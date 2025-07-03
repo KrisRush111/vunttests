@@ -6,7 +6,7 @@
     <title>Vuntgram - Sign In</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
+   <style>
         @keyframes gradientBackground {
             0% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
@@ -65,10 +65,6 @@
             box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.5);
         }
         
-        .input-error {
-            box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.5);
-        }
-        
         .btn-primary {
             background: linear-gradient(to right, #265341, #1d3d33);
             transition: all 0.3s ease;
@@ -115,13 +111,6 @@
             padding: 8px 12px;
             background: rgba(255, 0, 0, 0.1);
             border-radius: 6px;
-        }
-        
-        .field-error {
-            color: #ff6b6b;
-            font-size: 12px;
-            margin-top: 4px;
-            display: block;
         }
         
         @keyframes shake {
@@ -179,7 +168,6 @@
                            placeholder="ivan_petrov@vibe.ye"
                            title="Пожалуйста, используйте email, заканчивающийся на vibe.ye">
                 </div>
-                <span id="email-error" class="field-error hidden"></span>
             </div>
             
             <div class="animate-fade-in-up animate-delay-400">
@@ -192,7 +180,7 @@
                            class="input-field w-full pl-10 pr-3 py-3 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-0"
                            placeholder="••••••••">
                 </div>
-                <span id="password-error" class="field-error hidden"></span>
+                <div id="password-error" class="text-red-400 text-xs mt-1 hidden"></div>
             </div>
             
             <div class="flex items-center justify-between animate-fade-in-up animate-delay-500">
@@ -235,10 +223,6 @@
         // DOM Elements
         const loginForm = document.getElementById('loginForm');
         const errorElement = document.getElementById('error-message');
-        const emailInput = document.getElementById('email');
-        const passwordInput = document.getElementById('password');
-        const emailError = document.getElementById('email-error');
-        const passwordError = document.getElementById('password-error');
         const loginButton = document.getElementById('login-button');
         const buttonText = document.getElementById('button-text');
         const buttonLoader = document.getElementById('button-loader');
@@ -261,14 +245,17 @@
         loginForm.addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const email = emailInput.value;
-            const password = passwordInput.value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
             
-            // Reset all errors
-            resetErrors();
+            // Reset error message
+            errorElement.classList.add('hidden');
+            errorElement.textContent = '';
             
             // Show loading state
-            showLoadingState();
+            loginButton.classList.add('btn-loading');
+            buttonText.textContent = 'Вход...';
+            buttonLoader.classList.remove('hidden');
             
             // Client-side validation
             if (!email || !password) {
@@ -278,7 +265,7 @@
             }
             
             if (!email.endsWith('@vibe.ye')) {
-                showFieldError(emailInput, emailError, 'Пожалуйста, используйте email, заканчивающийся на vibe.ye');
+                showError('Пожалуйста, используйте email, заканчивающийся на vibe.ye');
                 resetButtonState();
                 return;
             }
@@ -299,15 +286,27 @@
                     body: new URLSearchParams(loginData)
                 });
                 
-                // Handle server response
                 const result = await response.json();
                 
                 if (response.ok) {
                     // Successful login - redirect to menu page
-                    window.location.href = result.redirect;
+                    window.location.href = `${SERVER_URL}/menu`;
                 } else {
-                    // Show error from server
-                    handleServerError(result.error, email);
+                    // Clear input fields
+                    document.getElementById('email').value = '';
+                    document.getElementById('password').value = '';
+                    
+                    const passwordError = document.getElementById('password-error');
+                    
+                    if (result.error === 'Account not found') {
+                        passwordError.textContent = 'Такого аккаунта нет';
+                        passwordError.classList.remove('hidden');
+                    } else {
+                        passwordError.textContent = 'Неверный адрес электронной почты или пароль';
+                        passwordError.classList.remove('hidden');
+                    }
+                    
+                    resetButtonState();
                 }
             } catch (error) {
                 console.error('Login error:', error);
@@ -320,6 +319,7 @@
         function showError(message) {
             errorElement.textContent = message;
             errorElement.classList.remove('hidden');
+            document.getElementById('password-error').classList.add('hidden');
             
             // Add shake animation
             errorElement.style.animation = 'none';
@@ -328,82 +328,11 @@
             }, 10);
         }
         
-        // Show field-specific error
-        function showFieldError(inputElement, errorElement, message) {
-            inputElement.classList.add('input-error');
-            errorElement.textContent = message;
-            errorElement.classList.remove('hidden');
-            
-            // Add shake animation to the field
-            inputElement.style.animation = 'none';
-            setTimeout(() => {
-                inputElement.style.animation = 'shake 0.5s ease-in-out';
-            }, 10);
-        }
-        
-        // Reset all error states
-        function resetErrors() {
-            errorElement.classList.add('hidden');
-            errorElement.textContent = '';
-            
-            emailInput.classList.remove('input-error');
-            passwordInput.classList.remove('input-error');
-            
-            emailError.classList.add('hidden');
-            passwordError.classList.add('hidden');
-            emailError.textContent = '';
-            passwordError.textContent = '';
-        }
-        
-        // Show loading state
-        function showLoadingState() {
-            loginButton.classList.add('btn-loading');
-            buttonText.textContent = 'Вход...';
-            buttonLoader.classList.remove('hidden');
-            loginButton.disabled = true;
-        }
-        
         // Reset button to normal state
         function resetButtonState() {
             loginButton.classList.remove('btn-loading');
             buttonText.textContent = 'Войти';
             buttonLoader.classList.add('hidden');
-            loginButton.disabled = false;
-        }
-        
-        // Clear form fields
-        function clearFormFields() {
-            emailInput.value = '';
-            passwordInput.value = '';
-        }
-        
-        // Handle server errors
-        function handleServerError(errorType, email) {
-            switch (errorType) {
-                case 'Неверный адрес электронной почты или пароль':
-                    showFieldError(passwordInput, passwordError, 'Неверный пароль');
-                    passwordInput.value = ''; // Clear password only
-                    break;
-                    
-                case 'Такого аккаунта нет':
-                    showFieldError(emailInput, emailError, 'Такого аккаунта нет');
-                    clearFormFields(); // Clear both fields
-                    break;
-                    
-                case 'Пожалуйста, используйте email, заканчивающийся на vibe.ye':
-                    showFieldError(emailInput, emailError, errorType);
-                    break;
-                    
-                case 'Заполните все поля':
-                    showError(errorType);
-                    break;
-                    
-                default:
-                    showError(errorType || 'Ошибка при входе');
-                    clearFormFields();
-            }
-            
-            resetButtonState();
         }
     </script>
 </body>
