@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head> 
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vuntgram - Профиль</title>
@@ -40,6 +40,20 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
         }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -52,14 +66,14 @@
                 </div>
                 
                 <div class="flex items-center space-x-6">
-                    <div class="bg-gray-200 border-2 border-dashed rounded-xl w-24 h-24 flex items-center justify-center">
+                    <div id="avatar-container" class="bg-gray-200 border-2 border-dashed rounded-xl w-24 h-24 flex items-center justify-center">
                         <i class="fas fa-user text-4xl text-gray-400"></i>
                     </div>
                     
                     <div>
-                        <h2 class="text-2xl font-bold">{{ nickname }}</h2>
-                        <p class="text-gray-200 mt-1">ID: {{ platform_user_id }}</p>
-                        <p class="text-emerald-200 mt-1">{{ identity }}</p>
+                        <h2 id="nickname" class="text-2xl font-bold">Загрузка...</h2>
+                        <p id="user-id" class="text-gray-200 mt-1">ID: загрузка...</p>
+                        <p id="identity" class="text-emerald-200 mt-1">загрузка...</p>
                     </div>
                 </div>
             </div>
@@ -73,17 +87,36 @@
                 <div class="space-y-4">
                     <div class="info-item">
                         <p class="text-gray-500 text-sm">Учебное заведение</p>
-                        <p class="font-medium">{{ main_school_name }}</p>
+                        <p id="main-school" class="font-medium">загрузка...</p>
                     </div>
                     
                     <div class="info-item">
                         <p class="text-gray-500 text-sm">Класс</p>
-                        <p class="font-medium">{{ class_info }}</p>
+                        <p id="class-info" class="font-medium">загрузка...</p>
                     </div>
                 </div>
             </div>
             
-            {{ additional_school_block }}
+            <div id="additional-school-block" class="profile-card bg-white p-6 mb-6 hidden">
+                <h3 class="section-title text-lg mb-4">Дополнительное образование</h3>
+                
+                <div class="space-y-4">
+                    <div class="info-item">
+                        <p class="text-gray-500 text-sm">Учебное заведение</p>
+                        <p id="additional-school" class="font-medium">загрузка...</p>
+                    </div>
+                    
+                    <div class="info-item">
+                        <p class="text-gray-500 text-sm">Курс</p>
+                        <p id="course" class="font-medium">загрузка...</p>
+                    </div>
+                    
+                    <div class="info-item">
+                        <p class="text-gray-500 text-sm">Направление</p>
+                        <p id="specialization" class="font-medium">загрузка...</p>
+                    </div>
+                </div>
+            </div>
             
             <div class="mt-8">
                 <button onclick="location.href='/logout'" class="logout-btn w-full text-white font-medium py-3 px-4 rounded-lg text-center">
@@ -92,5 +125,72 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // Загружаем данные профиля при открытии страницы
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Показываем состояние загрузки
+                document.getElementById('nickname').innerHTML = '<span class="loading-spinner"></span>Загрузка профиля...';
+                
+                // Запрос данных пользователя к API
+                const response = await fetch('/api/user', {
+                    method: 'GET',
+                    credentials: 'include' // Важно для передачи куки сессии
+                });
+                
+                if (response.status === 401) {
+                    // Не авторизован - перенаправляем на вход
+                    window.location.href = '/';
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error('Ошибка загрузки данных');
+                }
+                
+                const userData = await response.json();
+                
+                // Заполняем данные профиля
+                document.getElementById('nickname').textContent = userData.nickname || 'Пользователь';
+                document.getElementById('user-id').textContent = `ID: ${userData.platform_user_id || 'не указано'}`;
+                document.getElementById('identity').textContent = userData.identity || 'не указано';
+                document.getElementById('main-school').textContent = userData.main_school_name || 'не указано';
+                
+                // Формируем информацию о классе
+                let classInfo = '';
+                if (userData.class_number && userData.class_letter) {
+                    classInfo = `${userData.class_number}${userData.class_letter}`;
+                } else {
+                    classInfo = 'не указано';
+                }
+                document.getElementById('class-info').textContent = classInfo;
+                
+                // Заполняем блок дополнительного образования, если есть данные
+                if (userData.additional_school_name && userData.additional_school_name !== 'не указано') {
+                    document.getElementById('additional-school-block').classList.remove('hidden');
+                    document.getElementById('additional-school').textContent = userData.additional_school_name;
+                    document.getElementById('course').textContent = userData.course || 'не указано';
+                    document.getElementById('specialization').textContent = userData.specialization || 'не указано';
+                }
+                
+                // Обновляем аватар, если есть ссылка
+                if (userData.avatar_url) {
+                    const avatarContainer = document.getElementById('avatar-container');
+                    avatarContainer.innerHTML = '';
+                    const avatarImg = document.createElement('img');
+                    avatarImg.src = userData.avatar_url;
+                    avatarImg.alt = 'Аватар пользователя';
+                    avatarImg.classList.add('w-full', 'h-full', 'object-cover', 'rounded-xl');
+                    avatarContainer.appendChild(avatarImg);
+                }
+                
+            } catch (error) {
+                console.error('Ошибка загрузки профиля:', error);
+                document.getElementById('nickname').textContent = 'Ошибка загрузки';
+                document.getElementById('user-id').textContent = 'Попробуйте обновить страницу';
+            }
+        });
+    </script>
 </body>
 </html>
