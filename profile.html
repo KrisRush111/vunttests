@@ -54,6 +54,14 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        .error-container {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
     </style>
 </head>
 <body>
@@ -81,6 +89,9 @@
 
         <!-- Основное содержимое -->
         <div class="flex-1 container mx-auto max-w-3xl px-4 py-6 -mt-10">
+            <!-- Контейнер для ошибок -->
+            <div id="error-container" class="error-container hidden"></div>
+            
             <div class="profile-card bg-white p-6 mb-6">
                 <h3 class="section-title text-lg mb-4">Основное образование</h3>
                 
@@ -130,23 +141,35 @@
         // Загружаем данные профиля при открытии страницы
         document.addEventListener('DOMContentLoaded', async () => {
             try {
+                // Проверяем наличие базового URL API
+                if (!window.API_BASE_URL) {
+                    console.warn('API_BASE_URL не определен, используется значение по умолчанию');
+                    window.API_BASE_URL = 'https://vuntserver.onrender.com';
+                }
+                
                 // Показываем состояние загрузки
                 document.getElementById('nickname').innerHTML = '<span class="loading-spinner"></span>Загрузка профиля...';
                 
                 // Запрос данных пользователя к API
-                const response = await fetch('/api/user', {
+                const response = await fetch(`${window.API_BASE_URL}/api/user`, {
                     method: 'GET',
                     credentials: 'include' // Важно для передачи куки сессии
                 });
                 
+                // Обработка статусов ответа
                 if (response.status === 401) {
                     // Не авторизован - перенаправляем на вход
                     window.location.href = '/';
                     return;
                 }
                 
+                if (response.status === 404) {
+                    throw new Error('Пользователь не найден');
+                }
+                
                 if (!response.ok) {
-                    throw new Error('Ошибка загрузки данных');
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Ошибка сервера');
                 }
                 
                 const userData = await response.json();
@@ -187,6 +210,20 @@
                 
             } catch (error) {
                 console.error('Ошибка загрузки профиля:', error);
+                
+                // Показываем ошибку пользователю
+                const errorContainer = document.getElementById('error-container');
+                errorContainer.classList.remove('hidden');
+                errorContainer.innerHTML = `
+                    <strong>Ошибка загрузки профиля:</strong> ${error.message || 'Неизвестная ошибка'}
+                    <div class="mt-2">
+                        <button onclick="location.reload()" class="text-blue-600 font-medium">
+                            <i class="fas fa-sync-alt mr-1"></i> Попробовать снова
+                        </button>
+                    </div>
+                `;
+                
+                // Обновляем статус в заголовке
                 document.getElementById('nickname').textContent = 'Ошибка загрузки';
                 document.getElementById('user-id').textContent = 'Попробуйте обновить страницу';
             }
