@@ -74,6 +74,8 @@
             background: linear-gradient(135deg, var(--primary-color), #00a2ff);
             box-shadow: 0 4px 12px rgba(0, 136, 204, 0.2);
             animation: bounceIn 0.8s;
+            position: relative;
+            cursor: pointer;
         }
         
         .profile-info {
@@ -219,6 +221,75 @@
             animation: pulse 2s infinite;
         }
         
+        /* Avatar context menu styles */
+        .avatar-context-menu {
+            position: absolute;
+            top: calc(100% + 10px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 10px 0;
+            z-index: 100;
+            min-width: 160px;
+            display: none;
+            animation: fadeInUp 0.2s ease-out;
+        }
+        
+        .avatar-context-menu.show {
+            display: block;
+        }
+        
+        .avatar-context-menu button {
+            background: none;
+            border: none;
+            width: 100%;
+            text-align: left;
+            padding: 10px 16px;
+            font-size: 14px;
+            color: var(--text-color);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+        
+        .avatar-context-menu button:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .avatar-context-menu button i {
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .avatar-btn {
+            position: absolute;
+            bottom: -5px;
+            right: -5px;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: white;
+            border: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+        }
+        
+        .avatar-btn:hover {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+            transform: scale(1.1);
+        }
+        
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
@@ -292,9 +363,14 @@
             .profile-container {
                 padding: 15px 10px 80px;
             }
+            
+            .avatar-context-menu {
+                left: 0;
+                transform: none;
+                right: 0;
+                width: 100%;
+            }
         }
-
-
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -362,312 +438,354 @@
         </a>
     </div>
 
- <script>
-    // Configuration - SET YOUR SERVER URL HERE (same as in index.html)
-    const SERVER_URL = 'https://vuntserver-p1cx.onrender.com';
-    
-    // DOM elements
-    const loadingOverlay = document.getElementById('loadingOverlay');
-    const errorMessage = document.getElementById('errorMessage');
-    
-    // Profile elements
-    const profileAvatar = document.getElementById('profile-avatar');
-    const profileNickname = document.getElementById('profile-nickname');
-    const profileId = document.getElementById('profile-id');
-    const profileStatus = document.getElementById('profile-status');
-    const mainSchool = document.getElementById('main-school');
-    const userClass = document.getElementById('user-class');
-    const additionalSchool = document.getElementById('additional-school');
-    const userSpecialization = document.getElementById('user-specialization');
-    const userCourse = document.getElementById('user-course');
-    
-    // Additional containers
-    const additionalSchoolContainer = document.getElementById('additional-school-container');
-    const specializationContainer = document.getElementById('specialization-container');
-    const courseContainer = document.getElementById('course-container');
-    
-    // Avatar controls
-    const avatarInput = document.createElement('input');
-    avatarInput.type = 'file';
-    avatarInput.id = 'avatar-input';
-    avatarInput.accept = 'image/*';
-    avatarInput.style.display = 'none';
-    document.body.appendChild(avatarInput);
-    
-    const avatarUploadBtn = document.createElement('button');
-    avatarUploadBtn.id = 'avatar-upload-btn';
-    avatarUploadBtn.className = 'avatar-btn';
-    avatarUploadBtn.innerHTML = '<i class="fas fa-camera"></i>';
-    profileAvatar.appendChild(avatarUploadBtn);
-    
-    const avatarRemoveBtn = document.createElement('button');
-    avatarRemoveBtn.id = 'avatar-remove-btn';
-    avatarRemoveBtn.className = 'avatar-btn';
-    avatarRemoveBtn.innerHTML = '<i class="fas fa-times"></i>';
-    avatarRemoveBtn.style.display = 'none';
-    profileAvatar.appendChild(avatarRemoveBtn);
+    <!-- Avatar context menu -->
+    <div id="avatarContextMenu" class="avatar-context-menu">
+        <button id="changeAvatarBtn">
+            <i class="fas fa-camera"></i>
+            <span>Изменить фото</span>
+        </button>
+        <button id="removeAvatarBtn" style="display: none;">
+            <i class="fas fa-trash-alt"></i>
+            <span>Удалить фото</span>
+        </button>
+    </div>
 
-    // Color palette for avatars
-    const avatarColors = [
-        ['#0088cc', '#00ccff'],  // Синий
-        ['#4CAF50', '#8BC34A'],  // Зеленый
-        ['#FF5252', '#FF7B7B'],  // Красный
-        ['#9C27B0', '#E040FB'],  // Фиолетовый
-        ['#FFC107', '#FFD54F'],  // Желтый (золотистый)
-        ['#00BCD4', '#80DEEA'],  // Голубой
-        ['#FF9800', '#FFB74D'],  // Оранжевый
-    ];
-
-    // Show error message
-    function showError(message) {
-        errorMessage.textContent = message;
-        errorMessage.style.display = 'block';
-        setTimeout(hideError, 5000);
-    }
-
-    // Hide error message
-    function hideError() {
-        errorMessage.style.display = 'none';
-    }
-    
-    // Adjust color brightness
-    function adjustColor(hex, percent) {
-        const num = parseInt(hex.replace("#", ""), 16);
-        const amt = Math.round(2.55 * percent);
-        const R = (num >> 16) + amt;
-        const G = (num >> 8 & 0x00FF) + amt;
-        const B = (num & 0x0000FF) + amt;
+    <script>
+        // Configuration - SET YOUR SERVER URL HERE (same as in index.html)
+        const SERVER_URL = 'https://vuntserver-p1cx.onrender.com';
         
-        return `#${(
-            0x1000000 +
-            (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-            (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-            (B < 255 ? (B < 1 ? 0 : B) : 255)
-        ).toString(16).slice(1)}`;
-    }
-    
-    // Set avatar background
-    function setAvatarBackground(color, letter) {
-        profileAvatar.textContent = letter;
-        profileAvatar.style.backgroundImage = '';
+        // DOM elements
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const errorMessage = document.getElementById('errorMessage');
         
-        if (color) {
-            const lighterColor = adjustColor(color, 20);
-            profileAvatar.style.background = 
-                `linear-gradient(135deg, ${color}, ${lighterColor})`;
-        } else {
-            // Generate random gradient if no color
-            const colorPair = avatarColors[Math.floor(Math.random() * avatarColors.length)];
-            profileAvatar.style.background = 
-                `linear-gradient(135deg, ${colorPair[0]}, ${colorPair[1]})`;
-        }
-    }
-    
-    // Handle avatar upload
-    function handleAvatarUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
+        // Profile elements
+        const profileAvatar = document.getElementById('profile-avatar');
+        const profileNickname = document.getElementById('profile-nickname');
+        const profileId = document.getElementById('profile-id');
+        const profileStatus = document.getElementById('profile-status');
+        const mainSchool = document.getElementById('main-school');
+        const userClass = document.getElementById('user-class');
+        const additionalSchool = document.getElementById('additional-school');
+        const userSpecialization = document.getElementById('user-specialization');
+        const userCourse = document.getElementById('user-course');
         
-        // Reset input
-        avatarInput.value = '';
+        // Additional containers
+        const additionalSchoolContainer = document.getElementById('additional-school-container');
+        const specializationContainer = document.getElementById('specialization-container');
+        const courseContainer = document.getElementById('course-container');
+        
+        // Avatar controls
+        const avatarInput = document.createElement('input');
+        avatarInput.type = 'file';
+        avatarInput.id = 'avatar-input';
+        avatarInput.accept = 'image/*';
+        avatarInput.style.display = 'none';
+        document.body.appendChild(avatarInput);
+        
+        // Context menu elements
+        const avatarContextMenu = document.getElementById('avatarContextMenu');
+        const changeAvatarBtn = document.getElementById('changeAvatarBtn');
+        const removeAvatarBtn = document.getElementById('removeAvatarBtn');
 
-        // Check file type
-        if (!file.type.match('image.*')) {
-            showError('Пожалуйста, выберите изображение');
-            return;
+        // Color palette for avatars
+        const avatarColors = [
+            ['#0088cc', '#00ccff'],  // Синий
+            ['#4CAF50', '#8BC34A'],  // Зеленый
+            ['#FF5252', '#FF7B7B'],  // Красный
+            ['#9C27B0', '#E040FB'],  // Фиолетовый
+            ['#FFC107', '#FFD54F'],  // Желтый (золотистый)
+            ['#00BCD4', '#80DEEA'],  // Голубой
+            ['#FF9800', '#FFB74D'],  // Оранжевый
+        ];
+
+        // Show error message
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            setTimeout(hideError, 5000);
         }
 
-        // Preview
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            profileAvatar.style.backgroundImage = `url(${e.target.result})`;
-            profileAvatar.textContent = '';
-            avatarRemoveBtn.style.display = 'block';
-            
-            // Сохраняем временный аватар для отображения
-            sessionStorage.setItem('tempAvatar', e.target.result);
-            
-            // Обновляем данные в sessionStorage
-            const userData = JSON.parse(sessionStorage.getItem('userData'));
-            userData.has_avatar_photo = true;
-            sessionStorage.setItem('userData', JSON.stringify(userData));
-        };
-        reader.readAsDataURL(file);
-
-        // Send to server
-        const formData = new FormData();
-        formData.append('avatar', file);
-
-        fetch(`${SERVER_URL}/upload_avatar`, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => {
-            if (!response.ok) throw new Error('Ошибка загрузки');
-            return response.json();
-        })
-        .then(data => {
-            if (data.status !== 'success') {
-                showError('Ошибка загрузки: ' + (data.error || ''));
+        // Hide error message
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+        
+        // Toggle avatar context menu
+        function toggleAvatarContextMenu(show) {
+            if (show) {
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                const hasAvatar = userData?.has_avatar_photo || sessionStorage.getItem('tempAvatar');
                 
-                // Восстанавливаем предыдущий аватар при ошибке
-                const userData = JSON.parse(sessionStorage.getItem('userData'));
-                if (userData && userData.avatar_background) {
-                    setAvatarBackground(
-                        userData.avatar_background, 
-                        userData.nickname.charAt(0).toUpperCase()
-                    );
-                }
+                removeAvatarBtn.style.display = hasAvatar ? 'flex' : 'none';
+                avatarContextMenu.classList.add('show');
+            } else {
+                avatarContextMenu.classList.remove('show');
             }
-        })
-        .catch(error => {
-            showError('Ошибка сети: ' + error.message);
-        });
-    }
-    
-    // Handle avatar removal
-    function handleAvatarRemove() {
-        fetch(`${SERVER_URL}/remove_avatar`, {
-            method: 'POST'
-        })
-        .then(response => {
-            if (!response.ok) throw new Error('Ошибка удаления');
-            return response.json();
-        })
-        .then(data => {
-            if (data.status === 'success') {
+        }
+        
+        // Adjust color brightness
+        function adjustColor(hex, percent) {
+            const num = parseInt(hex.replace("#", ""), 16);
+            const amt = Math.round(2.55 * percent);
+            const R = (num >> 16) + amt;
+            const G = (num >> 8 & 0x00FF) + amt;
+            const B = (num & 0x0000FF) + amt;
+            
+            return `#${(
+                0x1000000 +
+                (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+                (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+                (B < 255 ? (B < 1 ? 0 : B) : 255)
+            ).toString(16).slice(1)}`;
+        }
+        
+        // Set avatar background
+        function setAvatarBackground(color, letter) {
+            profileAvatar.textContent = letter;
+            profileAvatar.style.backgroundImage = '';
+            
+            if (color) {
+                const lighterColor = adjustColor(color, 20);
+                profileAvatar.style.background = 
+                    `linear-gradient(135deg, ${color}, ${lighterColor})`;
+            } else {
+                // Generate random gradient if no color
+                const colorPair = avatarColors[Math.floor(Math.random() * avatarColors.length)];
+                profileAvatar.style.background = 
+                    `linear-gradient(135deg, ${colorPair[0]}, ${colorPair[1]})`;
+            }
+        }
+        
+        // Handle avatar upload
+        function handleAvatarUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            // Reset input
+            avatarInput.value = '';
+
+            // Check file type
+            if (!file.type.match('image.*')) {
+                showError('Пожалуйста, выберите изображение');
+                return;
+            }
+
+            // Preview
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                profileAvatar.style.backgroundImage = `url(${e.target.result})`;
+                profileAvatar.textContent = '';
+                
+                // Сохраняем временный аватар для отображения
+                sessionStorage.setItem('tempAvatar', e.target.result);
+                
+                // Обновляем данные в sessionStorage
                 const userData = JSON.parse(sessionStorage.getItem('userData'));
+                userData.has_avatar_photo = true;
+                sessionStorage.setItem('userData', JSON.stringify(userData));
+                
+                // Обновляем меню
+                toggleAvatarContextMenu(false);
+            };
+            reader.readAsDataURL(file);
+
+            // Send to server
+            const formData = new FormData();
+            formData.append('avatar', file);
+
+            fetch(`${SERVER_URL}/upload_avatar`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка загрузки');
+                return response.json();
+            })
+            .then(data => {
+                if (data.status !== 'success') {
+                    showError('Ошибка загрузки: ' + (data.error || ''));
+                    
+                    // Восстанавливаем предыдущий аватар при ошибке
+                    const userData = JSON.parse(sessionStorage.getItem('userData'));
+                    if (userData && userData.avatar_background) {
+                        setAvatarBackground(
+                            userData.avatar_background, 
+                            userData.nickname.charAt(0).toUpperCase()
+                        );
+                    }
+                }
+            })
+            .catch(error => {
+                showError('Ошибка сети: ' + error.message);
+            });
+        }
+        
+        // Handle avatar removal
+        function handleAvatarRemove() {
+            fetch(`${SERVER_URL}/remove_avatar`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка удаления');
+                return response.json();
+            })
+            .then(data => {
+                if (data.status === 'success') {
+                    const userData = JSON.parse(sessionStorage.getItem('userData'));
+                    const nickname = userData.nickname || '';
+                    const firstLetter = nickname.charAt(0).toUpperCase() || '?';
+                    const bgColor = userData.avatar_background;
+                    
+                    setAvatarBackground(bgColor, firstLetter);
+                    sessionStorage.removeItem('tempAvatar');
+                    
+                    // Обновляем данные в sessionStorage
+                    userData.has_avatar_photo = false;
+                    sessionStorage.setItem('userData', JSON.stringify(userData));
+                    
+                    // Обновляем меню
+                    toggleAvatarContextMenu(false);
+                } else {
+                    showError('Ошибка удаления: ' + (data.error || ''));
+                }
+            })
+            .catch(error => {
+                showError('Ошибка сети: ' + error.message);
+            });
+        }
+        
+        // Load avatar from server
+        function loadAvatar(userId) {
+            const timestamp = new Date().getTime();
+            profileAvatar.style.backgroundImage = `url(${SERVER_URL}/avatar/${userId}?t=${timestamp})`;
+            profileAvatar.style.backgroundSize = 'cover';
+            profileAvatar.style.backgroundPosition = 'center';
+            profileAvatar.textContent = '';
+        }
+
+        // Load profile data
+        function loadProfileData() {
+            try {
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                
+                // Если данных нет - перенаправляем на вход
+                if (!userData || !userData.id) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+                
+                // Сохраняем данные для аватарки
                 const nickname = userData.nickname || '';
                 const firstLetter = nickname.charAt(0).toUpperCase() || '?';
                 const bgColor = userData.avatar_background;
                 
-                setAvatarBackground(bgColor, firstLetter);
-                avatarRemoveBtn.style.display = 'none';
-                sessionStorage.removeItem('tempAvatar');
+                // Проверяем временный аватар (если загружали)
+                const tempAvatar = sessionStorage.getItem('tempAvatar');
                 
-                // Обновляем данные в sessionStorage
-                userData.has_avatar_photo = false;
-                sessionStorage.setItem('userData', JSON.stringify(userData));
-            } else {
-                showError('Ошибка удаления: ' + (data.error || ''));
-            }
-        })
-        .catch(error => {
-            showError('Ошибка сети: ' + error.message);
-        });
-    }
-    
-    // Load avatar from server
-    function loadAvatar(userId) {
-        const timestamp = new Date().getTime();
-        profileAvatar.style.backgroundImage = `url(${SERVER_URL}/avatar/${userId}?t=${timestamp})`;
-        profileAvatar.style.backgroundSize = 'cover';
-        profileAvatar.style.backgroundPosition = 'center';
-        profileAvatar.textContent = '';
-        avatarRemoveBtn.style.display = 'block';
-    }
+                if (tempAvatar) {
+                    profileAvatar.style.backgroundImage = `url(${tempAvatar})`;
+                    profileAvatar.textContent = '';
+                } else if (userData.has_avatar_photo) {
+                    loadAvatar(userData.id);
+                } else {
+                    setAvatarBackground(bgColor, firstLetter);
+                }
+                
+                // Заполняем данные профиля
+                profileNickname.textContent = nickname || 'Не указано';
+                profileId.textContent = `ID: ${userData.platform_user_id || 'Не указано'}`;
+                profileStatus.textContent = userData.identity || 'Не указано';
+                mainSchool.textContent = userData.main_school_name || 'Не указано';
+                
+                // Форматируем класс
+                if (userData.class_number && userData.class_letter) {
+                    userClass.textContent = `${userData.class_number}${userData.class_letter}`;
+                } else {
+                    userClass.textContent = 'Не указано';
+                }
+                
+                // Дополнительная школа
+                const additionalSchoolValue = userData.additional_school_name;
+                const hasAdditionalSchool = additionalSchoolValue && 
+                                          additionalSchoolValue !== 'Не указано' && 
+                                          additionalSchoolValue !== 'не указано' && 
+                                          additionalSchoolValue.trim() !== '';
+                
+                if (!hasAdditionalSchool) {
+                    additionalSchoolContainer.style.display = 'none';
+                    specializationContainer.style.display = 'none';
+                    courseContainer.style.display = 'none';
+                } else {
+                    additionalSchool.textContent = additionalSchoolValue;
+                    userSpecialization.textContent = userData.specialization || 'Не указано';
+                    userCourse.textContent = userData.course || 'Не указано';
+                }
 
-    // Load profile data
-    function loadProfileData() {
-        try {
-            const userData = JSON.parse(sessionStorage.getItem('userData'));
+                // Скрываем прелоадер
+                loadingOverlay.style.opacity = '0';
+                setTimeout(() => {
+                    loadingOverlay.style.display = 'none';
+                }, 300);
+
+            } catch (error) {
+                console.error('Profile loading error:', error);
+                showError('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.');
+                loadingOverlay.style.display = 'none';
+                
+                // Перенаправление на страницу входа через 5 секунд
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 5000);
+            }
+        }
+
+        // Check auth on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            const userData = sessionStorage.getItem('userData');
             
-            // Если данных нет - перенаправляем на вход
-            if (!userData || !userData.id) {
+            // Если нет данных пользователя - перенаправляем на вход
+            if (!userData) {
                 window.location.href = 'index.html';
                 return;
             }
             
-            // Сохраняем данные для аватарки
-            const nickname = userData.nickname || '';
-            const firstLetter = nickname.charAt(0).toUpperCase() || '?';
-            const bgColor = userData.avatar_background;
+            // Обработчики для контекстного меню аватарки
+            profileAvatar.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleAvatarContextMenu(true);
+            });
             
-            // Проверяем временный аватар (если загружали)
-            const tempAvatar = sessionStorage.getItem('tempAvatar');
+            // Закрытие меню при клике вне его
+            document.addEventListener('click', (e) => {
+                if (!avatarContextMenu.contains(e.target) && !profileAvatar.contains(e.target)) {
+                    toggleAvatarContextMenu(false);
+                }
+            });
             
-            if (tempAvatar) {
-                profileAvatar.style.backgroundImage = `url(${tempAvatar})`;
-                profileAvatar.textContent = '';
-                avatarRemoveBtn.style.display = 'block';
-            } else if (userData.has_avatar_photo) {
-                loadAvatar(userData.id);
-            } else {
-                setAvatarBackground(bgColor, firstLetter);
-                avatarRemoveBtn.style.display = 'none';
-            }
+            // Обработчики для кнопок меню
+            changeAvatarBtn.addEventListener('click', () => {
+                toggleAvatarContextMenu(false);
+                avatarInput.click();
+            });
             
-            // Заполняем данные профиля
-            profileNickname.textContent = nickname || 'Не указано';
-            profileId.textContent = `ID: ${userData.platform_user_id || 'Не указано'}`;
-            profileStatus.textContent = userData.identity || 'Не указано';
-            mainSchool.textContent = userData.main_school_name || 'Не указано';
+            removeAvatarBtn.addEventListener('click', () => {
+                toggleAvatarContextMenu(false);
+                handleAvatarRemove();
+            });
             
-            // Форматируем класс
-            if (userData.class_number && userData.class_letter) {
-                userClass.textContent = `${userData.class_number}${userData.class_letter}`;
-            } else {
-                userClass.textContent = 'Не указано';
-            }
+            // Обработчик загрузки аватарки
+            avatarInput.addEventListener('change', handleAvatarUpload);
             
-            // Дополнительная школа
-            const additionalSchoolValue = userData.additional_school_name;
-            const hasAdditionalSchool = additionalSchoolValue && 
-                                      additionalSchoolValue !== 'Не указано' && 
-                                      additionalSchoolValue !== 'не указано' && 
-                                      additionalSchoolValue.trim() !== '';
-            
-            if (!hasAdditionalSchool) {
-                additionalSchoolContainer.style.display = 'none';
-                specializationContainer.style.display = 'none';
-                courseContainer.style.display = 'none';
-            } else {
-                additionalSchool.textContent = additionalSchoolValue;
-                userSpecialization.textContent = userData.specialization || 'Не указано';
-                userCourse.textContent = userData.course || 'Не указано';
-            }
-
-            // Скрываем прелоадер
-            loadingOverlay.style.opacity = '0';
-            setTimeout(() => {
-                loadingOverlay.style.display = 'none';
-            }, 300);
-
-        } catch (error) {
-            console.error('Profile loading error:', error);
-            showError('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.');
-            loadingOverlay.style.display = 'none';
-            
-            // Перенаправление на страницу входа через 5 секунд
-            setTimeout(() => {
-                window.location.href = 'index.html';
-            }, 5000);
-        }
-    }
-
-    // Check auth on page load
-    window.addEventListener('DOMContentLoaded', () => {
-        const userData = sessionStorage.getItem('userData');
-        
-        // Если нет данных пользователя - перенаправляем на вход
-        if (!userData) {
-            window.location.href = 'index.html';
-            return;
-        }
-        
-        // Настройка обработчиков аватара
-        avatarUploadBtn.addEventListener('click', () => avatarInput.click());
-        avatarInput.addEventListener('change', handleAvatarUpload);
-        avatarRemoveBtn.addEventListener('click', handleAvatarRemove);
-        
-        // Загрузка данных профиля
-        loadProfileData();
-    });
-
-    // Handle back/forward cache
-    window.addEventListener('pageshow', (event) => {
-        if (event.persisted) {
+            // Загрузка данных профиля
             loadProfileData();
-        }
-    });
-</script>
+        });
+
+        // Handle back/forward cache
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) {
+                loadProfileData();
+            }
+        });
+    </script>
+</body>
+</html>
