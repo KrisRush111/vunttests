@@ -406,6 +406,9 @@
     </div>
 
     <script>
+        // Configuration - SET YOUR SERVER URL HERE (same as in index.html)
+        const SERVER_URL = 'https://vuntserver-p1cx.onrender.com';
+        
         // DOM elements
         const loadingOverlay = document.getElementById('loadingOverlay');
         const errorMessage = document.getElementById('errorMessage');
@@ -512,6 +515,9 @@
                 profileAvatar.style.backgroundImage = `url(${e.target.result})`;
                 profileAvatar.textContent = '';
                 avatarRemoveBtn.style.display = 'block';
+                
+                // Сохраняем временный аватар для отображения
+                sessionStorage.setItem('tempAvatar', e.target.result);
             };
             reader.readAsDataURL(file);
 
@@ -519,7 +525,7 @@
             const formData = new FormData();
             formData.append('avatar', file);
 
-            fetch('/upload_avatar', {
+            fetch(`${SERVER_URL}/upload_avatar`, {
                 method: 'POST',
                 body: formData
             })
@@ -530,6 +536,20 @@
             .then(data => {
                 if (data.status !== 'success') {
                     showError('Ошибка загрузки: ' + (data.error || ''));
+                    
+                    // Восстанавливаем предыдущий аватар при ошибке
+                    const userData = JSON.parse(sessionStorage.getItem('userData'));
+                    if (userData && userData.avatar_background) {
+                        setAvatarBackground(
+                            userData.avatar_background, 
+                            userData.nickname.charAt(0).toUpperCase()
+                        );
+                    }
+                } else {
+                    // Обновляем данные в sessionStorage
+                    const userData = JSON.parse(sessionStorage.getItem('userData'));
+                    userData.has_avatar_photo = true;
+                    sessionStorage.setItem('userData', JSON.stringify(userData));
                 }
             })
             .catch(error => {
@@ -539,7 +559,7 @@
         
         // Handle avatar removal
         function handleAvatarRemove() {
-            fetch('/remove_avatar', {
+            fetch(`${SERVER_URL}/remove_avatar`, {
                 method: 'POST'
             })
             .then(response => {
@@ -548,13 +568,18 @@
             })
             .then(data => {
                 if (data.status === 'success') {
-                    // Restore background
-                    const nickname = sessionStorage.getItem('user_nickname') || '';
+                    const userData = JSON.parse(sessionStorage.getItem('userData'));
+                    const nickname = userData.nickname || '';
                     const firstLetter = nickname.charAt(0).toUpperCase() || '?';
-                    const bgColor = sessionStorage.getItem('avatar_background');
+                    const bgColor = userData.avatar_background;
                     
                     setAvatarBackground(bgColor, firstLetter);
                     avatarRemoveBtn.style.display = 'none';
+                    sessionStorage.removeItem('tempAvatar');
+                    
+                    // Обновляем данные в sessionStorage
+                    userData.has_avatar_photo = false;
+                    sessionStorage.setItem('userData', JSON.stringify(userData));
                 } else {
                     showError('Ошибка удаления: ' + (data.error || ''));
                 }
@@ -566,116 +591,129 @@
         
         // Load avatar from server
         function loadAvatar(userId) {
-            // Add timestamp to bypass cache
             const timestamp = new Date().getTime();
-            profileAvatar.style.backgroundImage = `url(/avatar/${userId}?t=${timestamp})`;
+            profileAvatar.style.backgroundImage = `url(${SERVER_URL}/avatar/${userId}?t=${timestamp})`;
             profileAvatar.style.backgroundSize = 'cover';
             profileAvatar.style.backgroundPosition = 'center';
             profileAvatar.textContent = '';
             avatarRemoveBtn.style.display = 'block';
         }
 
-        // Load profile data
-        function loadProfileData() {
-            // Simulate loading delay
-            setTimeout(() => {
-                try {
-                    // Get user data from sessionStorage
-                    const userData = JSON.parse(sessionStorage.getItem('userData')) || {
-                        nickname: 'Иван Иванов',
-                        platform_user_id: '12345678',
-                        identity: 'Ученик',
-                        main_school_name: 'Гимназия №1',
-                        class_number: '10',
-                        class_letter: 'А',
-                        additional_school_name: null,
-                        specialization: 'Программирование',
-                        course: '2',
-                        has_avatar_photo: false,
-                        avatar_background: '#0088cc'
-                    };
-
-                    // If no data - redirect to login
-                    if (!userData) {
-                        window.location.href = 'index.html';
-                        return;
-                    }
-
-                    // Save data for avatar
-                    sessionStorage.setItem('user_id', userData.id);
-                    sessionStorage.setItem('user_nickname', userData.nickname);
-                    sessionStorage.setItem('avatar_background', userData.avatar_background);
-                    
-                    // Set avatar
-                    const firstLetter = userData.nickname ? userData.nickname.charAt(0).toUpperCase() : '?';
-                    
-                    if (userData.has_avatar_photo) {
-                        loadAvatar(userData.id);
-                    } else {
-                        setAvatarBackground(userData.avatar_background, firstLetter);
-                    }
-                    
-                    // Fill profile data
-                    profileNickname.textContent = userData.nickname || 'Не указано';
-                    profileId.textContent = `ID: ${userData.platform_user_id || 'Не указано'}`;
-                    profileStatus.textContent = userData.identity || 'Не указано';
-                    mainSchool.textContent = userData.main_school_name || 'Не указано';
-                    
-                    // Format class
-                    if (userData.class_number && userData.class_letter) {
-                        userClass.textContent = `${userData.class_number}${userData.class_letter}`;
-                    } else {
-                        userClass.textContent = 'Не указано';
-                    }
-                    
-                    // Check if additional school exists or is not empty
-                    const hasAdditionalSchool = !isEmptyValue(userData.additional_school_name);
-                    
-                    if (!hasAdditionalSchool) {
-                        additionalSchoolContainer.style.display = 'none';
-                        specializationContainer.style.display = 'none';
-                        courseContainer.style.display = 'none';
-                    } else {
-                        additionalSchool.textContent = userData.additional_school_name;
-                        userSpecialization.textContent = userData.specialization || 'Не указано';
-                        userCourse.textContent = userData.course || 'Не указано';
-                    }
-
-                    // Hide loading overlay
-                    loadingOverlay.style.opacity = '0';
-                    setTimeout(() => {
-                        loadingOverlay.style.display = 'none';
-                    }, 300);
-
-                } catch (error) {
-                    console.error('Profile loading error:', error);
-                    showError('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.');
-                    loadingOverlay.style.display = 'none';
+        // Load profile data from server
+        async function loadProfileData() {
+            try {
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                
+                // Если данных нет - перенаправляем на вход
+                if (!userData || !userData.id) {
+                    window.location.href = 'index.html';
+                    return;
                 }
-            }, 1000);
+                
+                // Запрос к серверу для получения данных профиля
+                const response = await fetch(`${SERVER_URL}/profile`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${userData.token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Ошибка загрузки профиля');
+                }
+                
+                const profileData = await response.json();
+                
+                // Обновляем данные в sessionStorage
+                const updatedUserData = {
+                    ...userData,
+                    ...profileData
+                };
+                sessionStorage.setItem('userData', JSON.stringify(updatedUserData));
+                
+                // Сохраняем данные для аватарки
+                const nickname = profileData.nickname || '';
+                const firstLetter = nickname.charAt(0).toUpperCase() || '?';
+                const bgColor = profileData.avatar_background;
+                
+                // Проверяем временный аватар (если загружали)
+                const tempAvatar = sessionStorage.getItem('tempAvatar');
+                
+                if (tempAvatar) {
+                    profileAvatar.style.backgroundImage = `url(${tempAvatar})`;
+                    profileAvatar.textContent = '';
+                } else if (profileData.has_avatar_photo) {
+                    loadAvatar(profileData.id);
+                } else {
+                    setAvatarBackground(bgColor, firstLetter);
+                }
+                
+                // Заполняем данные профиля
+                profileNickname.textContent = nickname || 'Не указано';
+                profileId.textContent = `ID: ${profileData.platform_user_id || 'Не указано'}`;
+                profileStatus.textContent = profileData.identity || 'Не указано';
+                mainSchool.textContent = profileData.main_school_name || 'Не указано';
+                
+                // Форматируем класс
+                if (profileData.class_number && profileData.class_letter) {
+                    userClass.textContent = `${profileData.class_number}${profileData.class_letter}`;
+                } else {
+                    userClass.textContent = 'Не указано';
+                }
+                
+                // Дополнительная школа
+                const hasAdditionalSchool = !isEmptyValue(profileData.additional_school_name);
+                
+                if (!hasAdditionalSchool) {
+                    additionalSchoolContainer.style.display = 'none';
+                    specializationContainer.style.display = 'none';
+                    courseContainer.style.display = 'none';
+                } else {
+                    additionalSchool.textContent = profileData.additional_school_name;
+                    userSpecialization.textContent = profileData.specialization || 'Не указано';
+                    userCourse.textContent = profileData.course || 'Не указано';
+                }
+
+                // Скрываем прелоадер
+                loadingOverlay.style.opacity = '0';
+                setTimeout(() => {
+                    loadingOverlay.style.display = 'none';
+                }, 300);
+
+            } catch (error) {
+                console.error('Profile loading error:', error);
+                showError('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.');
+                loadingOverlay.style.display = 'none';
+                
+                // Перенаправление на страницу входа через 5 секунд
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 5000);
+            }
         }
 
         // Check auth on page load
         window.addEventListener('DOMContentLoaded', () => {
             const userData = sessionStorage.getItem('userData');
             
-            // If no user data - redirect to login
+            // Если нет данных пользователя - перенаправляем на вход
             if (!userData) {
                 window.location.href = 'index.html';
                 return;
             }
             
-            // Set event listeners for avatar controls
+            // Настройка обработчиков аватара
             avatarUploadBtn.addEventListener('click', () => avatarInput.click());
             avatarInput.addEventListener('change', handleAvatarUpload);
             avatarRemoveBtn.addEventListener('click', handleAvatarRemove);
             
-            // Set initial avatar with nickname letter
+            // Установка временного аватара (первая буква имени)
             const nickname = JSON.parse(userData)?.nickname || '';
             const firstLetter = nickname.charAt(0).toUpperCase() || '?';
             profileAvatar.textContent = firstLetter;
             
-            // Load profile data
+            // Загрузка данных профиля
             loadProfileData();
         });
 
