@@ -405,7 +405,7 @@
         </a>
     </div>
 
-    <script>
+     <script>
         // Configuration - SET YOUR SERVER URL HERE (same as in index.html)
         const SERVER_URL = 'https://vuntserver-p1cx.onrender.com';
         
@@ -455,11 +455,6 @@
         // Hide error message
         function hideError() {
             errorMessage.style.display = 'none';
-        }
-
-        // Check if value is empty or "Не указано"
-        function isEmptyValue(value) {
-            return !value || value === 'Не указано' || value === 'null' || value === 'undefined';
         }
         
         // Adjust color brightness
@@ -518,6 +513,11 @@
                 
                 // Сохраняем временный аватар для отображения
                 sessionStorage.setItem('tempAvatar', e.target.result);
+                
+                // Обновляем данные в sessionStorage
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                userData.has_avatar_photo = true;
+                sessionStorage.setItem('userData', JSON.stringify(userData));
             };
             reader.readAsDataURL(file);
 
@@ -545,11 +545,6 @@
                             userData.nickname.charAt(0).toUpperCase()
                         );
                     }
-                } else {
-                    // Обновляем данные в sessionStorage
-                    const userData = JSON.parse(sessionStorage.getItem('userData'));
-                    userData.has_avatar_photo = true;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
                 }
             })
             .catch(error => {
@@ -599,8 +594,8 @@
             avatarRemoveBtn.style.display = 'block';
         }
 
-        // Load profile data from server
-        async function loadProfileData() {
+        // Load profile data
+        function loadProfileData() {
             try {
                 const userData = JSON.parse(sessionStorage.getItem('userData'));
                 
@@ -610,32 +605,10 @@
                     return;
                 }
                 
-                // Запрос к серверу для получения данных профиля
-                const response = await fetch(`${SERVER_URL}/profile`, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${userData.token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Ошибка загрузки профиля');
-                }
-                
-                const profileData = await response.json();
-                
-                // Обновляем данные в sessionStorage
-                const updatedUserData = {
-                    ...userData,
-                    ...profileData
-                };
-                sessionStorage.setItem('userData', JSON.stringify(updatedUserData));
-                
                 // Сохраняем данные для аватарки
-                const nickname = profileData.nickname || '';
+                const nickname = userData.nickname || '';
                 const firstLetter = nickname.charAt(0).toUpperCase() || '?';
-                const bgColor = profileData.avatar_background;
+                const bgColor = userData.avatar_background;
                 
                 // Проверяем временный аватар (если загружали)
                 const tempAvatar = sessionStorage.getItem('tempAvatar');
@@ -643,36 +616,40 @@
                 if (tempAvatar) {
                     profileAvatar.style.backgroundImage = `url(${tempAvatar})`;
                     profileAvatar.textContent = '';
-                } else if (profileData.has_avatar_photo) {
-                    loadAvatar(profileData.id);
+                } else if (userData.has_avatar_photo) {
+                    loadAvatar(userData.id);
                 } else {
                     setAvatarBackground(bgColor, firstLetter);
                 }
                 
                 // Заполняем данные профиля
                 profileNickname.textContent = nickname || 'Не указано';
-                profileId.textContent = `ID: ${profileData.platform_user_id || 'Не указано'}`;
-                profileStatus.textContent = profileData.identity || 'Не указано';
-                mainSchool.textContent = profileData.main_school_name || 'Не указано';
+                profileId.textContent = `ID: ${userData.platform_user_id || 'Не указано'}`;
+                profileStatus.textContent = userData.identity || 'Не указано';
+                mainSchool.textContent = userData.main_school_name || 'Не указано';
                 
                 // Форматируем класс
-                if (profileData.class_number && profileData.class_letter) {
-                    userClass.textContent = `${profileData.class_number}${profileData.class_letter}`;
+                if (userData.class_number && userData.class_letter) {
+                    userClass.textContent = `${userData.class_number}${userData.class_letter}`;
                 } else {
                     userClass.textContent = 'Не указано';
                 }
                 
                 // Дополнительная школа
-                const hasAdditionalSchool = !isEmptyValue(profileData.additional_school_name);
+                const additionalSchoolValue = userData.additional_school_name;
+                const hasAdditionalSchool = additionalSchoolValue && 
+                                          additionalSchoolValue !== 'Не указано' && 
+                                          additionalSchoolValue !== 'не указано' && 
+                                          additionalSchoolValue.trim() !== '';
                 
                 if (!hasAdditionalSchool) {
                     additionalSchoolContainer.style.display = 'none';
                     specializationContainer.style.display = 'none';
                     courseContainer.style.display = 'none';
                 } else {
-                    additionalSchool.textContent = profileData.additional_school_name;
-                    userSpecialization.textContent = profileData.specialization || 'Не указано';
-                    userCourse.textContent = profileData.course || 'Не указано';
+                    additionalSchool.textContent = additionalSchoolValue;
+                    userSpecialization.textContent = userData.specialization || 'Не указано';
+                    userCourse.textContent = userData.course || 'Не указано';
                 }
 
                 // Скрываем прелоадер
@@ -707,11 +684,6 @@
             avatarUploadBtn.addEventListener('click', () => avatarInput.click());
             avatarInput.addEventListener('change', handleAvatarUpload);
             avatarRemoveBtn.addEventListener('click', handleAvatarRemove);
-            
-            // Установка временного аватара (первая буква имени)
-            const nickname = JSON.parse(userData)?.nickname || '';
-            const firstLetter = nickname.charAt(0).toUpperCase() || '?';
-            profileAvatar.textContent = firstLetter;
             
             // Загрузка данных профиля
             loadProfileData();
