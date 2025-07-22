@@ -17,6 +17,7 @@
             --border-color: #e7e8ec;
             --online-status: #4caf50;
             --error-color: #ff3b30;
+            --success-color: #4CAF50; /* Добавлено для сообщений об успехе */
         }
         
         * {
@@ -78,6 +79,7 @@
             cursor: pointer;
             background-size: cover;
             background-position: center;
+            background-repeat: no-repeat; /* Добавлено */
         }
         
         .profile-info {
@@ -205,6 +207,7 @@
             align-items: center;
             justify-content: center;
             z-index: 1000;
+            transition: opacity 0.3s ease-in-out; /* Добавлено для плавного скрытия */
         }
         
         .spinner {
@@ -331,14 +334,23 @@
             }
         }
         
-        .error-message {
-            color: var(--error-color);
+        .message-box { /* Объединенный стиль для ошибок и успеха */
             text-align: center;
             padding: 15px;
             margin: 15px;
-            background: rgba(255,59,48,0.1);
             border-radius: 12px;
             animation: shakeX 0.5s;
+            display: none; /* Скрыт по умолчанию */
+        }
+
+        .message-box.error {
+            color: var(--error-color);
+            background: rgba(255,59,48,0.1);
+        }
+
+        .message-box.success {
+            color: var(--success-color);
+            background: rgba(76,175,80,0.1);
         }
         
         @media (max-width: 480px) {
@@ -384,8 +396,8 @@
     </div>
 
     <div class="profile-container">
-        <!-- Error message -->
-        <div id="errorMessage" class="error-message" style="display: none;"></div>
+        <!-- Message box for errors/success -->
+        <div id="messageBox" class="message-box"></div>
         
         <!-- Profile header -->
         <div class="profile-header">
@@ -458,7 +470,7 @@
         
         // DOM elements
         const loadingOverlay = document.getElementById('loadingOverlay');
-        const errorMessage = document.getElementById('errorMessage');
+        const messageBox = document.getElementById('messageBox'); // Изменено с errorMessage
         
         // Profile elements
         const profileAvatar = document.getElementById('profile-avatar');
@@ -489,7 +501,7 @@
         const changeAvatarBtn = document.getElementById('changeAvatarBtn');
         const removeAvatarBtn = document.getElementById('removeAvatarBtn');
 
-        // Color palette for avatars
+        // Color palette for avatars (used if no background color from server)
         const avatarColors = [
             ['#0088cc', '#00ccff'],  // Синий
             ['#4CAF50', '#8BC34A'],  // Зеленый
@@ -500,22 +512,24 @@
             ['#FF9800', '#FFB74D'],  // Оранжевый
         ];
 
-        // Show error message
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorMessage.style.display = 'block';
-            setTimeout(hideError, 5000);
+        // Show message (error or success)
+        function showMessage(message, type = 'error') {
+            messageBox.textContent = message;
+            messageBox.className = `message-box ${type}`; // Добавляем класс типа сообщения
+            messageBox.style.display = 'block';
+            setTimeout(hideMessage, 5000);
         }
 
-        // Hide error message
-        function hideError() {
-            errorMessage.style.display = 'none';
+        // Hide message
+        function hideMessage() {
+            messageBox.style.display = 'none';
         }
         
         // Toggle avatar context menu
         function toggleAvatarContextMenu(show) {
             if (show) {
                 const userData = JSON.parse(sessionStorage.getItem('userData'));
+                // Проверяем, есть ли аватарка (по флагу или временной)
                 const hasAvatar = userData?.has_avatar_photo || sessionStorage.getItem('tempAvatar');
                 
                 removeAvatarBtn.style.display = hasAvatar ? 'flex' : 'none';
@@ -525,7 +539,7 @@
             }
         }
         
-        // Adjust color brightness
+        // Adjust color brightness (for gradient in generated avatar)
         function adjustColor(hex, percent) {
             const num = parseInt(hex.replace("#", ""), 16);
             const amt = Math.round(2.55 * percent);
@@ -541,17 +555,19 @@
             ).toString(16).slice(1)}`;
         }
         
-        // Set avatar background
+        // Set avatar background (generated from letter)
         function setAvatarBackground(color, letter) {
             profileAvatar.textContent = letter;
-            profileAvatar.style.backgroundImage = '';
+            profileAvatar.style.backgroundImage = ''; // Очищаем, если был установлен URL
             
             if (color) {
-                const lighterColor = adjustColor(color, 20);
+                // Используем цвет, полученный с сервера, и генерируем более светлый оттенок для градиента
+                const lighterColor = adjustColor(color, 20); 
                 profileAvatar.style.background = 
                     `linear-gradient(135deg, ${color}, ${lighterColor})`;
             } else {
-                // Generate random gradient if no color
+                // Если цвет не указан (что не должно происходить, т.к. сервер всегда генерирует),
+                // выбираем случайный из палитры
                 const colorPair = avatarColors[Math.floor(Math.random() * avatarColors.length)];
                 profileAvatar.style.background = 
                     `linear-gradient(135deg, ${colorPair[0]}, ${colorPair[1]})`;
@@ -559,133 +575,172 @@
         }
         
         // Handle avatar upload
-  // Handle avatar removal
-       function handleAvatarUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    avatarInput.value = '';
-
-    // Проверки файла
-    if (!file.type.match('image.*')) {
-        showError('Пожалуйста, выберите изображение');
-        return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-        showError('Размер изображения не должен превышать 5MB');
-        return;
-    }
-
-    loadingOverlay.style.display = 'flex';
-    loadingOverlay.style.opacity = '1';
-    loadingOverlay.querySelector('.loading-text').textContent = 'Загрузка аватарки...';
-
-    // Сначала загружаем на сервер, потом показываем
-    const formData = new FormData();
-    formData.append('avatar', file);
-
-    fetch(`${SERVER_URL}/upload_avatar`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include'
-    })
-    .then(response => {
-        if (!response.ok) throw new Error('Ошибка загрузки');
-        return response.json();
-    })
-    .then(data => {
-        if (data.status !== 'success') {
-            throw new Error(data.error || 'Ошибка загрузки');
-        }
-        
-        // Только после успешной загрузки показываем превью
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            profileAvatar.style.backgroundImage = `url(${e.target.result})`;
-            profileAvatar.textContent = '';
-            sessionStorage.setItem('tempAvatar', e.target.result);
+        async function handleAvatarUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
             
-            const userData = JSON.parse(sessionStorage.getItem('userData'));
-            userData.has_avatar_photo = true;
-            sessionStorage.setItem('userData', JSON.stringify(userData));
-        };
-        reader.readAsDataURL(file);
-    })
-    .catch(error => {
-        showError('Ошибка загрузки: ' + error.message);
-        
-        // Восстанавливаем предыдущий аватар
-        const userData = JSON.parse(sessionStorage.getItem('userData'));
-        if (userData && userData.avatar_background) {
-            setAvatarBackground(
-                userData.avatar_background, 
-                userData.nickname.charAt(0).toUpperCase()
-            );
+            avatarInput.value = ''; // Очищаем input, чтобы можно было загрузить тот же файл снова
+
+            // Проверки файла на клиенте
+            if (!file.type.match('image.*')) {
+                showMessage('Пожалуйста, выберите файл изображения (PNG, JPG, GIF).');
+                return;
+            }
+
+            if (file.size > 5 * 1024 * 1024) { // Клиентское ограничение 5MB
+                showMessage('Размер изображения не должен превышать 5MB.');
+                return;
+            }
+
+            showLoading('Загрузка аватарки...');
+
+            const formData = new FormData();
+            formData.append('avatar', file);
+
+            try {
+                const response = await fetch(`${SERVER_URL}/upload_avatar`, {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    // Если ответ не OK (например, 400, 401, 500), выбрасываем ошибку
+                    throw new Error(data.error || 'Неизвестная ошибка загрузки.');
+                }
+                
+                if (data.status !== 'success') {
+                    // Если статус не 'success', но ответ OK (редко, но возможно)
+                    throw new Error(data.message || data.error || 'Ошибка загрузки.');
+                }
+                
+                // Только после успешной загрузки показываем превью
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    profileAvatar.style.backgroundImage = `url(${e.target.result})`;
+                    profileAvatar.textContent = ''; // Убираем букву
+                    sessionStorage.setItem('tempAvatar', e.target.result); // Сохраняем временный URL
+                    
+                    // Обновляем userData в sessionStorage
+                    const userData = JSON.parse(sessionStorage.getItem('userData'));
+                    userData.has_avatar_photo = true; // Теперь у пользователя есть фото
+                    userData.avatar_background = data.avatar_background; // Обновляем цвет фона
+                    sessionStorage.setItem('userData', JSON.stringify(userData));
+                    
+                    showMessage('Аватар успешно загружен!', 'success');
+                };
+                reader.readAsDataURL(file); // Читаем файл как Data URL для отображения
+            } catch (error) {
+                showMessage('Ошибка загрузки: ' + error.message);
+                
+                // Восстанавливаем предыдущий аватар или генерируем фоновый
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                if (userData) {
+                    if (userData.has_avatar_photo) {
+                        // Если раньше было фото, пытаемся загрузить его с сервера
+                        loadAvatar(userData.id);
+                    } else {
+                        // Иначе генерируем фоновый
+                        setAvatarBackground(
+                            userData.avatar_background, 
+                            userData.nickname.charAt(0).toUpperCase()
+                        );
+                    }
+                }
+                sessionStorage.removeItem('tempAvatar'); // Удаляем временный аватар
+            } finally {
+                hideLoading();
+                toggleAvatarContextMenu(false);
+            }
         }
-        sessionStorage.removeItem('tempAvatar');
-    })
-    .finally(() => {
-        loadingOverlay.style.opacity = '0';
-        setTimeout(() => {
-            loadingOverlay.style.display = 'none';
-        }, 300);
-        toggleAvatarContextMenu(false);
-    });
-}
         
-  function loadAvatar(userId) {
-    const img = new Image();
-    img.onload = function() {
-        profileAvatar.style.backgroundImage = `url(${SERVER_URL}/avatar/${userId}?t=${Date.now()})`;
-        profileAvatar.textContent = '';
-    };
-    img.onerror = function() {
-        const userData = JSON.parse(sessionStorage.getItem('userData'));
-        setAvatarBackground(
-            userData.avatar_background,
-            userData.nickname.charAt(0).toUpperCase()
-        );
-    };
-    img.src = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-}
+        // Load avatar from server
+        function loadAvatar(userId) {
+            // Добавляем timestamp, чтобы избежать кэширования браузером
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`; 
+            
+            const img = new Image();
+            img.onload = function() {
+                profileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                profileAvatar.textContent = ''; // Убираем букву
+                sessionStorage.removeItem('tempAvatar'); // Убеждаемся, что временный аватар удален
+            };
+            img.onerror = function() {
+                // Если загрузка с сервера не удалась, возвращаемся к генерируемому аватару
+                console.error('Failed to load avatar from server, generating background.');
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                if (userData) {
+                    setAvatarBackground(
+                        userData.avatar_background,
+                        userData.nickname.charAt(0).toUpperCase()
+                    );
+                    // Обновляем флаг, если аватар не загрузился
+                    userData.has_avatar_photo = false;
+                    sessionStorage.setItem('userData', JSON.stringify(userData));
+                }
+            };
+            img.src = avatarUrl;
+        }
         
         // Handle avatar removal
-     function handleAvatarRemove() {
-    loadingOverlay.style.display = 'flex';
-    loadingOverlay.querySelector('.loading-text').textContent = 'Удаление аватарки...';
+        async function handleAvatarRemove() {
+            showLoading('Удаление аватарки...');
 
-    fetch(`${SERVER_URL}/remove_avatar`, {
-        method: 'POST',
-        credentials: 'include'
-    })
-    .then(response => {
-        if (!response.ok) throw new Error('Ошибка сервера');
-        return response.json();
-    })
-    .then(data => {
-        if (data.status !== 'success') throw new Error(data.error || 'Ошибка удаления');
-        
-        const userData = JSON.parse(sessionStorage.getItem('userData'));
-        setAvatarBackground(
-            data.avatar_background || userData.avatar_background,
-            userData.nickname.charAt(0).toUpperCase()
-        );
-        
-        userData.has_avatar_photo = false;
-        sessionStorage.setItem('userData', JSON.stringify(userData));
-        sessionStorage.removeItem('tempAvatar');
-    })
-    .catch(error => {
-        showError('Ошибка: ' + error.message);
-    })
-    .finally(() => {
-        loadingOverlay.style.opacity = '0';
-        setTimeout(() => loadingOverlay.style.display = 'none', 300);
-    });
-}
- 
+            try {
+                const response = await fetch(`${SERVER_URL}/remove_avatar`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
 
+                if (!response.ok) {
+                    throw new Error(data.error || 'Неизвестная ошибка удаления.');
+                }
+                
+                if (data.status !== 'success') {
+                    throw new Error(data.message || data.error || 'Ошибка удаления.');
+                }
+                
+                const userData = JSON.parse(sessionStorage.getItem('userData'));
+                // Обновляем userData: фото удалено, используем новый цвет фона (если сервер вернул)
+                userData.has_avatar_photo = false;
+                userData.avatar_background = data.avatar_background || userData.avatar_background;
+                sessionStorage.setItem('userData', JSON.stringify(userData));
+                sessionStorage.removeItem('tempAvatar'); // Удаляем временный аватар
+                
+                // Устанавливаем сгенерированный аватар
+                setAvatarBackground(
+                    userData.avatar_background,
+                    userData.nickname.charAt(0).toUpperCase()
+                );
+                
+                showMessage('Аватар успешно удален!', 'success');
+            } catch (error) {
+                showMessage('Ошибка удаления: ' + error.message);
+            } finally {
+                hideLoading();
+                toggleAvatarContextMenu(false);
+            }
+        }
+
+        // Show loading overlay
+        function showLoading(text = 'Загрузка...') {
+            loadingOverlay.querySelector('.loading-text').textContent = text;
+            loadingOverlay.style.display = 'flex';
+            loadingOverlay.style.opacity = '1';
+        }
+
+        // Hide loading overlay
+        function hideLoading() {
+            loadingOverlay.style.opacity = '0';
+            setTimeout(() => {
+                loadingOverlay.style.display = 'none';
+            }, 300); // Задержка для анимации скрытия
+        }
+        
         // Load profile data
         function loadProfileData() {
             try {
@@ -693,6 +748,7 @@
                 
                 // If no data - redirect to login
                 if (!userData || !userData.id) {
+                    console.warn('No user data found in sessionStorage, redirecting to login.');
                     window.location.href = 'index.html';
                     return;
                 }
@@ -702,15 +758,17 @@
                 const firstLetter = nickname.charAt(0).toUpperCase() || '?';
                 const bgColor = userData.avatar_background;
                 
-                // Check for temporary avatar
+                // Check for temporary avatar (from recent upload)
                 const tempAvatar = sessionStorage.getItem('tempAvatar');
                 
                 if (tempAvatar) {
                     profileAvatar.style.backgroundImage = `url(${tempAvatar})`;
                     profileAvatar.textContent = '';
                 } else if (userData.has_avatar_photo) {
+                    // Если есть флаг, что фото существует, пытаемся его загрузить
                     loadAvatar(userData.id);
                 } else {
+                    // Иначе генерируем фоновый аватар
                     setAvatarBackground(bgColor, firstLetter);
                 }
                 
@@ -727,7 +785,7 @@
                     userClass.textContent = 'Не указано';
                 }
                 
-                // Additional school
+                // Additional school and related fields
                 const additionalSchoolValue = userData.additional_school_name;
                 const hasAdditionalSchool = additionalSchoolValue && 
                                           additionalSchoolValue !== 'Не указано' && 
@@ -739,21 +797,21 @@
                     specializationContainer.style.display = 'none';
                     courseContainer.style.display = 'none';
                 } else {
+                    additionalSchoolContainer.style.display = 'flex'; // Показываем, если есть данные
+                    specializationContainer.style.display = 'flex';
+                    courseContainer.style.display = 'flex';
+
                     additionalSchool.textContent = additionalSchoolValue;
                     userSpecialization.textContent = userData.specialization || 'Не указано';
                     userCourse.textContent = userData.course || 'Не указано';
                 }
 
-                // Hide loader
-                loadingOverlay.style.opacity = '0';
-                setTimeout(() => {
-                    loadingOverlay.style.display = 'none';
-                }, 300);
+                hideLoading(); // Скрываем загрузочный экран после загрузки данных
 
             } catch (error) {
                 console.error('Profile loading error:', error);
-                showError('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.');
-                loadingOverlay.style.display = 'none';
+                showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
+                hideLoading();
                 
                 // Redirect to login after 5 seconds
                 setTimeout(() => {
@@ -764,17 +822,9 @@
 
         // Check auth on page load
         window.addEventListener('DOMContentLoaded', () => {
-            const userData = sessionStorage.getItem('userData');
-            
-            // If no user data - redirect to login
-            if (!userData) {
-                window.location.href = 'index.html';
-                return;
-            }
-            
             // Avatar context menu handlers
             profileAvatar.addEventListener('click', (e) => {
-                e.stopPropagation();
+                e.stopPropagation(); // Предотвращаем всплытие события, чтобы не закрыть сразу
                 toggleAvatarContextMenu(true);
             });
             
@@ -788,7 +838,7 @@
             // Menu button handlers
             changeAvatarBtn.addEventListener('click', () => {
                 toggleAvatarContextMenu(false);
-                avatarInput.click();
+                avatarInput.click(); // Имитируем клик по скрытому input file
             });
             
             removeAvatarBtn.addEventListener('click', () => {
@@ -803,9 +853,10 @@
             loadProfileData();
         });
 
-        // Handle back/forward cache
+        // Handle back/forward cache (BFCache)
         window.addEventListener('pageshow', (event) => {
             if (event.persisted) {
+                // Если страница восстанавливается из BFCache, перезагружаем данные
                 loadProfileData();
             }
         });
