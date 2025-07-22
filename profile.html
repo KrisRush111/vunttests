@@ -381,7 +381,7 @@
 
     <script>
         // Configuration - SET YOUR SERVER URL HERE
-        const SERVER_URL = 'https://vuntserver-p1cx.onrender.com'; // Changed to the original server URL
+        const SERVER_URL = 'https://vuntserver-p1cx.onrender.com'; 
         
         // DOM elements
         const loadingOverlay = document.getElementById('loadingOverlay');
@@ -402,7 +402,7 @@
 
         // Get user data from sessionStorage
         const userData = JSON.parse(sessionStorage.getItem('userData'));
-        if (!userData || !userData.id) { // Changed from platform_user_id to id as per original code
+        if (!userData || !userData.id) { 
             window.location.href = 'index.html';
         }
 
@@ -420,7 +420,7 @@
         function showLoading(text = 'Загрузка...') {
             loadingOverlay.querySelector('.loading-text').textContent = text;
             loadingOverlay.style.display = 'flex';
-            loadingOverlay.style.opacity = '1'; // Added opacity for smooth transition
+            loadingOverlay.style.opacity = '1'; 
         }
 
         // Hide loading overlay
@@ -428,7 +428,7 @@
             loadingOverlay.style.opacity = '0';
             setTimeout(() => {
                 loadingOverlay.style.display = 'none';
-            }, 300); // Delay for animation
+            }, 300); 
         }
 
         // Adjust color brightness
@@ -450,14 +450,13 @@
         // Set avatar background (generated from letter)
         function setAvatarBackground(color, letter) {
             profileAvatar.textContent = letter;
-            profileAvatar.style.backgroundImage = ''; // Clear any existing image
+            profileAvatar.style.backgroundImage = ''; 
             
             if (color) {
                 const lighterColor = adjustColor(color, 20);
                 profileAvatar.style.background = 
                     `linear-gradient(135deg, ${color}, ${lighterColor})`;
             } else {
-                // Original avatarColors array from the context
                 const avatarColors = [
                     ['#0088cc', '#00ccff'],  // Синий
                     ['#4CAF50', '#8BC34A'],  // Зеленый
@@ -474,14 +473,14 @@
         }
 
         // Load avatar from server
-        function loadAvatar(userId) { // Added userId parameter as per original code
+        function loadAvatar(userId) { 
             const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
             const img = new Image();
             
             img.onload = function() {
                 profileAvatar.style.backgroundImage = `url(${avatarUrl})`;
                 profileAvatar.textContent = '';
-                sessionStorage.removeItem('tempAvatar'); // Ensure temp avatar is removed
+                sessionStorage.removeItem('tempAvatar'); 
             };
             
             img.onerror = function() {
@@ -492,7 +491,7 @@
                         currentUserData.avatar_background,
                         currentUserData.nickname?.charAt(0).toUpperCase() || '?'
                     );
-                    currentUserData.has_avatar_photo = false; // Update flag if avatar failed to load
+                    currentUserData.has_avatar_photo = false; 
                     sessionStorage.setItem('userData', JSON.stringify(currentUserData));
                 }
             };
@@ -505,15 +504,15 @@
             const file = event.target.files[0];
             if (!file) return;
             
-            avatarInput.value = ''; // Clear input for re-uploading same file
-
-            if (!file.type.match('image.*')) { // Changed to match original code's regex
-                showMessage('Пожалуйста, выберите файл изображения (PNG, JPG, GIF).');
+            // Проверка данных пользователя
+            const userData = JSON.parse(sessionStorage.getItem('userData'));
+            if (!userData?.platform_user_id) {
+                showMessage('Ошибка: не удалось определить ID пользователя');
                 return;
             }
 
-            if (file.size > 5 * 1024 * 1024) { // Client-side 5MB limit
-                showMessage('Размер изображения не должен превышать 5MB.');
+            if (!file.type.startsWith('image/')) {
+                showMessage('Пожалуйста, выберите файл изображения');
                 return;
             }
 
@@ -521,56 +520,32 @@
 
             const formData = new FormData();
             formData.append('avatar', file);
+            formData.append('platform_user_id', userData.platform_user_id); // Ключевое исправление
 
             try {
                 const response = await fetch(`${SERVER_URL}/upload_avatar`, {
                     method: 'POST',
                     body: formData,
-                    credentials: 'include' // Added credentials as per original code
+                    credentials: 'include'
                 });
 
-                const data = await response.json(); // Parse JSON response
-
                 if (!response.ok) {
-                    throw new Error(data.error || 'Неизвестная ошибка загрузки.');
-                }
-                
-                if (data.status !== 'success') {
-                    throw new Error(data.message || data.error || 'Ошибка загрузки.');
+                    throw new Error(await response.text());
                 }
 
-                // Only show preview after successful upload
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    profileAvatar.style.backgroundImage = `url(${e.target.result})`;
-                    profileAvatar.textContent = '';
-                    sessionStorage.setItem('tempAvatar', e.target.result);
-                    
-                    // Update userData in sessionStorage
-                    const currentUserData = JSON.parse(sessionStorage.getItem('userData'));
-                    currentUserData.has_avatar_photo = true;
-                    currentUserData.avatar_background = data.avatar_background;
-                    sessionStorage.setItem('userData', JSON.stringify(currentUserData));
-                    
-                    showMessage('Аватар успешно загружен!', 'success');
+                // Обновляем данные пользователя в sessionStorage после успешной загрузки
+                const responseData = await response.json();
+                const updatedUserData = {
+                    ...userData,
+                    has_avatar_photo: true,
+                    avatar_background: responseData.avatar_background || userData.avatar_background
                 };
-                reader.readAsDataURL(file);
+                sessionStorage.setItem('userData', JSON.stringify(updatedUserData));
+
+                loadAvatar(userData.platform_user_id); // Обновляем аватар
+                showMessage('Аватар успешно загружен!', 'success');
             } catch (error) {
                 showMessage('Ошибка загрузки: ' + error.message);
-                
-                // Restore previous avatar or generate background on error
-                const currentUserData = JSON.parse(sessionStorage.getItem('userData'));
-                if (currentUserData) {
-                    if (currentUserData.has_avatar_photo) {
-                        loadAvatar(currentUserData.id);
-                    } else {
-                        setAvatarBackground(
-                            currentUserData.avatar_background, 
-                            currentUserData.nickname.charAt(0).toUpperCase()
-                        );
-                    }
-                }
-                sessionStorage.removeItem('tempAvatar');
             } finally {
                 hideLoading();
             }
@@ -701,6 +676,37 @@
                 loadProfileData();
             }
         });
+
+        // Placeholder for login success (assuming this is handled elsewhere, e.g., index.html)
+        // This part is illustrative and should be integrated where the user logs in.
+        // Example of how userData might be set after a successful login API call:
+        /*
+        async function loginUser(username, password) {
+            try {
+                const response = await fetch(`${SERVER_URL}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    // После успешного входа
+                    sessionStorage.setItem('userData', JSON.stringify({
+                        ...data.user,
+                        platform_user_id: data.user.platform_user_id // Должно приходить с сервера
+                    }));
+                    window.location.href = 'profile.html'; // Redirect to profile page
+                } else {
+                    showMessage(data.message || 'Ошибка входа', 'error');
+                }
+            } catch (error) {
+                showMessage('Ошибка сети: ' + error.message, 'error');
+            }
+        }
+        */
     </script>
 </body>
 </html>
