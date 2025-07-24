@@ -81,6 +81,11 @@
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
+            image-rendering: crisp-edges;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
         }
         
         .profile-info {
@@ -616,120 +621,127 @@
             }
         }
 
-        // Load avatar from server
-        function loadAvatar(userId) {
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-            const img = new Image();
-            
-            img.onload = function() {
-                profileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-                profileAvatar.textContent = '';
-                sessionStorage.removeItem('tempAvatar');
-                
-                // Обновляем данные пользователя
-                if (userData) {
-                    userData.has_avatar_photo = true;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
-                }
-            };
-            
-            img.onerror = function() {
-                console.error('Failed to load avatar from server, generating background.');
-                if (userData) {
-                    setAvatarBackground(
-                        userData.avatar_background,
-                        userData.nickname?.charAt(0).toUpperCase() || '?'
-                    );
-                    userData.has_avatar_photo = false;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
-                }
-            };
-            
-            img.src = avatarUrl;
+      // Load avatar from server
+function loadAvatar(userId) {
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+    const img = new Image();
+    
+    img.onload = function() {
+        // Убедимся, что изображение полностью загружено
+        profileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+        profileAvatar.style.backgroundSize = 'cover';
+        profileAvatar.style.backgroundPosition = 'center';
+        profileAvatar.style.imageRendering = 'crisp-edges'; // Для четкости
+        profileAvatar.textContent = '';
+        sessionStorage.removeItem('tempAvatar');
+        
+        // Обновляем данные пользователя
+        if (userData) {
+            userData.has_avatar_photo = true;
+            sessionStorage.setItem('userData', JSON.stringify(userData));
+        }
+    };
+    
+    img.onerror = function() {
+        console.error('Failed to load avatar from server, generating background.');
+        if (userData) {
+            setAvatarBackground(
+                userData.avatar_background,
+                userData.nickname?.charAt(0).toUpperCase() || '?'
+            );
+            userData.has_avatar_photo = false;
+            sessionStorage.setItem('userData', JSON.stringify(userData));
+        }
+    };
+    
+    img.src = avatarUrl;
+}
+
+// Handle avatar upload
+async function handleAvatarUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    avatarInput.value = '';
+
+    if (!file.type.match('image.*')) {
+        showMessage('Пожалуйста, выберите файл изображения (PNG, JPG, GIF).');
+        return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+        showMessage('Размер изображения не должен превышать 5MB.');
+        return;
+    }
+
+    showLoading('Загрузка аватарки...');
+
+    const formData = new FormData();
+    formData.append('avatar', file);
+    formData.append('platform_user_id', userData.platform_user_id);
+
+    try {
+        const response = await fetch(`${SERVER_URL}/upload_avatar`, {
+            method: 'POST',
+            body: formData,
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Неизвестная ошибка загрузки.');
+        }
+        
+        if (data.status !== 'success') {
+            throw new Error(data.message || data.error || 'Ошибка загрузки.');
         }
 
-        // Handle avatar upload
-        async function handleAvatarUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            avatarInput.value = '';
+        // Сначала показываем превью
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            profileAvatar.style.backgroundImage = `url(${e.target.result})`;
+            profileAvatar.style.backgroundSize = 'cover';
+            profileAvatar.style.backgroundPosition = 'center';
+            profileAvatar.style.imageRendering = 'crisp-edges';
+            profileAvatar.textContent = '';
+            sessionStorage.setItem('tempAvatar', e.target.result);
+            showMessage('Аватар успешно загружен!', 'success');
+            hideLoading();
+        };
+        reader.readAsDataURL(file);
 
-            if (!file.type.match('image.*')) {
-                showMessage('Пожалуйста, выберите файл изображения (PNG, JPG, GIF).');
-                return;
-            }
+        // Обновляем данные пользователя
+        userData.has_avatar_photo = true;
+        userData.avatar_background = data.avatar_background || userData.avatar_background;
+        sessionStorage.setItem('userData', JSON.stringify(userData));
 
-            if (file.size > 5 * 1024 * 1024) {
-                showMessage('Размер изображения не должен превышать 5MB.');
-                return;
-            }
+        // В фоновом режиме загружаем аватар с сервера
+        setTimeout(() => {
+            loadAvatar(userData.platform_user_id);
+        }, 1000);
 
-            showLoading('Загрузка аватарки...');
-
-            const formData = new FormData();
-            formData.append('avatar', file);
-            formData.append('platform_user_id', userData.platform_user_id);
-
-            try {
-                const response = await fetch(`${SERVER_URL}/upload_avatar`, {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Неизвестная ошибка загрузки.');
-                }
-                
-                if (data.status !== 'success') {
-                    throw new Error(data.message || data.error || 'Ошибка загрузки.');
-                }
-
-                // Обновляем данные пользователя
-                userData.has_avatar_photo = true;
-                userData.avatar_background = data.avatar_background || userData.avatar_background;
-                sessionStorage.setItem('userData', JSON.stringify(userData));
-
-                // Показываем превью
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    profileAvatar.style.backgroundImage = `url(${e.target.result})`;
-                    profileAvatar.textContent = '';
-                    sessionStorage.setItem('tempAvatar', e.target.result);
-                    showMessage('Аватар успешно загружен!', 'success');
-                };
-                reader.readAsDataURL(file);
-
-                // Перезагружаем аватар с сервера через 1 секунду для гарантии
-                setTimeout(() => {
-                    loadAvatar(userData.platform_user_id);
-                }, 1000);
-
-            } catch (error) {
-                showMessage('Ошибка загрузки: ' + error.message);
-                
-                // Восстанавливаем предыдущий аватар
-                if (userData) {
-                    if (userData.has_avatar_photo) {
-                        loadAvatar(userData.platform_user_id);
-                    } else {
-                        setAvatarBackground(
-                            userData.avatar_background, 
-                            userData.nickname.charAt(0).toUpperCase()
-                        );
-                    }
-                }
-                sessionStorage.removeItem('tempAvatar');
-            } finally {
-                hideLoading();
+    } catch (error) {
+        showMessage('Ошибка загрузки: ' + error.message);
+        hideLoading();
+        
+        // Восстанавливаем предыдущий аватар
+        if (userData) {
+            if (userData.has_avatar_photo) {
+                loadAvatar(userData.platform_user_id);
+            } else {
+                setAvatarBackground(
+                    userData.avatar_background, 
+                    userData.nickname.charAt(0).toUpperCase()
+                );
             }
         }
+        sessionStorage.removeItem('tempAvatar');
+    }
+}
 
         // Handle avatar removal
-      async function handleAvatarRemove() {
+            async function handleAvatarRemove() {
     showLoading('Удаление аватарки...');
 
     try {
