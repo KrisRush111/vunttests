@@ -310,6 +310,93 @@
                 transform: scale(1);
             }
         }
+
+
+
+        .avatar-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.avatar-modal.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.avatar-modal-content {
+    max-width: 90%;
+    max-height: 80%;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.avatar-modal img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+.avatar-modal-actions {
+    display: flex;
+    justify-content: space-between;
+    width: 90%;
+    max-width: 400px;
+}
+
+.avatar-modal-btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+}
+
+.avatar-modal-btn.change {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.avatar-modal-btn.delete {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.avatar-modal-btn i {
+    margin-right: 8px;
+}
+
+.avatar-modal-close {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.avatar-modal-close:hover {
+    opacity: 1;
+}
     </style>
 </head>
 <body>
@@ -358,6 +445,24 @@
         </div>
     </div>
 
+
+
+    <!-- Avatar modal -->
+<div id="avatarModal" class="avatar-modal">
+    <div class="avatar-modal-content">
+        <span class="avatar-modal-close">&times;</span>
+        <img id="avatarModalImage" src="" alt="Аватар">
+    </div>
+    <div class="avatar-modal-actions">
+        <button id="changeAvatarBtn" class="avatar-modal-btn change">Изм.</button>
+        <button id="deleteAvatarBtn" class="avatar-modal-btn delete">
+            <i class="fas fa-trash-alt"></i> Удалить
+        </button>
+    </div>
+</div>
+
+
+
     <!-- Bottom navigation -->
     <div class="bottom-nav">
         <a href="friends.html" class="nav-item">
@@ -399,6 +504,57 @@
         const specializationContainer = document.getElementById('specialization-container');
         const courseContainer = document.getElementById('course-container');
         const avatarInput = document.getElementById('avatar-input');
+        // Avatar modal elements
+const avatarModal = document.getElementById('avatarModal');
+const avatarModalImage = document.getElementById('avatarModalImage');
+const avatarModalClose = document.querySelector('.avatar-modal-close');
+const changeAvatarBtn = document.getElementById('changeAvatarBtn');
+const deleteAvatarBtn = document.getElementById('deleteAvatarBtn');
+
+// Open avatar modal
+function openAvatarModal() {
+    if (!userData.has_avatar_photo && !sessionStorage.getItem('tempAvatar')) return;
+    
+    const avatarUrl = sessionStorage.getItem('tempAvatar') || 
+                     `${SERVER_URL}/avatar/${userData.platform_user_id}?t=${Date.now()}`;
+    
+    avatarModalImage.src = avatarUrl;
+    avatarModal.classList.add('active');
+}
+
+// Close avatar modal
+function closeAvatarModal() {
+    avatarModal.classList.remove('active');
+}
+
+// Event listeners for avatar modal
+profileAvatar.addEventListener('click', () => {
+    if (userData.has_avatar_photo || sessionStorage.getItem('tempAvatar')) {
+        openAvatarModal();
+    } else {
+        avatarInput.click();
+    }
+});
+
+avatarModalClose.addEventListener('click', closeAvatarModal);
+avatarModal.addEventListener('click', (e) => {
+    if (e.target === avatarModal) {
+        closeAvatarModal();
+    }
+});
+
+changeAvatarBtn.addEventListener('click', () => {
+    closeAvatarModal();
+    avatarInput.click();
+});
+
+deleteAvatarBtn.addEventListener('click', () => {
+    closeAvatarModal();
+    if (confirm('Удалить аватар?')) {
+        handleAvatarRemove();
+    }
+});
+
 
         // Get user data from sessionStorage
         let userData = JSON.parse(sessionStorage.getItem('userData'));
