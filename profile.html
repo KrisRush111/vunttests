@@ -81,12 +81,6 @@
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
-            -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    -khtml-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
         }
         
         .profile-info {
@@ -591,49 +585,49 @@
         }
 
         // Handle avatar removal
-    async function handleAvatarRemove() {
-    showLoading('Удаление аватарки...');
+        async function handleAvatarRemove() {
+            showLoading('Удаление аватарки...');
 
-    try {
-        const response = await fetch(`${SERVER_URL}/remove_avatar`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id
-            })
-        });
-        
-        const data = await response.json();
+            try {
+                const response = await fetch(`${SERVER_URL}/remove_avatar`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    })
+                });
+                
+                const data = await response.json();
 
-        if (!response.ok) {
-            throw new Error(data.error || 'Неизвестная ошибка удаления.');
+                if (!response.ok) {
+                    throw new Error(data.error || 'Неизвестная ошибка удаления.');
+                }
+                
+                if (data.status !== 'success') {
+                    throw new Error(data.message || data.error || 'Ошибка удаления.');
+                }
+                
+                // Обновляем данные пользователя
+                userData.has_avatar_photo = false;
+                userData.avatar_background = data.avatar_background || userData.avatar_background;
+                sessionStorage.setItem('userData', JSON.stringify(userData));
+                sessionStorage.removeItem('tempAvatar');
+                
+                setAvatarBackground(
+                    userData.avatar_background,
+                    userData.nickname.charAt(0).toUpperCase()
+                );
+                
+                showMessage('Аватар успешно удален!', 'success');
+            } catch (error) {
+                showMessage('Ошибка удаления: ' + error.message);
+            } finally {
+                hideLoading();
+            }
         }
-        
-        if (data.status !== 'success') {
-            throw new Error(data.message || data.error || 'Ошибка удаления.');
-        }
-        
-        // Обновляем данные пользователя
-        userData.has_avatar_photo = false;
-        userData.avatar_background = data.avatar_background || userData.avatar_background;
-        sessionStorage.setItem('userData', JSON.stringify(userData));
-        sessionStorage.removeItem('tempAvatar');
-        
-        setAvatarBackground(
-            userData.avatar_background,
-            userData.nickname.charAt(0).toUpperCase()
-        );
-        
-        showMessage('Аватар успешно удален!', 'success');
-    } catch (error) {
-        showMessage('Ошибка удаления: ' + error.message);
-    } finally {
-        hideLoading();
-    }
-}
 
         // Fetch updated user data from server
         async function fetchUserData() {
