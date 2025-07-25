@@ -658,74 +658,73 @@
             searchResults.appendChild(userElement);
         }
         
-        // Функция для отображения входящего запроса
-        function displayFriendRequest(user) {
-            const requestElement = document.createElement('div');
-            requestElement.className = 'user-result';
-            
-            // Avatar
-            const avatarElement = document.createElement('div');
-            avatarElement.className = 'user-avatar';
-            
-            if (user.has_avatar_photo) {
-                avatarElement.style.backgroundImage = `url(${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()})`;
-            } else {
-                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                avatarElement.textContent = initial;
-                if (user.avatar_background) {
-                    avatarElement.style.backgroundColor = user.avatar_background;
-                }
-            }
-            
-            // User info
-            const infoElement = document.createElement('div');
-            infoElement.className = 'user-info';
-            
-            const nicknameElement = document.createElement('div');
-            nicknameElement.className = 'user-nickname';
-            nicknameElement.textContent = user.nickname || 'Не указано';
-            
-            const idElement = document.createElement('div');
-            idElement.className = 'user-id';
-            idElement.textContent = `ID: ${user.platform_user_id}`;
-            
-            const requestText = document.createElement('div');
-            requestText.className = 'user-id';
-            requestText.textContent = 'Прислал(а) запрос на дружбу';
-            requestText.style.color = 'var(--primary-color)';
-            
-            infoElement.appendChild(nicknameElement);
-            infoElement.appendChild(idElement);
-            infoElement.appendChild(requestText);
-            
-            // Action buttons
-            const actionsContainer = document.createElement('div');
-            actionsContainer.className = 'friend-request-actions';
-            
-            const acceptButton = document.createElement('button');
-            acceptButton.className = 'accept-button';
-            acceptButton.innerHTML = '<i class="fas fa-check"></i>';
-            acceptButton.addEventListener('click', async () => {
-                await handleFriendRequest(user.platform_user_id, 'accept');
-            });
-            
-            const rejectButton = document.createElement('button');
-            rejectButton.className = 'reject-button';
-            rejectButton.innerHTML = '<i class="fas fa-times"></i>';
-            rejectButton.addEventListener('click', async () => {
-                await handleFriendRequest(user.platform_user_id, 'reject');
-            });
-            
-            actionsContainer.appendChild(acceptButton);
-            actionsContainer.appendChild(rejectButton);
-            
-            // Assemble the elements
-            requestElement.appendChild(avatarElement);
-            requestElement.appendChild(infoElement);
-            requestElement.appendChild(actionsContainer);
-            
-            searchResults.appendChild(requestElement);
+     function displayFriendRequest(user) {
+    const requestElement = document.createElement('div');
+    requestElement.className = 'user-result';
+    
+    // Avatar (без изменений)
+    const avatarElement = document.createElement('div');
+    avatarElement.className = 'user-avatar';
+    
+    if (user.has_avatar_photo) {
+        avatarElement.style.backgroundImage = `url(${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()})`;
+    } else {
+        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+        avatarElement.textContent = initial;
+        if (user.avatar_background) {
+            avatarElement.style.backgroundColor = user.avatar_background;
         }
+    }
+    
+    // User info (без изменений)
+    const infoElement = document.createElement('div');
+    infoElement.className = 'user-info';
+    
+    const nicknameElement = document.createElement('div');
+    nicknameElement.className = 'user-nickname';
+    nicknameElement.textContent = user.nickname || 'Не указано';
+    
+    const idElement = document.createElement('div');
+    idElement.className = 'user-id';
+    idElement.textContent = `ID: ${user.platform_user_id}`;
+    
+    const requestText = document.createElement('div');
+    requestText.className = 'user-id';
+    requestText.textContent = 'Прислал(а) запрос на дружбу';
+    requestText.style.color = 'var(--primary-color)';
+    
+    infoElement.appendChild(nicknameElement);
+    infoElement.appendChild(idElement);
+    infoElement.appendChild(requestText);
+    
+    // Action buttons
+    const actionsContainer = document.createElement('div');
+    actionsContainer.className = 'friend-request-actions';
+    
+    const acceptButton = document.createElement('button');
+    acceptButton.className = 'accept-button';
+    acceptButton.innerHTML = '<i class="fas fa-check"></i>';
+    acceptButton.addEventListener('click', async () => {
+        await handleFriendRequest(user.request_id, 'accept'); // Передаем request_id вместо platform_user_id
+    });
+    
+    const rejectButton = document.createElement('button');
+    rejectButton.className = 'reject-button';
+    rejectButton.innerHTML = '<i class="fas fa-times"></i>';
+    rejectButton.addEventListener('click', async () => {
+        await handleFriendRequest(user.request_id, 'reject'); // Передаем request_id вместо platform_user_id
+    });
+    
+    actionsContainer.appendChild(acceptButton);
+    actionsContainer.appendChild(rejectButton);
+    
+    // Assemble the elements
+    requestElement.appendChild(avatarElement);
+    requestElement.appendChild(infoElement);
+    requestElement.appendChild(actionsContainer);
+    
+    searchResults.appendChild(requestElement);
+}
         
         // Функция для отправки запроса на дружбу
         async function sendFriendRequest(receiverId) {
@@ -765,45 +764,17 @@
             }
         }
         
-   async function handleFriendRequest(senderId, action) {
+async function handleFriendRequest(requestId, action) {
     showLoading(action === 'accept' ? 'Принятие запроса...' : 'Отклонение запроса...');
     
     try {
-        // Сначала получаем список входящих запросов
-        const friendsResponse = await fetch(`${SERVER_URL}/get_friends`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-        
-        const friendsData = await friendsResponse.json();
-        
-        if (!friendsResponse.ok || friendsData.status !== 'success') {
-            throw new Error(friendsData.error || 'Ошибка получения списка запросов');
-        }
-        
-        // Находим конкретный запрос от этого отправителя
-        const request = friendsData.incoming_requests.find(
-            req => req.platform_user_id === senderId
-        );
-        
-        if (!request) {
-            throw new Error('Запрос не найден');
-        }
-        
-        // Теперь обрабатываем запрос с правильным request_id
         const response = await fetch(`${SERVER_URL}/handle_friend_request`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                request_id: request.id, // Передаем ID запроса
+                request_id: requestId,
                 receiver_id: userData.platform_user_id,
                 action: action
             }),
