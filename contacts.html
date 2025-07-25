@@ -355,6 +355,64 @@
                 font-size: 13px;
             }
         }
+
+        /* Добавим новые стили для кнопок друзей */
+        .friend-request-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .accept-button {
+            padding: 8px 16px;
+            background-color: var(--success-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .reject-button {
+            padding: 8px 16px;
+            background-color: var(--error-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .sent-button {
+            padding: 8px 16px;
+            background-color: rgba(0, 136, 204, 0.5);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: not-allowed;
+        }
+        
+        .added-button {
+            padding: 8px 16px;
+            background-color: var(--success-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: default;
+        }
+        
+        .accept-button:hover {
+            background-color: #3d8b40;
+            transform: translateY(-1px);
+        }
+        
+        .reject-button:hover {
+            background-color: #d32f2f;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -478,26 +536,20 @@
             }
         }
         
-        // Search user by ID
-        async function searchUserById(userId) {
-            if (!userId || userId.trim() === '') {
-                showMessage('Пожалуйста, введите ID пользователя');
-                return;
-            }
-            
-            showLoading('Поиск пользователя...');
+        // Новая функция для загрузки контактов
+        async function loadContacts() {
+            showLoading('Загрузка контактов...');
             searchResults.innerHTML = '';
             noContacts.style.display = 'none';
             
             try {
-                const response = await fetch(`${SERVER_URL}/search_user`, {
+                const response = await fetch(`${SERVER_URL}/get_friends`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        platform_user_id: userId,
-                        requester_id: userData.platform_user_id
+                        platform_user_id: userData.platform_user_id
                     }),
                     credentials: 'include'
                 });
@@ -505,34 +557,48 @@
                 const data = await response.json();
                 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Неизвестная ошибка поиска');
+                    throw new Error(data.error || 'Ошибка загрузки контактов');
                 }
                 
-                if (data.status === 'success' && data.user) {
-                    displayUserResult(data.user);
+                if (data.status === 'success') {
+                    // Отображаем друзей
+                    if (data.friends.length > 0) {
+                        data.friends.forEach(user => {
+                            displayUserResult(user, 'added');
+                        });
+                    }
+                    
+                    // Отображаем входящие запросы
+                    if (data.incoming_requests.length > 0) {
+                        data.incoming_requests.forEach(user => {
+                            displayFriendRequest(user);
+                        });
+                    }
+                    
+                    // Если нет ни друзей, ни запросов
+                    if (data.friends.length === 0 && data.incoming_requests.length === 0) {
+                        noContacts.textContent = 'Нет контактов';
+                        noContacts.style.display = 'block';
+                    }
                 } else {
-                    noContacts.textContent = 'Пользователь не найден';
-                    noContacts.style.display = 'block';
+                    throw new Error(data.error || 'Ошибка загрузки контактов');
                 }
             } catch (error) {
-                console.error('Search error:', error);
-                showMessage('Ошибка поиска: ' + error.message);
-                noContacts.textContent = 'Ошибка при поиске';
+                console.error('Load contacts error:', error);
+                showMessage('Ошибка загрузки контактов: ' + error.message);
+                noContacts.textContent = 'Ошибка при загрузке контактов';
                 noContacts.style.display = 'block';
             } finally {
                 hideLoading();
             }
         }
         
-        // Display user search result
-        function displayUserResult(user) {
-            searchResults.innerHTML = '';
-            noContacts.style.display = 'none';
-            
+        // Обновленная функция для отображения результатов поиска
+        async function displayUserResult(user, status = 'default') {
             const userElement = document.createElement('div');
             userElement.className = 'user-result';
             
-            // Avatar (either photo or colored circle with initial)
+            // Avatar
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
             
@@ -561,34 +627,358 @@
             infoElement.appendChild(nicknameElement);
             infoElement.appendChild(idElement);
             
-            // Add button
-            const addButton = document.createElement('button');
-            addButton.className = 'add-button';
-            addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
-            addButton.addEventListener('click', () => {
-                // TODO: Implement add friend functionality
-                showMessage('Функция добавления в контакты будет реализована позже', 'success');
-            });
+            // Action button
+            const actionContainer = document.createElement('div');
+            
+            if (status === 'added') {
+                const addedButton = document.createElement('button');
+                addedButton.className = 'added-button';
+                addedButton.innerHTML = '<i class="fas fa-check"></i> Добавлен';
+                actionContainer.appendChild(addedButton);
+            } else if (status === 'request_sent') {
+                const sentButton = document.createElement('button');
+                sentButton.className = 'sent-button';
+                sentButton.innerHTML = '<i class="fas fa-hourglass-half"></i> Отправлено';
+                actionContainer.appendChild(sentButton);
+            } else {
+                const addButton = document.createElement('button');
+                addButton.className = 'add-button';
+                addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
+                addButton.addEventListener('click', async () => {
+                    await sendFriendRequest(user.platform_user_id);
+                });
+                actionContainer.appendChild(addButton);
+            }
             
             // Assemble the elements
             userElement.appendChild(avatarElement);
             userElement.appendChild(infoElement);
-            userElement.appendChild(addButton);
+            userElement.appendChild(actionContainer);
             
             searchResults.appendChild(userElement);
         }
         
-        // Initialize page
+        // Функция для отображения входящего запроса
+        function displayFriendRequest(user) {
+            const requestElement = document.createElement('div');
+            requestElement.className = 'user-result';
+            
+            // Avatar
+            const avatarElement = document.createElement('div');
+            avatarElement.className = 'user-avatar';
+            
+            if (user.has_avatar_photo) {
+                avatarElement.style.backgroundImage = `url(${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()})`;
+            } else {
+                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+                avatarElement.textContent = initial;
+                if (user.avatar_background) {
+                    avatarElement.style.backgroundColor = user.avatar_background;
+                }
+            }
+            
+            // User info
+            const infoElement = document.createElement('div');
+            infoElement.className = 'user-info';
+            
+            const nicknameElement = document.createElement('div');
+            nicknameElement.className = 'user-nickname';
+            nicknameElement.textContent = user.nickname || 'Не указано';
+            
+            const idElement = document.createElement('div');
+            idElement.className = 'user-id';
+            idElement.textContent = `ID: ${user.platform_user_id}`;
+            
+            const requestText = document.createElement('div');
+            requestText.className = 'user-id';
+            requestText.textContent = 'Прислал(а) запрос на дружбу';
+            requestText.style.color = 'var(--primary-color)';
+            
+            infoElement.appendChild(nicknameElement);
+            infoElement.appendChild(idElement);
+            infoElement.appendChild(requestText);
+            
+            // Action buttons
+            const actionsContainer = document.createElement('div');
+            actionsContainer.className = 'friend-request-actions';
+            
+            const acceptButton = document.createElement('button');
+            acceptButton.className = 'accept-button';
+            acceptButton.innerHTML = '<i class="fas fa-check"></i>';
+            acceptButton.addEventListener('click', async () => {
+                await handleFriendRequest(user.platform_user_id, 'accept');
+            });
+            
+            const rejectButton = document.createElement('button');
+            rejectButton.className = 'reject-button';
+            rejectButton.innerHTML = '<i class="fas fa-times"></i>';
+            rejectButton.addEventListener('click', async () => {
+                await handleFriendRequest(user.platform_user_id, 'reject');
+            });
+            
+            actionsContainer.appendChild(acceptButton);
+            actionsContainer.appendChild(rejectButton);
+            
+            // Assemble the elements
+            requestElement.appendChild(avatarElement);
+            requestElement.appendChild(infoElement);
+            requestElement.appendChild(actionsContainer);
+            
+            searchResults.appendChild(requestElement);
+        }
+        
+        // Функция для отправки запроса на дружбу
+        async function sendFriendRequest(receiverId) {
+            showLoading('Отправка запроса...');
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/send_friend_request`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        sender_id: userData.platform_user_id,
+                        receiver_id: receiverId
+                    }),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ошибка отправки запроса');
+                }
+                
+                if (data.status === 'success') {
+                    showMessage('Запрос на дружбу отправлен', 'success');
+                    // Обновляем список контактов
+                    loadContacts();
+                } else {
+                    throw new Error(data.error || 'Ошибка отправки запроса');
+                }
+            } catch (error) {
+                console.error('Send friend request error:', error);
+                showMessage('Ошибка отправки запроса: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Функция для обработки запроса на дружбу
+        async function handleFriendRequest(senderId, action) {
+            showLoading(action === 'accept' ? 'Принятие запроса...' : 'Отклонение запроса...');
+            
+            try {
+                // Сначала получаем ID запроса
+                const checkResponse = await fetch(`${SERVER_URL}/check_friendship`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user1_id: senderId,
+                        user2_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                const checkData = await checkResponse.json();
+                
+                if (!checkResponse.ok || checkData.status !== 'success') {
+                    throw new Error(checkData.error || 'Ошибка проверки запроса');
+                }
+                
+                if (checkData.friendship_status !== 'request_received') {
+                    throw new Error('Запрос не найден');
+                }
+                
+                // Теперь обрабатываем запрос
+                const response = await fetch(`${SERVER_URL}/handle_friend_request`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        requester_id: userData.platform_user_id, // This should be the receiver_id in the context of handling
+                        sender_id: senderId, // This is the sender of the original request
+                        action: action
+                    }),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ошибка обработки запроса');
+                }
+                
+                if (data.status === 'success') {
+                    showMessage(
+                        action === 'accept' ? 
+                        'Запрос принят! Пользователь добавлен в контакты' : 
+                        'Запрос отклонен',
+                        action === 'accept' ? 'success' : 'info'
+                    );
+                    // Обновляем список контактов
+                    loadContacts();
+                } else {
+                    throw new Error(data.error || 'Ошибка обработки запроса');
+                }
+            } catch (error) {
+                console.error('Handle friend request error:', error);
+                showMessage('Ошибка обработки запроса: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Функция для проверки статуса дружбы
+        async function checkFriendshipStatus(userId) {
+            try {
+                const response = await fetch(`${SERVER_URL}/check_friendship`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user1_id: userData.platform_user_id,
+                        user2_id: userId
+                    }),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ошибка проверки статуса');
+                }
+                
+                return data.friendship_status || 'not_friends';
+            } catch (error) {
+                console.error('Check friendship error:', error);
+                return 'not_friends';
+            }
+        }
+        
+        // Обновленная функция поиска пользователя
+        async function searchUserById(userId) {
+            if (!userId || userId.trim() === '') {
+                showMessage('Пожалуйста, введите ID пользователя');
+                return;
+            }
+            
+            if (userId === userData.platform_user_id) {
+                showMessage('Нельзя искать самого себя');
+                return;
+            }
+            
+            showLoading('Поиск пользователя...');
+            searchResults.innerHTML = '';
+            noContacts.style.display = 'none';
+            
+            try {
+                // Сначала проверяем статус дружбы
+                const friendshipStatus = await checkFriendshipStatus(userId);
+                
+                if (friendshipStatus === 'accepted') {
+                    // Если уже друзья, получаем полные данные
+                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            platform_user_id: userId
+                        }),
+                        credentials: 'include'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Неизвестная ошибка поиска');
+                    }
+                    
+                    if (data.status === 'success' && data.user) {
+                        displayUserResult(data.user, 'added');
+                    } else {
+                        noContacts.textContent = 'Пользователь не найден';
+                        noContacts.style.display = 'block';
+                    }
+                } else if (friendshipStatus === 'request_sent') {
+                    // Если запрос уже отправлен
+                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            platform_user_id: userId
+                        }),
+                        credentials: 'include'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Неизвестная ошибка поиска');
+                    }
+                    
+                    if (data.status === 'success' && data.user) {
+                        displayUserResult(data.user, 'request_sent');
+                    } else {
+                        noContacts.textContent = 'Пользователь не найден';
+                        noContacts.style.display = 'block';
+                    }
+                } else {
+                    // Если нет отношений, ищем пользователя
+                    const response = await fetch(`${SERVER_URL}/search_user`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            platform_user_id: userId,
+                            requester_id: userData.platform_user_id
+                        }),
+                        credentials: 'include'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Неизвестная ошибка поиска');
+                    }
+                    
+                    if (data.status === 'success' && data.user) {
+                        displayUserResult(data.user, 'default');
+                    } else {
+                        noContacts.textContent = 'Пользователь не найден';
+                        noContacts.style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                showMessage('Ошибка поиска: ' + error.message);
+                noContacts.textContent = 'Ошибка при поиске';
+                noContacts.style.display = 'block';
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Обновляем инициализацию страницы
         window.addEventListener('DOMContentLoaded', () => {
             loadUserData();
+            loadContacts(); // Загружаем контакты при открытии страницы
             
-            // Search button click handler
+            // Обработчики событий остаются без изменений
             searchButton.addEventListener('click', () => {
                 const searchId = searchInput.value.trim();
                 searchUserById(searchId);
             });
             
-            // Handle Enter key in search input
             searchInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     const searchId = searchInput.value.trim();
@@ -601,6 +991,7 @@
         window.addEventListener('pageshow', (event) => {
             if (event.persisted) {
                 loadUserData();
+                loadContacts();
             }
         });
     </script>
