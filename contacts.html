@@ -97,6 +97,23 @@
             font-size: 18px;
         }
         
+        .search-button {
+            margin-left: 10px;
+            padding: 12px 20px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .search-button:hover {
+            background-color: #006699;
+            transform: translateY(-1px);
+        }
+        
         .contacts-content {
             background: white;
             border-radius: 16px;
@@ -105,8 +122,6 @@
             min-height: 200px;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
             animation: fadeInUp 0.6s ease-out 0.2s;
             animation-fill-mode: both;
         }
@@ -115,8 +130,68 @@
             color: var(--text-secondary);
             font-size: 16px;
             text-align: center;
+            margin: auto;
             opacity: 0;
             animation: fadeIn 0.5s ease-out 0.4s forwards;
+        }
+        
+        .user-result {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            background-color: var(--secondary-color);
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            margin-right: 15px;
+            background-size: cover;
+            background-position: center;
+        }
+        
+        .user-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .user-nickname {
+            font-weight: 600;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .user-id {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .add-button {
+            padding: 8px 16px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .add-button:hover {
+            background-color: #006699;
+            transform: translateY(-1px);
         }
         
         .loading-overlay {
@@ -148,6 +223,25 @@
             color: var(--text-secondary);
             font-size: 16px;
             animation: pulse 2s infinite;
+        }
+        
+        .message-box {
+            text-align: center;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 12px;
+            animation: shakeX 0.5s;
+            display: none;
+        }
+
+        .message-box.error {
+            color: var(--error-color);
+            background: rgba(255,59,48,0.1);
+        }
+
+        .message-box.success {
+            color: var(--success-color);
+            background: rgba(76,175,80,0.1);
         }
         
         .bottom-nav {
@@ -244,6 +338,22 @@
                 padding-left: 40px;
                 font-size: 14px;
             }
+            
+            .search-button {
+                padding: 10px 15px;
+                font-size: 14px;
+            }
+            
+            .user-avatar {
+                width: 40px;
+                height: 40px;
+                margin-right: 10px;
+            }
+            
+            .add-button {
+                padding: 6px 12px;
+                font-size: 13px;
+            }
         }
     </style>
 </head>
@@ -255,18 +365,23 @@
     </div>
 
     <div class="contacts-container">
+        <!-- Message box -->
+        <div id="messageBox" class="message-box"></div>
+        
         <!-- Search section -->
         <div class="search-container">
             <div class="search-title">Поиск по ID платформы</div>
             <div class="search-input-container">
                 <i class="fas fa-search search-icon"></i>
-                <input type="text" class="search-input" placeholder="Введите ID пользователя">
+                <input type="text" id="searchInput" class="search-input" placeholder="Введите ID пользователя">
+                <button id="searchButton" class="search-button">Найти</button>
             </div>
         </div>
         
         <!-- Contacts content -->
         <div class="contacts-content">
             <div id="noContacts" class="no-contacts">Нет контактов</div>
+            <div id="searchResults"></div>
         </div>
     </div>
 
@@ -295,6 +410,10 @@
         // DOM elements
         const loadingOverlay = document.getElementById('loadingOverlay');
         const noContacts = document.getElementById('noContacts');
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const searchResults = document.getElementById('searchResults');
+        const messageBox = document.getElementById('messageBox');
         
         // User data from profile page
         let userData = {};
@@ -312,6 +431,16 @@
             setTimeout(() => {
                 loadingOverlay.style.display = 'none';
             }, 300);
+        }
+        
+        // Show message (error or success)
+        function showMessage(message, type = 'error') {
+            messageBox.textContent = message;
+            messageBox.className = `message-box ${type}`;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 5000);
         }
         
         // Load user data from sessionStorage
@@ -337,11 +466,7 @@
                     };
                     
                     console.log('User data loaded:', userData);
-                    
-                    // Simulate loading delay for demo purposes
-                    setTimeout(() => {
-                        hideLoading();
-                    }, 800);
+                    hideLoading();
                 } else {
                     throw new Error('No user data found');
                 }
@@ -353,8 +478,124 @@
             }
         }
         
+        // Search user by ID
+        async function searchUserById(userId) {
+            if (!userId || userId.trim() === '') {
+                showMessage('Пожалуйста, введите ID пользователя');
+                return;
+            }
+            
+            showLoading('Поиск пользователя...');
+            searchResults.innerHTML = '';
+            noContacts.style.display = 'none';
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/search_user`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userId,
+                        requester_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Неизвестная ошибка поиска');
+                }
+                
+                if (data.status === 'success' && data.user) {
+                    displayUserResult(data.user);
+                } else {
+                    noContacts.textContent = 'Пользователь не найден';
+                    noContacts.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                showMessage('Ошибка поиска: ' + error.message);
+                noContacts.textContent = 'Ошибка при поиске';
+                noContacts.style.display = 'block';
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Display user search result
+        function displayUserResult(user) {
+            searchResults.innerHTML = '';
+            noContacts.style.display = 'none';
+            
+            const userElement = document.createElement('div');
+            userElement.className = 'user-result';
+            
+            // Avatar (either photo or colored circle with initial)
+            const avatarElement = document.createElement('div');
+            avatarElement.className = 'user-avatar';
+            
+            if (user.has_avatar_photo) {
+                avatarElement.style.backgroundImage = `url(${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()})`;
+            } else {
+                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+                avatarElement.textContent = initial;
+                if (user.avatar_background) {
+                    avatarElement.style.backgroundColor = user.avatar_background;
+                }
+            }
+            
+            // User info
+            const infoElement = document.createElement('div');
+            infoElement.className = 'user-info';
+            
+            const nicknameElement = document.createElement('div');
+            nicknameElement.className = 'user-nickname';
+            nicknameElement.textContent = user.nickname || 'Не указано';
+            
+            const idElement = document.createElement('div');
+            idElement.className = 'user-id';
+            idElement.textContent = `ID: ${user.platform_user_id}`;
+            
+            infoElement.appendChild(nicknameElement);
+            infoElement.appendChild(idElement);
+            
+            // Add button
+            const addButton = document.createElement('button');
+            addButton.className = 'add-button';
+            addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
+            addButton.addEventListener('click', () => {
+                // TODO: Implement add friend functionality
+                showMessage('Функция добавления в контакты будет реализована позже', 'success');
+            });
+            
+            // Assemble the elements
+            userElement.appendChild(avatarElement);
+            userElement.appendChild(infoElement);
+            userElement.appendChild(addButton);
+            
+            searchResults.appendChild(userElement);
+        }
+        
         // Initialize page
-        window.addEventListener('DOMContentLoaded', loadUserData);
+        window.addEventListener('DOMContentLoaded', () => {
+            loadUserData();
+            
+            // Search button click handler
+            searchButton.addEventListener('click', () => {
+                const searchId = searchInput.value.trim();
+                searchUserById(searchId);
+            });
+            
+            // Handle Enter key in search input
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const searchId = searchInput.value.trim();
+                    searchUserById(searchId);
+                }
+            });
+        });
         
         // Handle back/forward cache (BFCache)
         window.addEventListener('pageshow', (event) => {
