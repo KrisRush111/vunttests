@@ -513,6 +513,8 @@
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
+            font-weight: bold;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
 
         .profile-info {
@@ -725,56 +727,56 @@
         }
 
         // Загрузить профиль пользователя
-  async function loadUserProfile(userId) {
-    try {
-        const response = await fetch(`${SERVER_URL}/get_user_data`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_id: userId
-            }),
-            credentials: 'include'
-        });
+        async function loadUserProfile(userId) {
+            try {
+                const response = await fetch(`${SERVER_URL}/get_user_data`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userId
+                    }),
+                    credentials: 'include'
+                });
 
-        const data = await response.json();
-        console.log('User data:', data); // Добавьте эту строку для отладки
+                const data = await response.json();
+                console.log('User data from server:', data); // Добавьте эту строку
 
-        if (!response.ok) {
-            throw new Error(data.error || 'Ошибка загрузки профиля');
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ошибка загрузки профиля');
+                }
+
+                if (data.status === 'success' && data.user) {
+                    updateProfileModalUI(data.user);
+                } else {
+                    throw new Error('Пользователь не найден');
+                }
+            } catch (error) {
+                console.error('Profile loading error:', error);
+                showMessage('Ошибка загрузки профиля: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
         }
-
-        if (data.status === 'success' && data.user) {
-            updateProfileModalUI(data.user);
-        } else {
-            throw new Error('Пользователь не найден');
-        }
-    } catch (error) {
-        console.error('Profile loading error:', error);
-        showMessage('Ошибка загрузки профиля: ' + error.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
 
         // Обновить UI модального окна профиля
         function updateProfileModalUI(user) {
-            // Установка аватара
-               if (user.has_avatar) {
+             if (user.has_avatar || user.has_avatar_photo) {
         const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
         modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
         modalProfileAvatar.textContent = '';
+        modalProfileAvatar.style.backgroundColor = ''; // Сбрасываем цвет фона
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
         modalProfileAvatar.textContent = initial;
         modalProfileAvatar.style.backgroundImage = '';
-        // Устанавливаем цвет фона, если он есть в user.avatar_background
+        
+        // Устанавливаем цвет фона
         if (user.avatar_background) {
-            modalProfileAvatar.style.background = user.avatar_background;
+            modalProfileAvatar.style.backgroundColor = user.avatar_background;
         } else {
-            // Если фона нет, можно задать дефолтный цвет
-            modalProfileAvatar.style.background = '#0088cc'; // Пример: синий цвет
+            modalProfileAvatar.style.backgroundColor = '#0088cc'; // Дефолтный цвет
         }
     }
 
