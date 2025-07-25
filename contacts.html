@@ -146,19 +146,31 @@
         }
         
         .user-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background-color: var(--primary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-            margin-right: 15px;
-            background-size: cover;
-            background-position: center;
-        }
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    margin-right: 15px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    image-rendering: crisp-edges;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.user-avatar:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
         
         .user-info {
             flex: 1;
@@ -594,89 +606,147 @@
         }
         
         // Обновленная функция для отображения результатов поиска
-        async function displayUserResult(user, status = 'default') {
-            const userElement = document.createElement('div');
-            userElement.className = 'user-result';
-            
-            // Avatar
-            const avatarElement = document.createElement('div');
-            avatarElement.className = 'user-avatar';
-            
-            if (user.has_avatar_photo) {
-                avatarElement.style.backgroundImage = `url(${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()})`;
-            } else {
-                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                avatarElement.textContent = initial;
-                if (user.avatar_background) {
-                    avatarElement.style.backgroundColor = user.avatar_background;
-                }
-            }
-            
-            // User info
-            const infoElement = document.createElement('div');
-            infoElement.className = 'user-info';
-            
-            const nicknameElement = document.createElement('div');
-            nicknameElement.className = 'user-nickname';
-            nicknameElement.textContent = user.nickname || 'Не указано';
-            
-            const idElement = document.createElement('div');
-            idElement.className = 'user-id';
-            idElement.textContent = `ID: ${user.platform_user_id}`;
-            
-            infoElement.appendChild(nicknameElement);
-            infoElement.appendChild(idElement);
-            
-            // Action button
-            const actionContainer = document.createElement('div');
-            
-            if (status === 'added') {
-                const addedButton = document.createElement('button');
-                addedButton.className = 'added-button';
-                addedButton.innerHTML = '<i class="fas fa-check"></i> Добавлен';
-                actionContainer.appendChild(addedButton);
-            } else if (status === 'request_sent') {
-                const sentButton = document.createElement('button');
-                sentButton.className = 'sent-button';
-                sentButton.innerHTML = '<i class="fas fa-hourglass-half"></i> Отправлено';
-                actionContainer.appendChild(sentButton);
-            } else {
-                const addButton = document.createElement('button');
-                addButton.className = 'add-button';
-                addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
-                addButton.addEventListener('click', async () => {
-                    await sendFriendRequest(user.platform_user_id);
-                });
-                actionContainer.appendChild(addButton);
-            }
-            
-            // Assemble the elements
-            userElement.appendChild(avatarElement);
-            userElement.appendChild(infoElement);
-            userElement.appendChild(actionContainer);
-            
-            searchResults.appendChild(userElement);
-        }
-        
-     function displayFriendRequest(user) {
-    const requestElement = document.createElement('div');
-    requestElement.className = 'user-result';
+async function displayUserResult(user, status = 'default') {
+    const userElement = document.createElement('div');
+    userElement.className = 'user-result';
     
-    // Avatar (без изменений)
+    // Avatar
     const avatarElement = document.createElement('div');
     avatarElement.className = 'user-avatar';
     
     if (user.has_avatar_photo) {
-        avatarElement.style.backgroundImage = `url(${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()})`;
+        // Используем URL аватарки с сервера
+        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.textContent = '';
+    } else {
+        // Генерируем градиентный фон с буквой
+        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+        avatarElement.textContent = initial;
+        
+        // Используем цвет фона из данных пользователя или случайный
+        if (user.avatar_background) {
+            const lighterColor = adjustColor(user.avatar_background, 20);
+            avatarElement.style.background = 
+                `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+        } else {
+            const avatarColors = [
+                ['#0088cc', '#00ccff'],
+                ['#4CAF50', '#8BC34A'],
+                ['#FF5252', '#FF7B7B'],
+                ['#9C27B0', '#E040FB'],
+                ['#FFC107', '#FFD54F'],
+                ['#00BCD4', '#80DEEA'],
+                ['#FF9800', '#FFB74D'],
+            ];
+            const colorPair = avatarColors[Math.floor(Math.random() * avatarColors.length)];
+            avatarElement.style.background = 
+                `linear-gradient(135deg, ${colorPair[0]}, ${colorPair[1]})`;
+        }
+    }
+    
+    // User info
+    const infoElement = document.createElement('div');
+    infoElement.className = 'user-info';
+    
+    const nicknameElement = document.createElement('div');
+    nicknameElement.className = 'user-nickname';
+    nicknameElement.textContent = user.nickname || 'Не указано';
+    
+    const idElement = document.createElement('div');
+    idElement.className = 'user-id';
+    idElement.textContent = `ID: ${user.platform_user_id}`;
+    
+    infoElement.appendChild(nicknameElement);
+    infoElement.appendChild(idElement);
+    
+    // Action button
+    const actionContainer = document.createElement('div');
+    
+    if (status === 'added') {
+        const addedButton = document.createElement('button');
+        addedButton.className = 'added-button';
+        addedButton.innerHTML = '<i class="fas fa-check"></i> Добавлен';
+        actionContainer.appendChild(addedButton);
+    } else if (status === 'request_sent') {
+        const sentButton = document.createElement('button');
+        sentButton.className = 'sent-button';
+        sentButton.innerHTML = '<i class="fas fa-hourglass-half"></i> Отправлено';
+        actionContainer.appendChild(sentButton);
+    } else {
+        const addButton = document.createElement('button');
+        addButton.className = 'add-button';
+        addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
+        addButton.addEventListener('click', async () => {
+            await sendFriendRequest(user.platform_user_id);
+        });
+        actionContainer.appendChild(addButton);
+    }
+    
+    // Assemble the elements
+    userElement.appendChild(avatarElement);
+    userElement.appendChild(infoElement);
+    userElement.appendChild(actionContainer);
+    
+    searchResults.appendChild(userElement);
+}
+        
+
+
+        // Adjust color brightness
+function adjustColor(hex, percent) {
+    const num = parseInt(hex.replace("#", ""), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    
+    return `#${
+        (0x1000000 +
+        (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+        (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+        (B < 255 ? (B < 1 ? 0 : B) : 255)
+    ).toString(16).slice(1)}`;
+}
+
+
+
+ function displayFriendRequest(user) {
+    const requestElement = document.createElement('div');
+    requestElement.className = 'user-result';
+    
+    // Avatar
+    const avatarElement = document.createElement('div');
+    avatarElement.className = 'user-avatar';
+    
+    if (user.has_avatar_photo) {
+        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.textContent = '';
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
         avatarElement.textContent = initial;
         if (user.avatar_background) {
-            avatarElement.style.backgroundColor = user.avatar_background;
+            const lighterColor = adjustColor(user.avatar_background, 20);
+            avatarElement.style.background = 
+                `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+        } else {
+            const avatarColors = [
+                ['#0088cc', '#00ccff'],
+                ['#4CAF50', '#8BC34A'],
+                ['#FF5252', '#FF7B7B'],
+                ['#9C27B0', '#E040FB'],
+                ['#FFC107', '#FFD54F'],
+                ['#00BCD4', '#80DEEA'],
+                ['#FF9800', '#FFB74D'],
+            ];
+            const colorPair = avatarColors[Math.floor(Math.random() * avatarColors.length)];
+            avatarElement.style.background = 
+                `linear-gradient(135deg, ${colorPair[0]}, ${colorPair[1]})`;
         }
     }
     
-    // User info (без изменений)
+    // User info
     const infoElement = document.createElement('div');
     infoElement.className = 'user-info';
     
@@ -705,14 +775,14 @@
     acceptButton.className = 'accept-button';
     acceptButton.innerHTML = '<i class="fas fa-check"></i>';
     acceptButton.addEventListener('click', async () => {
-        await handleFriendRequest(user.request_id, 'accept'); // Передаем request_id вместо platform_user_id
+        await handleFriendRequest(user.request_id, 'accept');
     });
     
     const rejectButton = document.createElement('button');
     rejectButton.className = 'reject-button';
     rejectButton.innerHTML = '<i class="fas fa-times"></i>';
     rejectButton.addEventListener('click', async () => {
-        await handleFriendRequest(user.request_id, 'reject'); // Передаем request_id вместо platform_user_id
+        await handleFriendRequest(user.request_id, 'reject');
     });
     
     actionsContainer.appendChild(acceptButton);
@@ -725,6 +795,7 @@
     
     searchResults.appendChild(requestElement);
 }
+
         
         // Функция для отправки запроса на дружбу
         async function sendFriendRequest(receiverId) {
