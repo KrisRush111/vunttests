@@ -395,7 +395,7 @@
             left: 0;
             right: 0;
             height: 85vh;
-            background: var(--telegram-bg);
+            background: white;
             border-top-left-radius: 16px;
             border-top-right-radius: 16px;
             padding: 20px;
@@ -422,7 +422,7 @@
         .contacts-title {
             font-size: 20px;
             font-weight: 600;
-            color: var(--telegram-text);
+            color: black;
         }
 
         .close-contacts {
@@ -445,7 +445,7 @@
             align-items: center;
             padding: 12px;
             border-radius: 12px;
-            background: var(--telegram-secondary-bg);
+            background: #f5f5f5;
             transition: all 0.2s ease;
             cursor: pointer;
         }
@@ -474,13 +474,13 @@
 
         .contact-name {
             font-weight: 500;
-            color: var(--telegram-text);
+            color: black;
             margin-bottom: 2px;
         }
 
         .contact-status {
             font-size: 12px;
-            color: var(--telegram-hint);
+            color: #8e8e93;
         }
 
         .modal-overlay {
@@ -499,6 +499,24 @@
         .modal-overlay.active {
             opacity: 1;
             pointer-events: all;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .contacts-modal {
+                background: var(--telegram-bg);
+            }
+            
+            .contacts-title {
+                color: var(--telegram-text);
+            }
+            
+            .contact-item {
+                background: var(--telegram-secondary-bg);
+            }
+            
+            .contact-name {
+                color: var(--telegram-text);
+            }
         }
 
         @media (max-width: 480px) {
@@ -675,14 +693,341 @@
         const modalOverlay = document.getElementById('modalOverlay');
         const closeContacts = document.getElementById('closeContacts');
         const contactsList = document.getElementById('contactsList');
-        const contacts = JSON.parse(sessionStorage.getItem('userContacts')) || [];
-if (contacts.length > 0) {
-    renderContacts(contacts); // Отрисовка контактов в модальном окне
-}
         
-        // User data from profile page
+        // User data
         let userData = {};
-        
+        let contacts = [];
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', initializePage);
+
+        async function initializePage() {
+            // Check if user is authenticated
+            await checkAuth();
+            
+            // Load user data
+            await loadUserData();
+            
+            // Load chats
+            loadChats();
+            
+            // Set up event listeners
+            setupEventListeners();
+        }
+
+        // Check if user is authenticated
+        async function checkAuth() {
+            showLoading('Проверка авторизации...');
+            
+            try {
+                const data = JSON.parse(sessionStorage.getItem('userData'));
+                
+                if (!data || !data.platform_user_id) {
+                    // Try to fetch user data from server
+                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Not authenticated');
+                    }
+                    
+                    const responseData = await response.json();
+                    if (responseData.status !== 'success') {
+                        throw new Error('Not authenticated');
+                    }
+                    
+                    // Save user data to sessionStorage
+                    sessionStorage.setItem('userData', JSON.stringify(responseData.user));
+                    userData = responseData.user;
+                } else {
+                    userData = data;
+                }
+                
+                hideLoading();
+            } catch (error) {
+                console.error('Auth error:', error);
+                hideLoading();
+                window.location.href = 'profile.html';
+            }
+        }
+
+        // Load user data
+        async function loadUserData() {
+            showLoading('Загрузка данных пользователя...');
+            
+            try {
+                // Try to get from sessionStorage first
+                const sessionData = JSON.parse(sessionStorage.getItem('userData'));
+                
+                if (sessionData && sessionData.platform_user_id) {
+                    userData = sessionData;
+                    hideLoading();
+                    return;
+                }
+                
+                // If not in sessionStorage, fetch from server
+                const response = await fetch(`${SERVER_URL}/get_user_data`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load user data');
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    userData = data.user;
+                    sessionStorage.setItem('userData', JSON.stringify(userData));
+                    hideLoading();
+                } else {
+                    throw new Error(data.error || 'Failed to load user data');
+                }
+            } catch (error) {
+                console.error('Error loading user data:', error);
+                showMessage('Ошибка загрузки данных пользователя', 'error');
+                hideLoading();
+                window.location.href = 'profile.html';
+            }
+        }
+
+        // Load chats from server
+        async function loadChats() {
+            showLoading('Загрузка чатов...');
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/get_chats`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load chats');
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.chats && data.chats.length > 0) {
+                    renderChats(data.chats);
+                    noChats.style.display = 'none';
+                } else {
+                    noChats.style.display = 'block';
+                }
+                
+                hideLoading();
+            } catch (error) {
+                console.error('Error loading chats:', error);
+                showMessage('Ошибка загрузки чатов', 'error');
+                noChats.style.display = 'block';
+                hideLoading();
+            }
+        }
+
+        // Render chats list
+        function renderChats(chats) {
+            chatsList.innerHTML = '';
+            
+            chats.forEach(chat => {
+                const chatItem = document.createElement('div');
+                chatItem.className = 'chat-item';
+                
+                // Generate avatar from first letters or use photo
+                const initials = chat.name 
+                    ? chat.name.split(' ').map(n => n[0]).join('') 
+                    : '?';
+                
+                chatItem.innerHTML = `
+                    <div class="chat-avatar" style="${chat.avatar_background ? `background-color: ${chat.avatar_background}` : ''}">
+                        ${chat.avatar_photo ? '' : initials}
+                    </div>
+                    <div class="chat-info">
+                        <div class="chat-name">${chat.name || 'Новый чат'}</div>
+                        <div class="last-message">${chat.last_message || 'Начните общение'}</div>
+                        <div class="chat-time">${formatTime(chat.last_message_time)}</div>
+                    </div>
+                    ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
+                `;
+                
+                // Add click handler
+                chatItem.addEventListener('click', () => {
+                    openChat(chat.id);
+                });
+                
+                chatsList.appendChild(chatItem);
+            });
+        }
+
+        // Format time for chat list
+        function formatTime(timestamp) {
+            if (!timestamp) return '';
+            
+            const date = new Date(timestamp);
+            const now = new Date();
+            
+            if (date.toDateString() === now.toDateString()) {
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } else if (date.getFullYear() === now.getFullYear()) {
+                return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            } else {
+                return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+            }
+        }
+
+        // Open chat (placeholder)
+        function openChat(chatId) {
+            showMessage('Открытие чата будет реализовано позже', 'info');
+        }
+
+        // Load contacts from server
+        async function loadContacts() {
+            showLoading('Загрузка контактов...');
+            contactsList.innerHTML = '';
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/get_friends`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load contacts');
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    contacts = data.friends;
+                    sessionStorage.setItem('userContacts', JSON.stringify(contacts));
+                    renderContacts(contacts);
+                } else {
+                    throw new Error(data.error || 'Failed to load contacts');
+                }
+                
+                hideLoading();
+            } catch (error) {
+                console.error('Error loading contacts:', error);
+                showMessage('Ошибка загрузки контактов', 'error');
+                hideLoading();
+            }
+        }
+
+        // Render contacts list
+        function renderContacts(contacts) {
+            contactsList.innerHTML = '';
+            
+            if (!contacts || contacts.length === 0) {
+                contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
+                return;
+            }
+
+            contacts.forEach(contact => {
+                const contactItem = document.createElement('div');
+                contactItem.className = 'contact-item';
+                
+                // Generate avatar from first letters or use photo
+                const initials = contact.nickname 
+                    ? contact.nickname.split(' ').map(n => n[0]).join('') 
+                    : '?';
+                
+                contactItem.innerHTML = `
+                    <div class="contact-avatar" style="background-color: ${contact.avatar_background || getRandomColor()}">
+                        ${initials}
+                    </div>
+                    <div class="contact-info">
+                        <div class="contact-name">${contact.nickname || 'Без имени'}</div>
+                        <div class="contact-status">${contact.identity || 'Статус не указан'}</div>
+                    </div>
+                `;
+                
+                // Add click handler
+                contactItem.addEventListener('click', () => {
+                    createChatWithContact(contact);
+                });
+                
+                contactsList.appendChild(contactItem);
+            });
+        }
+
+        // Generate random color for avatar
+        function getRandomColor() {
+            const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        // Create chat with selected contact
+        async function createChatWithContact(contact) {
+            showLoading('Создание чата...');
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/create_chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user1_id: userData.platform_user_id,
+                        user2_id: contact.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to create chat');
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    hideContactsModal();
+                    showMessage(`Чат с ${contact.nickname} создан`, 'success');
+                    loadChats(); // Refresh chats list
+                } else {
+                    throw new Error(data.error || 'Failed to create chat');
+                }
+            } catch (error) {
+                console.error('Error creating chat:', error);
+                showMessage('Ошибка создания чата', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Show contacts modal
+        function showContactsModal() {
+            contactsModal.classList.add('active');
+            modalOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            loadContacts();
+        }
+
+        // Hide contacts modal
+        function hideContactsModal() {
+            contactsModal.classList.remove('active');
+            modalOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
         // Show loading overlay
         function showLoading(text = 'Загрузка...') {
             loadingOverlay.querySelector('.loading-text').textContent = text;
@@ -707,217 +1052,26 @@ if (contacts.length > 0) {
                 messageBox.style.display = 'none';
             }, 5000);
         }
-        
-        // Load user data from sessionStorage
-        function loadUserData() {
-            showLoading('Загрузка данных пользователя...');
-            
-            try {
-                const data = JSON.parse(sessionStorage.getItem('userData'));
-                
-                if (data && data.platform_user_id) {
-                    userData = {
-                        nickname: data.nickname || "не указано",
-                        identity: data.identity || "не указано",
-                        main_school_code: data.main_school_code || "не указано",
-                        main_school_name: data.main_school_name || "не указано",
-                        class_number: data.class_number || "не указано",
-                        class_letter: data.class_letter || "не указано",
-                        additional_school_code: data.additional_school_code || "не указано",
-                        additional_school_name: data.additional_school_name || "не указано",
-                        specialization: data.specialization || "не указано",
-                        course: data.course || "не указано",
-                        platform_user_id: data.platform_user_id
-                    };
-                    
-                    console.log('User data loaded:', userData);
-                    hideLoading();
-                } else {
-                    throw new Error('No user data found');
-                }
-            } catch (error) {
-                console.error('Error loading user data:', error);
-                hideLoading();
-                // Redirect to profile if no data
-                window.location.href = 'profile.html';
-            }
-        }
-        
-        // Load chats (placeholder - no actual data loading yet)
-        function loadChats() {
-            showLoading('Загрузка чатов...');
-            chatsList.innerHTML = '';
-            noChats.style.display = 'block';
-            hideLoading();
-        }
-        
-        // Show contacts modal
-        function showContactsModal() {
-            contactsModal.classList.add('active');
-            modalOverlay.classList.add('active');
-            document.body.style.overflow = 'hidden';
-            loadContacts();
-        }
 
-        // Hide contacts modal
-        function hideContactsModal() {
-            contactsModal.classList.remove('active');
-            modalOverlay.classList.remove('active');
-            document.body.style.overflow = '';
-        }
-
-        // Load contacts from server
-        function loadContacts() {
-            showLoading('Загрузка контактов...');
-            contactsList.innerHTML = '';
-            
-            // Здесь должен быть реальный запрос к серверу для получения контактов
-            // Временная имитация запроса
-            setTimeout(() => {
-                // Получаем список друзей пользователя
-                fetch(`${SERVER_URL}/get_friends`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        renderContacts(data.friends);
-                    } else {
-                        showMessage('Не удалось загрузить контакты', 'error');
-                    }
-                    hideLoading();
-                })
-                .catch(error => {
-                    console.error('Error loading contacts:', error);
-                    showMessage('Ошибка загрузки контактов', 'error');
-                    hideLoading();
-                });
-            }, 500);
-        }
-
-        // Render contacts list
-        function renderContacts(contacts) {
-            if (!contacts || contacts.length === 0) {
-                contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
-                return;
-            }
-
-            contacts.forEach(contact => {
-                const contactItem = document.createElement('div');
-                contactItem.className = 'contact-item';
-                
-                // Генерируем аватар на основе первых букв имени
-                const initials = contact.nickname 
-                    ? contact.nickname.split(' ').map(n => n[0]).join('') 
-                    : '?';
-                
-                // Используем цвет фона из базы или генерируем случайный
-                const bgColor = contact.avatar_background || getRandomColor();
-                
-                contactItem.innerHTML = `
-                    <div class="contact-avatar" style="background-color: ${bgColor}">
-                        ${initials}
-                    </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${contact.nickname || 'Без имени'}</div>
-                        <div class="contact-status">${contact.identity || 'Статус не указан'}</div>
-                    </div>
-                `;
-                
-                // Добавляем обработчик клика для создания чата
-                contactItem.addEventListener('click', () => {
-                    createChatWithContact(contact);
-                });
-                
-                contactsList.appendChild(contactItem);
-            });
-        }
-
-        // Generate random color for avatar background
-        function getRandomColor() {
-            const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
-            return colors[Math.floor(Math.random() * colors.length)];
-        }
-
-        // Create chat with selected contact
-        function createChatWithContact(contact) {
-            showLoading('Создание чата...');
-            
-            // Здесь должен быть запрос к серверу для создания чата
-            // Временная имитация
-            setTimeout(() => {
-                hideContactsModal();
-                hideLoading();
-                showMessage(`Чат с ${contact.nickname} создан`, 'success');
-                
-                // Добавляем новый чат в список (в реальном приложении нужно обновить список чатов)
-                addNewChat(contact);
-            }, 1000);
-        }
-
-        // Add new chat to the list (temporary function)
-        function addNewChat(contact) {
-            noChats.style.display = 'none';
-            
-            const chatItem = document.createElement('div');
-            chatItem.className = 'chat-item';
-            
-            const initials = contact.nickname 
-                ? contact.nickname.split(' ').map(n => n[0]).join('') 
-                : '?';
-            
-            const bgColor = contact.avatar_background || getRandomColor();
-            
-            chatItem.innerHTML = `
-                <div class="chat-avatar" style="background-color: ${bgColor}">
-                    ${initials}
-                </div>
-                <div class="chat-info">
-                    <div class="chat-name">${contact.nickname || 'Новый чат'}</div>
-                    <div class="last-message">Начните общение</div>
-                    <div class="chat-time">только что</div>
-                </div>
-            `;
-            
-            // Добавляем обработчик клика для перехода в чат
-            chatItem.addEventListener('click', () => {
-                showMessage('Переход в чат будет реализован позже', 'info');
-            });
-            
-            chatsList.prepend(chatItem);
-        }
-
-        // Event listeners
-        window.addEventListener('DOMContentLoaded', () => {
-            loadUserData();
-            loadChats();
-            
-            // Обработчик кнопки добавления чата
+        // Set up event listeners
+        function setupEventListeners() {
+            // Add chat button
             addChatButton.addEventListener('click', (e) => {
                 e.preventDefault();
                 showContactsModal();
-                loadContacts();
             });
 
-            // Обработчики закрытия модального окна
+            // Close contacts modal
             closeContacts.addEventListener('click', hideContactsModal);
             modalOverlay.addEventListener('click', hideContactsModal);
-        });
-        
-        // Handle back/forward cache (BFCache)
-        window.addEventListener('pageshow', (event) => {
-            if (event.persisted) {
-                loadUserData();
-                loadChats();
-            }
-        });
+            
+            // Handle back/forward cache
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted) {
+                    initializePage();
+                }
+            });
+        }
     </script>
 </body>
 </html>
