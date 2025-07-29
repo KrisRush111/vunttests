@@ -1247,6 +1247,8 @@
                 }
                 
                 if (data.status === 'success') {
+
+                 sessionStorage.setItem('userContacts', JSON.stringify(data.friends));
                     // Display friends
                     if (data.friends.length > 0) {
                         data.friends.forEach(user => {
@@ -1450,42 +1452,42 @@
         }
         
         // Send friend request
-        async function sendFriendRequest(receiverId) {
-            showLoading('Отправка запроса...');
-            
-            try {
-                const response = await fetch(`${SERVER_URL}/send_friend_request`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        sender_id: userData.platform_user_id,
-                        receiver_id: receiverId
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.error || 'Ошибка отправки запроса');
-                }
-                
-                if (data.status === 'success') {
-                    showMessage('Запрос на дружбу отправлен', 'success');
-                    // Обновляем список контактов
-                    loadContacts();
-                } else {
-                    throw new Error(data.error || 'Ошибка отправки запроса');
-                }
-            } catch (error) {
-                console.error('Send friend request error:', error);
-                showMessage('Ошибка отправки запроса: ' + error.message);
-            } finally {
-                hideLoading();
-            }
+async function sendFriendRequest(receiverId) {
+    showLoading('Отправка запроса...');
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/send_friend_request`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sender_id: userData.platform_user_id,
+                receiver_id: receiverId
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Ошибка отправки запроса');
         }
+        
+        if (data.status === 'success') {
+            showMessage('Запрос на дружбу отправлен', 'success');
+            // Обновляем список контактов и сохраняем в sessionStorage
+            loadContacts();
+        } else {
+            throw new Error(data.error || 'Ошибка отправки запроса');
+        }
+    } catch (error) {
+        console.error('Send friend request error:', error);
+        showMessage('Ошибка отправки запроса: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
         
         async function handleFriendRequest(requestId, action) {
             showLoading(action === 'accept' ? 'Принятие запроса...' : 'Отклонение запроса...');
