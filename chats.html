@@ -134,24 +134,21 @@
         }
         
         .add-chat-button {
-            padding: 10px;
-            background-color: var(--telegram-blue);
-            color: white;
+            background-color: transparent;
+            color: var(--telegram-blue);
             border: none;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            width: auto;
+            height: auto;
+            padding: 0;
+            font-size: 24px;
             cursor: pointer;
             transition: all 0.2s ease;
         }
         
         .add-chat-button:hover {
-            background-color: #006ba1;
-            transform: translateY(-1px);
-            box-shadow: var(--telegram-shadow-large);
+            background-color: transparent;
+            transform: translateY(-1px) scale(1.1);
+            box-shadow: none;
         }
 
         .add-chat-button:active {
@@ -391,6 +388,119 @@
             transform: scale(0.95);
         }
 
+        /* Модальное окно контактов */
+        .contacts-modal {
+            position: fixed;
+            bottom: -100%;
+            left: 0;
+            right: 0;
+            height: 85vh;
+            background: var(--telegram-bg);
+            border-top-left-radius: 16px;
+            border-top-right-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            overflow-y: auto;
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform: translateY(100%);
+        }
+
+        .contacts-modal.active {
+            transform: translateY(0);
+        }
+
+        .contacts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--telegram-divider);
+        }
+
+        .contacts-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--telegram-text);
+        }
+
+        .close-contacts {
+            background: none;
+            border: none;
+            color: var(--telegram-blue);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 8px;
+        }
+
+        .contacts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 12px;
+            background: var(--telegram-secondary-bg);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .contact-item:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .contact-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 20px;
+            margin-right: 12px;
+            background-size: cover;
+            background-position: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+        }
+
+        .contact-info {
+            flex: 1;
+        }
+
+        .contact-name {
+            font-weight: 500;
+            color: var(--telegram-text);
+            margin-bottom: 2px;
+        }
+
+        .contact-status {
+            font-size: 12px;
+            color: var(--telegram-hint);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
         @media (max-width: 480px) {
             .chats-container {
                 padding: 8px 8px 80px;
@@ -416,6 +526,11 @@
                 height: 40px;
                 font-size: 16px;
                 margin-right: 10px;
+            }
+
+            .contacts-modal {
+                height: 80vh;
+                padding: 16px;
             }
         }
         
@@ -451,6 +566,15 @@
             }
             to {
                 opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+            }
+            to {
                 transform: translateY(0);
             }
         }
@@ -521,6 +645,21 @@
         </a>
     </div>
 
+    <!-- Модальное окно контактов -->
+    <div id="modalOverlay" class="modal-overlay"></div>
+
+    <div id="contactsModal" class="contacts-modal">
+        <div class="contacts-header">
+            <div class="contacts-title">Выберите контакт</div>
+            <button id="closeContacts" class="close-contacts">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="contactsList" class="contacts-list">
+            <!-- Контакты будут добавляться здесь динамически -->
+        </div>
+    </div>
+
     <script>
         // Configuration
         const SERVER_URL = 'https://vuntserver-p1cx.onrender.com';
@@ -532,6 +671,10 @@
         const addChatButton = document.getElementById('addChatButton');
         const chatsList = document.getElementById('chatsList');
         const messageBox = document.getElementById('messageBox');
+        const contactsModal = document.getElementById('contactsModal');
+        const modalOverlay = document.getElementById('modalOverlay');
+        const closeContacts = document.getElementById('closeContacts');
+        const contactsList = document.getElementById('contactsList');
         
         // User data from profile page
         let userData = {};
@@ -604,14 +747,163 @@
             hideLoading();
         }
         
+        // Show contacts modal
+        function showContactsModal() {
+            contactsModal.classList.add('active');
+            modalOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            loadContacts();
+        }
+
+        // Hide contacts modal
+        function hideContactsModal() {
+            contactsModal.classList.remove('active');
+            modalOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // Load contacts from server
+        function loadContacts() {
+            showLoading('Загрузка контактов...');
+            contactsList.innerHTML = '';
+            
+            // Здесь должен быть реальный запрос к серверу для получения контактов
+            // Временная имитация запроса
+            setTimeout(() => {
+                // Получаем список друзей пользователя
+                fetch(`${SERVER_URL}/get_friends`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        renderContacts(data.friends);
+                    } else {
+                        showMessage('Не удалось загрузить контакты', 'error');
+                    }
+                    hideLoading();
+                })
+                .catch(error => {
+                    console.error('Error loading contacts:', error);
+                    showMessage('Ошибка загрузки контактов', 'error');
+                    hideLoading();
+                });
+            }, 500);
+        }
+
+        // Render contacts list
+        function renderContacts(contacts) {
+            if (!contacts || contacts.length === 0) {
+                contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
+                return;
+            }
+
+            contacts.forEach(contact => {
+                const contactItem = document.createElement('div');
+                contactItem.className = 'contact-item';
+                
+                // Генерируем аватар на основе первых букв имени
+                const initials = contact.nickname 
+                    ? contact.nickname.split(' ').map(n => n[0]).join('') 
+                    : '?';
+                
+                // Используем цвет фона из базы или генерируем случайный
+                const bgColor = contact.avatar_background || getRandomColor();
+                
+                contactItem.innerHTML = `
+                    <div class="contact-avatar" style="background-color: ${bgColor}">
+                        ${initials}
+                    </div>
+                    <div class="contact-info">
+                        <div class="contact-name">${contact.nickname || 'Без имени'}</div>
+                        <div class="contact-status">${contact.identity || 'Статус не указан'}</div>
+                    </div>
+                `;
+                
+                // Добавляем обработчик клика для создания чата
+                contactItem.addEventListener('click', () => {
+                    createChatWithContact(contact);
+                });
+                
+                contactsList.appendChild(contactItem);
+            });
+        }
+
+        // Generate random color for avatar background
+        function getRandomColor() {
+            const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        // Create chat with selected contact
+        function createChatWithContact(contact) {
+            showLoading('Создание чата...');
+            
+            // Здесь должен быть запрос к серверу для создания чата
+            // Временная имитация
+            setTimeout(() => {
+                hideContactsModal();
+                hideLoading();
+                showMessage(`Чат с ${contact.nickname} создан`, 'success');
+                
+                // Добавляем новый чат в список (в реальном приложении нужно обновить список чатов)
+                addNewChat(contact);
+            }, 1000);
+        }
+
+        // Add new chat to the list (temporary function)
+        function addNewChat(contact) {
+            noChats.style.display = 'none';
+            
+            const chatItem = document.createElement('div');
+            chatItem.className = 'chat-item';
+            
+            const initials = contact.nickname 
+                ? contact.nickname.split(' ').map(n => n[0]).join('') 
+                : '?';
+            
+            const bgColor = contact.avatar_background || getRandomColor();
+            
+            chatItem.innerHTML = `
+                <div class="chat-avatar" style="background-color: ${bgColor}">
+                    ${initials}
+                </div>
+                <div class="chat-info">
+                    <div class="chat-name">${contact.nickname || 'Новый чат'}</div>
+                    <div class="last-message">Начните общение</div>
+                    <div class="chat-time">только что</div>
+                </div>
+            `;
+            
+            // Добавляем обработчик клика для перехода в чат
+            chatItem.addEventListener('click', () => {
+                showMessage('Переход в чат будет реализован позже', 'info');
+            });
+            
+            chatsList.prepend(chatItem);
+        }
+
         // Event listeners
         window.addEventListener('DOMContentLoaded', () => {
             loadUserData();
             loadChats();
             
-            addChatButton.addEventListener('click', () => {
-                showMessage('Функция добавления чата будет реализована позже', 'info');
+            // Обработчик кнопки добавления чата
+            addChatButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                showContactsModal();
             });
+
+            // Обработчики закрытия модального окна
+            closeContacts.addEventListener('click', hideContactsModal);
+            modalOverlay.addEventListener('click', hideContactsModal);
         });
         
         // Handle back/forward cache (BFCache)
