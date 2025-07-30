@@ -389,19 +389,20 @@
         }
 
         /* Модальное окно контактов */
-.contacts-modal {
+ .contacts-modal {
     position: fixed;
+    top: auto;
     bottom: 0;
     left: 0;
     right: 0;
-    height: 95vh; /* Увеличиваем высоту (было 80vh) */
+    height: 80vh;
     background: var(--telegram-bg);
     z-index: 1000;
     transform: translateY(100%);
     transition: transform 0.3s ease;
     display: flex;
     flex-direction: column;
-    border-top-left-radius: 20px; /* Закругленные верхние углы */
+    border-top-left-radius: 16px;
     border-top-right-radius: 16px;
     box-shadow: var(--telegram-shadow-large);
 }
@@ -409,6 +410,7 @@
 .contacts-modal.active {
     transform: translateY(0);
 }
+
         .contacts-header {
             display: flex;
             align-items: center;
@@ -506,6 +508,23 @@
             padding: 12px;
             border-top: 1px solid var(--telegram-divider);
         }
+
+        .contact-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 24px;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 18px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
 
         .contacts-action-btn {
             background: var(--telegram-blue);
@@ -943,39 +962,43 @@
         }
 
         // Render contacts list
-        function renderContacts(contacts) {
-            if (!contacts || contacts.length === 0) {
-                contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
-                return;
-            }
+// Render contacts list
+function renderContacts(contacts) {
+    if (!contacts || contacts.length === 0) {
+        contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
+        return;
+    }
 
-            contacts.forEach(contact => {
-                const contactItem = document.createElement('div');
-                contactItem.className = 'contact-item';
-                
+    contacts.forEach(contact => {
+        const contactItem = document.createElement('div');
+        contactItem.className = 'contact-item';
+        
+        // Если есть аватарка, используем ее, иначе - фон с инициалами
+        const avatarHTML = contact.has_avatar_photo 
+            ? `<div class="contact-avatar" style="background-image: url('${SERVER_URL}/avatar/${contact.platform_user_id}?${Date.now()}')"></div>`
+            : (() => {
                 const initials = contact.nickname 
                     ? contact.nickname.split(' ').map(n => n[0]).join('') 
                     : '?';
-                
                 const bgColor = contact.avatar_background || getRandomColor();
-                
-                contactItem.innerHTML = `
-                    <div class="contact-avatar" style="background-color: ${bgColor}">
-                        ${initials}
-                    </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${contact.nickname || 'Без имени'}</div>
-                        <div class="contact-status">был(а) недавно</div>
-                    </div>
-                `;
-                
-                contactItem.addEventListener('click', () => {
-                    createChatWithContact(contact);
-                });
-                
-                contactsList.appendChild(contactItem);
-            });
-        }
+                return `<div class="contact-avatar" style="background-color: ${bgColor}">${initials}</div>`;
+            })();
+        
+        contactItem.innerHTML = `
+            ${avatarHTML}
+            <div class="contact-info">
+                <div class="contact-name">${contact.nickname || 'Без имени'}</div>
+                <div class="contact-status">был(а) недавно</div>
+            </div>
+        `;
+        
+        contactItem.addEventListener('click', () => {
+            createChatWithContact(contact);
+        });
+        
+        contactsList.appendChild(contactItem);
+    });
+}
 
         // Generate random color for avatar background
         function getRandomColor() {
