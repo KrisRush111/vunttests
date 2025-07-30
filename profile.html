@@ -683,7 +683,7 @@
     <!-- Hidden file input for avatar upload -->
     <input type="file" id="avatar-input" accept="image/*" style="display: none;">
 
-    <script>
+ <script>
         // Configuration - SET YOUR SERVER URL HERE
         const SERVER_URL = 'https://vuntserver-p1cx.onrender.com';
         
@@ -797,7 +797,7 @@
                 sessionStorage.removeItem('tempAvatar');
                 
                 if (userData) {
-                    userData.has_avatar_photo = true;
+                    userData.has_avatar = true;
                     sessionStorage.setItem('userData', JSON.stringify(userData));
                 }
             };
@@ -809,7 +809,7 @@
                         userData.avatar_background,
                         userData.nickname?.charAt(0).toUpperCase() || '?'
                     );
-                    userData.has_avatar_photo = false;
+                    userData.has_avatar = false;
                     sessionStorage.setItem('userData', JSON.stringify(userData));
                 }
             };
@@ -857,32 +857,25 @@
                     throw new Error(data.message || data.error || 'Ошибка загрузки.');
                 }
 
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    profileAvatar.style.backgroundImage = `url(${e.target.result})`;
-                    profileAvatar.style.backgroundSize = 'cover';
-                    profileAvatar.style.backgroundPosition = 'center';
-                    profileAvatar.textContent = '';
-                    sessionStorage.setItem('tempAvatar', e.target.result);
-                    showMessage('Аватар успешно загружен!', 'success');
-                    hideLoading();
-                };
-                reader.readAsDataURL(file);
+                // Use the new avatar URL from Cloudinary
+                profileAvatar.style.backgroundImage = `url(${data.avatar_url})`;
+                profileAvatar.style.backgroundSize = 'cover';
+                profileAvatar.style.backgroundPosition = 'center';
+                profileAvatar.textContent = '';
+                
+                showMessage('Аватар успешно загружен!', 'success');
+                hideLoading();
 
-                userData.has_avatar_photo = true;
+                userData.has_avatar = true;
                 userData.avatar_background = data.avatar_background || userData.avatar_background;
                 sessionStorage.setItem('userData', JSON.stringify(userData));
-
-                setTimeout(() => {
-                    loadAvatar(userData.platform_user_id);
-                }, 1000);
 
             } catch (error) {
                 showMessage('Ошибка загрузки: ' + error.message);
                 hideLoading();
                 
                 if (userData) {
-                    if (userData.has_avatar_photo) {
+                    if (userData.has_avatar) {
                         loadAvatar(userData.platform_user_id);
                     } else {
                         setAvatarBackground(
@@ -891,7 +884,6 @@
                         );
                     }
                 }
-                sessionStorage.removeItem('tempAvatar');
             }
         }
 
@@ -921,10 +913,9 @@
                     throw new Error(data.message || data.error || 'Ошибка удаления.');
                 }
                 
-                userData.has_avatar_photo = false;
+                userData.has_avatar = false;
                 userData.avatar_background = data.avatar_background || userData.avatar_background;
                 sessionStorage.setItem('userData', JSON.stringify(userData));
-                sessionStorage.removeItem('tempAvatar');
                 
                 setAvatarBackground(
                     userData.avatar_background,
@@ -959,7 +950,7 @@
                     userData = {
                         ...userData,
                         ...data.user,
-                        has_avatar_photo: data.user.has_avatar
+                        has_avatar: data.user.has_avatar
                     };
                     sessionStorage.setItem('userData', JSON.stringify(userData));
                     return true;
@@ -978,12 +969,7 @@
             const firstLetter = nickname.charAt(0).toUpperCase() || '?';
             const bgColor = userData.avatar_background;
             
-            const tempAvatar = sessionStorage.getItem('tempAvatar');
-            
-            if (tempAvatar) {
-                profileAvatar.style.backgroundImage = `url(${tempAvatar})`;
-                profileAvatar.textContent = '';
-            } else if (userData.has_avatar_photo) {
+            if (userData.has_avatar) {
                 loadAvatar(userData.platform_user_id);
             } else {
                 setAvatarBackground(bgColor, firstLetter);
@@ -1025,10 +1011,9 @@
 
         // Open avatar modal
         function openAvatarModal() {
-            if (!userData.has_avatar_photo && !sessionStorage.getItem('tempAvatar')) return;
+            if (!userData.has_avatar) return;
             
-            const avatarUrl = sessionStorage.getItem('tempAvatar') || 
-                             `${SERVER_URL}/avatar/${userData.platform_user_id}?t=${Date.now()}`;
+            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}?t=${Date.now()}`;
             
             avatarModalImage.src = avatarUrl;
             avatarModal.classList.add('active');
@@ -1066,7 +1051,7 @@
 
         // Event listeners
         profileAvatar.addEventListener('click', () => {
-            if (userData.has_avatar_photo || sessionStorage.getItem('tempAvatar')) {
+            if (userData.has_avatar) {
                 openAvatarModal();
             } else {
                 avatarInput.click();
