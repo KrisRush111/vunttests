@@ -546,7 +546,7 @@
             pointer-events: all;
         }
 
-        /* Добавьте эти стили в тег style */
+        /* Модальное окно чата */
         .chat-modal {
             position: fixed;
             top: 0;
@@ -586,13 +586,23 @@
             cursor: pointer;
         }
 
+        .chat-title-container {
+            flex: 1;
+            min-width: 0;
+        }
+
         .chat-title {
             font-weight: 600;
             font-size: 16px;
-            flex: 1;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        .chat-status {
+            font-size: 13px;
+            color: var(--telegram-hint);
+            margin-top: 2px;
         }
 
         .chat-menu-button {
@@ -609,6 +619,13 @@
             overflow-y: auto;
             display: flex;
             flex-direction: column;
+        }
+
+        .no-messages {
+            color: var(--telegram-hint);
+            text-align: center;
+            margin: auto;
+            padding: 20px;
         }
 
         .message {
@@ -812,20 +829,23 @@
             <div id="chatsList"></div>
         </div>
 
-        <!-- Добавьте этот div в chats-container после chats-content -->
+        <!-- Модальное окно чата -->
         <div id="chatModal" class="chat-modal">
             <div class="chat-header">
                 <button id="backToChats" class="back-button">
                     <i class="fas fa-arrow-left"></i>
                 </button>
-                <div class="chat-title" id="chatTitle"></div>
+                <div class="chat-title-container">
+                    <div class="chat-title" id="chatTitle"></div>
+                    <div class="chat-status" id="chatStatus">был(а) недавно</div>
+                </div>
                 <button class="chat-menu-button">
                     <i class="fas fa-ellipsis-v"></i>
                 </button>
             </div>
             
             <div id="messagesContainer" class="messages-container">
-                <!-- Сообщения будут добавляться здесь -->
+                <div id="noMessages" class="no-messages">Сообщений пока нет...</div>
             </div>
             
             <div class="message-input-container">
@@ -877,7 +897,6 @@
         <div id="contactsList" class="contacts-list">
             <!-- Контакты будут добавляться здесь динамически -->
         </div>
-        
     </div>
 
     <script>
@@ -901,9 +920,11 @@
         const chatModal = document.getElementById('chatModal');
         const backToChats = document.getElementById('backToChats');
         const messagesContainer = document.getElementById('messagesContainer');
+        const noMessages = document.getElementById('noMessages');
         const messageInput = document.getElementById('messageInput');
         const sendMessageButton = document.getElementById('sendMessageButton');
         const chatTitle = document.getElementById('chatTitle');
+        const chatStatus = document.getElementById('chatStatus');
         
         // User data
         let userData = {};
@@ -1243,6 +1264,9 @@
                     hideLoading();
                     showMessage(`Чат с ${contact.nickname} создан`, 'success');
                     loadChats(); // Обновляем список чатов
+                    
+                    // Открываем созданный чат
+                    openChat(data.chat_id);
                 } else {
                     throw new Error(data.error || 'Не удалось создать чат');
                 }
@@ -1339,6 +1363,7 @@
             currentChat = null;
             currentMessages = [];
             messagesContainer.innerHTML = '';
+            noMessages.style.display = 'block';
         }
 
         // Отправить сообщение
@@ -1400,6 +1425,13 @@
         // Отрисовка сообщений
         function renderMessages(messages) {
             messagesContainer.innerHTML = '';
+            
+            if (!messages || messages.length === 0) {
+                noMessages.style.display = 'block';
+                return;
+            }
+            
+            noMessages.style.display = 'none';
             messages.forEach(message => {
                 renderMessage(message);
             });
