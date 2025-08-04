@@ -566,44 +566,89 @@
             display: flex;
         }
 
-        .chat-header {
-            display: flex;
-            align-items: center;
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--telegram-divider);
-            background: var(--telegram-bg);
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
+/* Обновите стили для заголовка чата */
+.chat-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--telegram-divider);
+    background: var(--telegram-bg);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: 60px;
+}
 
-        .back-button {
-            background: none;
-            border: none;
-            color: var(--telegram-blue);
-            font-size: 20px;
-            margin-right: 16px;
-            cursor: pointer;
-        }
+.back-button {
+    background: none;
+    border: none;
+    color: var(--telegram-blue);
+    font-size: 20px;
+    margin-right: 16px;
+    cursor: pointer;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 
-        .chat-title-container {
-            flex: 1;
-            min-width: 0;
-        }
+.chat-title-container {
+    flex: 1;
+    text-align: center;
+    margin-right: 40px; /* Для баланса с кнопкой назад */
+}
 
-        .chat-title {
-            font-weight: 600;
-            font-size: 16px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+.chat-title {
+    font-weight: 600;
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
-        .chat-status {
-            font-size: 13px;
-            color: var(--telegram-hint);
-            margin-top: 2px;
-        }
+.chat-status {
+    font-size: 13px;
+    color: var(--telegram-hint);
+    margin-top: 2px;
+}
+
+/* Анимации для модального окна чата */
+.chat-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--telegram-bg);
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+}
+
+.chat-modal.active {
+    transform: translateX(0);
+    display: flex;
+}
+
+/* Аватар в заголовке чата */
+.chat-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    margin-right: 12px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 16px;
+    flex-shrink: 0;
+}
 
         .chat-menu-button {
             background: none;
@@ -829,33 +874,28 @@
             <div id="chatsList"></div>
         </div>
 
-        <!-- Модальное окно чата -->
-        <div id="chatModal" class="chat-modal">
-            <div class="chat-header">
-                <button id="backToChats" class="back-button">
-                    <i class="fas fa-arrow-left"></i>
-                </button>
-                <div class="chat-title-container">
-                    <div class="chat-title" id="chatTitle"></div>
-                    <div class="chat-status" id="chatStatus">был(а) недавно</div>
-                </div>
-                <button class="chat-menu-button">
-                    <i class="fas fa-ellipsis-v"></i>
-                </button>
-            </div>
-            
-            <div id="messagesContainer" class="messages-container">
-                <div id="noMessages" class="no-messages">Сообщений пока нет...</div>
-            </div>
-            
-            <div class="message-input-container">
-                <input type="text" id="messageInput" class="message-input" placeholder="Написать сообщение...">
-                <button id="sendMessageButton" class="send-button">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-            </div>
+<div id="chatModal" class="chat-modal">
+    <div class="chat-header">
+        <button id="backToChats" class="back-button">
+            <span style="color: var(--telegram-blue);">Назад</span>
+        </button>
+        <div class="chat-title-container">
+            <div class="chat-title" id="chatTitle"></div>
+            <div class="chat-status" id="chatStatus">был(а) недавно</div>
         </div>
     </div>
+    
+    <div id="messagesContainer" class="messages-container">
+        <div id="noMessages" class="no-messages">Сообщений пока нет...</div>
+    </div>
+    
+    <div class="message-input-container">
+        <input type="text" id="messageInput" class="message-input" placeholder="Сообщение...">
+        <button id="sendMessageButton" class="send-button">
+            <i class="fas fa-paper-plane"></i>
+        </button>
+    </div>
+</div>
 
     <!-- Bottom navigation -->
     <div class="bottom-nav">
@@ -1249,10 +1289,16 @@
                 const data = await response.json();
                 
                 if (data.status === 'success') {
+                  // В функции createChatWithContact после успешного создания чата:
                     hideContactsModal();
                     hideLoading();
                     showMessage(`Чат с ${contact.nickname} создан`, 'success');
                     loadChats(); // Обновляем список чатов
+
+// Открываем созданный чат с анимацией
+                    setTimeout(() => {
+                        openChat(data.chat_id);
+                    }, 100);
                     
                     // Открываем созданный чат
                     openChat(data.chat_id);
@@ -1282,78 +1328,108 @@
         }
 
         // Открыть чат
-        async function openChat(chatId) {
-            showLoading('Загрузка чата...');
-            
-            try {
-                // Получаем информацию о чате
-                const response = await fetch(`${SERVER_URL}/get_chat_info`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        chat_id: chatId,
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                });
-                
-                const chatData = await response.json();
-                
-                if (chatData.status !== 'success') {
-                    throw new Error(chatData.error || 'Не удалось загрузить чат');
-                }
-                
-                currentChat = chatData.chat;
-                chatTitle.textContent = currentChat.name;
-                
-                // Получаем сообщения
-                const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        chat_id: chatId,
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                });
-                
-                const messagesData = await messagesResponse.json();
-                
-                if (messagesData.status !== 'success') {
-                    throw new Error(messagesData.error || 'Не удалось загрузить сообщения');
-                }
-                
-                currentMessages = messagesData.messages;
-                renderMessages(currentMessages);
-                
-                // Показываем чат
-                chatModal.classList.add('active');
-                hideLoading();
-                
-                // Прокручиваем вниз
-                setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }, 100);
-                
-            } catch (error) {
-                console.error('Error opening chat:', error);
-                hideLoading();
-                showMessage('Ошибка загрузки чата', 'error');
-            }
+      async function openChat(chatId) {
+    showLoading('Загрузка чата...');
+    
+    try {
+        // Получаем информацию о чате
+        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const chatData = await response.json();
+        
+        if (chatData.status !== 'success') {
+            throw new Error(chatData.error || 'Не удалось загрузить чат');
         }
+        
+        currentChat = chatData.chat;
+        
+        // Устанавливаем заголовок чата
+        chatTitle.textContent = currentChat.name;
+        
+        // Загружаем аватар, если он есть
+        if (currentChat.avatar_url) {
+            const avatarElement = document.createElement('div');
+            avatarElement.className = 'chat-avatar';
+            avatarElement.style.backgroundImage = `url(${currentChat.avatar_url})`;
+            document.querySelector('.chat-header').prepend(avatarElement);
+        } else if (currentChat.avatar_background) {
+            const avatarElement = document.createElement('div');
+            avatarElement.className = 'chat-avatar';
+            avatarElement.style.backgroundColor = currentChat.avatar_background;
+            avatarElement.textContent = currentChat.name[0].toUpperCase();
+            document.querySelector('.chat-header').prepend(avatarElement);
+        }
+        
+        // Получаем сообщения
+        const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const messagesData = await messagesResponse.json();
+        
+        if (messagesData.status !== 'success') {
+            throw new Error(messagesData.error || 'Не удалось загрузить сообщения');
+        }
+        
+        currentMessages = messagesData.messages;
+        renderMessages(currentMessages);
+        
+        // Показываем чат с анимацией
+        chatModal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+        
+        // Прокручиваем вниз
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 100);
+        
+    } catch (error) {
+        console.error('Error opening chat:', error);
+        showMessage('Ошибка загрузки чата', 'error');
+    } finally {
+        hideLoading();
+    }
+}
 
-        // Закрыть чат
-        function closeChat() {
-            chatModal.classList.remove('active');
-            currentChat = null;
-            currentMessages = [];
-            messagesContainer.innerHTML = '';
-            noMessages.style.display = 'block';
+
+
+     function closeChat() {
+    chatModal.style.transition = 'transform 0.3s ease';
+    chatModal.style.transform = 'translateX(100%)';
+    
+    setTimeout(() => {
+        chatModal.classList.remove('active');
+        document.body.style.overflow = '';
+        currentChat = null;
+        currentMessages = [];
+        messagesContainer.innerHTML = '';
+        noMessages.style.display = 'block';
+        
+        // Удаляем аватар, если он был добавлен
+        const avatar = document.querySelector('.chat-header .chat-avatar');
+        if (avatar) {
+            avatar.remove();
         }
+    }, 300);
+}
 
         // Отправить сообщение
         async function sendMessage() {
