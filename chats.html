@@ -1002,90 +1002,79 @@
         }
         
         // Load chats from server
-        async function loadChats() {
-            showLoading('Загрузка чатов...');
-            
-            try {
-                const response = await fetch(`${SERVER_URL}/get_chats`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    renderChats(data.chats);
-                    hideLoading();
-                } else {
-                    // Проверяем, есть ли у пользователя чаты (data.chats существует и пустой)
-                    if (data.chats && Array.isArray(data.chats) && data.chats.length === 0) {
-                        renderChats([]); // Просто показываем пустой список
-                        hideLoading();
-                    } else {
-                        throw new Error(data.error || 'Не удалось загрузить чаты');
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading chats:', error);
-                // Показываем сообщение только если это не просто отсутствие чатов
-                if (!error.message.includes('No chats found') && !error.message.includes('нет чатов')) {
-                    showMessage('Ошибка загрузки чатов', 'error');
-                }
-                hideLoading();
-            }
+  async function loadChats() {
+    showLoading('Загрузка чатов...');
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chats`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            renderChats(data.chats);
+        } else {
+            renderChats([]); // Просто показываем пустой список
         }
+        hideLoading();
+    } catch (error) {
+        console.error('Error loading chats:', error);
+        renderChats([]); // В случае ошибки тоже показываем пустой список
+        hideLoading();
+    }
+}
         
         // Render chats list
-        function renderChats(chats) {
-            if (!chats || chats.length === 0) {
-                noChats.style.display = 'block';
-                chatsList.innerHTML = '';
-                return;
-            }
-            
-            noChats.style.display = 'none';
-            chatsList.innerHTML = '';
-            
-            chats.forEach(chat => {
-                const chatItem = document.createElement('div');
-                chatItem.className = 'chat-item';
-                
-                const initials = chat.name 
-                    ? chat.name.split(' ').map(n => n[0]).join('') 
-                    : '?';
-                
-                const bgColor = chat.avatar_background || getRandomColor();
-                
-                chatItem.innerHTML = `
-                    <div class="chat-avatar" style="background-color: ${bgColor}">
-                        ${initials}
-                    </div>
-                    <div class="chat-info">
-                        <div class="chat-name">${chat.name || 'Новый чат'}</div>
-                        <div class="last-message">${chat.last_message || 'Начните общение'}</div>
-                        <div class="chat-time">${formatTime(chat.last_message_time)}</div>
-                    </div>
-                    ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
-                `;
-                
-                // Загружаем аватар, если он есть
-                if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-                    loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
-                }
-                
-                chatItem.addEventListener('click', () => {
-                    openChat(chat.id);
-                });
-                
-                chatsList.appendChild(chatItem);
-            });
+    function renderChats(chats) {
+    chatsList.innerHTML = '';
+    
+    if (!chats || chats.length === 0) {
+        noChats.style.display = 'block';
+        return;
+    }
+    
+    noChats.style.display = 'none';
+    chats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-item';
+        
+        const initials = chat.name 
+            ? chat.name.split(' ').map(n => n[0]).join('') 
+            : '?';
+        
+        const bgColor = chat.avatar_background || getRandomColor();
+        
+        chatItem.innerHTML = `
+            <div class="chat-avatar" style="background-color: ${bgColor}">
+                ${initials}
+            </div>
+            <div class="chat-info">
+                <div class="chat-name">${chat.name || 'Новый чат'}</div>
+                <div class="last-message">${chat.last_message || 'Начните общение'}</div>
+                <div class="chat-time">${formatTime(chat.last_message_time)}</div>
+            </div>
+            ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
+        `;
+        
+        if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
         }
+        
+        chatItem.addEventListener('click', () => {
+            openChat(chat.id);
+        });
+        
+        chatsList.appendChild(chatItem);
+    });
+}
         
         // Load chat avatar from server
         function loadChatAvatar(avatarElement, userId, initials, bgColor) {
