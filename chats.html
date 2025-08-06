@@ -82,6 +82,8 @@
                 left: 0;
                 top: 0;
                 z-index: 10;
+                display: flex; /* Make it a flex container */
+                flex-direction: column; /* Stack children vertically */
             }
             
             .desktop-content {
@@ -125,12 +127,16 @@
             .chats-content {
                 border-radius: 0;
                 box-shadow: none;
-                flex: 1;
+                flex: 1; /* Allow chats content to grow and take available space */
                 overflow-y: auto;
             }
             
             .bottom-nav {
-                display: none;
+                position: static; /* Allow it to be part of the sidebar flow */
+                border-top: 1px solid var(--telegram-divider);
+                padding: 8px 0; /* Adjust padding as needed */
+                margin-top: auto; /* Push to the bottom of the flex container */
+                display: flex; /* Ensure it's displayed on desktop sidebar */
             }
 
             .chat-modal {
@@ -773,6 +779,9 @@
                 display: flex; /* Show mobile chats container */
                 flex-direction: column;
             }
+            .bottom-nav {
+                display: flex; /* Show bottom nav on mobile */
+            }
         }
 
         @media (max-width: 480px) {
@@ -895,6 +904,24 @@
             <div id="noChatsDesktop" class="no-chats">Нет чатов</div>
             <div id="chatsListDesktop"></div>
         </div>
+
+        <!-- Bottom navigation for desktop sidebar -->
+        <div class="bottom-nav desktop-only-nav">
+            <a href="contacts.html" class="nav-item">
+                <i class="fas fa-user-circle"></i>
+                <span>Контакты</span>
+            </a>
+            
+            <a href="chats.html" class="nav-item active">
+                <i class="fas fa-comments"></i>
+                <span>Чаты</span>
+            </a>
+         
+            <a href="profile.html" class="nav-item">
+                <i class="fas fa-cog"></i>
+                <span>Профиль</span>
+            </a>
+        </div>
     </div>
     
     <!-- Desktop content -->
@@ -908,6 +935,7 @@
             <div class="chat-header">
                 <!-- No back button on desktop -->
                 <div class="chat-title-container">
+                    <div class="chat-avatar" id="chatAvatarDesktop"></div> <!-- Added avatar placeholder -->
                     <div class="chat-title" id="chatTitleDesktop"></div>
                     <div class="chat-status" id="chatStatusDesktop">был(а) недавно</div>
                 </div>
@@ -957,6 +985,7 @@
                 <span style="color: var(--telegram-blue);">Назад</span>
             </button>
             <div class="chat-title-container">
+                <div class="chat-avatar" id="chatAvatarMobile"></div> <!-- Added avatar placeholder -->
                 <div class="chat-title" id="chatTitleMobile"></div>
                 <div class="chat-status" id="chatStatusMobile">был(а) недавно</div>
             </div>
@@ -998,8 +1027,8 @@
 
     <div id="modalOverlay" class="modal-overlay"></div>
 
-    <!-- Bottom navigation -->
-    <div class="bottom-nav">
+    <!-- Bottom navigation for mobile -->
+    <div class="bottom-nav mobile-only-nav">
         <a href="contacts.html" class="nav-item">
             <i class="fas fa-user-circle"></i>
             <span>Контакты</span>
@@ -1038,12 +1067,15 @@
         const noChatsDesktop = document.getElementById('noChatsDesktop');
         const chatsListDesktop = document.getElementById('chatsListDesktop');
         const chatModalDesktop = document.getElementById('chatModalDesktop');
+        const chatAvatarDesktop = document.getElementById('chatAvatarDesktop');
         const chatTitleDesktop = document.getElementById('chatTitleDesktop');
         const chatStatusDesktop = document.getElementById('chatStatusDesktop');
         const messagesContainerDesktop = document.getElementById('messagesContainerDesktop');
         const noMessagesDesktop = document.getElementById('noMessagesDesktop');
         const messageInputDesktop = document.getElementById('messageInputDesktop');
         const sendMessageButtonDesktop = document.getElementById('sendMessageButtonDesktop');
+        const desktopOnlyNav = document.querySelector('.desktop-only-nav');
+
 
         // Mobile specific elements
         const mobileChatsContainer = document.querySelector('.chats-container.mobile-only');
@@ -1053,13 +1085,14 @@
         const chatsListMobile = document.getElementById('chatsListMobile');
         const chatModalMobile = document.getElementById('chatModalMobile');
         const backToChatsMobile = document.getElementById('backToChatsMobile');
+        const chatAvatarMobile = document.getElementById('chatAvatarMobile');
         const chatTitleMobile = document.getElementById('chatTitleMobile');
         const chatStatusMobile = document.getElementById('chatStatusMobile');
         const messagesContainerMobile = document.getElementById('messagesContainerMobile');
         const noMessagesMobile = document.getElementById('noMessagesMobile');
         const messageInputMobile = document.getElementById('messageInputMobile');
         const sendMessageButtonMobile = document.getElementById('sendMessageButtonMobile');
-        const bottomNav = document.querySelector('.bottom-nav');
+        const mobileOnlyNav = document.querySelector('.mobile-only-nav');
         
         // User data
         let userData = {};
@@ -1077,6 +1110,7 @@
                     chatsList: chatsListDesktop,
                     chatModal: chatModalDesktop,
                     backToChats: null, // No back button on desktop
+                    chatAvatar: chatAvatarDesktop,
                     chatTitle: chatTitleDesktop,
                     chatStatus: chatStatusDesktop,
                     messagesContainer: messagesContainerDesktop,
@@ -1092,6 +1126,7 @@
                     chatsList: chatsListMobile,
                     chatModal: chatModalMobile,
                     backToChats: backToChatsMobile,
+                    chatAvatar: chatAvatarMobile,
                     chatTitle: chatTitleMobile,
                     chatStatus: chatStatusMobile,
                     messagesContainer: messagesContainerMobile,
@@ -1452,7 +1487,7 @@
         // Open chat
         async function openChat(chatId) {
             showLoading('Загрузка чата...');
-            const { chatModal, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+            const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
             
             try {
                 // Get chat info
@@ -1479,24 +1514,19 @@
                 // Set chat title
                 chatTitle.textContent = currentChat.name;
                 
-                // Remove existing avatar if any
-                const existingAvatar = chatModal.querySelector('.chat-header .chat-avatar');
-                if (existingAvatar) {
-                    existingAvatar.remove();
-                }
+                // Clear existing avatar styles
+                chatAvatar.style.backgroundImage = '';
+                chatAvatar.style.backgroundColor = '';
+                chatAvatar.textContent = '';
 
                 // Add avatar to chat header
                 if (currentChat.avatar_url) {
-                    const avatarElement = document.createElement('div');
-                    avatarElement.className = 'chat-avatar';
-                    avatarElement.style.backgroundImage = `url(${currentChat.avatar_url})`;
-                    chatModal.querySelector('.chat-header').prepend(avatarElement);
+                    chatAvatar.style.backgroundImage = `url(${currentChat.avatar_url})`;
+                    chatAvatar.style.backgroundSize = 'cover';
+                    chatAvatar.style.backgroundPosition = 'center';
                 } else if (currentChat.avatar_background) {
-                    const avatarElement = document.createElement('div');
-                    avatarElement.className = 'chat-avatar';
-                    avatarElement.style.backgroundColor = currentChat.avatar_background;
-                    avatarElement.textContent = currentChat.name[0].toUpperCase();
-                    chatModal.querySelector('.chat-header').prepend(avatarElement);
+                    chatAvatar.style.backgroundColor = currentChat.avatar_background;
+                    chatAvatar.textContent = currentChat.name[0].toUpperCase();
                 }
                 
                 // Get messages
@@ -1544,7 +1574,7 @@
         }
 
         function closeChat() {
-            const { chatModal, messagesContainer, noMessages } = getActiveElements();
+            const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
 
             if (isDesktop) {
                 chatModal.style.display = 'none';
@@ -1564,11 +1594,10 @@
             messagesContainer.innerHTML = '';
             noMessages.style.display = 'block';
             
-            // Remove avatar from chat header
-            const avatar = chatModal.querySelector('.chat-header .chat-avatar');
-            if (avatar) {
-                avatar.remove();
-            }
+            // Clear avatar styles
+            chatAvatar.style.backgroundImage = '';
+            chatAvatar.style.backgroundColor = '';
+            chatAvatar.textContent = '';
         }
 
         // Send message
@@ -1672,19 +1701,21 @@
             // Determine if desktop or mobile
             isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-            // Hide/show relevant containers
+            // Hide/show relevant containers and navigation
             if (isDesktop) {
                 mobileChatsContainer.style.display = 'none';
-                bottomNav.style.display = 'none';
-                desktopSidebar.style.display = 'block';
+                mobileOnlyNav.style.display = 'none';
+                desktopSidebar.style.display = 'flex'; // Use flex for sidebar
                 desktopContent.style.display = 'flex';
+                desktopOnlyNav.style.display = 'flex'; // Show desktop nav
                 chatModalDesktop.style.display = 'none'; // Initially hide chat modal on desktop
                 desktopPlaceholder.style.display = 'flex'; // Show placeholder
             } else {
                 mobileChatsContainer.style.display = 'flex';
-                bottomNav.style.display = 'flex';
+                mobileOnlyNav.style.display = 'flex';
                 desktopSidebar.style.display = 'none';
                 desktopContent.style.display = 'none';
+                desktopOnlyNav.style.display = 'none'; // Hide desktop nav
                 chatModalMobile.classList.remove('active'); // Ensure mobile chat modal is hidden
             }
 
