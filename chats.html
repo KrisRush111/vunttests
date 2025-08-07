@@ -1639,7 +1639,7 @@
         }
 
         // Open chat
-  async function openChat(chatId) {
+async function openChat(chatId) {
     showLoading('Загрузка чата...');
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
@@ -1702,9 +1702,19 @@
         if (messagesData.status === 'success') {
             currentMessages = messagesData.messages;
             renderMessages(currentMessages);
+            
+            // Показываем/скрываем плейсхолдер в зависимости от количества сообщений
+            if (currentMessages.length === 0) {
+                noMessages.style.display = 'block';
+                noMessages.textContent = 'Сообщений пока нет...';
+            } else {
+                noMessages.style.display = 'none';
+            }
         } else {
             currentMessages = [];
             renderMessages([]);
+            noMessages.style.display = 'block';
+            noMessages.textContent = 'Сообщений пока нет...';
         }
         
         // Show chat
@@ -1731,32 +1741,36 @@
     }
 }
 
-        function closeChat() {
-            const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
+function closeChat() {
+    const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
 
-            if (isDesktop) {
-                chatModal.style.display = 'none';
-                desktopPlaceholder.style.display = 'flex';
-            } else {
-                chatModal.style.transition = 'transform 0.3s ease';
-                chatModal.style.transform = 'translateX(100%)';
-                
-                setTimeout(() => {
-                    chatModal.classList.remove('active');
-                    document.body.style.overflow = '';
-                }, 300);
-            }
-            
-            currentChat = null;
-            currentMessages = [];
-            messagesContainer.innerHTML = '';
-            noMessages.style.display = 'block';
-            
-            // Clear avatar styles
-            chatAvatar.style.backgroundImage = '';
-            chatAvatar.style.backgroundColor = '';
-            chatAvatar.textContent = '';
-        }
+    if (isDesktop) {
+        chatModal.style.display = 'none';
+        desktopPlaceholder.style.display = 'flex';
+    } else {
+        chatModal.style.transition = 'transform 0.3s ease';
+        chatModal.style.transform = 'translateX(100%)';
+        
+        setTimeout(() => {
+            chatModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }, 300);
+    }
+    
+    currentChat = null;
+    currentMessages = [];
+    messagesContainer.innerHTML = '';
+    noMessages.style.display = 'block';
+    noMessages.textContent = 'Сообщений пока нет...';
+    
+    // Clear avatar styles
+    chatAvatar.style.backgroundImage = '';
+    chatAvatar.style.backgroundColor = '';
+    chatAvatar.textContent = '';
+    
+    // Обновляем список чатов после закрытия
+    loadChats();
+}
 
         // Send message
 async function sendMessage() {
@@ -1827,8 +1841,8 @@ async function sendMessage() {
     }
 }
 
-
-  function renderMessages(messages) {
+        // Render messages
+function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
     
     // Очищаем только сообщения, сохраняя noMessages
@@ -1852,6 +1866,20 @@ async function sendMessage() {
     }, 50);
 }
 
+        // Render a single message
+function renderMessage(message) {
+    const { messagesContainer } = getActiveElements();
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+    
+    messageElement.innerHTML = `
+        <div class="message-content">${message.content}</div>
+        <div class="message-time">${formatTime(message.sent_at)}</div>
+    `;
+    
+    messagesContainer.appendChild(messageElement);
+}
         // Initialize page
         async function initializePage() {
             // Check authorization
