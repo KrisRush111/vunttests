@@ -92,7 +92,10 @@
                 height: 100vh;
                 display: flex;
                 flex-direction: column;
-                background-color: var(--telegram-bg);
+                background-image: url('https://example.com/your-background-image.jpg');
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
             }
             
             .desktop-placeholder {
@@ -430,6 +433,7 @@
         .message-box.success {
             color: white;
             background: var(--telegram-success);
+            opacity: 0.7; /* Make success message transparent */
         }
         
         /* Chat modal styles */
@@ -510,6 +514,20 @@
             text-align: center;
             margin: auto;
             padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .no-messages h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: var(--telegram-text);
+        }
+
+        .no-messages p {
+            font-size: 14px;
+            margin-bottom: 16px;
         }
 
         .message {
@@ -727,7 +745,7 @@
             backdrop-filter: blur(20px);
             z-index: 100;
         }
-        
+
         .nav-item {
             display: flex;
             flex-direction: column;
@@ -741,7 +759,7 @@
             border-radius: 12px;
             min-width: 60px;
         }
-        
+
         .nav-item i {
             font-size: 22px;
             margin-bottom: 2px;
@@ -751,7 +769,7 @@
         .nav-item span {
             transition: all 0.2s ease;
         }
-        
+
         .nav-item.active {
             color: var(--telegram-blue);
         }
@@ -759,7 +777,7 @@
         .nav-item.active i {
             animation: bounce 0.6s ease;
         }
-        
+
         .nav-item:hover i {
             transform: translateY(-2px) scale(1.1);
         }
@@ -768,27 +786,52 @@
             transform: scale(0.95);
         }
 
-        @media (max-width: 767px) {
-            .desktop-sidebar, .desktop-content {
-                display: none;
+        /* Desktop styles */
+        @media (min-width: 768px) {
+            .bottom-nav {
+                position: static;
+                width: var(--desktop-sidebar-width);
+                border-top: 1px solid var(--telegram-divider);
+                padding: 8px 0;
+                margin-top: auto;
+                backdrop-filter: none;
+                z-index: auto;
             }
-            .chats-container.mobile-only {
-                display: flex;
-                flex-direction: column;
+            
+            .bottom-nav {
+                padding-bottom: 8px !important;
             }
+            
+            .mobile-only-nav {
+                display: none !important;
+            }
+        }
 
+        /* Mobile styles */
+        @media (max-width: 767px) {
+            .desktop-only-nav {
+                display: none !important;
+            }
+            
+            .mobile-only-nav {
+                display: flex !important;
+            }
+            
             .bottom-nav {
                 position: fixed;
                 bottom: 0;
                 left: 0;
                 right: 0;
-                background: var(--telegram-bg);
+            }
+            
+            .desktop-sidebar, 
+            .desktop-content {
+                display: none;
+            }
+            
+            .chats-container.mobile-only {
                 display: flex;
-                justify-content: space-around;
-                padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
-                border-top: 1px solid var(--telegram-divider);
-                backdrop-filter: blur(20px);
-                z-index: 100;
+                flex-direction: column;
             }
         }
 
@@ -949,7 +992,10 @@
             </div>
             
             <div id="messagesContainerDesktop" class="messages-container">
-                <div id="noMessagesDesktop" class="no-messages">Сообщений пока нет...</div>
+                <div id="noMessagesDesktop" class="no-messages">
+                    <h2 id="noMessagesTitleDesktop">Сообщений пока нет...</h2>
+                    <p>Отправьте сообщение или нажмите на приветствие ниже.</p>
+                </div>
             </div>
             
             <div class="message-input-container">
@@ -999,7 +1045,10 @@
         </div>
         
         <div id="messagesContainerMobile" class="messages-container">
-            <div id="noMessagesMobile" class="no-messages">Сообщений пока нет...</div>
+            <div id="noMessagesMobile" class="no-messages">
+                <h2 id="noMessagesTitleMobile">Сообщений пока нет...</h2>
+                <p>Отправьте сообщение или нажмите на приветствие ниже.</p>
+            </div>
         </div>
         
         <div class="message-input-container">
@@ -1079,6 +1128,7 @@
         const chatStatusDesktop = document.getElementById('chatStatusDesktop');
         const messagesContainerDesktop = document.getElementById('messagesContainerDesktop');
         const noMessagesDesktop = document.getElementById('noMessagesDesktop');
+        const noMessagesTitleDesktop = document.getElementById('noMessagesTitleDesktop');
         const messageInputDesktop = document.getElementById('messageInputDesktop');
         const sendMessageButtonDesktop = document.getElementById('sendMessageButtonDesktop');
         const desktopOnlyNav = document.querySelector('.desktop-only-nav');
@@ -1096,6 +1146,7 @@
         const chatStatusMobile = document.getElementById('chatStatusMobile');
         const messagesContainerMobile = document.getElementById('messagesContainerMobile');
         const noMessagesMobile = document.getElementById('noMessagesMobile');
+        const noMessagesTitleMobile = document.getElementById('noMessagesTitleMobile');
         const messageInputMobile = document.getElementById('messageInputMobile');
         const sendMessageButtonMobile = document.getElementById('sendMessageButtonMobile');
         const mobileOnlyNav = document.querySelector('.mobile-only-nav');
@@ -1121,6 +1172,7 @@
                     chatStatus: chatStatusDesktop,
                     messagesContainer: messagesContainerDesktop,
                     noMessages: noMessagesDesktop,
+                    noMessagesTitle: noMessagesTitleDesktop,
                     messageInput: messageInputDesktop,
                     sendMessageButton: sendMessageButtonDesktop
                 };
@@ -1137,6 +1189,7 @@
                     chatStatus: chatStatusMobile,
                     messagesContainer: messagesContainerMobile,
                     noMessages: noMessagesMobile,
+                    noMessagesTitle: noMessagesTitleMobile,
                     messageInput: messageInputMobile,
                     sendMessageButton: sendMessageButtonMobile
                 };
@@ -1460,11 +1513,10 @@
                 if (data.status === 'success') {
                     hideContactsModal();
                     hideLoading();
+                    // Show transparent success message
                     showMessage(`Чат с ${contact.nickname} создан`, 'success');
-                    loadChats(); 
-                    setTimeout(() => {
-                        openChat(data.chat_id);
-                    }, 100);
+                    await loadChats(); // Reload chats to show the new chat
+                    openChat(data.chat_id); // Open the newly created/existing chat
                 } else {
                     throw new Error(data.error || 'Не удалось создать чат');
                 }
@@ -1493,7 +1545,7 @@
         // Open chat
         async function openChat(chatId) {
             showLoading('Загрузка чата...');
-            const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+            const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages, noMessagesTitle } = getActiveElements();
             
             try {
                 // Get chat info
@@ -1598,7 +1650,7 @@
             currentChat = null;
             currentMessages = [];
             messagesContainer.innerHTML = '';
-            noMessages.style.display = 'block';
+            noMessages.style.display = 'flex'; // Ensure it's flex to center content
             
             // Clear avatar styles
             chatAvatar.style.backgroundImage = '';
@@ -1669,7 +1721,7 @@
             messagesContainer.innerHTML = '';
             
             if (!messages || messages.length === 0) {
-                noMessages.style.display = 'block';
+                noMessages.style.display = 'flex'; // Ensure it's flex to center content
                 return;
             }
             
