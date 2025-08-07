@@ -587,13 +587,30 @@
     position: relative;
 }
 
-        .no-messages {
-    color: var(--telegram-hint);
+.no-messages {
+    /* Текст */
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    margin-bottom: 8px;
+    
+    /* Рамка */
+    padding: 5px 12px;
+    border-radius: 24px;
+    background-color: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(4px);
+    
+    /* Тень */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    
+    /* Размеры и выравнивание */
+    width: fit-content;
+    max-width: 70%;
     text-align: center;
-    margin: auto;
-    padding: 20px;
-    font-size: 15px;
-    line-height: 1.5;
+    line-height: 1.4;
+    margin: auto; /* Центрирование */
+    display: block; /* По умолчанию видим */
 }
 
 @media (min-width: 768px) {
@@ -1130,7 +1147,7 @@
     </div>
     
     <div id="messagesContainerMobile" class="messages-container">
-        <div id="noMessagesMobile" class="no-messages">Сообщений пока нет...<br>Отправьте сообщение или нажмите на приветствие ниже.</div>
+        <div id="noMessagesMobile" class="no-messages">Сообщений пока нет...</div>
     </div>
     
     <div class="message-input-container">
@@ -1742,77 +1759,84 @@
         }
 
         // Send message
-        async function sendMessage() {
-            const { messageInput, sendMessageButton, messagesContainer } = getActiveElements();
-            const content = messageInput.value.trim();
-            if (!content || !currentChat) return;
-            
-            sendMessageButton.disabled = true;
-            messageInput.value = '';
-            
-            try {
-                const response = await fetch(`${SERVER_URL}/send_message`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        chat_id: currentChat.id,
-                        sender_id: userData.platform_user_id,
-                        content: content
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status !== 'success') {
-                    throw new Error(data.error || 'Не удалось отправить сообщение');
-                }
-                
-                // Add message locally
-                const newMessage = {
-                    id: data.message_id,
-                    sender_id: userData.platform_user_id,
-                    content: content,
-                    sent_at: data.sent_at,
-                    is_read: false,
-                    sender_name: userData.nickname,
-                    sender_avatar: userData.avatar_url,
-                    sender_avatar_background: userData.avatar_background,
-                    is_me: true
-                };
-                
-                currentMessages.push(newMessage);
-                renderMessage(newMessage);
-                
-                // Scroll to bottom
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                
-            } catch (error) {
-                console.error('Error sending message:', error);
-                showMessage('Ошибка отправки сообщения', 'error');
-                messageInput.value = content; // Return text to input field
-            } finally {
-                sendMessageButton.disabled = false;
-            }
+async function sendMessage() {
+    const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
+    const content = messageInput.value.trim();
+    if (!content || !currentChat) return;
+    
+    sendMessageButton.disabled = true;
+    messageInput.value = '';
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/send_message`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: currentChat.id,
+                sender_id: userData.platform_user_id,
+                content: content
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status !== 'success') {
+            throw new Error(data.error || 'Не удалось отправить сообщение');
         }
+        
+        // Add message locally
+        const newMessage = {
+            id: data.message_id,
+            sender_id: userData.platform_user_id,
+            content: content,
+            sent_at: data.sent_at,
+            is_read: false,
+            sender_name: userData.nickname,
+            sender_avatar: userData.avatar_url,
+            sender_avatar_background: userData.avatar_background,
+            is_me: true
+        };
+        
+        currentMessages.push(newMessage);
+        
+        // Hide "No messages" placeholder if it's the first message
+        if (currentMessages.length === 1) {
+            noMessages.style.display = 'none';
+        }
+        
+        renderMessage(newMessage);
+        
+        // Scroll to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
+    } catch (error) {
+        console.error('Error sending message:', error);
+        showMessage('Ошибка отправки сообщения', 'error');
+        messageInput.value = content; // Return text to input field
+    } finally {
+        sendMessageButton.disabled = false;
+    }
+}
 
         // Render messages
-        function renderMessages(messages) {
-            const { messagesContainer, noMessages } = getActiveElements();
-            messagesContainer.innerHTML = '';
-            
-            if (!messages || messages.length === 0) {
-                noMessages.style.display = 'block';
-                return;
-            }
-            
-            noMessages.style.display = 'none';
-            messages.forEach(message => {
-                renderMessage(message);
-            });
-        }
+function renderMessages(messages) {
+    const { messagesContainer, noMessages } = getActiveElements();
+    messagesContainer.innerHTML = '';
+    
+    if (!messages || messages.length === 0) {
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Сообщений пока нет...';
+        return;
+    }
+    
+    noMessages.style.display = 'none';
+    messages.forEach(message => {
+        renderMessage(message);
+    });
+}
 
         // Render a single message
         function renderMessage(message) {
