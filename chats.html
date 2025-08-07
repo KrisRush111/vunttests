@@ -1702,10 +1702,17 @@
         if (messagesData.status === 'success') {
             currentMessages = messagesData.messages;
             renderMessages(currentMessages);
+            
+        if (currentMessages.length > 0) {
+            noMessages.style.display = 'none';
         } else {
-            currentMessages = [];
-            renderMessages([]);
+            noMessages.style.display = 'block';
         }
+    } else {
+        currentMessages = [];
+        renderMessages([]);
+        noMessages.style.display = 'block'; // Явно показываем, если ошибка
+    }
         
         // Show chat
         if (isDesktop) {
@@ -1780,7 +1787,8 @@ async function sendMessage() {
             }),
             credentials: 'include'
         });
-        
+
+        noMessages.style.display = 'none';
         const data = await response.json();
         
         if (data.status !== 'success') {
@@ -1821,13 +1829,15 @@ async function sendMessage() {
     }
 }
 
-        // Render messages
+
 function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
     
-    // Сначала очищаем только сообщения, сохраняя noMessages
-    const messageElements = messagesContainer.querySelectorAll('.message');
-    messageElements.forEach(el => el.remove());
+    // Полностью очищаем контейнер (включая noMessages)
+    messagesContainer.innerHTML = '';
+    
+    // Всегда добавляем noMessages обратно в контейнер
+    messagesContainer.appendChild(noMessages);
     
     if (!messages || messages.length === 0) {
         noMessages.style.display = 'block';
@@ -1840,21 +1850,6 @@ function renderMessages(messages) {
         renderMessage(message);
     });
 }
-
-        // Render a single message
-        function renderMessage(message) {
-            const { messagesContainer } = getActiveElements();
-            const messageElement = document.createElement('div');
-            messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
-            
-            messageElement.innerHTML = `
-                <div class="message-content">${message.content}</div>
-                <div class="message-time">${formatTime(message.sent_at)}</div>
-            `;
-            
-            messagesContainer.appendChild(messageElement);
-        }
-
         // Initialize page
         async function initializePage() {
             // Check authorization
