@@ -1638,105 +1638,6 @@
             });
         }
 
-        // Open chat
-  async function openChat(chatId) {
-    showLoading('Загрузка чата...');
-    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-    
-    try {
-        // Get chat info
-        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-        
-        const chatData = await response.json();
-        
-        if (chatData.status !== 'success') {
-            throw new Error(chatData.error || 'Не удалось загрузить чат');
-        }
-        
-        currentChat = chatData.chat;
-        
-        // Set chat title and status
-        chatTitle.textContent = currentChat.name || 'Новый чат';
-        chatStatus.textContent = 'был(а) недавно';
-        
-        // Set avatar
-        chatAvatar.style.backgroundImage = '';
-        chatAvatar.style.backgroundColor = '';
-        chatAvatar.textContent = '';
-        
-        if (currentChat.avatar_url) {
-            chatAvatar.style.backgroundImage = `url(${currentChat.avatar_url})`;
-            chatAvatar.style.backgroundSize = 'cover';
-            chatAvatar.style.backgroundPosition = 'center';
-        } else {
-            const bgColor = currentChat.avatar_background || getRandomColor();
-            chatAvatar.style.backgroundColor = bgColor;
-            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-        }
-        
-        // Get messages
-        const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-        
-        const messagesData = await messagesResponse.json();
-        
-        if (messagesData.status === 'success') {
-            currentMessages = messagesData.messages;
-            renderMessages(currentMessages);
-            
-        if (currentMessages.length > 0) {
-            noMessages.style.display = 'none';
-        } else {
-            noMessages.style.display = 'block';
-        }
-    } else {
-        currentMessages = [];
-        renderMessages([]);
-        noMessages.style.display = 'block'; // Явно показываем, если ошибка
-    }
-        
-        // Show chat
-        if (isDesktop) {
-            desktopPlaceholder.style.display = 'none';
-            chatModal.style.display = 'flex';
-        } else {
-            chatModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
-        }
-        
-        // Scroll to bottom if messages exist
-        if (currentMessages.length > 0) {
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        }
-        
-    } catch (error) {
-        console.error('Error opening chat:', error);
-        showMessage('Ошибка загрузки чата', 'error');
-    } finally {
-        hideLoading();
-    }
-}
 
         function closeChat() {
             const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
@@ -1830,13 +1731,115 @@ async function sendMessage() {
 }
 
 
+async function openChat(chatId) {
+    showLoading('Загрузка чата...');
+    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+    
+    try {
+        // Get chat info
+        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const chatData = await response.json();
+        
+        if (chatData.status !== 'success') {
+            throw new Error(chatData.error || 'Не удалось загрузить чат');
+        }
+        
+        currentChat = chatData.chat;
+        
+        // Set chat title and status
+        chatTitle.textContent = currentChat.name || 'Новый чат';
+        chatStatus.textContent = 'был(а) недавно';
+        
+        // Set avatar
+        chatAvatar.style.backgroundImage = '';
+        chatAvatar.style.backgroundColor = '';
+        chatAvatar.textContent = '';
+        
+        if (currentChat.avatar_url) {
+            chatAvatar.style.backgroundImage = `url(${currentChat.avatar_url})`;
+            chatAvatar.style.backgroundSize = 'cover';
+            chatAvatar.style.backgroundPosition = 'center';
+        } else {
+            const bgColor = currentChat.avatar_background || getRandomColor();
+            chatAvatar.style.backgroundColor = bgColor;
+            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+        }
+        
+        // Get messages
+        const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const messagesData = await messagesResponse.json();
+        
+        if (messagesData.status === 'success') {
+            currentMessages = messagesData.messages;
+            renderMessages(currentMessages);
+            
+            if (currentMessages.length > 0) {
+                noMessages.style.display = 'none';
+            } else {
+                noMessages.style.display = 'block';
+            }
+        } else {
+            currentMessages = [];
+            renderMessages([]);
+            noMessages.style.display = 'block';
+            throw new Error(messagesData.error || 'Не удалось загрузить сообщения');
+        }
+        
+        // Show chat
+        if (isDesktop) {
+            desktopPlaceholder.style.display = 'none';
+            chatModal.style.display = 'flex';
+        } else {
+            chatModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        
+        // Scroll to bottom if messages exist
+        if (currentMessages.length > 0) {
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        }
+        
+    } catch (error) {
+        console.error('Error opening chat:', error);
+        showMessage('Ошибка загрузки чата: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
 function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
     
-    // Полностью очищаем контейнер (включая noMessages)
-    messagesContainer.innerHTML = '';
+    // Create a new container for messages
+    const messagesList = document.createElement('div');
+    messagesList.className = 'messages-list';
     
-    // Всегда добавляем noMessages обратно в контейнер
+    // Clear existing messages (but preserve noMessages)
+    messagesContainer.innerHTML = '';
     messagesContainer.appendChild(noMessages);
     
     if (!messages || messages.length === 0) {
@@ -1847,9 +1850,26 @@ function renderMessages(messages) {
     
     noMessages.style.display = 'none';
     messages.forEach(message => {
-        renderMessage(message);
+        const messageElement = document.createElement('div');
+        messageElement.className = `message ${message.sender_id === userData.platform_user_id ? 'message-outgoing' : 'message-incoming'}`;
+        
+        messageElement.innerHTML = `
+            <div class="message-content">${message.content}</div>
+            <div class="message-time">${formatTime(message.sent_at)}</div>
+        `;
+        
+        messagesList.appendChild(messageElement);
     });
+    
+    messagesContainer.appendChild(messagesList);
+    
+    // Scroll to bottom
+    setTimeout(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 50);
 }
+
+
         // Initialize page
         async function initializePage() {
             // Check authorization
