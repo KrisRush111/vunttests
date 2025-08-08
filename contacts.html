@@ -161,14 +161,14 @@ body {
         display: block;
     }
 
-    .desktop-profile-modal-content {
+    .profile-modal-content {
         width: 100%;
         max-width: 600px;
         margin: 0 auto;
         background: transparent;
     }
 
-    .desktop-profile-header {
+    .profile-header {
         margin-top: 0;
         background-color: var(--telegram-bg);
         border-radius: 12px;
@@ -177,11 +177,11 @@ body {
         transition: transform 0.2s ease;
     }
 
-    .desktop-profile-header:active {
+    .profile-header:active {
         transform: scale(0.98);
     }
 
-    .desktop-profile-details {
+    .profile-details {
         background-color: var(--telegram-bg);
         border-radius: 12px;
         margin-top: 12px;
@@ -189,7 +189,7 @@ body {
         box-shadow: var(--telegram-shadow);
     }
 
-    .desktop-profile-actions {
+    .profile-actions {
         background-color: var(--telegram-bg);
         border-radius: 12px;
         padding: 16px;
@@ -197,7 +197,7 @@ body {
         box-shadow: var(--telegram-shadow);
     }
 
-    .desktop-profile-header .profile-back-button {
+    .profile-header .profile-back-button {
         display: none;
     }
 
@@ -207,17 +207,17 @@ body {
         opacity: 0;
     }
     
-    .desktop-profile-modal.visible {
+    .profile-modal.visible {
         display: block;
         opacity: 1;
     }
 
     /* Hide overlay on desktop */
-    .desktop-modal-overlay {
+    .modal-overlay {
         display: none !important;
     }
 
-    .desktop-mobile-only {
+    .mobile-only {
         display: none;
     }
 }
@@ -1028,7 +1028,7 @@ body {
         </div>
         <!-- Profile modal will be displayed here on desktop -->
         <div id="profileModalDesktop" class="profile-modal desktop-profile-view">
-            <div class="desktop-profile-modal-content">
+            <div class="profile-modal-content">
                 <!-- Profile header with back button (hidden on desktop) -->
                 <div class="profile-header">
                     <div id="profileBackButtonDesktop" class="profile-back-button mobile-only">
@@ -1372,8 +1372,8 @@ body {
         }
     }
     
-    // Open profile modal
-  // Обновленная функция открытия профиля
+// Open profile modal
+// Обновленная функция открытия профиля
 function openProfileModal(userId) {
     showLoading('Загрузка профиля...');
     const { profileModal } = getActiveElements();
@@ -1590,92 +1590,107 @@ function closeProfileModal() {
     }
     
     // Display user result
-    async function displayUserResult(user, status = 'default') {
-        const { searchResults } = getActiveElements();
-        const userElement = document.createElement('div');
-        userElement.className = 'user-result';
+async function displayUserResult(user, status = 'default') {
+    const { searchResults } = getActiveElements();
+    const userElement = document.createElement('div');
+    userElement.className = 'user-result';
+    
+// Click handler for opening profile
+userElement.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') {
+        // Анимация нажатия
+        userElement.style.transform = 'scale(0.98)';
+        userElement.style.opacity = '0.9';
         
-        // Click handler for opening profile
-        userElement.addEventListener('click', (e) => {
-            if (e.target.tagName !== 'BUTTON') {
-                // Анимация нажатия
-                userElement.style.transform = 'scale(0.98)';
-                userElement.style.opacity = '0.9';
+        setTimeout(() => {
+            userElement.style.transform = '';
+            userElement.style.opacity = '1';
+            
+            // Открываем профиль пользователя
+            openProfileModal(user.platform_user_id);
+            
+            // На десктопе скрываем плейсхолдер и показываем профиль
+            if (isDesktop) {
+                const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+                const profileModalDesktop = document.getElementById('profileModalDesktop');
                 
-                setTimeout(() => {
-                    userElement.style.transform = '';
-                    userElement.style.opacity = '1';
-                    
-                    // Открываем профиль пользователя
-                    openProfileModal(user.platform_user_id);
-                }, 100);
+                desktopPlaceholder.style.display = 'none';
+                profileModalDesktop.style.display = 'flex';
+                
+                // Прокручиваем к верху профиля
+                document.querySelector('.desktop-content').scrollTo({
+                    top: 0,
+                    behavior: 'smooth'
+                });
             }
-        });
-        
-        // Avatar
-        const avatarElement = document.createElement('div');
-        avatarElement.className = 'user-avatar';
-        
-        if (user.has_avatar_photo || user.has_avatar) {
-            const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-            avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-            avatarElement.textContent = '';
-        } else {
-            const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-            avatarElement.textContent = initial;
-            if (user.avatar_background) {
-                const colors = [user.avatar_background, adjustColor(user.avatar_background, 20)];
-                avatarElement.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
-            } else {
-                avatarElement.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
-            }
-        }
-        
-        // User info
-        const infoElement = document.createElement('div');
-        infoElement.className = 'user-info';
-        
-        const nicknameElement = document.createElement('div');
-        nicknameElement.className = 'user-nickname';
-        nicknameElement.textContent = user.nickname || 'Не указано';
-        
-        const idElement = document.createElement('div');
-        idElement.className = 'user-id';
-        idElement.textContent = `ID: ${user.platform_user_id}`;
-        
-        infoElement.appendChild(nicknameElement);
-        infoElement.appendChild(idElement);
-        
-        // Action button
-        const actionContainer = document.createElement('div');
-        
-        if (status === 'added') {
-            const arrowIcon = document.createElement('i');
-            arrowIcon.className = 'fas fa-chevron-right chevron-icon';
-            actionContainer.appendChild(arrowIcon);
-        } else if (status === 'request_sent') {
-            const sentButton = document.createElement('button');
-            sentButton.className = 'sent-button';
-            sentButton.innerHTML = '<i class="fas fa-clock"></i> Отправлено';
-            actionContainer.appendChild(sentButton);
-        } else {
-            const addButton = document.createElement('button');
-            addButton.className = 'add-button';
-            addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
-            addButton.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                await sendFriendRequest(user.platform_user_id);
-            });
-            actionContainer.appendChild(addButton);
-        }
-        
-        // Assemble the elements
-        userElement.appendChild(avatarElement);
-        userElement.appendChild(infoElement);
-        userElement.appendChild(actionContainer);
-        
-        searchResults.appendChild(userElement);
+        }, 100);
     }
+});
+    
+    // Avatar
+    const avatarElement = document.createElement('div');
+    avatarElement.className = 'user-avatar';
+    
+    if (user.has_avatar_photo || user.has_avatar) {
+        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.textContent = '';
+    } else {
+        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+        avatarElement.textContent = initial;
+        if (user.avatar_background) {
+            const colors = [user.avatar_background, adjustColor(user.avatar_background, 20)];
+            avatarElement.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
+        } else {
+            avatarElement.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+        }
+    }
+    
+    // User info
+    const infoElement = document.createElement('div');
+    infoElement.className = 'user-info';
+    
+    const nicknameElement = document.createElement('div');
+    nicknameElement.className = 'user-nickname';
+    nicknameElement.textContent = user.nickname || 'Не указано';
+    
+    const idElement = document.createElement('div');
+    idElement.className = 'user-id';
+    idElement.textContent = `ID: ${user.platform_user_id}`;
+    
+    infoElement.appendChild(nicknameElement);
+    infoElement.appendChild(idElement);
+    
+    // Action button
+    const actionContainer = document.createElement('div');
+    
+    if (status === 'added') {
+        const arrowIcon = document.createElement('i');
+        arrowIcon.className = 'fas fa-chevron-right chevron-icon';
+        actionContainer.appendChild(arrowIcon);
+    } else if (status === 'request_sent') {
+        const sentButton = document.createElement('button');
+        sentButton.className = 'sent-button';
+        sentButton.innerHTML = '<i class="fas fa-clock"></i> Отправлено';
+        actionContainer.appendChild(sentButton);
+    } else {
+        const addButton = document.createElement('button');
+        addButton.className = 'add-button';
+        addButton.innerHTML = '<i class="fas fa-user-plus"></i> Добавить';
+        addButton.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await sendFriendRequest(user.platform_user_id);
+        });
+        actionContainer.appendChild(addButton);
+    }
+    
+    // Assemble the elements
+    userElement.appendChild(avatarElement);
+    userElement.appendChild(infoElement);
+    userElement.appendChild(actionContainer);
+    
+    searchResults.appendChild(userElement);
+}
     
     function displayFriendRequest(user) {
         const { searchResults } = getActiveElements();
