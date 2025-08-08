@@ -1555,8 +1555,8 @@ function openProfileModal(userId) {
     const { profileModal } = getActiveElements();
 
     if (isDesktop) {
-        desktopPlaceholder.style.display = 'none'; // Явно скрываем плейсхолдер
-        profileModal.style.display = 'flex'; // Явно показываем профиль
+        desktopPlaceholder.style.display = 'none';
+        profileModal.style.display = 'flex';
         profileModal.classList.add('visible');
         
         document.querySelector('.desktop-content').scrollTo({
@@ -1573,16 +1573,14 @@ function openProfileModal(userId) {
 
 // Close profile modal - теперь работает только для мобильных
 function closeProfileModal() {
-    if (!isDesktop) {
-        const { profileModal } = getActiveElements();
-        profileModal.classList.remove('active');
-        modalOverlay.classList.remove('active');
-    } else {
-        // Для десктопа показываем плейсхолдер и скрываем профиль
+    if (isDesktop) {
         desktopPlaceholder.style.display = 'flex';
         profileModalDesktop.style.display = 'none';
         profileModalDesktop.classList.remove('visible');
-        sessionStorage.removeItem('lastOpenedProfile');
+    } else {
+        const { profileModal } = getActiveElements();
+        profileModal.classList.remove('active');
+        modalOverlay.classList.remove('active');
     }
 }
 
@@ -2182,28 +2180,24 @@ async function initializePage() {
     if (isDesktop) {
         mobileContactsContainer.style.display = 'none';
         mobileOnlyNav.style.display = 'none';
-        desktopSidebar.style.display = 'flex'; // Use flex for sidebar
+        desktopSidebar.style.display = 'flex';
         desktopContent.style.display = 'flex';
-        desktopOnlyNav.style.display = 'flex'; // Show desktop nav
+        desktopOnlyNav.style.display = 'flex';
         
-        // Desktop profile modal initialization
-        profileModalDesktop.style.display = 'none'; // Initially hidden
-        profileModalDesktop.classList.remove('active'); // Remove mobile-specific class
-        profileModalDesktop.classList.add('desktop-profile'); // Add desktop-specific class
-        
-        // Show placeholder initially (добавлено явное управление видимостью)
+        // Всегда показываем плейсхолдер при загрузке
         desktopPlaceholder.style.display = 'flex';
+        profileModalDesktop.style.display = 'none';
+        profileModalDesktop.classList.remove('active');
         profileModalDesktop.classList.remove('visible');
+        profileModalDesktop.classList.add('desktop-profile');
         
-        // Check if we need to show profile from session storage
-        const lastOpenedProfile = sessionStorage.getItem('lastOpenedProfile');
-        if (lastOpenedProfile) {
-            openProfileModal(lastOpenedProfile);
-        } else {
-            // Явно показываем плейсхолдер, если нет сохраненного профиля
-            desktopPlaceholder.style.display = 'flex';
-            profileModalDesktop.classList.remove('visible');
-        }
+        // Добавляем кнопку закрытия профиля для десктопа
+        const closeButton = document.createElement('div');
+        closeButton.className = 'profile-back-button';
+        closeButton.innerHTML = '<i class="fas fa-times"></i>';
+        closeButton.style.display = 'block';
+        closeButton.addEventListener('click', closeProfileModal);
+        document.querySelector('.profile-header').prepend(closeButton);
     } else {
         mobileContactsContainer.style.display = 'flex';
         mobileOnlyNav.style.display = 'flex';
@@ -2211,7 +2205,6 @@ async function initializePage() {
         desktopContent.style.display = 'none';
         desktopOnlyNav.style.display = 'none';
         
-        // Mobile profile modal initialization
         profileModalMobile.classList.remove('active');
         profileModalMobile.classList.remove('desktop-profile');
     }
@@ -2221,7 +2214,7 @@ async function initializePage() {
     await loadContacts();
     
     // Event listeners for active elements
-    const { searchInput, searchButton, profileBackButton } = getActiveElements();
+    const { searchInput } = getActiveElements();
 
     searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
@@ -2232,8 +2225,8 @@ async function initializePage() {
 
     // Only add back button and overlay handlers for mobile
     if (!isDesktop) {
-        if (profileBackButton) {
-            profileBackButton.addEventListener('click', closeProfileModal);
+        if (profileBackButtonMobile) {
+            profileBackButtonMobile.addEventListener('click', closeProfileModal);
         }
         modalOverlay.addEventListener('click', closeProfileModal);
     }
@@ -2244,16 +2237,6 @@ async function initializePage() {
         if (newIsDesktop !== isDesktop) {
             isDesktop = newIsDesktop;
             initializePage(); // Re-initialize to apply correct layout
-        }
-    });
-    
-    // Save last opened profile when leaving page
-    window.addEventListener('beforeunload', () => {
-        if (isDesktop && document.querySelector('.desktop-profile.visible')) {
-            const profileId = modalProfileIdDesktop.textContent.replace('ID: ', '');
-            sessionStorage.setItem('lastOpenedProfile', profileId);
-        } else {
-            sessionStorage.removeItem('lastOpenedProfile');
         }
     });
 }
