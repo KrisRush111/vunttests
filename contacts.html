@@ -1119,6 +1119,42 @@
                 transform: translateY(-2px);
             }
         }
+
+
+        /* Обновленные стили для профиля в десктопе */
+.profile-modal.desktop-profile {
+    position: static;
+    display: none;
+    flex: 1;
+    height: 100%;
+    padding: 20px;
+    overflow-y: auto;
+    background-color: var(--telegram-secondary-bg);
+    z-index: 1;
+    animation: none;
+    transform: none;
+}
+
+.profile-modal.desktop-profile.visible {
+    display: flex;
+}
+
+.desktop-profile .profile-modal-content {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    background: transparent;
+    animation: none;
+}
+
+.desktop-profile .profile-back-button {
+    display: none;
+}
+
+/* Убираем оверлей для десктопа */
+.modal-overlay.desktop-overlay {
+    display: none !important;
+}
     </style>
 </head>
 <body>
@@ -1168,7 +1204,7 @@
             <h3>Выберите кого хотели бы просмотреть</h3>
         </div>
         <!-- Profile modal will be displayed here on desktop -->
-        <div id="profileModalDesktop" class="profile-modal">
+        <div id="profileModalDesktop" class="profile-modal desktop-profile">
             <div class="profile-modal-content">
                 <!-- Profile header with back button (hidden on desktop) -->
                 <div class="profile-header">
@@ -1519,9 +1555,9 @@ function openProfileModal(userId) {
     const { profileModal } = getActiveElements();
 
     if (isDesktop) {
-        // На десктопе скрываем плейсхолдер и показываем профиль
+        // На десктопе просто показываем профиль в правом модуле
         desktopPlaceholder.style.display = 'none';
-        profileModal.style.display = 'flex'; // Используем flex для правильного отображения
+        profileModal.classList.add('visible');
         
         // Прокручиваем к верху профиля
         document.querySelector('.desktop-content').scrollTo({
@@ -1529,7 +1565,7 @@ function openProfileModal(userId) {
             behavior: 'smooth'
         });
     } else {
-        // На мобильных устройствах используем модальное окно
+        // На мобильных устройствах используем модальное окно с анимацией
         profileModal.classList.add('active');
         modalOverlay.classList.add('active');
     }
@@ -1537,22 +1573,15 @@ function openProfileModal(userId) {
     loadUserProfile(userId);
 }
 
-
-    // Close profile modal
-// Close profile modal
+// Close profile modal - теперь работает только для мобильных
 function closeProfileModal() {
-    const { profileModal } = getActiveElements();
-
-    if (isDesktop) {
-        // На десктопе скрываем профиль и показываем плейсхолдер
-        profileModal.style.display = 'none';
-        desktopPlaceholder.style.display = 'flex';
-    } else {
-        // На мобильных устройствах скрываем модальное окно
+    if (!isDesktop) {
+        const { profileModal } = getActiveElements();
         profileModal.classList.remove('active');
         modalOverlay.classList.remove('active');
     }
 }
+
 
     // Load user profile
     async function loadUserProfile(userId) {
@@ -2133,66 +2162,93 @@ userElement.addEventListener('click', (e) => {
     }
     
     // Initialize page
-    async function initializePage() {
-        // Check authorization
-        const userDataFromStorage = sessionStorage.getItem('userData');
-        if (!userDataFromStorage) {
-            window.location.href = 'profile.html';
-            return;
+async function initializePage() {
+    // Check authorization
+    const userDataFromStorage = sessionStorage.getItem('userData');
+    if (!userDataFromStorage) {
+        window.location.href = 'profile.html';
+        return;
+    }
+    
+    userData = JSON.parse(userDataFromStorage);
+    
+    // Determine if desktop or mobile
+    isDesktop = window.matchMedia("(min-width: 768px)").matches;
+
+    // Hide/show relevant containers and navigation
+    if (isDesktop) {
+        mobileContactsContainer.style.display = 'none';
+        mobileOnlyNav.style.display = 'none';
+        desktopSidebar.style.display = 'flex'; // Use flex for sidebar
+        desktopContent.style.display = 'flex';
+        desktopOnlyNav.style.display = 'flex'; // Show desktop nav
+        
+        // Desktop profile modal initialization
+        profileModalDesktop.style.display = 'none'; // Initially hidden
+        profileModalDesktop.classList.remove('active'); // Remove mobile-specific class
+        profileModalDesktop.classList.add('desktop-profile'); // Add desktop-specific class
+        
+        // Show placeholder initially
+        desktopPlaceholder.style.display = 'flex';
+        
+        // Check if we need to show profile from session storage
+        const lastOpenedProfile = sessionStorage.getItem('lastOpenedProfile');
+        if (lastOpenedProfile) {
+            openProfileModal(lastOpenedProfile);
         }
+    } else {
+        mobileContactsContainer.style.display = 'flex';
+        mobileOnlyNav.style.display = 'flex';
+        desktopSidebar.style.display = 'none';
+        desktopContent.style.display = 'none';
+        desktopOnlyNav.style.display = 'none';
         
-        userData = JSON.parse(userDataFromStorage);
-        
-        // Determine if desktop or mobile
-        isDesktop = window.matchMedia("(min-width: 768px)").matches;
+        // Mobile profile modal initialization
+        profileModalMobile.classList.remove('active');
+        profileModalMobile.classList.remove('desktop-profile');
+    }
 
-        // Hide/show relevant containers and navigation
-        if (isDesktop) {
-            mobileContactsContainer.style.display = 'none';
-            mobileOnlyNav.style.display = 'none';
-            desktopSidebar.style.display = 'flex'; // Use flex for sidebar
-            desktopContent.style.display = 'flex';
-            desktopOnlyNav.style.display = 'flex'; // Show desktop nav
-            profileModalDesktop.style.display = 'none'; // Initially hide profile modal on desktop
-            desktopPlaceholder.style.display = 'flex'; // Show placeholder
-        } else {
-            mobileContactsContainer.style.display = 'flex';
-            mobileOnlyNav.style.display = 'flex';
-            desktopSidebar.style.display = 'none';
-            desktopContent.style.display = 'none';
-            desktopOnlyNav.style.display = 'none'; // Hide desktop nav
-            profileModalMobile.classList.remove('active'); // Ensure mobile profile modal is hidden
+    // Load data
+    await loadUserData();
+    await loadContacts();
+    
+    // Event listeners for active elements
+    const { searchInput, searchButton, profileBackButton } = getActiveElements();
+
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const searchId = searchInput.value.trim();
+            searchUserById(searchId);
         }
+    });
 
-        // Load data
-        await loadUserData();
-        await loadContacts();
-        
-        // Event listeners for active elements
-        const { searchInput, searchButton, profileBackButton } = getActiveElements();
-
-        
-        searchInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                const searchId = searchInput.value.trim();
-                searchUserById(searchId);
-            }
-        });
-
-        if (profileBackButton) { // Only for mobile
+    // Only add back button and overlay handlers for mobile
+    if (!isDesktop) {
+        if (profileBackButton) {
             profileBackButton.addEventListener('click', closeProfileModal);
         }
         modalOverlay.addEventListener('click', closeProfileModal);
-
-        // Handle window resize for responsive layout
-        window.addEventListener('resize', () => {
-            const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-            if (newIsDesktop !== isDesktop) {
-                isDesktop = newIsDesktop;
-                initializePage(); // Re-initialize to apply correct layout
-            }
-        });
     }
+
+    // Handle window resize for responsive layout
+    window.addEventListener('resize', () => {
+        const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+        if (newIsDesktop !== isDesktop) {
+            isDesktop = newIsDesktop;
+            initializePage(); // Re-initialize to apply correct layout
+        }
+    });
+    
+    // Save last opened profile when leaving page
+    window.addEventListener('beforeunload', () => {
+        if (isDesktop && document.querySelector('.desktop-profile.visible')) {
+            const profileId = modalProfileIdDesktop.textContent.replace('ID: ', '');
+            sessionStorage.setItem('lastOpenedProfile', profileId);
+        } else {
+            sessionStorage.removeItem('lastOpenedProfile');
+        }
+    });
+}
 
     // Initialize when DOM is loaded
     document.addEventListener('DOMContentLoaded', initializePage);
