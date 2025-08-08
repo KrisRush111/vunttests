@@ -148,7 +148,7 @@
     /* Обновленные стили для профиля в десктопе */
     .profile-modal {
         position: static;
-        display: block;
+        display: none;
         flex: 1;
         height: 100%;
         padding: 20px;
@@ -160,7 +160,6 @@
     
     .profile-modal.active {
         display: flex;
-        flex-direction: column;
     }
 
     .profile-modal-content {
@@ -1513,15 +1512,23 @@
         }
     }
     
-    // Open profile modal
+// Open profile modal
 function openProfileModal(userId) {
     showLoading('Загрузка профиля...');
     const { profileModal } = getActiveElements();
 
     if (isDesktop) {
-        desktopPlaceholder.style.display = 'none'; // Скрываем плейсхолдер
-        profileModal.style.display = 'block'; // Показываем профиль
+        // На десктопе скрываем плейсхолдер и показываем профиль
+        desktopPlaceholder.style.display = 'none';
+        profileModal.style.display = 'flex'; // Используем flex для правильного отображения
+        
+        // Прокручиваем к верху профиля
+        document.querySelector('.desktop-content').scrollTo({
+            top: 0,
+            behavior: 'smooth'
+        });
     } else {
+        // На мобильных устройствах используем модальное окно
         profileModal.classList.add('active');
         modalOverlay.classList.add('active');
     }
@@ -1531,13 +1538,16 @@ function openProfileModal(userId) {
 
 
     // Close profile modal
+// Close profile modal
 function closeProfileModal() {
     const { profileModal } = getActiveElements();
 
     if (isDesktop) {
-        profileModal.style.display = 'none'; // Скрываем профиль
-        desktopPlaceholder.style.display = 'flex'; // Показываем плейсхолдер
+        // На десктопе скрываем профиль и показываем плейсхолдер
+        profileModal.style.display = 'none';
+        desktopPlaceholder.style.display = 'flex';
     } else {
+        // На мобильных устройствах скрываем модальное окно
         profileModal.classList.remove('active');
         modalOverlay.classList.remove('active');
     }
@@ -1726,37 +1736,37 @@ async function displayUserResult(user, status = 'default') {
     const userElement = document.createElement('div');
     userElement.className = 'user-result';
     
-    // Click handler for opening profile
-    userElement.addEventListener('click', (e) => {
-        if (e.target.tagName !== 'BUTTON') {
-            // Анимация нажатия
-            userElement.style.transform = 'scale(0.98)';
-            userElement.style.opacity = '0.9';
+// Click handler for opening profile
+userElement.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') {
+        // Анимация нажатия
+        userElement.style.transform = 'scale(0.98)';
+        userElement.style.opacity = '0.9';
+        
+        setTimeout(() => {
+            userElement.style.transform = '';
+            userElement.style.opacity = '1';
             
-            setTimeout(() => {
-                userElement.style.transform = '';
-                userElement.style.opacity = '1';
+            // Открываем профиль пользователя
+            openProfileModal(user.platform_user_id);
+            
+            // На десктопе скрываем плейсхолдер и показываем профиль
+            if (isDesktop) {
+                const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+                const profileModalDesktop = document.getElementById('profileModalDesktop');
                 
-                // Открываем профиль пользователя
-                openProfileModal(user.platform_user_id);
+                desktopPlaceholder.style.display = 'none';
+                profileModalDesktop.style.display = 'flex';
                 
-                // На десктопе скрываем плейсхолдер и показываем профиль
-                if (isDesktop) {
-                    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-                    const profileModalDesktop = document.getElementById('profileModalDesktop');
-                    
-                    desktopPlaceholder.style.display = 'none';
-                    profileModalDesktop.style.display = 'flex';
-                    
-                    // Прокручиваем к верху профиля
-                    document.querySelector('.desktop-content').scrollTo({
-                        top: 0,
-                        behavior: 'smooth'
-                    });
-                }
-            }, 100);
-        }
-    });
+                // Прокручиваем к верху профиля
+                document.querySelector('.desktop-content').scrollTo({
+                    top: 0,
+                    behavior: 'smooth'
+                });
+            }
+        }, 100);
+    }
+});
     
     // Avatar
     const avatarElement = document.createElement('div');
