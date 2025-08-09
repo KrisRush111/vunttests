@@ -2185,73 +2185,99 @@ userElement.addEventListener('click', (e) => {
     
     // Initialize page
 async function initializePage() {
-    // Check authorization
-    const userDataFromStorage = sessionStorage.getItem('userData');
-    if (!userDataFromStorage) {
-        window.location.href = 'profile.html';
-        return;
-    }
-    
-    userData = JSON.parse(userDataFromStorage);
-    
-    // Determine if desktop or mobile
-    isDesktop = window.matchMedia("(min-width: 768px)").matches;
+    console.log('Initializing page...'); // Debug log
 
-    // Hide/show relevant containers and navigation
-    if (isDesktop) {
-        mobileContactsContainer.style.display = 'none';
-        mobileOnlyNav.style.display = 'none';
-        desktopSidebar.style.display = 'flex';
-        desktopContent.style.display = 'flex';
-        desktopOnlyNav.style.display = 'flex';
+    try {
+        // Check authorization
+        const userDataFromStorage = sessionStorage.getItem('userData');
+        if (!userDataFromStorage) {
+            console.warn('No user data found, redirecting to profile');
+            window.location.href = 'profile.html';
+            return;
+        }
         
-        // Всегда показываем плейсхолдер при загрузке
-        desktopPlaceholder.style.display = 'flex';
-        profileModalDesktop.style.display = 'none';
-        profileModalDesktop.classList.remove('active');
-        profileModalDesktop.classList.remove('visible');
-        profileModalDesktop.classList.add('desktop-profile');
-    } else {
-        mobileContactsContainer.style.display = 'flex';
-        mobileOnlyNav.style.display = 'flex';
-        desktopSidebar.style.display = 'none';
-        desktopContent.style.display = 'none';
-        desktopOnlyNav.style.display = 'none';
+        // Parse user data
+        userData = JSON.parse(userDataFromStorage);
+        console.log('User data loaded:', userData);
         
-        profileModalMobile.classList.remove('active');
-        profileModalMobile.classList.remove('desktop-profile');
+        // Determine device type
+        isDesktop = window.matchMedia("(min-width: 768px)").matches;
+        console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
+
+        // Toggle visibility based on device type
+        if (isDesktop) {
+            console.log('Initializing desktop layout');
+            mobileContactsContainer.style.display = 'none';
+            mobileOnlyNav.style.display = 'none';
+            desktopSidebar.style.display = 'flex';
+            desktopContent.style.display = 'flex';
+            desktopOnlyNav.style.display = 'flex';
+            
+            // Show placeholder and hide profile modal initially
+            desktopPlaceholder.style.display = 'flex';
+            profileModalDesktop.style.display = 'none';
+            profileModalDesktop.classList.remove('active', 'visible');
+            profileModalDesktop.classList.add('desktop-profile');
+        } else {
+            console.log('Initializing mobile layout');
+            mobileContactsContainer.style.display = 'flex';
+            mobileOnlyNav.style.display = 'flex';
+            desktopSidebar.style.display = 'none';
+            desktopContent.style.display = 'none';
+            desktopOnlyNav.style.display = 'none';
+            
+            profileModalMobile.classList.remove('active', 'desktop-profile');
+        }
+
+        // Load required data
+        console.log('Loading user data...');
+        await loadUserData();
+        console.log('Loading contacts...');
+        await loadContacts();
+        
+        // Setup search input handler
+        const { searchInput } = getActiveElements();
+        console.log('Setting up search input handler');
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const searchId = searchInput.value.trim();
+                console.log('Searching for user:', searchId);
+                searchUserById(searchId);
+            }
+        });
+
+        // Mobile-specific event listeners
+        if (!isDesktop) {
+            console.log('Setting up mobile event listeners');
+            if (profileBackButtonMobile) {
+                profileBackButtonMobile.addEventListener('click', () => {
+                    console.log('Profile back button clicked');
+                    closeProfileModal();
+                });
+            }
+            
+            modalOverlay.addEventListener('click', () => {
+                console.log('Modal overlay clicked');
+                closeProfileModal();
+            });
+        }
+
+        // Handle window resize
+        console.log('Setting up resize handler');
+        window.addEventListener('resize', () => {
+            const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+            if (newIsDesktop !== isDesktop) {
+                console.log(`Layout changed to ${newIsDesktop ? 'desktop' : 'mobile'}`);
+                isDesktop = newIsDesktop;
+                initializePage(); // Re-initialize for new layout
+            }
+        });
+
+        console.log('Initialization complete');
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        showMessage('Ошибка инициализации страницы', 'error');
     }
-
-    // Load data
-    await loadUserData();
-    await loadContacts();
-    
-    // Event listeners for active elements
-    const { searchInput } = getActiveElements();
-
-    searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            const searchId = searchInput.value.trim();
-            searchUserById(searchId);
-        }
-    });
-
-    // Only add back button and overlay handlers for mobile
-    if (!isDesktop) {
-        if (profileBackButtonMobile) {
-            profileBackButtonMobile.addEventListener('click', closeProfileModal);
-        }
-        modalOverlay.addEventListener('click', closeProfileModal);
-    }
-
-    // Handle window resize for responsive layout
-    window.addEventListener('resize', () => {
-        const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-        if (newIsDesktop !== isDesktop) {
-            isDesktop = newIsDesktop;
-            initializePage(); // Re-initialize to apply correct layout
-        }
-    });
 }
 
     // Initialize when DOM is loaded
