@@ -1013,6 +1013,19 @@
             transform: translateY(-2px);
         }
     }
+
+    .date-header {
+    text-align: center;
+    margin: 12px 0;
+    font-size: 14px;
+    color: white;
+    background-color: rgba(0, 0, 0, 0.2);
+    padding: 4px 12px;
+    border-radius: 12px;
+    display: inline-block;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
 </style>
 </head>
 <body>
@@ -1243,6 +1256,59 @@
         let currentChat = null;
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
+
+
+
+
+
+        // Добавляем в начало скрипта функцию для форматирования времени
+function formatMoscowTime(timestamp) {
+    if (!timestamp) return '';
+    
+    // Создаем дату и учитываем московское время (UTC+3)
+    const date = new Date(timestamp);
+    const moscowOffset = 3 * 60 * 60 * 1000; // MSK (UTC+3)
+    const moscowTime = new Date(date.getTime() + moscowOffset);
+    
+    // Форматируем время как "HH:MM"
+    const hours = moscowTime.getUTCHours().toString().padStart(2, '0');
+    const minutes = moscowTime.getUTCMinutes().toString().padStart(2, '0');
+    
+    return `${hours}:${minutes}`;
+}
+
+// Функция для форматирования даты заголовка
+function formatDateHeader(timestamp) {
+    if (!timestamp) return '';
+    
+    const date = new Date(timestamp);
+    const moscowOffset = 3 * 60 * 60 * 1000; // MSK (UTC+3)
+    const moscowTime = new Date(date.getTime() + moscowOffset);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const messageDate = new Date(moscowTime);
+    messageDate.setHours(0, 0, 0, 0);
+    
+    if (messageDate.getTime() === today.getTime()) {
+        return 'Сегодня';
+    } else if (messageDate.getTime() === yesterday.getTime()) {
+        return 'Вчера';
+    } else {
+        const months = [
+            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+        ];
+        const day = messageDate.getDate();
+        const month = months[messageDate.getMonth()];
+        return `${day} ${month}`;
+    }
+}
+
 
         // Helper function to get correct elements based on device
         function getActiveElements() {
@@ -1790,12 +1856,16 @@ async function sendMessage() {
             throw new Error(data.error || 'Не удалось отправить сообщение');
         }
         
-        // Add message locally
+        // Добавляем сообщение локально с московским временем
+        const now = new Date();
+        const moscowOffset = 3 * 60 * 60 * 1000; // MSK (UTC+3)
+        const moscowTime = new Date(now.getTime() + moscowOffset);
+        
         const newMessage = {
             id: data.message_id,
             sender_id: userData.platform_user_id,
             content: content,
-            sent_at: data.sent_at,
+            sent_at: moscowTime.toISOString(), // Используем московское время
             is_read: false,
             sender_name: userData.nickname,
             sender_avatar: userData.avatar_url,
@@ -1805,13 +1875,13 @@ async function sendMessage() {
         
         currentMessages.push(newMessage);
         
-        // Always hide "No messages" placeholder when sending a message
+        // Всегда скрываем плейсхолдер "Нет сообщений" при отправке
         noMessages.style.display = 'none';
         
-        // Render the new message
-        renderMessage(newMessage);
+        // Перерисовываем все сообщения, чтобы обновить заголовки дат
+        renderMessages(currentMessages);
         
-        // Ensure messages container is scrolled to bottom
+        // Прокручиваем вниз
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
@@ -1819,9 +1889,9 @@ async function sendMessage() {
     } catch (error) {
         console.error('Error sending message:', error);
         showMessage('Ошибка отправки сообщения', 'error');
-        messageInput.value = content; // Return text to input field
+        messageInput.value = content; // Возвращаем текст в поле ввода
         
-        // Restore "No messages" if sending failed and there are no messages
+        // Восстанавливаем "Нет сообщений", если отправка не удалась и сообщений нет
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
         }
@@ -1835,7 +1905,7 @@ function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
     
     // Очищаем только сообщения, сохраняя noMessages
-    const messageElements = messagesContainer.querySelectorAll('.message');
+    const messageElements = messagesContainer.querySelectorAll('.message, .date-header');
     messageElements.forEach(el => el.remove());
     
     if (!messages || messages.length === 0) {
@@ -1845,7 +1915,28 @@ function renderMessages(messages) {
     }
     
     noMessages.style.display = 'none';
-    messages.forEach(message => {
+    
+    let lastDateHeader = '';
+    messages.forEach((message, index) => {
+        const currentDateHeader = formatDateHeader(message.sent_at);
+        
+        // Добавляем заголовок даты, если он изменился
+        if (currentDateHeader !== lastDateHeader) {
+            const dateHeader = document.createElement('div');
+            dateHeader.className = 'date-header';
+            dateHeader.textContent = currentDateHeader;
+            dateHeader.style.textAlign = 'center';
+            dateHeader.style.margin = '12px 0';
+            dateHeader.style.fontSize = '14px';
+            dateHeader.style.color = 'white';
+            dateHeader.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+            dateHeader.style.padding = '4px 12px';
+            dateHeader.style.borderRadius = '12px';
+            dateHeader.style.display = 'inline-block';
+            messagesContainer.appendChild(dateHeader);
+            lastDateHeader = currentDateHeader;
+        }
+        
         renderMessage(message);
     });
     
@@ -1854,6 +1945,7 @@ function renderMessages(messages) {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }, 50);
 }
+
 
         // Render a single message
 function renderMessage(message) {
@@ -1864,7 +1956,7 @@ function renderMessage(message) {
     
     messageElement.innerHTML = `
         <div class="message-content">${message.content}</div>
-        <div class="message-time">${formatTime(message.sent_at)}</div>
+        <div class="message-time">${formatMoscowTime(message.sent_at)}</div>
     `;
     
     messagesContainer.appendChild(messageElement);
