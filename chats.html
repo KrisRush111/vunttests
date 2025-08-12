@@ -1263,10 +1263,11 @@
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-        function adjustMoscowTime(timestamp) {
+function adjustTimeToMoscow(timestamp) {
+    if (!timestamp) return null;
     const date = new Date(timestamp);
-    date.setHours(date.getHours() + 3);  // Добавляем 3 часа
-    return date;
+    date.setHours(date.getHours() + 3);
+    return date.toISOString();
 }
 
 function formatTime(timestamp) {
@@ -1459,79 +1460,51 @@ function formatDateHeader(timestamp) {
         }
         
         // Render chats list
-        function renderChats(chats) {
-            const { chatsList, noChats } = getActiveElements();
-            chatsList.innerHTML = '';
-            
-            if (!chats || chats.length === 0) {
-                noChats.style.display = 'block';
-                return;
-            }
-            
-            noChats.style.display = 'none';
-            chats.forEach(chat => {
-                const chatItem = document.createElement('div');
-                chatItem.className = 'chat-item';
-                
-                const initials = chat.name 
-                    ? chat.name.split(' ').map(n => n[0]).join('') 
-                    : '?';
-                
-                const bgColor = chat.avatar_background || getRandomColor();
-                
-                chatItem.innerHTML = `
-                    <div class="chat-avatar" style="background-color: ${bgColor}">
-                        ${initials}
-                    </div>
-                    <div class="chat-info">
-                        <div class="chat-name">${chat.name || 'Новый чат'}</div>
-                        <div class="last-message">${chat.last_message || 'Начните общение'}</div>
-                        <div class="chat-time">${formatTime(chat.last_message_time)}</div>
-                    </div>
-                    ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
-                `;
-                
-                if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-                    loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
-                }
-                
-                chatItem.addEventListener('click', () => {
-                    openChat(chat.id);
-                });
-                
-                chatsList.appendChild(chatItem);
-            });
-        }
-        
-        // Load chat avatar from server
-        function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-            const img = new Image();
-            
-            img.onload = function() {
-                avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-                avatarElement.style.backgroundSize = 'cover';
-                avatarElement.style.backgroundPosition = 'center';
-                avatarElement.textContent = '';
-            };
-            
-            img.onerror = function() {
-                console.log('Failed to load avatar, using initials');
-                avatarElement.style.backgroundImage = '';
-                avatarElement.textContent = initials;
-                avatarElement.style.backgroundColor = bgColor;
-            };
-            
-            img.src = avatarUrl;
-        }
-        
-        // Format time for chat list
-function formatTime(timestamp) {
-    if (!timestamp) return 'только что';
+// Render chats list (остается без изменений, но теперь получает правильное время)
+function renderChats(chats) {
+    const { chatsList, noChats } = getActiveElements();
+    chatsList.innerHTML = '';
     
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!chats || chats.length === 0) {
+        noChats.style.display = 'block';
+        return;
+    }
+    
+    noChats.style.display = 'none';
+    chats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-item';
+        
+        const initials = chat.name 
+            ? chat.name.split(' ').map(n => n[0]).join('') 
+            : '?';
+        
+        const bgColor = chat.avatar_background || getRandomColor();
+        
+        chatItem.innerHTML = `
+            <div class="chat-avatar" style="background-color: ${bgColor}">
+                ${initials}
+            </div>
+            <div class="chat-info">
+                <div class="chat-name">${chat.name || 'Новый чат'}</div>
+                <div class="last-message">${chat.last_message || 'Начните общение'}</div>
+                <div class="chat-time">${formatTime(chat.last_message_time)}</div>
+            </div>
+            ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
+        `;
+        
+        if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
+        }
+        
+        chatItem.addEventListener('click', () => {
+            openChat(chat.id);
+        });
+        
+        chatsList.appendChild(chatItem);
+    });
 }
+        
         
         // Generate random color for avatar background
         function getRandomColor() {
