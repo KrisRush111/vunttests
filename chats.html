@@ -1479,6 +1479,7 @@ function formatDateHeader(timestamp) {
             chats.forEach(chat => {
                 const chatItem = document.createElement('div');
                 chatItem.className = 'chat-item';
+                chatItem.setAttribute('data-chat-id', chat.id); // Добавляем атрибут с ID чата
                 
                 const initials = chat.name 
                     ? chat.name.split(' ').map(n => n[0]).join('') 
@@ -1794,6 +1795,13 @@ async function openChat(chatId) {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }, 100);
         }
+
+        // После загрузки чата обновляем его в списке
+        await updateChatInList(chatId, {
+            last_message: currentChat.last_message,
+            last_message_time: currentChat.last_message_time,
+            unread_count: 0 // Сбрасываем счетчик непрочитанных
+        });
         
     } catch (error) {
         console.error('Error opening chat:', error);
@@ -1863,47 +1871,112 @@ async function sendMessage() {
             throw new Error(data.error || 'Не удалось отправить сообщение');
         }
         
-        
-const newMessage = {
-    id: data.message_id,
-    sender_id: userData.platform_user_id,
-    content: content,
-    sent_at: new Date().toISOString(), // Используем текущее время
-    is_read: false,
-    sender_name: userData.nickname,
-    sender_avatar: userData.avatar_url,
-    sender_avatar_background: userData.avatar_background,
-    is_me: true
-};
+        const newMessage = {
+            id: data.message_id,
+            sender_id: userData.platform_user_id,
+            content: content,
+            sent_at: new Date().toISOString(),
+            is_read: false,
+            sender_name: userData.nickname,
+            sender_avatar: userData.avatar_url,
+            sender_avatar_background: userData.avatar_background,
+            is_me: true
+        };
         
         currentMessages.push(newMessage);
-        
-        // Всегда скрываем плейсхолдер "Нет сообщений" при отправке
         noMessages.style.display = 'none';
-        
-        // Перерисовываем все сообщения, чтобы обновить заголовки дат
         renderMessages(currentMessages);
         
-        // Прокручиваем вниз
+        // Обновляем список чатов
+        await updateChatInList(currentChat.id, {
+            last_message: content,
+            last_message_time: newMessage.sent_at
+        });
+        
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
-
-        // --- ДОБАВИТЬ ЭТУ СТРОКУ ---
-        await loadChats(); // Обновляем список чатов после отправки сообщения
         
     } catch (error) {
         console.error('Error sending message:', error);
         showMessage('Ошибка отправки сообщения', 'error');
-        messageInput.value = content; // Возвращаем текст в поле ввода
+        messageInput.value = content;
         
-        // Восстанавливаем "Нет сообщений", если отправка не удалась и сообщений нет
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
         }
     } finally {
         sendMessageButton.disabled = false;
     }
+}
+
+// Функция для обновления чата в списке
+async function updateChatInList(chatId, updates) {
+    try {
+        // Получаем обновленные данные чата с сервера
+        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Обновляем чат в списке
+            updateChatItemInDOM(chatId, data.chat);
+        }
+    } catch (error) {
+        console.error('Error updating chat in list:', error);
+    }
+}
+
+// Функция для обновления элемента чата в DOM
+function updateChatItemInDOM(chatId, chatData) {
+    // Обновляем и в десктопном и в мобильном списке
+    [chatsListDesktop, chatsListMobile].forEach(list => {
+        if (!list) return;
+        
+        const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+        if (chatItem) {
+            // Обновляем последнее сообщение и время
+            const lastMessageEl = chatItem.querySelector('.last-message');
+            const chatTimeEl = chatItem.querySelector('.chat-time');
+            
+            if (lastMessageEl) {
+                lastMessageEl.textContent = chatData.last_message || 'Начните общение';
+            }
+            
+            if (chatTimeEl) {
+                chatTimeEl.textContent = formatChatListTime(chatData.last_message_time);
+            }
+            
+            // Обновляем счетчик непрочитанных, если нужно
+            if (chatData.unread_count > 0) {
+                let badge = chatItem.querySelector('.unread-badge');
+                if (!badge) {
+                    badge = document.createElement('div');
+                    badge.className = 'unread-badge';
+                    chatItem.appendChild(badge);
+                }
+                badge.textContent = chatData.unread_count;
+            } else {
+                const badge = chatItem.querySelector('.unread-badge');
+                if (badge) {
+                    badge.remove();
+                }
+            }
+            
+            // Перемещаем чат вверх списка
+            list.prepend(chatItem);
+        }
+    });
 }
 
 
@@ -1933,13 +2006,13 @@ function renderMessages(messages) {
             dateHeader.className = 'date-header';
             dateHeader.textContent = currentDateHeader;
             dateHeader.style.textAlign = 'center';
-            dateHeader.style.margin = '12px 0';
+            dateHeader.style.margin = '12px auto'; /* Changed to auto for horizontal centering */
             dateHeader.style.fontSize = '14px';
             dateHeader.style.color = 'white';
             dateHeader.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
             dateHeader.style.padding = '4px 12px';
-            dateHeader.style.borderRadius = '12px';
-            dateHeader.style.display = 'inline-block';
+            dateHeader.style.borderRadius = '24px'; /* Changed to 24px for consistency */
+            dateHeader.style.display = 'block'; /* Changed to block for centering */
             messagesContainer.appendChild(dateHeader);
             lastDateHeader = currentDateHeader;
         }
