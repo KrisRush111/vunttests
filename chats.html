@@ -1270,16 +1270,28 @@ function adjustTimeToMoscow(timestamp) {
     return date.toISOString();
 }
 
-function formatTime(timestamp) {
+// Для списка чатов (UTC время с сервера)
+function formatChatListTime(timestamp) {
     if (!timestamp) return 'только что';
     
     const date = new Date(timestamp);
-    date.setHours(date.getHours() + 3); // Добавляем 3 часа для московского времени
+    // Добавляем 3 часа для московского времени
+    date.setHours(date.getHours() + 3);
     
     return date.toLocaleTimeString('ru-RU', { 
         hour: '2-digit', 
-        minute: '2-digit',
-        timeZone: 'Europe/Moscow' // Явно указываем часовой пояс
+        minute: '2-digit'
+    });
+}
+
+// Для сообщений в чате (уже с поправкой на часовой пояс)
+function formatChatMessageTime(timestamp) {
+    if (!timestamp) return 'только что';
+    
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('ru-RU', { 
+        hour: '2-digit', 
+        minute: '2-digit'
     });
 }
 
@@ -1298,7 +1310,7 @@ function formatDateHeader(timestamp) {
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     
-    // Дата сообщения
+    // Дата сообщения (уже с поправкой на часовой пояс)
     const messageDate = new Date(date);
     messageDate.setHours(0, 0, 0, 0);
     
@@ -1474,17 +1486,18 @@ function formatDateHeader(timestamp) {
                 
                 const bgColor = chat.avatar_background || getRandomColor();
                 
-                chatItem.innerHTML = `
-                    <div class="chat-avatar" style="background-color: ${bgColor}">
-                        ${initials}
-                    </div>
-                    <div class="chat-info">
-                        <div class="chat-name">${chat.name || 'Новый чат'}</div>
-                        <div class="last-message">${chat.last_message || 'Начните общение'}</div>
-                        <div class="chat-time">${formatTime(chat.last_message_time)}</div>
-                    </div>
-                    ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
-                `;
+// В функции renderChats замените formatTime на formatChatListTime
+chatItem.innerHTML = `
+    <div class="chat-avatar" style="background-color: ${bgColor}">
+        ${initials}
+    </div>
+    <div class="chat-info">
+        <div class="chat-name">${chat.name || 'Новый чат'}</div>
+        <div class="last-message">${chat.last_message || 'Начните общение'}</div>
+        <div class="chat-time">${formatChatListTime(chat.last_message_time)}</div>
+    </div>
+    ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
+`;
                 
                 if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
                     loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
@@ -1944,8 +1957,7 @@ function renderMessage(message) {
     const messageElement = document.createElement('div');
     messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
     
-    // Замените formatMoscowTime на простое форматирование времени
- const messageTime = formatTime(message.sent_at);
+    const messageTime = formatChatMessageTime(message.sent_at);
     
     messageElement.innerHTML = `
         <div class="message-content">${message.content}</div>
