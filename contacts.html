@@ -690,6 +690,7 @@
             background-repeat: no-repeat;
             transition: all 0.2s ease;
             position: relative;
+            cursor: pointer; /* Добавляем курсор-указатель для кликабельности */
         }
 
         .profile-info {
@@ -1474,6 +1475,11 @@
         const messageBox = document.getElementById('messageBox');
         const modalOverlay = document.getElementById('modalOverlay');
 
+        // Photo Viewer elements
+        const photoViewerModal = document.getElementById('photoViewerModal');
+        const photoViewerImg = document.getElementById('photoViewerImg');
+        const photoViewerClose = document.getElementById('photoViewerClose');
+
         // Desktop specific elements
         const desktopSidebar = document.querySelector('.desktop-sidebar');
         const desktopContent = document.querySelector('.desktop-content');
@@ -1519,29 +1525,23 @@
         const mobileOnlyNav = document.querySelector('.mobile-only-nav');
 
 
+        // Photo Viewer Functions
+        function openPhotoViewer(photoUrl) {
+            photoViewerImg.src = photoUrl;
+            photoViewerModal.classList.add('active');
+        }
 
+        function closePhotoViewer() {
+            photoViewerModal.classList.remove('active');
+        }
 
-// Photo Viewer Functions
-const photoViewerModal = document.getElementById('photoViewerModal');
-const photoViewerImg = document.getElementById('photoViewerImg');
-const photoViewerClose = document.getElementById('photoViewerClose');
-
-function openPhotoViewer(photoUrl) {
-    photoViewerImg.src = photoUrl;
-    photoViewerModal.classList.add('active');
-}
-
-function closePhotoViewer() {
-    photoViewerModal.classList.remove('active');
-}
-
-// Close photo viewer when clicking close button or outside the image
-photoViewerClose.addEventListener('click', closePhotoViewer);
-photoViewerModal.addEventListener('click', (e) => {
-    if (e.target === photoViewerModal) {
-        closePhotoViewer();
-    }
-});
+        // Close photo viewer when clicking close button or outside the image
+        photoViewerClose.addEventListener('click', closePhotoViewer);
+        photoViewerModal.addEventListener('click', (e) => {
+            if (e.target === photoViewerModal) {
+                closePhotoViewer();
+            }
+        });
 
 
         // User data from profile page
@@ -1791,7 +1791,7 @@ photoViewerModal.addEventListener('click', (e) => {
                 modalUserCourse.textContent = user.course || 'Не указано';
             }
 
-            // Добавляем обработчик клика на аватарку в профиле
+            // Добавляем обработчик клика на аватарку в профиле (для мобильной и десктопной версии)
             modalProfileAvatar.onclick = () => {
                 if (user.has_avatar_photo || user.has_avatar) {
                     const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
@@ -1881,9 +1881,10 @@ photoViewerModal.addEventListener('click', (e) => {
             const userElement = document.createElement('div');
             userElement.className = 'user-result';
 
-            // Click handler for opening profile
+            // Click handler for opening profile (whole user element)
             userElement.addEventListener('click', (e) => {
-                if (e.target.tagName !== 'BUTTON' && !e.target.closest('.user-avatar')) { // Исключаем клик по аватарке
+                // Убедимся, что клик не был по кнопке, чтобы не перехватывать ее действие
+                if (e.target.tagName !== 'BUTTON') {
                     // Анимация нажатия
                     userElement.style.transform = 'scale(0.98)';
                     userElement.style.opacity = '0.9';
@@ -1916,15 +1917,14 @@ photoViewerModal.addEventListener('click', (e) => {
             // Avatar
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
-            
-            // Добавляем обработчик клика на аватарку в списке контактов
-            avatarElement.addEventListener('click', (e) => {
-                e.stopPropagation(); // Предотвращаем всплытие события, чтобы не открывался профиль
-                if (user.has_avatar_photo || user.has_avatar) {
-                    const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-                    openPhotoViewer(avatarUrl);
-                }
-            });
+            // Удаляем обработчик клика на аватарку в списке контактов, чтобы она не открывала фото
+            // avatarElement.addEventListener('click', (e) => {
+            //     e.stopPropagation();
+            //     if (user.has_avatar_photo || user.has_avatar) {
+            //         const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+            //         openPhotoViewer(avatarUrl);
+            //     }
+            // });
 
             if (user.has_avatar_photo || user.has_avatar) {
                 const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
@@ -1994,7 +1994,8 @@ photoViewerModal.addEventListener('click', (e) => {
 
             // Обработчик клика на весь элемент пользователя
             requestElement.addEventListener('click', (e) => {
-                if (!e.target.closest('.friend-request-actions') && !e.target.closest('.user-avatar')) { // Исключаем клик по кнопкам действий и аватарке
+                // Убедимся, что клик не был по кнопкам действий или по аватарке
+                if (!e.target.closest('.friend-request-actions') && e.target.tagName !== 'BUTTON') {
                     openProfileModal(user.platform_user_id);
                 }
             });
@@ -2002,15 +2003,14 @@ photoViewerModal.addEventListener('click', (e) => {
             // Avatar
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
-
-            // Добавляем обработчик клика на аватарку в запросах на дружбу
-            avatarElement.addEventListener('click', (e) => {
-                e.stopPropagation(); // Предотвращаем всплытие события
-                if (user.has_avatar_photo || user.has_avatar) {
-                    const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-                    openPhotoViewer(avatarUrl);
-                }
-            });
+            // Удаляем обработчик клика на аватарку в запросах на дружбу, чтобы она не открывала фото
+            // avatarElement.addEventListener('click', (e) => {
+            //     e.stopPropagation();
+            //     if (user.has_avatar_photo || user.has_avatar) {
+            //         const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+            //         openPhotoViewer(avatarUrl);
+            //     }
+            // });
 
             if (user.has_avatar_photo || user.has_avatar) {
                 const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
