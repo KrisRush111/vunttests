@@ -1167,67 +1167,92 @@
             margin-right: auto;
         }
 
+        /* Photo Viewer Modal - Updated for desktop to be within profile modal */
+        .photo-viewer-modal {
+            position: fixed; /* Default for mobile, will be overridden for desktop */
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
 
+        .photo-viewer-modal.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
 
+        .photo-viewer-content {
+            position: relative;
+            max-width: 90%;
+            max-height: 90%;
+        }
 
+        .photo-viewer-img {
+            max-width: 100%;
+            max-height: 80vh;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
 
+        .photo-viewer-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.2);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
 
-        /* Photo Viewer Modal */
-.photo-viewer-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.9);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 3000;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s ease;
-}
+        .photo-viewer-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
 
-.photo-viewer-modal.active {
-    opacity: 1;
-    pointer-events: auto;
-}
+        /* Desktop Photo Viewer within Profile Modal */
+        @media (min-width: 768px) {
+            .profile-modal.desktop-profile .photo-viewer-modal {
+                position: absolute; /* Position relative to its parent (.profile-modal) */
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: rgba(0, 0, 0, 0.7); /* Slightly less opaque */
+                z-index: 2001; /* Above profile content but within desktop-content */
+                border-radius: 12px; /* Inherit from parent or define */
+                overflow: hidden; /* Ensure content stays within bounds */
+            }
 
-.photo-viewer-content {
-    position: relative;
-    max-width: 90%;
-    max-height: 90%;
-}
+            .profile-modal.desktop-profile .photo-viewer-content {
+                max-width: 80%; /* Adjust size for desktop modal */
+                max-height: 80%;
+            }
 
-.photo-viewer-img {
-    max-width: 100%;
-    max-height: 80vh;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-}
+            .profile-modal.desktop-profile .photo-viewer-img {
+                max-height: 70vh; /* Adjust max height */
+            }
 
-.photo-viewer-close {
-    position: absolute;
-    top: -40px;
-    right: 0;
-    color: white;
-    font-size: 24px;
-    cursor: pointer;
-    background: rgba(255, 255, 255, 0.2);
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-}
-
-.photo-viewer-close:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: scale(1.1);
-}
+            .profile-modal.desktop-profile .photo-viewer-close {
+                top: 10px; /* Adjust position within the modal */
+                right: 10px;
+                background: rgba(0, 0, 0, 0.4); /* Darker background for contrast */
+            }
+        }
     </style>
 </head>
 <body>
@@ -1343,6 +1368,15 @@
                     </div>
                 </div>
             </div>
+            <!-- Photo Viewer Modal for Desktop Profile -->
+            <div id="photoViewerModalDesktop" class="photo-viewer-modal">
+                <div class="photo-viewer-content">
+                    <div id="photoViewerCloseDesktop" class="photo-viewer-close">
+                        <i class="fas fa-times"></i>
+                    </div>
+                    <img id="photoViewerImgDesktop" class="photo-viewer-img" src="" alt="User Photo">
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1436,15 +1470,15 @@
     </div>
 
 
-    <!-- Photo Viewer Modal -->
-<div id="photoViewerModal" class="photo-viewer-modal">
-    <div class="photo-viewer-content">
-        <div id="photoViewerClose" class="photo-viewer-close">
-            <i class="fas fa-times"></i>
+    <!-- Photo Viewer Modal (for mobile, full screen) -->
+    <div id="photoViewerModalMobile" class="photo-viewer-modal">
+        <div class="photo-viewer-content">
+            <div id="photoViewerCloseMobile" class="photo-viewer-close">
+                <i class="fas fa-times"></i>
+            </div>
+            <img id="photoViewerImgMobile" class="photo-viewer-img" src="" alt="User Photo">
         </div>
-        <img id="photoViewerImg" class="photo-viewer-img" src="" alt="User Photo">
     </div>
-</div>
 
     <div id="modalOverlay" class="modal-overlay"></div>
 
@@ -1475,10 +1509,15 @@
         const messageBox = document.getElementById('messageBox');
         const modalOverlay = document.getElementById('modalOverlay');
 
-        // Photo Viewer elements
-        const photoViewerModal = document.getElementById('photoViewerModal');
-        const photoViewerImg = document.getElementById('photoViewerImg');
-        const photoViewerClose = document.getElementById('photoViewerClose');
+        // Photo Viewer elements (separate for desktop and mobile)
+        const photoViewerModalMobile = document.getElementById('photoViewerModalMobile');
+        const photoViewerImgMobile = document.getElementById('photoViewerImgMobile');
+        const photoViewerCloseMobile = document.getElementById('photoViewerCloseMobile');
+
+        const photoViewerModalDesktop = document.getElementById('photoViewerModalDesktop');
+        const photoViewerImgDesktop = document.getElementById('photoViewerImgDesktop');
+        const photoViewerCloseDesktop = document.getElementById('photoViewerCloseDesktop');
+
 
         // Desktop specific elements
         const desktopSidebar = document.querySelector('.desktop-sidebar');
@@ -1527,18 +1566,34 @@
 
         // Photo Viewer Functions
         function openPhotoViewer(photoUrl) {
-            photoViewerImg.src = photoUrl;
-            photoViewerModal.classList.add('active');
+            if (isDesktop) {
+                photoViewerImgDesktop.src = photoUrl;
+                photoViewerModalDesktop.classList.add('active');
+            } else {
+                photoViewerImgMobile.src = photoUrl;
+                photoViewerModalMobile.classList.add('active');
+            }
         }
 
         function closePhotoViewer() {
-            photoViewerModal.classList.remove('active');
+            if (isDesktop) {
+                photoViewerModalDesktop.classList.remove('active');
+            } else {
+                photoViewerModalMobile.classList.remove('active');
+            }
         }
 
         // Close photo viewer when clicking close button or outside the image
-        photoViewerClose.addEventListener('click', closePhotoViewer);
-        photoViewerModal.addEventListener('click', (e) => {
-            if (e.target === photoViewerModal) {
+        photoViewerCloseMobile.addEventListener('click', closePhotoViewer);
+        photoViewerModalMobile.addEventListener('click', (e) => {
+            if (e.target === photoViewerModalMobile) {
+                closePhotoViewer();
+            }
+        });
+
+        photoViewerCloseDesktop.addEventListener('click', closePhotoViewer);
+        photoViewerModalDesktop.addEventListener('click', (e) => {
+            if (e.target === photoViewerModalDesktop) {
                 closePhotoViewer();
             }
         });
@@ -1732,75 +1787,73 @@
         }
 
         // Update profile modal UI with user data
-  // Update profile modal UI with user data
-function updateProfileModalUI(user) {
-    const {
-        modalProfileAvatar, modalProfileNickname, modalProfileId,
-        modalMainSchool, modalUserClass, modalUserRole,
-        modalAdditionalSchool, modalUserSpecialization, modalUserCourse,
-        modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer
-    } = getActiveElements();
+        function updateProfileModalUI(user) {
+            const {
+                modalProfileAvatar, modalProfileNickname, modalProfileId,
+                modalMainSchool, modalUserClass, modalUserRole,
+                modalAdditionalSchool, modalUserSpecialization, modalUserCourse,
+                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer
+            } = getActiveElements();
 
-    // Set avatar - new logic
-    if (user.has_avatar_photo || user.has_avatar) {
-        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-        modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        modalProfileAvatar.textContent = '';
-        modalProfileAvatar.style.backgroundColor = '';
-    } else {
-        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-        modalProfileAvatar.textContent = initial;
-        modalProfileAvatar.style.backgroundImage = '';
+            // Set avatar - new logic
+            if (user.has_avatar_photo || user.has_avatar) {
+                const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+                modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                modalProfileAvatar.textContent = '';
+                modalProfileAvatar.style.backgroundColor = '';
+            } else {
+                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+                modalProfileAvatar.textContent = initial;
+                modalProfileAvatar.style.backgroundImage = '';
 
-        if (user.avatar_background) {
-            const lighterColor = adjustColor(user.avatar_background, 20);
-            modalProfileAvatar.style.background =
-                `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
-        } else {
-            modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+                if (user.avatar_background) {
+                    const lighterColor = adjustColor(user.avatar_background, 20);
+                    modalProfileAvatar.style.background =
+                        `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+                } else {
+                    modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+                }
+            }
+
+            modalProfileNickname.textContent = user.nickname || 'Не указано';
+            modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
+            modalUserRole.textContent = user.identity || 'Не указано';
+            modalMainSchool.textContent = user.main_school_name || 'Не указано';
+
+            if (user.class_number && user.class_letter) {
+                modalUserClass.textContent = `${user.class_number}${user.class_letter}`;
+            } else {
+                modalUserClass.textContent = 'Не указано';
+            }
+
+            const additionalSchoolValue = user.additional_school_name;
+            const hasAdditionalSchool = additionalSchoolValue &&
+                                      additionalSchoolValue !== 'Не указано' &&
+                                      additionalSchoolValue !== 'не указано' &&
+                                      additionalSchoolValue.trim() !== '';
+
+            if (!hasAdditionalSchool) {
+                modalAdditionalSchoolContainer.style.display = 'none';
+                modalSpecializationContainer.style.display = 'none';
+                modalCourseContainer.style.display = 'none';
+            } else {
+                modalAdditionalSchoolContainer.style.display = 'flex';
+                modalSpecializationContainer.style.display = 'flex';
+                modalCourseContainer.style.display = 'flex';
+
+                modalAdditionalSchool.textContent = additionalSchoolValue;
+                modalUserSpecialization.textContent = user.specialization || 'Не указано';
+                modalUserCourse.textContent = user.course || 'Не указано';
+            }
+
+            // Добавляем обработчик клика на аватарку в профиле (для мобильной и десктопной версии)
+            modalProfileAvatar.onclick = () => {
+                if (user.has_avatar_photo || user.has_avatar) {
+                    const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+                    openPhotoViewer(avatarUrl);
+                }
+            };
         }
-    }
-
-    modalProfileNickname.textContent = user.nickname || 'Не указано';
-    modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
-    modalUserRole.textContent = user.identity || 'Не указано';
-    modalMainSchool.textContent = user.main_school_name || 'Не указано';
-
-    if (user.class_number && user.class_letter) {
-        modalUserClass.textContent = `${user.class_number}${user.class_letter}`;
-    } else {
-        modalUserClass.textContent = 'Не указано';
-    }
-
-    const additionalSchoolValue = user.additional_school_name;
-    const hasAdditionalSchool = additionalSchoolValue &&
-                              additionalSchoolValue !== 'Не указано' &&
-                              additionalSchoolValue !== 'не указано' &&
-                              additionalSchoolValue.trim() !== '';
-
-    if (!hasAdditionalSchool) {
-        modalAdditionalSchoolContainer.style.display = 'none';
-        modalSpecializationContainer.style.display = 'none';
-        modalCourseContainer.style.display = 'none';
-    } else {
-        modalAdditionalSchoolContainer.style.display = 'flex';
-        modalSpecializationContainer.style.display = 'flex';
-        modalCourseContainer.style.display = 'flex';
-
-        modalAdditionalSchool.textContent = additionalSchoolValue;
-        modalUserSpecialization.textContent = user.specialization || 'Не указано';
-        modalUserCourse.textContent = user.course || 'Не указано';
-    }
-
-    // Добавляем обработчик клика на аватар для всех устройств
-    modalProfileAvatar.style.cursor = (user.has_avatar_photo || user.has_avatar) ? 'pointer' : 'default';
-    modalProfileAvatar.addEventListener('click', (e) => {
-        if (user.has_avatar_photo || user.has_avatar) {
-            const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-            openPhotoViewer(avatarUrl);
-        }
-    });
-}
 
         // Adjust color brightness
         function adjustColor(hex, percent) {
@@ -2394,4 +2447,3 @@ function updateProfileModalUI(user) {
     </script>
 </body>
 </html>
-
