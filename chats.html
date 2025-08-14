@@ -1681,7 +1681,33 @@ async function createChatWithContact(contact) {
     showLoading('Подготовка чата...');
     
     try {
-        // Создаем временный объект чата (без сохранения на сервере)
+        // Сначала проверяем, есть ли уже чат с этим контактом
+        const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                contact_id: contact.platform_user_id
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+        
+        if (data.status !== 'success') {
+            throw new Error(data.error || 'Не удалось проверить чат');
+        }
+
+        if (!data.is_new) {
+            // Чат уже существует - открываем его
+            openChat(data.chat_id);
+            hideLoading();
+            return;
+        }
+
+        // Чат не существует - создаем временный объект чата
         const tempChat = {
             id: `temp_${Date.now()}`, // Временный ID чата (не настоящий)
             is_group: false,
