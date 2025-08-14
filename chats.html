@@ -2101,16 +2101,10 @@ function updateChatItemInDOM(chatId, chatData) {
 function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
     
-    // Полностью очищаем контейнер, но сохраняем noMessages
-    messagesContainer.querySelectorAll('.message, .date-header').forEach(el => el.remove());
+    // Полностью очищаем контейнер сообщений
+    messagesContainer.innerHTML = '';
     
-    // Проверяем наличие сообщений
-    if (!Array.isArray(messages)) {
-        console.error('Messages is not an array:', messages);
-        messages = [];
-    }
-    
-    if (messages.length === 0) {
+    if (!messages || messages.length === 0) {
         noMessages.style.display = 'block';
         noMessages.textContent = 'Сообщений пока нет...';
         return;
@@ -2119,87 +2113,33 @@ function renderMessages(messages) {
     noMessages.style.display = 'none';
     
     let lastDateHeader = '';
-    const fragment = document.createDocumentFragment(); // Используем фрагмент для оптимизации
-    
-    messages.forEach((message) => {
-        try {
-            // Проверяем валидность сообщения
-            if (!message || !message.sent_at || !message.content) {
-                console.warn('Invalid message format:', message);
-                return;
-            }
-            
-            const currentDateHeader = formatDateHeader(message.sent_at);
-            
-            // Добавляем заголовок даты при изменении
-            if (currentDateHeader !== lastDateHeader) {
-                const dateHeader = document.createElement('div');
-                dateHeader.className = 'date-header';
-                dateHeader.textContent = currentDateHeader;
-                Object.assign(dateHeader.style, {
-                    textAlign: 'center',
-                    margin: '12px auto',
-                    fontSize: '14px',
-                    color: 'white',
-                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                    padding: '4px 12px',
-                    borderRadius: '24px',
-                    display: 'block'
-                });
-                fragment.appendChild(dateHeader);
-                lastDateHeader = currentDateHeader;
-            }
-            
-            // Создаем элемент сообщения
-            const messageElement = document.createElement('div');
-            messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
-            
-            const messageTime = formatChatMessageTime(message.sent_at);
-            messageElement.innerHTML = `
-                <div class="message-content">${escapeHtml(message.content)}</div>
-                <div class="message-time">${messageTime}</div>
-            `;
-            
-            // Добавляем анимацию
-            messageElement.style.opacity = '0';
-            messageElement.style.transform = 'translateY(10px)';
-            fragment.appendChild(messageElement);
-            
-            // Запускаем анимацию
-            setTimeout(() => {
-                messageElement.style.opacity = '1';
-                messageElement.style.transform = 'translateY(0)';
-            }, 10);
-            
-        } catch (error) {
-            console.error('Error rendering message:', error, message);
+    messages.forEach((message, index) => {
+        const currentDateHeader = formatDateHeader(message.sent_at);
+        
+        if (currentDateHeader !== lastDateHeader) {
+            const dateHeader = document.createElement('div');
+            dateHeader.className = 'date-header';
+            dateHeader.textContent = currentDateHeader;
+            dateHeader.style.textAlign = 'center';
+            dateHeader.style.margin = '12px auto'; /* Changed to auto for horizontal centering */
+            dateHeader.style.fontSize = '14px';
+            dateHeader.style.color = 'white';
+            dateHeader.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+            dateHeader.style.padding = '4px 12px';
+            dateHeader.style.borderRadius = '24px'; /* Changed to 24px for consistency */
+            dateHeader.style.display = 'block'; /* Changed to block for centering */
+            messagesContainer.appendChild(dateHeader);
+            lastDateHeader = currentDateHeader;
         }
+        
+        renderMessage(message);
     });
     
-    // Добавляем все элементы за один раз
-    messagesContainer.appendChild(fragment);
-    
-    // Прокручиваем вниз с проверкой на существование контейнера
-    if (messagesContainer) {
-        setTimeout(() => {
-            try {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            } catch (scrollError) {
-                console.error('Scroll error:', scrollError);
-            }
-        }, 50);
-    }
+    setTimeout(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 50);
 }
 
-// Вспомогательная функция для экранирования HTML
-function escapeHtml(unsafe) {
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
 
 
         // Render a single message
