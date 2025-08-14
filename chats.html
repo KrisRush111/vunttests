@@ -1295,18 +1295,34 @@ function adjustTimeToMoscow(timestamp) {
 }
 
 // Для списка чатов (UTC время с сервера)
-function formatChatListTime(timestamp) {
-    if (!timestamp) return 'только что';
+    // Для списка чатов (UTC время с сервера)
+    function formatChatListTime(timestamp) {
+        if (!timestamp) return 'только что';
+        
+        const date = new Date(timestamp);
+        // Добавляем 3 часа для московского времени
+        date.setHours(date.getHours() + 3); // Это корректно, если timestamp - UTC
+        
+        return date.toLocaleTimeString('ru-RU', { 
+            hour: '2-digit', 
+            minute: '2-digit'
+        });
+    }
+
+    // Для сообщений в чате (уже с поправкой на часовой пояс)
+    function formatChatMessageTime(timestamp) {
+        if (!timestamp) return 'только что';
+        
+        const date = new Date(timestamp);
+        // Добавляем 3 часа для московского времени
+        date.setHours(date.getHours() + 3); // Добавьте эту строку, если timestamp - UTC
+        
+        return date.toLocaleTimeString('ru-RU', { 
+            hour: '2-digit', 
+            minute: '2-digit'
+        });
+    }
     
-    const date = new Date(timestamp);
-    // Добавляем 3 часа для московского времени
-    date.setHours(date.getHours() + 3);
-    
-    return date.toLocaleTimeString('ru-RU', { 
-        hour: '2-digit', 
-        minute: '2-digit'
-    });
-}
 
 // Для сообщений в чате (уже с поправкой на часовой пояс)
 function formatChatMessageTime(timestamp) {
@@ -1839,17 +1855,19 @@ async function sendMessage() {
         }
         
         // Создаем объект нового сообщения
-        const newMessage = {
-            id: messageData.message_id,
-            sender_id: userData.platform_user_id,
-            content: content,
-            sent_at: adjustTimeToMoscow(new Date().toISOString()), // Используем функцию корректировки времени
-            is_read: false,
-            sender_name: userData.nickname,
-            sender_avatar: userData.avatar_url,
-            sender_avatar_background: userData.avatar_background,
-            is_me: true
-        };
+    // Создаем объект нового сообщения
+    const newMessage = {
+        id: messageData.message_id,
+        sender_id: userData.platform_user_id,
+        content: content,
+        sent_at: new Date().toISOString(), // Отправляем UTC время на сервер
+        is_read: false,
+        sender_name: userData.nickname,
+        sender_avatar: userData.avatar_url,
+        sender_avatar_background: userData.avatar_background,
+        is_me: true
+    };
+    
         
         // Добавляем сообщение в текущий список
         currentMessages = [...currentMessages, newMessage];
