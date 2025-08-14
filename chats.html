@@ -1681,50 +1681,25 @@ async function createChatWithContact(contact) {
     showLoading('Подготовка чата...');
     
     try {
-        const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id,
-                contact_id: contact.platform_user_id
-            }),
-            credentials: 'include'
-        });
+        // Создаем временный объект чата (без сохранения на сервере)
+        const tempChat = {
+            id: `temp_${Date.now()}`, // Временный ID чата (не настоящий)
+            is_group: false,
+            name: contact.nickname || 'Без имени',
+            last_message: null,
+            last_message_time: null,
+            unread_count: 0,
+            participants: [contact],
+            has_avatar_photo: contact.has_avatar_photo,
+            initials: contact.nickname ? contact.nickname[0].toUpperCase() : '?',
+            avatar_background: contact.avatar_background || '#0088cc',
+            is_temp: true  // Флаг временного чата
+        };
         
-        const data = await response.json();
+        // Открываем временный чат
+        openTempChat(tempChat);
+        hideLoading();
         
-        if (data.status === 'success') {
-            hideContactsModal();
-            hideLoading();
-            
-            // Если чат новый (временный), просто откроем его без создания на сервере
-            if (data.is_new) {
-                // Создаем временный объект чата
-                const tempChat = {
-                    id: data.chat_id,
-                    is_group: false,
-                    name: contact.nickname || 'Без имени',
-                    last_message: null,
-                    last_message_time: null,
-                    unread_count: 0,
-                    participants: [contact],
-                    has_avatar_photo: contact.has_avatar_photo,
-                    initials: contact.nickname ? contact.nickname[0].toUpperCase() : '?',
-                    avatar_background: contact.avatar_background || '#0088cc',
-                    is_temp: true  // Флаг временного чата
-                };
-                
-                // Открываем временный чат
-                openTempChat(tempChat);
-            } else {
-                // Если чат уже существует, открываем его как обычно
-                openChat(data.chat_id);
-            }
-        } else {
-            throw new Error(data.error || 'Не удалось подготовить чат');
-        }
     } catch (error) {
         console.error('Error preparing chat:', error);
         showMessage('Ошибка подготовки чата: ' + error.message, 'error');
@@ -1775,9 +1750,7 @@ async function sendMessage() {
         if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     platform_user_id: userData.platform_user_id,
                     contact_id: currentChat.participants[0].platform_user_id
@@ -1799,9 +1772,7 @@ async function sendMessage() {
         // Отправляем сообщение как обычно
         const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chat_id: currentChat.id,
                 sender_id: userData.platform_user_id,
