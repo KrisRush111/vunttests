@@ -1669,6 +1669,16 @@ async function createChatWithContact(contact) {
     showLoading('Создание чата...');
     
     try {
+        // Проверяем, что у нас есть все необходимые данные
+        if (!userData?.platform_user_id || !contact?.platform_user_id) {
+            throw new Error('Недостаточно данных для создания чата');
+        }
+
+        // Проверяем, что пользователь не пытается создать чат с самим собой
+        if (userData.platform_user_id === contact.platform_user_id) {
+            throw new Error('Нельзя создать чат с самим собой');
+        }
+
         const response = await fetch(`${SERVER_URL}/create_chat`, {
             method: 'POST',
             headers: {
@@ -1677,27 +1687,62 @@ async function createChatWithContact(contact) {
             body: JSON.stringify({
                 platform_user_id: userData.platform_user_id,
                 contact_id: contact.platform_user_id,
-                initiator_only: true // Флаг, что чат пока только для инициатора
+                initiator_only: true // Чат будет виден только инициатору до первого сообщения
             }),
             credentials: 'include'
         });
-        
+
+        // Проверяем статус ответа
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Ошибка сервера: ${response.status}`);
+        }
+
         const data = await response.json();
         
         if (data.status === 'success') {
+            // Показываем уведомление об успешном создании чата
+            showMessage('Чат успешно создан', 'success');
+            
+            // Закрываем модальное окно контактов
             hideContactsModal();
             hideLoading();
-            loadChats(); 
+            
+            // Обновляем список чатов
+            await loadChats();
+            
+            // Открываем новый чат с небольшой задержкой для плавности анимации
             setTimeout(() => {
                 openChat(data.chat_id);
-            }, 100);
+                
+                // Фокусируем поле ввода сообщения
+                const { messageInput } = getActiveElements();
+                if (messageInput) {
+                    messageInput.focus();
+                }
+            }, 150);
+            
+            // Возвращаем данные созданного чата для возможного дальнейшего использования
+            return data;
         } else {
             throw new Error(data.error || 'Не удалось создать чат');
         }
     } catch (error) {
-        console.error('Error creating chat:', error);
-        showMessage('Ошибка создания чата: ' + error.message, 'error');
+        console.error('Ошибка при создании чата:', error);
+        
+        // Форматируем сообщение об ошибке для пользователя
+        let errorMessage = 'Ошибка создания чата';
+        if (error.message.includes('already exists')) {
+            errorMessage = 'Чат с этим пользователем уже существует';
+        } else if (error.message) {
+            errorMessage += ': ' + error.message;
+        }
+        
+        showMessage(errorMessage, 'error');
         hideLoading();
+        
+        // Пробрасываем ошибку дальше для возможной обработки
+        throw error;
     }
 }
 
@@ -1861,12 +1906,21 @@ function closeChat() {
 async function sendMessage() {
     const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
     const content = messageInput.value.trim();
-    if (!content || !currentChat) return;
     
+    // Проверяем условия для отправки
+    if (!content || !currentChat || !userData?.platform_user_id) {
+        showMessage('Нельзя отправить пустое сообщение', 'error');
+        return;
+    }
+
+    // Блокируем интерфейс на время отправки
     sendMessageButton.disabled = true;
+    messageInput.disabled = true;
     messageInput.value = '';
     
     try {
+        // Отправляем сообщение на сервер
+        const startTime = performance.now();
         const response = await fetch(`${SERVER_URL}/send_message`, {
             method: 'POST',
             headers: {
@@ -1876,30 +1930,40 @@ async function sendMessage() {
                 chat_id: currentChat.id,
                 sender_id: userData.platform_user_id,
                 content: content,
-                is_first_message: currentMessages.length === 0 // Флаг первого сообщения
+                is_first_message: currentMessages.length === 0
             }),
             credentials: 'include'
         });
-        
+
+        // Проверяем ответ сервера
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Ошибка сервера: ${response.status}`);
+        }
+
         const data = await response.json();
         
         if (data.status !== 'success') {
             throw new Error(data.error || 'Не удалось отправить сообщение');
         }
-        
+
+        // Создаем объект нового сообщения
         const newMessage = {
             id: data.message_id,
             sender_id: userData.platform_user_id,
             content: content,
-            sent_at: new Date().toISOString(),
+            sent_at: data.sent_at || new Date().toISOString(),
             is_read: false,
             sender_name: userData.nickname,
             sender_avatar: userData.avatar_url,
             sender_avatar_background: userData.avatar_background,
             is_me: true
         };
-        
+
+        // Добавляем сообщение в историю
         currentMessages.push(newMessage);
+        
+        // Обновляем UI
         noMessages.style.display = 'none';
         renderMessages(currentMessages);
         
@@ -1908,21 +1972,58 @@ async function sendMessage() {
             last_message: content,
             last_message_time: newMessage.sent_at
         });
+
+        // Прокручиваем к новому сообщению
+        scrollToLatestMessage(messagesContainer);
         
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
-        
+        // Логируем время выполнения
+        const duration = performance.now() - startTime;
+        console.log(`Сообщение отправлено за ${duration.toFixed(1)}ms`);
+
     } catch (error) {
-        console.error('Error sending message:', error);
-        showMessage('Ошибка отправки сообщения', 'error');
+        console.error('Ошибка отправки сообщения:', error);
+        
+        // Восстанавливаем текст сообщения при ошибке
         messageInput.value = content;
         
+        // Показываем соответствующее сообщение об ошибке
+        let errorMessage = 'Ошибка отправки сообщения';
+        if (error.message.includes('не найден')) {
+            errorMessage = 'Чат не найден';
+        } else if (error.message) {
+            errorMessage += `: ${error.message}`;
+        }
+        
+        showMessage(errorMessage, 'error');
+        
+        // Если это было первое сообщение и оно не отправилось
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
+            noMessages.textContent = 'Не удалось отправить первое сообщение';
         }
     } finally {
+        // Восстанавливаем интерфейс
         sendMessageButton.disabled = false;
+        messageInput.disabled = false;
+        messageInput.focus();
+    }
+}
+
+// Вспомогательная функция для плавной прокрутки
+function scrollToLatestMessage(container) {
+    if (!container) return;
+    
+    const scrollOptions = {
+        top: container.scrollHeight,
+        behavior: 'smooth'
+    };
+    
+    // Пробуем использовать scrollTo с options
+    if ('scrollTo' in container) {
+        container.scrollTo(scrollOptions);
+    } else {
+        // Фолбэк для старых браузеров
+        container.scrollTop = container.scrollHeight;
     }
 }
 
@@ -2161,4 +2262,5 @@ window.addEventListener('pageshow', (event) => {
     </script>
 </body>
 </html>
+
 
