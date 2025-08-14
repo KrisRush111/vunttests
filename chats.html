@@ -1721,6 +1721,29 @@ function openTempChat(tempChat) {
     chatAvatar.style.backgroundColor = tempChat.avatar_background;
     chatAvatar.textContent = tempChat.initials;
     
+    // Если у контакта есть аватар, загружаем его
+    if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
+        const userId = tempChat.participants[0].platform_user_id;
+        const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+        const img = new Image();
+        
+        img.onload = function() {
+            chatAvatar.style.backgroundImage = `url(${avatarUrl})`;
+            chatAvatar.style.backgroundSize = 'cover';
+            chatAvatar.style.backgroundPosition = 'center';
+            chatAvatar.textContent = '';
+        };
+        
+        img.onerror = function() {
+            // Если загрузка не удалась, оставляем инициалы
+            chatAvatar.style.backgroundImage = '';
+            chatAvatar.textContent = tempChat.initials;
+            chatAvatar.style.backgroundColor = tempChat.avatar_background;
+        };
+        
+        img.src = avatarUrl;
+    }
+    
     // Очищаем сообщения
     messagesContainer.innerHTML = '';
     noMessages.style.display = 'block';
@@ -1735,7 +1758,6 @@ function openTempChat(tempChat) {
         document.body.style.overflow = 'hidden';
     }
 }
-
 // Обновите функцию sendMessage для обработки временных чатов
 async function sendMessage() {
     const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
