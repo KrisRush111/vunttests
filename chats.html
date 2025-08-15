@@ -464,34 +464,29 @@
         bottom: 0;
         background: var(--telegram-bg);
         z-index: 100;
-        display: flex; /* Always flex, control visibility with opacity/pointer-events */
+        display: none; /* Hidden by default */
         flex-direction: column;
         transform: translateX(100%);
-        transition: transform 0.3s ease, opacity 0.3s ease; /* Add opacity transition */
-        opacity: 0; /* Start hidden */
-        pointer-events: none; /* Disable interactions when hidden */
+        transition: transform 0.3s ease;
     }
 
     .chat-modal.active {
         transform: translateX(0);
-        opacity: 1;
-        pointer-events: all;
+        display: flex; /* Show when active */
     }
 
     @media (min-width: 768px) {
         .chat-modal {
             position: static;
             transform: translateX(0);
-            display: flex; /* Always flex on desktop */
+            display: none; /* Hidden by default on desktop */
             flex: 1;
             height: 100vh;
             border-left: 1px solid var(--telegram-divider);
-            opacity: 1; /* Always visible on desktop when active */
-            pointer-events: all;
         }
 
-        .chat-modal:not(.active) { /* Hide on desktop if not active */
-            display: none;
+        .chat-modal.active {
+            display: flex; /* Show when active on desktop */
         }
     }
 
@@ -1173,6 +1168,12 @@
         width: fit-content;
         line-height: 1.4;
     }
+
+    /* New styles for mobile chat visibility */
+    body.chat-open-mobile .chats-container.mobile-only,
+    body.chat-open-mobile .bottom-nav.mobile-only-nav {
+        display: none;
+    }
 </style>
 </head>
 <body>
@@ -1435,17 +1436,20 @@
             
             const date = new Date(timestamp);
             date.setHours(date.getHours() + 3); // Adjust for Moscow time (UTC+3)
-            
+
             const now = new Date();
-            now.setHours(0, 0, 0, 0); // Start of today
+            now.setHours(now.getHours() + 3); // Adjust for Moscow time (UTC+3)
             
-            const messageDate = new Date(date);
-            messageDate.setHours(0, 0, 0, 0); // Start of message day
+            const today = new Date(now);
+            today.setHours(0, 0, 0, 0);
             
-            const yesterday = new Date(now);
+            const yesterday = new Date(today);
             yesterday.setDate(yesterday.getDate() - 1);
             
-            if (messageDate.getTime() === now.getTime()) {
+            const messageDate = new Date(date);
+            messageDate.setHours(0, 0, 0, 0);
+            
+            if (messageDate.getTime() === today.getTime()) {
                 return 'Сегодня';
             } else if (messageDate.getTime() === yesterday.getTime()) {
                 return 'Вчера';
@@ -1460,7 +1464,7 @@
             }
         }
 
-        // --- Helper Functions ---
+        // Helper function to get correct elements based on device
         function getActiveElements() {
             if (isDesktop) {
                 return {
@@ -1476,7 +1480,8 @@
                     messagesContainer: messagesContainerDesktop,
                     noMessages: noMessagesDesktop,
                     messageInput: messageInputDesktop,
-                    sendMessageButton: sendMessageButtonDesktop
+                    sendMessageButton: sendMessageButtonDesktop,
+                    mainContentContainer: desktopContent // For desktop, main content is desktop-content
                 };
             } else {
                 return {
@@ -1492,17 +1497,20 @@
                     messagesContainer: messagesContainerMobile,
                     noMessages: noMessagesMobile,
                     messageInput: messageInputMobile,
-                    sendMessageButton: sendMessageButtonMobile
+                    sendMessageButton: sendMessageButtonMobile,
+                    mainContentContainer: mobileChatsContainer // For mobile, main content is mobile-only chats-container
                 };
             }
         }
 
+        // Show loading overlay
         function showLoading(text = 'Загрузка...') {
             loadingOverlay.querySelector('.loading-text').textContent = text;
             loadingOverlay.style.display = 'flex';
             loadingOverlay.style.opacity = '1';
         }
         
+        // Hide loading overlay
         function hideLoading() {
             loadingOverlay.style.opacity = '0';
             setTimeout(() => {
@@ -1510,6 +1518,7 @@
             }, 300);
         }
         
+        // Show message (error or success)
         function showMessage(message, type = 'error') {
             messageBox.textContent = message;
             messageBox.className = `message-box ${type}`;
@@ -1519,14 +1528,10 @@
             }, 5000);
         }
         
-        function getRandomColor() {
-            const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
-            return colors[Math.floor(Math.random() * colors.length)];
-        }
-
-        // --- User Data and Chats Loading ---
+        // Load user data from sessionStorage or server
         async function loadUserData() {
             showLoading('Загрузка данных пользователя...');
+            
             try {
                 const cachedData = sessionStorage.getItem('userData');
                 if (cachedData) {
@@ -1535,14 +1540,23 @@
                     return true;
                 }
                 
+                // If not in cache, try to fetch from server (assuming platform_user_id is available from somewhere, e.g., URL param or cookie)
+                // For this example, we'll assume it's already set or will be set by a previous page.
+                // If platform_user_id is truly undefined here, this call will likely fail.
+                // A more robust solution would involve a proper authentication flow.
                 const response = await fetch(`${SERVER_URL}/get_user_data`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id // This might be undefined if not in cache
+                    }),
                     credentials: 'include'
                 });
                 
                 const data = await response.json();
+                
                 if (data.status === 'success') {
                     userData = data.user;
                     sessionStorage.setItem('userData', JSON.stringify(userData));
@@ -1559,17 +1573,25 @@
             }
         }
         
+        // Load chats from server
         async function loadChats() {
             showLoading('Загрузка чатов...');
             const { chatsList, noChats } = getActiveElements();
+            
             try {
                 const response = await fetch(`${SERVER_URL}/get_chats`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
                     credentials: 'include'
                 });
+                
                 const data = await response.json();
+                
                 if (data.status === 'success') {
                     renderChats(data.chats);
                 } else {
@@ -1583,24 +1605,29 @@
             }
         }
         
+        // Render chats list
         function renderChats(chats) {
             const { chatsList, noChats } = getActiveElements();
             chatsList.innerHTML = '';
 
-            const filteredChats = chats.filter(chat => !chat.is_temp);
+            // Filter out temporary chats from the initial render
+            const permanentChats = chats.filter(chat => !chat.is_temp);
             
-            if (!filteredChats || filteredChats.length === 0) {
+            if (!permanentChats || permanentChats.length === 0) {
                 noChats.style.display = 'block';
                 return;
             }
             
             noChats.style.display = 'none';
-            filteredChats.forEach(chat => {
+            permanentChats.forEach(chat => {
                 const chatItem = document.createElement('div');
                 chatItem.className = 'chat-item';
                 chatItem.setAttribute('data-chat-id', chat.id);
                 
-                const initials = chat.name ? chat.name.split(' ').map(n => n[0]).join('') : '?';
+                const initials = chat.name 
+                    ? chat.name.split(' ').map(n => n[0]).join('') 
+                    : '?';
+                
                 const bgColor = chat.avatar_background || getRandomColor();
                 
                 chatItem.innerHTML = `
@@ -1627,49 +1654,68 @@
             });
         }
         
+        // Load chat avatar from server
         function loadChatAvatar(avatarElement, userId, initials, bgColor) {
             const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
             const img = new Image();
+            
             img.onload = function() {
                 avatarElement.style.backgroundImage = `url(${avatarUrl})`;
                 avatarElement.style.backgroundSize = 'cover';
                 avatarElement.style.backgroundPosition = 'center';
                 avatarElement.textContent = '';
             };
+            
             img.onerror = function() {
+                console.log('Failed to load avatar, using initials');
                 avatarElement.style.backgroundImage = '';
                 avatarElement.textContent = initials;
                 avatarElement.style.backgroundColor = bgColor;
             };
+            
             img.src = avatarUrl;
         }
-
-        // --- Contacts Modal Functions ---
+        
+        // Generate random color for avatar background
+        function getRandomColor() {
+            const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+        
+        // Show contacts modal
         function showContactsModal() {
             contactsModal.classList.add('active');
             modalOverlay.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            document.body.style.overflow = 'hidden'; // Prevent body scroll
             loadContacts();
         }
 
+        // Hide contacts modal
         function hideContactsModal() {
             contactsModal.classList.remove('active');
             modalOverlay.classList.remove('active');
-            document.body.style.overflow = '';
-            contactsSearchInput.value = ''; // Clear search input
+            document.body.style.overflow = ''; // Restore body scroll
         }
 
+        // Load contacts from server
         async function loadContacts() {
             showLoading('Загрузка контактов...');
             contactsList.innerHTML = '';
+            
             try {
                 const response = await fetch(`${SERVER_URL}/get_friends`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
                     credentials: 'include'
                 });
+                
                 const data = await response.json();
+                
                 if (data.status === 'success') {
                     renderContacts(data.friends);
                     hideLoading();
@@ -1683,6 +1729,7 @@
             }
         }
 
+        // Render contacts list
         function renderContacts(contacts) {
             if (!contacts || contacts.length === 0) {
                 contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
@@ -1692,9 +1739,11 @@
             contacts.forEach(contact => {
                 const contactItem = document.createElement('div');
                 contactItem.className = 'contact-item';
-                contactItem.setAttribute('data-user-id', contact.platform_user_id); // Add user ID for filtering
                 
-                const initials = contact.nickname ? contact.nickname.split(' ').map(n => n[0]).join('') : '?';
+                const initials = contact.nickname 
+                    ? contact.nickname.split(' ').map(n => n[0]).join('') 
+                    : '?';
+                
                 const bgColor = contact.avatar_background || getRandomColor();
                 
                 contactItem.innerHTML = `
@@ -1719,26 +1768,39 @@
             });
         }
         
-        function filterContacts(searchTerm) {
-            const items = contactsList.querySelectorAll('.contact-item');
-            const lowerCaseSearchTerm = searchTerm.toLowerCase();
-            items.forEach(item => {
-                const name = item.querySelector('.contact-name').textContent.toLowerCase();
-                if (name.includes(lowerCaseSearchTerm)) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
+        // Load contact avatar from server
+        function loadContactAvatar(avatarElement, userId, initials, bgColor) {
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+            const img = new Image();
+            
+            img.onload = function() {
+                avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+                avatarElement.style.backgroundSize = 'cover';
+                avatarElement.style.backgroundPosition = 'center';
+                avatarElement.textContent = '';
+            };
+            
+            img.onerror = function() {
+                console.log('Failed to load avatar, using initials');
+                avatarElement.style.backgroundImage = '';
+                avatarElement.textContent = initials;
+                avatarElement.style.backgroundColor = bgColor;
+            };
+            
+            img.src = avatarUrl;
         }
 
-        // --- Chat Management Functions ---
+        // Create chat with selected contact
         async function createChatWithContact(contact) {
             showLoading('Подготовка чата...');
+            hideContactsModal(); // Close contacts modal immediately
+
             try {
                 const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify({
                         platform_user_id: userData.platform_user_id,
                         contact_id: contact.platform_user_id
@@ -1753,10 +1815,12 @@
                 }
 
                 if (!data.is_new) {
+                    // Chat already exists - open it
                     openChat(data.chat_id);
                 } else {
+                    // Chat does not exist - create a temporary chat object
                     const tempChat = {
-                        id: `temp_${Date.now()}`,
+                        id: `temp_${Date.now()}`, // Temporary chat ID
                         is_group: false,
                         name: contact.nickname || 'Без имени',
                         last_message: null,
@@ -1766,15 +1830,15 @@
                         has_avatar_photo: contact.has_avatar_photo,
                         initials: contact.nickname ? contact.nickname[0].toUpperCase() : '?',
                         avatar_background: contact.avatar_background || getRandomColor(),
-                        is_temp: true
+                        is_temp: true  // Flag for temporary chat
                     };
                     openTempChat(tempChat);
                 }
-                hideContactsModal(); // Close contacts modal after selecting a contact
+                hideLoading();
+                
             } catch (error) {
                 console.error('Error preparing chat:', error);
                 showMessage('Ошибка подготовки чата: ' + error.message, 'error');
-            } finally {
                 hideLoading();
             }
         }
@@ -1783,6 +1847,7 @@
             const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
             
             currentChat = tempChat;
+            
             chatTitle.textContent = tempChat.name;
             chatStatus.textContent = 'был(а) недавно';
             
@@ -1791,124 +1856,15 @@
             chatAvatar.textContent = tempChat.initials;
             
             if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
-                loadChatAvatar(chatAvatar, tempChat.participants[0].platform_user_id, tempChat.initials, tempChat.avatar_background);
+                const userId = tempChat.participants[0].platform_user_id;
+                loadChatAvatar(chatAvatar, userId, tempChat.initials, tempChat.avatar_background);
             }
             
             messagesContainer.innerHTML = '';
             noMessages.style.display = 'block';
             noMessages.textContent = 'Напишите сообщение, чтобы начать чат';
-            currentMessages = []; // Ensure currentMessages is empty for temp chat
-
-            if (isDesktop) {
-                desktopPlaceholder.style.display = 'none';
-                chatModal.classList.add('active'); // Use active class for desktop too
-            } else {
-                chatModal.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            }
-        }
-
-        async function openChat(chatId) {
-            showLoading('Загрузка чата...');
-            const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
             
-            try {
-                const chatResponse = await fetch(`${SERVER_URL}/get_chat_info`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
-                    credentials: 'include'
-                });
-                const chatData = await chatResponse.json();
-                if (chatData.status !== 'success') {
-                    throw new Error(chatData.error || 'Не удалось загрузить чат');
-                }
-                currentChat = chatData.chat;
-                
-                chatTitle.textContent = currentChat.name || 'Новый чат';
-                chatStatus.textContent = 'был(а) недавно';
-                
-                chatAvatar.style.backgroundImage = '';
-                chatAvatar.style.backgroundColor = '';
-                chatAvatar.textContent = '';
-                
-                if (currentChat.avatar_url) {
-                    chatAvatar.style.backgroundImage = `url(${currentChat.avatar_url})`;
-                    chatAvatar.style.backgroundSize = 'cover';
-                    chatAvatar.style.backgroundPosition = 'center';
-                } else {
-                    const bgColor = currentChat.avatar_background || getRandomColor();
-                    chatAvatar.style.backgroundColor = bgColor;
-                    chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-                }
-                
-                const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
-                    credentials: 'include'
-                });
-                const messagesData = await messagesResponse.json();
-                
-                if (messagesData.status === 'success') {
-                    currentMessages = messagesData.messages;
-                    renderMessages(currentMessages);
-                    noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
-                    noMessages.textContent = 'Сообщений пока нет...';
-                } else {
-                    currentMessages = [];
-                    renderMessages([]);
-                    noMessages.style.display = 'block';
-                    noMessages.textContent = 'Сообщений пока нет...';
-                }
-                
-                if (isDesktop) {
-                    desktopPlaceholder.style.display = 'none';
-                    chatModal.classList.add('active');
-                } else {
-                    chatModal.classList.add('active');
-                    document.body.style.overflow = 'hidden';
-                }
-                
-                if (currentMessages.length > 0) {
-                    setTimeout(() => {
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 100);
-                }
-
-                await updateChatInList(chatId, { unread_count: 0 }); // Reset unread count
-                
-            } catch (error) {
-                console.error('Error opening chat:', error);
-                showMessage('Ошибка загрузки чата', 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        function closeChat() {
-            const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
-
-            if (isDesktop) {
-                chatModal.classList.remove('active');
-                desktopPlaceholder.style.display = 'flex';
-            } else {
-                chatModal.classList.remove('active');
-                document.body.style.overflow = '';
-            }
-            
-            // Clear chat state
-            currentChat = null;
-            currentMessages = [];
-            messagesContainer.innerHTML = '';
-            noMessages.style.display = 'block';
-            noMessages.textContent = 'Сообщений пока нет...';
-            
-            chatAvatar.style.backgroundImage = '';
-            chatAvatar.style.backgroundColor = '';
-            chatAvatar.textContent = '';
-
-            loadChats(); // Reload chats to reflect any changes (e.g., unread counts)
+            showChatModal();
         }
 
         async function sendMessage() {
@@ -1924,7 +1880,7 @@
                 let isNewChatCreated = false;
 
                 if (currentChat.is_temp) {
-                    const createChatResponse = await fetch(`${SERVER_URL}/create_chat`, {
+                    const response = await fetch(`${SERVER_URL}/create_chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1934,13 +1890,13 @@
                         credentials: 'include'
                     });
                     
-                    const createChatData = await createChatResponse.json();
+                    const data = await response.json();
                     
-                    if (createChatData.status !== 'success') {
-                        throw new Error(createChatData.error || 'Не удалось создать чат');
+                    if (data.status !== 'success') {
+                        throw new Error(data.error || 'Не удалось создать чат');
                     }
                     
-                    chatIdToSend = createChatData.chat_id;
+                    chatIdToSend = data.chat_id;
                     currentChat.id = chatIdToSend;
                     currentChat.is_temp = false;
                     isNewChatCreated = true;
@@ -1967,7 +1923,7 @@
                     id: messageData.message_id,
                     sender_id: userData.platform_user_id,
                     content: content,
-                    sent_at: new Date().toISOString(),
+                    sent_at: new Date().toISOString(), // Send UTC time to server
                     is_read: false,
                     sender_name: userData.nickname,
                     sender_avatar: userData.avatar_url,
@@ -1976,25 +1932,30 @@
                 };
                 
                 currentMessages = [...currentMessages, newMessage];
+                
+                noMessages.style.display = 'none';
                 renderMessages(currentMessages);
                 
                 setTimeout(() => {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }, 50);
                 
+                // Update chat list after sending message
+                await updateChatInList(currentChat.id, {
+                    last_message: content,
+                    last_message_time: newMessage.sent_at
+                });
+
+                // If a new chat was created, reload the entire chat list to ensure it appears
                 if (isNewChatCreated) {
-                    await loadChats(); // Reload all chats to show the newly created one
-                } else {
-                    await updateChatInList(currentChat.id, {
-                        last_message: content,
-                        last_message_time: newMessage.sent_at
-                    });
+                    await loadChats();
                 }
                 
             } catch (error) {
                 console.error('Error sending message:', error);
                 showMessage('Ошибка отправки сообщения: ' + error.message, 'error');
-                messageInput.value = content; // Restore message content
+                messageInput.value = content;
+                
                 if (currentMessages.length === 0) {
                     noMessages.style.display = 'block';
                 }
@@ -2003,15 +1964,158 @@
             }
         }
 
+        async function openChat(chatId) {
+            showLoading('Загрузка чата...');
+            const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                const chatData = await response.json();
+                
+                if (chatData.status !== 'success') {
+                    throw new Error(chatData.error || 'Не удалось загрузить чат');
+                }
+                
+                currentChat = chatData.chat;
+                
+                chatTitle.textContent = currentChat.name || 'Новый чат';
+                chatStatus.textContent = 'был(а) недавно';
+                
+                chatAvatar.style.backgroundImage = '';
+                chatAvatar.style.backgroundColor = '';
+                chatAvatar.textContent = '';
+                
+                if (currentChat.avatar_url) {
+                    chatAvatar.style.backgroundImage = `url(${currentChat.avatar_url})`;
+                    chatAvatar.style.backgroundSize = 'cover';
+                    chatAvatar.style.backgroundPosition = 'center';
+                } else {
+                    const bgColor = currentChat.avatar_background || getRandomColor();
+                    chatAvatar.style.backgroundColor = bgColor;
+                    chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                }
+                
+                const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                const messagesData = await messagesResponse.json();
+                
+                if (messagesData.status === 'success') {
+                    currentMessages = messagesData.messages;
+                    renderMessages(currentMessages);
+                    
+                    if (currentMessages.length === 0) {
+                        noMessages.style.display = 'block';
+                        noMessages.textContent = 'Сообщений пока нет...';
+                    } else {
+                        noMessages.style.display = 'none';
+                    }
+                } else {
+                    currentMessages = [];
+                    renderMessages([]);
+                    noMessages.style.display = 'block';
+                    noMessages.textContent = 'Сообщений пока нет...';
+                }
+                
+                showChatModal();
+                
+                if (currentMessages.length > 0) {
+                    setTimeout(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 100);
+                }
+
+                await updateChatInList(chatId, {
+                    last_message: currentChat.last_message,
+                    last_message_time: currentChat.last_message_time,
+                    unread_count: 0 // Reset unread count
+                });
+                
+            } catch (error) {
+                console.error('Error opening chat:', error);
+                showMessage('Ошибка загрузки чата', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function showChatModal() {
+            const { chatModal, mainContentContainer } = getActiveElements();
+            if (isDesktop) {
+                desktopPlaceholder.style.display = 'none';
+                chatModal.style.display = 'flex';
+            } else {
+                // Hide main chats container and mobile nav
+                document.body.classList.add('chat-open-mobile');
+                chatModal.classList.add('active');
+                document.body.style.overflow = 'hidden'; // Prevent body scroll
+            }
+        }
+
+        function closeChat() {
+            const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
+
+            if (isDesktop) {
+                chatModal.style.display = 'none';
+                desktopPlaceholder.style.display = 'flex';
+            } else {
+                chatModal.classList.remove('active');
+                document.body.classList.remove('chat-open-mobile');
+                document.body.style.overflow = ''; // Restore body scroll
+            }
+            
+            // Only reload chats if it was a permanent chat (not a temporary one that just got created)
+            if (!currentChat || !currentChat.is_temp) {
+                loadChats(); // Reload to update unread counts and last messages
+            }
+            
+            currentChat = null;
+            currentMessages = [];
+            messagesContainer.innerHTML = '';
+            noMessages.style.display = 'block';
+            noMessages.textContent = 'Сообщений пока нет...';
+            
+            chatAvatar.style.backgroundImage = '';
+            chatAvatar.style.backgroundColor = '';
+            chatAvatar.textContent = '';
+        }
+
         async function updateChatInList(chatId, updates) {
             try {
                 const response = await fetch(`${SERVER_URL}/get_chat_info`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        platform_user_id: userData.platform_user_id
+                    }),
                     credentials: 'include'
                 });
+                
                 const data = await response.json();
+                
                 if (data.status === 'success') {
                     updateChatItemInDOM(chatId, data.chat);
                 }
@@ -2051,13 +2155,16 @@
                             badge.remove();
                         }
                     }
-                    list.prepend(chatItem); // Move to top
+                    
+                    // Move chat to the top of the list
+                    list.prepend(chatItem);
                 }
             });
         }
 
         function renderMessages(messages) {
             const { messagesContainer, noMessages } = getActiveElements();
+            
             messagesContainer.innerHTML = '';
             
             if (!messages || messages.length === 0) {
@@ -2089,6 +2196,7 @@
 
         function renderMessage(message) {
             const { messagesContainer } = getActiveElements();
+            
             const messageElement = document.createElement('div');
             messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
             
@@ -2107,25 +2215,41 @@
             messagesContainer.appendChild(messageElement);
         }
 
-        // --- Initialization ---
+        // Function to filter contacts (for contacts modal search)
+        function filterContacts(searchTerm) {
+            const items = contactsList.querySelectorAll('.contact-item');
+            const lowerCaseSearchTerm = searchTerm.toLowerCase();
+
+            items.forEach(item => {
+                const name = item.querySelector('.contact-name').textContent.toLowerCase();
+                if (name.includes(lowerCaseSearchTerm)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // Initialize page
         async function initializePage() {
             const userDataFromStorage = sessionStorage.getItem('userData');
             if (!userDataFromStorage) {
                 window.location.href = 'profile.html';
                 return;
             }
+            
             userData = JSON.parse(userDataFromStorage);
             
             isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-            // Set initial display states based on device
+            // Initial display setup based on device type
             if (isDesktop) {
                 mobileChatsContainer.style.display = 'none';
                 mobileOnlyNav.style.display = 'none';
                 desktopSidebar.style.display = 'flex';
                 desktopContent.style.display = 'flex';
                 desktopOnlyNav.style.display = 'flex';
-                chatModalDesktop.classList.remove('active'); // Ensure hidden initially
+                chatModalDesktop.style.display = 'none';
                 desktopPlaceholder.style.display = 'flex';
             } else {
                 mobileChatsContainer.style.display = 'flex';
@@ -2133,13 +2257,13 @@
                 desktopSidebar.style.display = 'none';
                 desktopContent.style.display = 'none';
                 desktopOnlyNav.style.display = 'none';
-                chatModalMobile.classList.remove('active'); // Ensure hidden initially
+                chatModalMobile.classList.remove('active');
+                document.body.classList.remove('chat-open-mobile'); // Ensure this is reset
             }
 
             await loadUserData();
             await loadChats();
             
-            // Event Listeners
             const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
 
             addChatButton.addEventListener('click', (e) => {
@@ -2154,11 +2278,12 @@
                 filterContacts(e.target.value);
             });
 
-            // Basic chat search/filter (can be expanded)
+            // Note: The searchInput for chats is currently a placeholder.
+            // If actual chat filtering is needed, implement it here.
             searchInput.addEventListener('input', (e) => {
+                // Example: filter chats based on input
                 const searchTerm = e.target.value.toLowerCase();
-                const { chatsList } = getActiveElements();
-                const chatItems = chatsList.querySelectorAll('.chat-item');
+                const chatItems = (isDesktop ? chatsListDesktop : chatsListMobile).querySelectorAll('.chat-item');
                 chatItems.forEach(item => {
                     const chatName = item.querySelector('.chat-name').textContent.toLowerCase();
                     if (chatName.includes(searchTerm)) {
@@ -2183,8 +2308,8 @@
             // Periodically update chats (e.g., for new messages/unread counts)
             setInterval(async () => {
                 const { chatModal } = getActiveElements();
-                // Only reload chats if a chat modal is NOT active
-                if (!chatModal.classList.contains('active')) {
+                // Only load chats if a chat modal is NOT active (to avoid interrupting active chat)
+                if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
                     await loadChats();
                 }
             }, 30000); // Every 30 seconds
