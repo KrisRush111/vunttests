@@ -542,6 +542,27 @@
             box-shadow: var(--telegram-shadow-large);
         }
 
+        .message-box {
+            text-align: center;
+            padding: 12px 16px;
+            margin: 12px;
+            border-radius: 12px;
+            display: none;
+            font-size: 15px;
+            font-weight: 500;
+            animation: slideDown 0.3s ease;
+        }
+
+        .message-box.error {
+            color: white;
+            background: var(--telegram-destructive);
+        }
+
+        .message-box.success {
+            color: white;
+            background: var(--telegram-success);
+        }
+
         /* Profile Modal */
         .profile-modal {
             position: fixed;
@@ -1325,6 +1346,9 @@
         </div>
     </div>
 
+    <!-- Message box -->
+    <div id="messageBox" class="message-box"></div>
+
     <!-- Mobile layout -->
     <div class="contacts-container mobile-only">
         <div class="search-container">
@@ -1448,7 +1472,7 @@
 
         // DOM elements (unified for desktop and mobile where possible)
         const loadingOverlay = document.getElementById('loadingOverlay');
-        // const messageBox = document.getElementById('messageBox'); // Удален из HTML, поэтому закомментирован
+        const messageBox = document.getElementById('messageBox');
         const modalOverlay = document.getElementById('modalOverlay');
 
         // Photo Viewer elements
@@ -1584,15 +1608,14 @@
             }, 300);
         }
 
-        // Show message (error or success) - Now logs to console instead of displaying on screen
+        // Show message (error or success)
         function showMessage(message, type = 'error') {
-            console.log(`Message (${type}): ${message}`);
-            // messageBox.textContent = message; // Removed
-            // messageBox.className = `message-box ${type}`; // Removed
-            // messageBox.style.display = 'block'; // Removed
-            // setTimeout(() => { // Removed
-            //     messageBox.style.display = 'none'; // Removed
-            // }, 5000); // Removed
+            messageBox.textContent = message;
+            messageBox.className = `message-box ${type}`;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 5000);
         }
 
         // Load user data from sessionStorage
@@ -1702,7 +1725,7 @@
                 }
             } catch (error) {
                 console.error('Profile loading error:', error);
-                // showMessage('Ошибка загрузки профиля: ' + error.message, 'error'); // Removed
+                showMessage('Ошибка загрузки профиля: ' + error.message, 'error');
             } finally {
                 hideLoading();
             }
@@ -1725,7 +1748,7 @@
                 modalProfileAvatar.style.backgroundColor = '';
             } else {
                 const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                avatarElement.textContent = initial;
+                modalProfileAvatar.textContent = initial;
                 modalProfileAvatar.style.backgroundImage = '';
 
                 if (user.avatar_background) {
@@ -1840,12 +1863,12 @@
                         noContacts.style.display = 'block';
                     }
                 } else {
-                    throw new Error(data.error || 'Нет контактов');
+                    throw new Error(data.error || 'Ошибка загрузки контактов');
                 }
             } catch (error) {
                 console.error('Load contacts error:', error);
-                // showMessage('Ошибка загрузки контактов: ' + error.message); // Removed
-                noContacts.textContent = 'Нет контактов';
+                showMessage('Ошибка загрузки контактов: ' + error.message);
+                noContacts.textContent = 'Ошибка при загрузке контактов';
                 noContacts.style.display = 'block';
             } finally {
                 hideLoading();
@@ -1894,6 +1917,14 @@
             // Avatar
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
+            // Удаляем обработчик клика на аватарку в списке контактов, чтобы она не открывала фото
+            // avatarElement.addEventListener('click', (e) => {
+            //     e.stopPropagation();
+            //     if (user.has_avatar_photo || user.has_avatar) {
+            //         const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+            //         openPhotoViewer(avatarUrl);
+            //     }
+            // });
 
             if (user.has_avatar_photo || user.has_avatar) {
                 const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
@@ -1972,6 +2003,14 @@
             // Avatar
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
+            // Удаляем обработчик клика на аватарку в запросах на дружбу, чтобы она не открывала фото
+            // avatarElement.addEventListener('click', (e) => {
+            //     e.stopPropagation();
+            //     if (user.has_avatar_photo || user.has_avatar) {
+            //         const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+            //         openPhotoViewer(avatarUrl);
+            //     }
+            // });
 
             if (user.has_avatar_photo || user.has_avatar) {
                 const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
@@ -2063,7 +2102,7 @@
                 }
 
                 if (data.status === 'success') {
-                    console.log('Запрос на дружбу отправлен'); // Log success
+                    showMessage('Запрос на дружбу отправлен', 'success');
                     // Обновляем список контактов и сохраняем в sessionStorage
                     loadContacts();
                 } else {
@@ -2071,7 +2110,7 @@
                 }
             } catch (error) {
                 console.error('Send friend request error:', error);
-                // showMessage('Ошибка отправки запроса: ' + error.message); // Removed
+                showMessage('Ошибка отправки запроса: ' + error.message);
             } finally {
                 hideLoading();
             }
@@ -2101,7 +2140,12 @@
                 }
 
                 if (data.status === 'success') {
-                    console.log(action === 'accept' ? 'Запрос принят! Пользователь добавлен в контакты' : 'Запрос отклонен'); // Log success
+                    showMessage(
+                        action === 'accept' ?
+                        'Запрос принят! Пользователь добавлен в контакты' :
+                        'Запрос отклонен',
+                        action === 'accept' ? 'success' : 'info'
+                    );
                     // Обновляем список контактов
                     loadContacts();
                 } else {
@@ -2109,7 +2153,7 @@
                 }
             } catch (error) {
                 console.error('Handle friend request error:', error);
-                // showMessage('Ошибка обработки запроса: ' + error.message); // Removed
+                showMessage('Ошибка обработки запроса: ' + error.message);
             } finally {
                 hideLoading();
             }
@@ -2148,12 +2192,12 @@
             const { searchResults, noContacts } = getActiveElements();
 
             if (!userId || userId.trim() === '') {
-                console.log('Пожалуйста, введите ID пользователя'); // Log message
+                showMessage('Пожалуйста, введите ID пользователя');
                 return;
             }
 
             if (userId === userData.platform_user_id) {
-                console.log('Нельзя искать самого себя'); // Log message
+                showMessage('Нельзя искать самого себя');
                 return;
             }
 
@@ -2244,7 +2288,7 @@
                 }
             } catch (error) {
                 console.error('Search error:', error);
-                // showMessage('Ошибка поиска: ' + error.message); // Removed
+                showMessage('Ошибка поиска: ' + error.message);
                 noContacts.textContent = 'Ошибка при поиске';
                 noContacts.style.display = 'block';
             } finally {
@@ -2332,7 +2376,7 @@
                 console.log('Initialization complete');
             } catch (error) {
                 console.error('Initialization failed:', error);
-                // showMessage('Ошибка инициализации страницы', 'error'); // Removed
+                showMessage('Ошибка инициализации страницы', 'error');
             }
         }
 
