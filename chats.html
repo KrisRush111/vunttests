@@ -1969,19 +1969,17 @@ async function sendMessage() {
         }
         
         // Создаем объект нового сообщения
-    // Создаем объект нового сообщения
-    const newMessage = {
-        id: messageData.message_id,
-        sender_id: userData.platform_user_id,
-        content: content,
-        sent_at: new Date().toISOString(), // Отправляем UTC время на сервер
-        is_read: false,
-        sender_name: userData.nickname,
-        sender_avatar: userData.avatar_url,
-        sender_avatar_background: userData.avatar_background,
-        is_me: true
-    };
-    
+        const newMessage = {
+            id: messageData.message_id,
+            sender_id: userData.platform_user_id,
+            content: content,
+            sent_at: new Date().toISOString(), // Отправляем UTC время на сервер
+            is_read: false,
+            sender_name: userData.nickname,
+            sender_avatar: userData.avatar_url,
+            sender_avatar_background: userData.avatar_background,
+            is_me: true
+        };
         
         // Добавляем сообщение в текущий список
         currentMessages = [...currentMessages, newMessage];
@@ -1995,11 +1993,22 @@ async function sendMessage() {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
         
-        // Для не временных чатов обновляем список
+        // Для не временных чатов обновляем список без показа окна загрузки
         if (!currentChat.is_temp) {
-            await updateChatInList(currentChat.id, {
+            // Сразу обновляем DOM для мгновенного отображения
+            updateChatItemInDOM(currentChat.id, {
+                last_message: content,
+                last_message_time: newMessage.sent_at,
+                unread_count: 0 // Сбрасываем счетчик, так как это наше сообщение
+            });
+            
+            // Затем асинхронно обновляем данные с сервера
+            updateChatInList(currentChat.id, {
                 last_message: content,
                 last_message_time: newMessage.sent_at
+            }).catch(error => {
+                console.error('Background chat update error:', error);
+                // Игнорируем ошибки фонового обновления
             });
         }
         
@@ -2110,11 +2119,21 @@ async function openChat(chatId) {
             }, 100);
         }
 
-        // После загрузки чата обновляем его в списке
-        await updateChatInList(chatId, {
+        // После загрузки чата мгновенно обновляем его в списке (без показа загрузки)
+        updateChatItemInDOM(chatId, {
             last_message: currentChat.last_message,
             last_message_time: currentChat.last_message_time,
             unread_count: 0 // Сбрасываем счетчик непрочитанных
+        });
+        
+        // Затем асинхронно обновляем данные с сервера в фоновом режиме
+        updateChatInList(chatId, {
+            last_message: currentChat.last_message,
+            last_message_time: currentChat.last_message_time,
+            unread_count: 0
+        }).catch(error => {
+            console.error('Background chat update error:', error);
+            // Игнорируем ошибки фонового обновления
         });
         
     } catch (error) {
@@ -2180,10 +2199,25 @@ async function updateChatInList(chatId, updates) {
         if (data.status === 'success') {
             // Обновляем чат в списке
             updateChatItemInDOM(chatId, data.chat);
+            
+            // Перемещаем чат вверх списка (самый свежий вверху)
+            moveChatToTop(chatId);
         }
     } catch (error) {
         console.error('Error updating chat in list:', error);
     }
+}
+
+// Функция для перемещения чата в начало списка
+function moveChatToTop(chatId) {
+    [chatsListDesktop, chatsListMobile].forEach(list => {
+        if (!list) return;
+        
+        const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+        if (chatItem) {
+            list.prepend(chatItem);
+        }
+    });
 }
 
 // Функция для обновления элемента чата в DOM
@@ -2299,90 +2333,140 @@ function renderMessage(message) {
     messagesContainer.appendChild(messageElement);
 }
         // Initialize page
-        async function initializePage() {
-            // Check authorization
-            const userDataFromStorage = sessionStorage.getItem('userData');
-            if (!userDataFromStorage) {
-                window.location.href = 'profile.html';
-                return;
-            }
-            
-            userData = JSON.parse(userDataFromStorage);
-            
-            // Determine if desktop or mobile
-            isDesktop = window.matchMedia("(min-width: 768px)").matches;
+ async function initializePage() {
+    // Check authorization
+    const userDataFromStorage = sessionStorage.getItem('userData');
+    if (!userDataFromStorage) {
+        window.location.href = 'profile.html';
+        return;
+    }
+    
+    userData = JSON.parse(userDataFromStorage);
+    
+    // Determine if desktop or mobile
+    isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-            // Hide/show relevant containers and navigation
-            if (isDesktop) {
-                mobileChatsContainer.style.display = 'none';
-                mobileOnlyNav.style.display = 'none';
-                desktopSidebar.style.display = 'flex'; // Use flex for sidebar
-                desktopContent.style.display = 'flex';
-                desktopOnlyNav.style.display = 'flex'; // Show desktop nav
-                chatModalDesktop.style.display = 'none'; // Initially hide chat modal on desktop
-                desktopPlaceholder.style.display = 'flex'; // Show placeholder
-            } else {
-                mobileChatsContainer.style.display = 'flex';
-                mobileOnlyNav.style.display = 'flex';
-                desktopSidebar.style.display = 'none';
-                desktopContent.style.display = 'none';
-                desktopOnlyNav.style.display = 'none'; // Hide desktop nav
-                chatModalMobile.classList.remove('active'); // Ensure mobile chat modal is hidden
-            }
+    // Hide/show relevant containers and navigation
+    if (isDesktop) {
+        mobileChatsContainer.style.display = 'none';
+        mobileOnlyNav.style.display = 'none';
+        desktopSidebar.style.display = 'flex'; // Use flex for sidebar
+        desktopContent.style.display = 'flex';
+        desktopOnlyNav.style.display = 'flex'; // Show desktop nav
+        chatModalDesktop.style.display = 'none'; // Initially hide chat modal on desktop
+        desktopPlaceholder.style.display = 'flex'; // Show placeholder
+    } else {
+        mobileChatsContainer.style.display = 'flex';
+        mobileOnlyNav.style.display = 'flex';
+        desktopSidebar.style.display = 'none';
+        desktopContent.style.display = 'none';
+        desktopOnlyNav.style.display = 'none'; // Hide desktop nav
+        chatModalMobile.classList.remove('active'); // Ensure mobile chat modal is hidden
+    }
 
-            // Load data
-            await loadUserData();
-            await loadChats();
-            
-            // Event listeners for active elements
-            const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
+    // Load data
+    await loadUserData();
+    await loadChats();
+    
+    // Event listeners for active elements
+    const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
 
-            addChatButton.addEventListener('click', (e) => {
-                e.preventDefault();
-                showContactsModal();
-            });
+    addChatButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        showContactsModal();
+    });
 
-            closeContacts.addEventListener('click', hideContactsModal);
-            modalOverlay.addEventListener('click', hideContactsModal);
-            
-            contactsSearchInput.addEventListener('input', (e) => {
-                filterContacts(e.target.value);
-            });
+    closeContacts.addEventListener('click', hideContactsModal);
+    modalOverlay.addEventListener('click', hideContactsModal);
+    
+    contactsSearchInput.addEventListener('input', (e) => {
+        filterContacts(e.target.value);
+    });
 
-            searchInput.addEventListener('input', (e) => {
-                // Implement chat search/filter logic here if needed
-                // For now, it's just a placeholder input
-            });
+    searchInput.addEventListener('input', (e) => {
+        // Implement chat search/filter logic here if needed
+        // For now, it's just a placeholder input
+        filterChats(e.target.value);
+    });
 
-            if (backToChats) { // Only for mobile
-                backToChats.addEventListener('click', closeChat);
-            }
-            
-            sendMessageButton.addEventListener('click', sendMessage);
-            messageInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    sendMessage();
-                }
-            });
-            
-            // Update chats every 30 seconds
-            setInterval(async () => {
-                const { chatModal } = getActiveElements();
-                if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') { // Check for both mobile active class and desktop display style
-                    await loadChats();
-                }
-            }, 30000);
-
-            // Handle window resize for responsive layout
-            window.addEventListener('resize', () => {
-                const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-                if (newIsDesktop !== isDesktop) {
-                    isDesktop = newIsDesktop;
-                    initializePage(); // Re-initialize to apply correct layout
-                }
-            });
+    if (backToChats) { // Only for mobile
+        backToChats.addEventListener('click', closeChat);
+    }
+    
+    sendMessageButton.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
         }
+    });
+    
+    // Update chats every 10 seconds (увеличили частоту обновлений)
+    setInterval(async () => {
+        const { chatModal } = getActiveElements();
+        // Обновляем только если чат не открыт
+        if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
+            await loadChats();
+        }
+    }, 10000); // Уменьшили интервал до 10 секунд
 
+    // Handle window resize for responsive layout
+    window.addEventListener('resize', () => {
+        const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+        if (newIsDesktop !== isDesktop) {
+            isDesktop = newIsDesktop;
+            initializePage(); // Re-initialize to apply correct layout
+        }
+    });
+
+    // Добавляем обработчик для кнопки меню в заголовке чата
+    const menuButton = document.querySelector('.menu-button');
+    if (menuButton) {
+        menuButton.addEventListener('click', () => {
+            // Здесь можно добавить функциональность меню чата
+            console.log('Menu button clicked');
+        });
+    }
+
+    // Добавляем обработчик для поиска в контактах
+    const contactsSearchBtn = document.querySelector('.contacts-search-btn');
+    if (contactsSearchBtn) {
+        contactsSearchBtn.addEventListener('click', () => {
+            contactsSearchInput.focus();
+        });
+    }
+}
+
+// Добавляем функцию фильтрации чатов
+function filterChats(searchTerm) {
+    const { chatsList } = getActiveElements();
+    const chatItems = chatsList.querySelectorAll('.chat-item');
+    
+    chatItems.forEach(item => {
+        const chatName = item.querySelector('.chat-name').textContent.toLowerCase();
+        const lastMessage = item.querySelector('.last-message').textContent.toLowerCase();
+        
+        if (chatName.includes(searchTerm.toLowerCase()) || lastMessage.includes(searchTerm.toLowerCase())) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+// Добавляем функцию фильтрации контактов
+function filterContacts(searchTerm) {
+    const contactItems = contactsList.querySelectorAll('.contact-item');
+    
+    contactItems.forEach(item => {
+        const contactName = item.querySelector('.contact-name').textContent.toLowerCase();
+        
+        if (contactName.includes(searchTerm.toLowerCase())) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
         // Initialize when DOM is loaded
         document.addEventListener('DOMContentLoaded', initializePage);
         
