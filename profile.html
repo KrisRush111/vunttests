@@ -202,6 +202,48 @@
             .modal-overlay {
                 display: none !important;
             }
+
+            /* New styles for desktop content modules */
+            .desktop-module {
+                display: none; /* Hidden by default */
+                flex-direction: column;
+                flex: 1;
+                height: 100%;
+                padding: 12px;
+                overflow-y: auto;
+                background-color: var(--telegram-secondary-bg);
+                z-index: 1;
+                animation: none;
+                transform: none;
+            }
+
+            .desktop-module.visible {
+                display: flex;
+            }
+
+            .desktop-module-content {
+                width: 100%;
+                max-width: 480px;
+                margin: 0 auto;
+                background: var(--telegram-bg); /* White background for modules */
+                border-radius: 12px;
+                box-shadow: var(--telegram-shadow);
+                padding: 20px;
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: 200px; /* Ensure it's visible */
+            }
+
+            .desktop-module-content h3 {
+                color: var(--telegram-hint); /* Серый цвет текста */
+                font-size: 18px;
+                font-weight: 500;
+                text-align: center; /* Выравнивание по центру */
+                width: 100%; /* Занимает всю доступную ширину */
+            }
         }
 
         /* Общие стили для профиля (мобильный и десктопный контент) */
@@ -780,6 +822,8 @@
             border-radius: 12px;
             box-shadow: none; /* Убираем тень */
             transition: all 0.2s ease;
+            border-bottom: 1px solid var(--telegram-divider); /* Add divider line */
+            padding-bottom: 12px; /* Space for the line */
         }
 
         .search-input-container {
@@ -817,8 +861,9 @@
 
         .desktop-sidebar-header {
             padding: 16px; /* Отступы вокруг блока профиля */
-            display: flex;
-            align-items: center; /* Выравнивание по центру по вертикали */
+            display: flex; /* Изменено на flex */
+            flex-direction: row; /* Изменено на row */
+            align-items: center; /* Выравнивание по центру */
             background: var(--telegram-bg);
             border-bottom: 1px solid var(--telegram-divider);
             position: relative; /* Для позиционирования кнопки "Изм." */
@@ -834,7 +879,7 @@
             font-size: 24px; /* Уменьшаем размер шрифта */
             font-weight: 600;
             color: white;
-            margin-right: 12px; /* Отступ справа от аватара */
+            margin-right: 12px; /* Добавлен отступ справа от аватара */
             flex-shrink: 0;
             background: linear-gradient(135deg, var(--telegram-blue), var(--telegram-light-blue));
             background-size: cover;
@@ -847,6 +892,7 @@
         .desktop-sidebar-info {
             display: flex;
             flex-direction: column;
+            align-items: flex-start; /* Выравнивание текста по левому краю */
             flex-grow: 1; /* Занимает оставшееся пространство */
             min-width: 0; /* Позволяет тексту сжиматься */
         }
@@ -858,12 +904,14 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            max-width: 100%; /* Ensure it doesn't overflow */
         }
 
-        .desktop-sidebar-role {
+        .desktop-sidebar-id { /* New style for ID */
             font-size: 14px;
             color: var(--telegram-hint);
-            text-transform: lowercase; /* Роль с маленькой буквы */
+            margin-top: 4px;
+            text-transform: lowercase; /* ID с маленькой буквы */
         }
 
         .desktop-sidebar-settings {
@@ -956,7 +1004,7 @@
         <div class="loading-text">Загрузка профиля...</div>
     </div>
 
-    <!-- "Скоро..." message -->
+    <!-- "Скоро..." message (for mobile, or general use if needed) -->
     <div id="soonMessage" class="soon-message">Скоро...</div>
 
     <!-- Desktop layout -->
@@ -974,7 +1022,7 @@
                 <div id="sidebar-profile-avatar" class="desktop-sidebar-avatar"></div>
                 <div class="desktop-sidebar-info">
                     <div id="sidebar-profile-nickname" class="desktop-sidebar-nickname">Загрузка...</div>
-                    <div class="desktop-sidebar-role">ученица</div>
+                    <div id="sidebar-profile-id" class="desktop-sidebar-id">id: Загрузка...</div> <!-- Added ID here -->
                 </div>
                 <a href="https://t.me/VuntgramBot?start=myprofile" class="edit-button">Изм.</a>
             </div>
@@ -1066,6 +1114,18 @@
                         <div id="desktop-user-course" class="detail-value">Загрузка...</div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- New desktop modules for settings -->
+        <div id="privacyModule" class="desktop-module">
+            <div class="desktop-module-content">
+                <h3>Скоро...</h3>
+            </div>
+        </div>
+        <div id="appearanceModule" class="desktop-module">
+            <div class="desktop-module-content">
+                <h3>Скоро...</h3>
             </div>
         </div>
     </div>
@@ -1196,8 +1256,13 @@
         const desktopCourseContainer = document.getElementById('desktop-course-container');
         const sidebarProfileAvatar = document.getElementById('sidebar-profile-avatar');
         const sidebarProfileNickname = document.getElementById('sidebar-profile-nickname');
+        const sidebarProfileId = document.getElementById('sidebar-profile-id'); // New ID element in sidebar
         const desktopBottomNav = document.querySelector('.bottom-nav.desktop-only-nav');
         const searchInputDesktop = document.getElementById('searchInputDesktop'); // New search input
+
+        // New desktop modules
+        const privacyModule = document.getElementById('privacyModule');
+        const appearanceModule = document.getElementById('appearanceModule');
 
         // Avatar modal elements
         const avatarModal = document.getElementById('avatarModal');
@@ -1279,12 +1344,20 @@
             }, 300);
         }
 
-        // Show "Скоро..." message
-        function showSoonMessage() {
-            soonMessage.classList.add('active');
-            setTimeout(() => {
-                soonMessage.classList.remove('active');
-            }, 2000); // Message disappears after 2 seconds
+        // Show "Скоро..." message (for desktop modules)
+        function showDesktopModule(moduleElement) {
+            // Hide all other modules first
+            const allModules = [profileModalDesktop, privacyModule, appearanceModule];
+            allModules.forEach(mod => {
+                if (mod) mod.classList.remove('visible');
+            });
+            desktopPlaceholder.style.display = 'none';
+
+            // Show the selected module
+            if (moduleElement) {
+                moduleElement.classList.add('visible');
+                desktopContent.scrollTo({ top: 0, behavior: 'smooth' });
+            }
         }
 
         // Adjust color brightness
@@ -1402,18 +1475,20 @@
                 }
 
                 // Use the new avatar URL from Cloudinary
-                profileAvatarMobile.style.backgroundImage = `url(${data.avatar_url})`;
+                const newAvatarUrl = data.avatar_url;
+
+                profileAvatarMobile.style.backgroundImage = `url(${newAvatarUrl})`;
                 profileAvatarMobile.style.backgroundSize = 'cover';
                 profileAvatarMobile.style.backgroundPosition = 'center';
                 profileAvatarMobile.textContent = '';
                 
                 if (isDesktop) {
-                    sidebarProfileAvatar.style.backgroundImage = `url(${data.avatar_url})`;
+                    sidebarProfileAvatar.style.backgroundImage = `url(${newAvatarUrl})`;
                     sidebarProfileAvatar.style.backgroundSize = 'cover';
                     sidebarProfileAvatar.style.backgroundPosition = 'center';
                     sidebarProfileAvatar.textContent = '';
 
-                    desktopProfileAvatar.style.backgroundImage = `url(${data.avatar_url})`;
+                    desktopProfileAvatar.style.backgroundImage = `url(${newAvatarUrl})`;
                     desktopProfileAvatar.style.backgroundSize = 'cover';
                     desktopProfileAvatar.style.backgroundPosition = 'center';
                     desktopProfileAvatar.textContent = '';
@@ -1554,6 +1629,7 @@
             const nickname = userData.nickname || '';
             const firstLetter = nickname.charAt(0).toUpperCase() || '?';
             const bgColor = userData.avatar_background;
+            const platformId = userData.platform_user_id || 'Не указано';
             
             // Update mobile profile
             const mobileElements = getActiveElements(); // This will return mobile elements if !isDesktop
@@ -1564,7 +1640,7 @@
                     setAvatarBackground(mobileElements.profileAvatar, bgColor, firstLetter);
                 }
                 mobileElements.profileNickname.textContent = nickname || 'Не указано';
-                mobileElements.profileId.textContent = `ID: ${userData.platform_user_id || 'Не указано'}`;
+                mobileElements.profileId.textContent = `ID: ${platformId}`;
                 mobileElements.userRole.textContent = userData.identity || 'Не указано';
                 mobileElements.mainSchool.textContent = userData.main_school_name || 'Не указано';
                 if (userData.class_number && userData.class_letter) {
@@ -1599,7 +1675,7 @@
                     setAvatarBackground(sidebarProfileAvatar, bgColor, firstLetter);
                 }
                 sidebarProfileNickname.textContent = nickname || 'Не указано';
-                // The role "ученица" is static in HTML for sidebar
+                sidebarProfileId.textContent = `id: ${platformId}`; // Update ID in sidebar
             }
 
             // Update desktop main profile content (when "My Profile" is clicked)
@@ -1611,7 +1687,7 @@
                     setAvatarBackground(desktopElements.profileAvatar, bgColor, firstLetter);
                 }
                 desktopElements.profileNickname.textContent = nickname || 'Не указано';
-                desktopElements.profileId.textContent = `ID: ${userData.platform_user_id || 'Не указано'}`;
+                desktopElements.profileId.textContent = `ID: ${platformId}`;
                 desktopElements.userRole.textContent = userData.identity || 'Не указано';
                 desktopElements.mainSchool.textContent = userData.main_school_name || 'Не указано';
                 if (userData.class_number && userData.class_letter) {
@@ -1640,8 +1716,12 @@
         }
 
         // Open avatar modal
-        function openAvatarModal() {
-            if (!userData.has_avatar) return;
+        function openAvatarModal(targetAvatarElement) {
+            if (!userData.has_avatar) {
+                // If no avatar, trigger file input directly
+                avatarInput.click();
+                return;
+            }
             
             const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}?t=${Date.now()}`;
             
@@ -1658,10 +1738,7 @@
 
         // Open profile in desktop content area
         function openDesktopProfile() {
-            desktopPlaceholder.style.display = 'none';
-            profileModalDesktop.style.display = 'flex';
-            profileModalDesktop.classList.add('visible');
-            desktopContent.scrollTo({ top: 0, behavior: 'smooth' });
+            showDesktopModule(profileModalDesktop);
             updateProfileUI(); // Ensure the desktop profile content is updated
         }
 
@@ -1698,7 +1775,9 @@
                 desktopSidebar.style.display = 'flex';
                 desktopContent.style.display = 'flex';
                 desktopPlaceholder.style.display = 'flex'; // Show placeholder by default
-                profileModalDesktop.style.display = 'none'; // Hide desktop profile modal by default
+                profileModalDesktop.classList.remove('visible'); // Hide desktop profile modal by default
+                privacyModule.classList.remove('visible');
+                appearanceModule.classList.remove('visible');
                 desktopBottomNav.style.display = 'flex';
             } else {
                 mobileProfileContainer.style.display = 'flex';
@@ -1712,21 +1791,21 @@
         // Avatar click (mobile)
         profileAvatarMobile.addEventListener('click', () => {
             if (!isDesktop) {
-                openAvatarModal();
+                openAvatarModal(profileAvatarMobile);
             }
         });
 
         // Avatar click (desktop sidebar)
         sidebarProfileAvatar.addEventListener('click', () => {
             if (isDesktop) {
-                openAvatarModal();
+                openAvatarModal(sidebarProfileAvatar);
             }
         });
 
         // Avatar click (desktop main profile)
         desktopProfileAvatar.addEventListener('click', () => {
             if (isDesktop) {
-                openAvatarModal();
+                openAvatarModal(desktopProfileAvatar);
             }
         });
 
@@ -1762,9 +1841,34 @@
             }
         });
 
-        privacyBtn.addEventListener('click', showSoonMessage);
-        appearanceBtn.addEventListener('click', showSoonMessage);
-        faqBtn.addEventListener('click', showSoonMessage);
+        privacyBtn.addEventListener('click', () => {
+            if (isDesktop) {
+                showDesktopModule(privacyModule);
+            } else {
+                // For mobile, you might want a different behavior, e.g., show a toast or navigate to a new page.
+                // For now, it will show the general "Скоро..." message if not desktop.
+                soonMessage.classList.add('active');
+                setTimeout(() => {
+                    soonMessage.classList.remove('active');
+                }, 2000);
+            }
+        });
+
+        appearanceBtn.addEventListener('click', () => {
+            if (isDesktop) {
+                showDesktopModule(appearanceModule);
+            } else {
+                // For mobile, similar to privacyBtn
+                soonMessage.classList.add('active');
+                setTimeout(() => {
+                    soonMessage.classList.remove('active');
+                }, 2000);
+            }
+        });
+
+        faqBtn.addEventListener('click', () => {
+            window.open('https://telegra.ph/Vuntgram-FAQ-05-15', '_blank'); // Open in new tab
+        });
 
         // Search input event listener (desktop only)
         searchInputDesktop.addEventListener('input', (e) => {
