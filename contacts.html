@@ -1206,6 +1206,29 @@
     background: rgba(255, 255, 255, 0.3);
     transform: scale(1.1);
 }
+
+
+        .desktop-profile .action-button:hover .action-button-icon {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .desktop-profile .action-button:active .action-button-icon {
+            transform: translateY(0);
+        }
+
+        /* Улучшаем визуальную обратную связь для кнопок на десктопе */
+        .desktop-profile .action-button {
+            transition: all 0.2s ease;
+        }
+
+        .desktop-profile .action-button:hover {
+            transform: translateY(-2px);
+        }
+
+        .desktop-profile .action-button:active {
+            transform: translateY(0);
+        }
     </style>
 </head>
 <body>
@@ -1498,63 +1521,77 @@
         const modalCourseContainerMobile = document.getElementById('modal-course-container-mobile');
         const mobileOnlyNav = document.querySelector('.mobile-only-nav');
 // Найти кнопки чата и добавить обработчики
-const chatButtonDesktop = document.getElementById('chatButtonDesktop');
-const chatButtonMobile = document.getElementById('chatButtonMobile');
+    const chatButtonDesktop = document.getElementById('chatButtonDesktop');
+        const chatButtonMobile = document.getElementById('chatButtonMobile');
 
-if (chatButtonDesktop) {
-    chatButtonDesktop.addEventListener('click', () => {
-        openChatWithContact(currentViewedUser);
-    });
-}
+        if (chatButtonDesktop) {
+            // Добавляем анимацию при наведении
+            chatButtonDesktop.addEventListener('mouseenter', () => {
+                const icon = chatButtonDesktop.querySelector('.action-button-icon');
+                icon.style.transform = 'translateY(-3px)';
+                icon.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+            });
 
-if (chatButtonMobile) {
-    chatButtonMobile.addEventListener('click', () => {
-        openChatWithContact(currentViewedUser);
-    });
-}
+            chatButtonDesktop.addEventListener('mouseleave', () => {
+                const icon = chatButtonDesktop.querySelector('.action-button-icon');
+                icon.style.transform = '';
+                icon.style.boxShadow = '';
+            });
 
-
-let currentViewedUser = null; // Добавьте эту переменную в начало скрипта
-
-// Функция для открытия чата с контактом
-async function openChatWithContact(user) {
-    if (!user || !user.platform_user_id) return;
-    
-    showLoading('Открытие чата...');
-    
-    try {
-        // Получаем или создаем чат с этим пользователем
-        const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id,
-                contact_id: user.platform_user_id
-            }),
-            credentials: 'include'
-        });
-
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            // Сохраняем ID чата в sessionStorage
-            sessionStorage.setItem('openChatId', data.chat_id);
-            sessionStorage.setItem('openChatName', user.nickname || 'Чат');
-            
-            // Переходим на страницу чатов
-            window.location.href = 'chats.html';
-        } else {
-            throw new Error(data.error || 'Не удалось создать чат');
+            // Обработчик клика
+            chatButtonDesktop.addEventListener('click', () => {
+                openChatWithContact(currentViewedUser);
+            });
         }
-    } catch (error) {
-        console.error('Error opening chat:', error);
-        showMessage('Ошибка открытия чата: ' + error.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
+
+        if (chatButtonMobile) {
+            chatButtonMobile.addEventListener('click', () => {
+                openChatWithContact(currentViewedUser);
+            });
+        }
+
+        // Функция для открытия чата с контактом
+        async function openChatWithContact(user) {
+            if (!user || !user.platform_user_id) {
+                console.error('No user data to open chat with');
+                return;
+            }
+            
+            showLoading('Открытие чата...');
+            
+            try {
+                // Получаем или создаем чат с этим пользователем
+                const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id,
+                        contact_id: user.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Сохраняем ID чата в sessionStorage
+                    sessionStorage.setItem('openChatId', data.chat_id);
+                    sessionStorage.setItem('openChatName', user.nickname || 'Чат');
+                    
+                    // Переходим на страницу чатов
+                    window.location.href = 'chats.html';
+                } else {
+                    throw new Error(data.error || 'Не удалось создать чат');
+                }
+            } catch (error) {
+                console.error('Error opening chat:', error);
+                showMessage('Ошибка открытия чата: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
 
        
         function openPhotoViewer(photoUrl) {
