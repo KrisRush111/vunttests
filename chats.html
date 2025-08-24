@@ -69,24 +69,6 @@
     }
     
     /* Desktop layout */
-    .desktop-sidebar,
-    .desktop-content {
-        display: none; /* Hidden by default for mobile-first approach */
-    }
-
-    .chats-container.mobile-only {
-        display: flex;
-        flex-direction: column;
-    }
-
-    .mobile-only-nav {
-        display: flex;
-    }
-
-    .desktop-only-nav {
-        display: none;
-    }
-
     @media (min-width: 768px) {
         body {
             flex-direction: row;
@@ -112,9 +94,10 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
-            position: relative; /* Added for proper positioning of chat modal */
-            overflow: auto; /* Added for scrollability */
-            background-color: var(--telegram-secondary-bg); /* Default background */
+            background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
         }
         
         .desktop-placeholder {
@@ -125,11 +108,6 @@
             width: 100%;
             padding: 20px;
             box-sizing: border-box;
-            background-image: url('https://s14.gifyu.com/images/bNh1k.jpg'); /* Background image for desktop placeholder */
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
-            transition: opacity 0.3s ease; /* Smooth transition for placeholder */
         }
 
         .desktop-placeholder h3 {
@@ -137,6 +115,7 @@
             font-size: 14px;
             font-weight: 500;
             letter-spacing: 0.3px;
+            margin-bottom: 8px;
             padding: 5px 12px;
             border-radius: 24px;
             background-color: rgba(0, 0, 0, 0.2);
@@ -204,17 +183,6 @@
 
         .mobile-only {
             display: none;
-        }
-
-        /* Hide mobile-specific elements on desktop */
-        .chats-container.mobile-only {
-            display: none;
-        }
-        .mobile-only-nav {
-            display: none !important;
-        }
-        .desktop-only-nav {
-            display: flex !important;
         }
     }
 
@@ -1200,6 +1168,45 @@
         width: fit-content;
         line-height: 1.4;
     }
+
+    /* New styles for message status circles */
+    .message-status {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 4px;
+        height: 16px;
+    }
+
+    .status-circles {
+        display: flex;
+        gap: 2px;
+    }
+
+    .status-circle {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        font-size: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .status-circle.gray {
+        background-color: var(--telegram-hint);
+    }
+
+    .status-circle.green {
+        background-color: var(--telegram-success);
+    }
+
+    .message-outgoing .message-time {
+        color: rgba(255, 255, 255, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+    }
 </style>
 
 
@@ -2003,7 +2010,7 @@ async function sendMessage() {
             sender_id: userData.platform_user_id,
             content: content,
             sent_at: new Date().toISOString(), 
-            is_read: false,
+            is_read: false, // Default to false, will be updated by server
             sender_name: userData.nickname,
             sender_avatar: userData.avatar_url,
             sender_avatar_background: userData.avatar_background,
@@ -2118,6 +2125,8 @@ async function openChat(chatId) {
             currentMessages = messagesData.messages;
             renderMessages(currentMessages);
             
+            // Помечаем все сообщения как прочитанные
+            markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
                 noMessages.style.display = 'block';
@@ -2334,27 +2343,134 @@ function renderMessages(messages) {
 }
 
 
-
+// Updated renderMessage function
 function renderMessage(message) {
     const { messagesContainer } = getActiveElements();
     
     const messageElement = document.createElement('div');
     messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+    messageElement.setAttribute('data-message-id', message.id); // Add data-message-id
     
     const messageTime = formatChatMessageTime(message.sent_at);
     
+    // Create status circles for outgoing messages
+    let statusCircles = '';
+    if (message.is_me) {
+        const isRead = message.is_read;
+        statusCircles = `
+            <div class="message-status">
+                <div class="status-circles">
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                </div>
+            </div>
+        `;
+    }
+    
     messageElement.innerHTML = `
         <div class="message-content">${message.content}</div>
-        <div class="message-time">${messageTime}</div>
+        <div class="message-time">
+            ${messageTime}
+            ${message.is_me ? statusCircles : ''}
+        </div>
     `;
     
-
     setTimeout(() => {
         messageElement.style.opacity = '1';
         messageElement.style.transform = 'translateY(0)';
     }, 10);
     
     messagesContainer.appendChild(messageElement);
+}
+
+// New functions for message status updates
+async function updateMessageStatus(chatId, messageId) {
+    try {
+        const response = await fetch(`${SERVER_URL}/mark_as_read`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                message_id: messageId,
+                reader_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Update the visual display of the status
+            updateMessageStatusInUI(messageId);
+        }
+    } catch (error) {
+        console.error('Error updating message status:', error);
+    }
+}
+
+function updateMessageStatusInUI(messageId) {
+    const { messagesContainer } = getActiveElements();
+    const messageElement = messagesContainer.querySelector(`[data-message-id="${messageId}"]`);
+    
+    if (messageElement) {
+        const circles = messageElement.querySelectorAll('.status-circle');
+        circles.forEach(circle => {
+            circle.classList.remove('gray');
+            circle.classList.add('green');
+        });
+    }
+}
+
+async function markAllMessagesAsRead(chatId) {
+    try {
+        const response = await fetch(`${SERVER_URL}/mark_all_as_read`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                reader_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Update the status of all messages in the UI
+            currentMessages.forEach(message => {
+                if (!message.is_me) { // Only mark incoming messages as read
+                    message.is_read = true;
+                }
+            });
+            
+            // Update visual display
+            updateAllMessageStatusesInUI();
+        }
+    } catch (error) {
+        console.error('Error marking all messages as read:', error);
+    }
+}
+
+function updateAllMessageStatusesInUI() {
+    const { messagesContainer } = getActiveElements();
+    const messageElements = messagesContainer.querySelectorAll('.message[data-message-id]');
+    
+    messageElements.forEach(element => {
+        const messageId = element.getAttribute('data-message-id');
+        const message = currentMessages.find(m => m.id === messageId);
+        
+        if (message && message.is_me && message.is_read) { // Only update outgoing messages that are marked as read
+            const circles = element.querySelectorAll('.status-circle');
+            circles.forEach(circle => {
+                circle.classList.remove('gray');
+                circle.classList.add('green');
+            });
+        }
+    });
 }
      
  async function initializePage() {
@@ -2502,4 +2618,3 @@ function filterContacts(searchTerm) {
     </script>
 </body>
 </html>
-
