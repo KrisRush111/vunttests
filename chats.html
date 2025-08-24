@@ -467,12 +467,17 @@
         display: none;
         flex-direction: column;
         transform: translateX(100%);
-        transition: transform 0.3s ease;
+        transition: transform 0.3s ease, opacity 0.3s ease; /* Added opacity transition */
     }
 
     .chat-modal.active {
         transform: translateX(0);
         display: flex;
+    }
+
+    .chat-modal.changing { /* New class for animation */
+        opacity: 0.5;
+        pointer-events: none;
     }
 
     @media (min-width: 768px) {
@@ -1437,6 +1442,7 @@
         let currentChat = null;
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
+        let isOpeningChat = false; // Flag to prevent multiple chat openings
 
 function adjustTimeToMoscow(timestamp) {
     if (!timestamp) return null;
@@ -1696,7 +1702,8 @@ function renderChats(chats) {
             loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
         }
         
-        chatItem.addEventListener('click', () => {
+        chatItem.addEventListener('click', (e) => { // Updated event listener
+            e.preventDefault();
             openChat(chat.id);
         });
         
@@ -1843,6 +1850,9 @@ function renderChats(chats) {
 
       
 async function createChatWithContact(contact) {
+    if (isOpeningChat) return; // Prevent multiple chat creations
+    isOpeningChat = true;
+
     showLoading('Подготовка чата...');
     
     try {
@@ -1895,6 +1905,8 @@ async function createChatWithContact(contact) {
         console.error('Error preparing chat:', error);
         showMessage('Ошибка подготовки чата: ' + error.message, 'error');
         hideLoading();
+    } finally {
+        isOpeningChat = false;
     }
 }
 
@@ -1903,6 +1915,11 @@ function openTempChat(tempChat) {
     
     currentChat = tempChat;
     
+    // Apply changing class for animation
+    chatModal.classList.add('changing');
+    setTimeout(() => {
+        chatModal.classList.remove('changing');
+    }, 300);
 
     chatTitle.textContent = tempChat.name;
     chatStatus.textContent = 'был(а) недавно';
@@ -2062,11 +2079,30 @@ async function sendMessage() {
 }
        
 async function openChat(chatId) {
+    if (isOpeningChat) return; // Prevent multiple chat openings
+    isOpeningChat = true;
+
+    // Close previous chat before opening a new one
+    if (currentChat && currentChat.id !== chatId) {
+        closeChat();
+    }
+    
     showLoading('Загрузка чата...');
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
     try {
+        // Clear previous messages and show loading state
+        messagesContainer.innerHTML = '';
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Загрузка...';
+
+        // Apply changing class for animation
+        chatModal.classList.add('changing');
+        setTimeout(() => {
+            chatModal.classList.remove('changing');
+        }, 300);
         
+        // Get chat information
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {
@@ -2087,11 +2123,11 @@ async function openChat(chatId) {
         
         currentChat = chatData.chat;
         
- 
+        // Update chat information in UI
         chatTitle.textContent = currentChat.name || 'Новый чат';
         chatStatus.textContent = 'был(а) недавно';
         
-       
+        // Set avatar
         chatAvatar.style.backgroundImage = '';
         chatAvatar.style.backgroundColor = '';
         chatAvatar.textContent = '';
@@ -2106,7 +2142,7 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
-     
+        // Load messages
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -2125,7 +2161,7 @@ async function openChat(chatId) {
             currentMessages = messagesData.messages;
             renderMessages(currentMessages);
             
-            // Помечаем все сообщения как прочитанные
+            // Mark all messages as read
             markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
@@ -2136,12 +2172,11 @@ async function openChat(chatId) {
             }
         } else {
             currentMessages = [];
-            renderMessages([]);
             noMessages.style.display = 'block';
             noMessages.textContent = 'Сообщений пока нет...';
         }
         
-    
+        // Show chat modal
         if (isDesktop) {
             desktopPlaceholder.style.display = 'none';
             chatModal.style.display = 'flex';
@@ -2150,69 +2185,59 @@ async function openChat(chatId) {
             document.body.style.overflow = 'hidden';
         }
         
-     
+        // Scroll to the last message
         if (currentMessages.length > 0) {
             setTimeout(() => {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }, 100);
         }
 
-        
+        // Update chat list item
         updateChatItemInDOM(chatId, {
             last_message: currentChat.last_message,
             last_message_time: currentChat.last_message_time,
             unread_count: 0 
         });
         
-        
-        updateChatInList(chatId, {
-            last_message: currentChat.last_message,
-            last_message_time: currentChat.last_message_time,
-            unread_count: 0
-        }).catch(error => {
-            console.error('Background chat update error:', error);
-   
-        });
-        
     } catch (error) {
         console.error('Error opening chat:', error);
         showMessage('Ошибка загрузки чата', 'error');
+        closeChat(); // Ensure UI is reset on error
     } finally {
+        isOpeningChat = false; // Reset flag
         hideLoading();
     }
 }
 
 function closeChat() {
-    const { chatModal, chatAvatar, messagesContainer, noMessages } = getActiveElements();
+    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
-    if (isDesktop) {
-        chatModal.style.display = 'none';
-        desktopPlaceholder.style.display = 'flex';
-    } else {
-        chatModal.style.transition = 'transform 0.3s ease';
-        chatModal.style.transform = 'translateX(100%)';
-        
-        setTimeout(() => {
-            chatModal.classList.remove('active');
-            document.body.style.overflow = '';
-        }, 300);
-    }
-    
-  
-    if (!currentChat || !currentChat.is_temp) {
-        loadChats();
-    }
-    
+    // Reset chat state
     currentChat = null;
     currentMessages = [];
+    
+    // Clear UI
     messagesContainer.innerHTML = '';
     noMessages.style.display = 'block';
     noMessages.textContent = 'Сообщений пока нет...';
     
-
+    chatTitle.textContent = '';
+    chatStatus.textContent = '';
     chatAvatar.style.backgroundImage = '';
     chatAvatar.style.backgroundColor = '';
     chatAvatar.textContent = '';
+    
+    // Hide chat modal
+    if (isDesktop) {
+        chatModal.style.display = 'none';
+        desktopPlaceholder.style.display = 'flex';
+    } else {
+        chatModal.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+    
+    // Reload chat list
+    loadChats();
 }
 
 
@@ -2529,7 +2554,10 @@ function updateAllMessageStatusesInUI() {
     });
 
     if (backToChats) { 
-        backToChats.addEventListener('click', closeChat);
+        backToChats.addEventListener('click', (e) => { // Updated event listener
+            e.preventDefault();
+            closeChat();
+        });
     }
     
     sendMessageButton.addEventListener('click', sendMessage);
