@@ -1900,106 +1900,80 @@ let currentViewedUser = null;
 
    
 function updateProfileModalUI(user) {
-    const activeElements = getActiveElements(); // Получаем все активные элементы
-
-    const modalProfileAvatar = activeElements.modalProfileAvatar;
-    const modalProfileNickname = activeElements.modalProfileNickname;
-    const modalProfileId = activeElements.modalProfileId;
-    const modalMainSchool = activeElements.modalMainSchool;
-    const modalUserClass = activeElements.modalUserClass; // Исправлено
-    const modalUserRole = activeElements.modalUserRole;   // Исправлено
-    const modalAdditionalSchool = activeElements.modalAdditionalSchool;
-    const modalUserSpecialization = activeElements.modalUserSpecialization; // Исправлено
-    const modalUserCourse = activeElements.modalUserCourse; // Исправлено
-
-    // Получаем родительские detail-item элементы для скрытия/показа
-    const detailMainSchool = activeElements.modalMainSchool.closest('.detail-item');
-    const detailUserClass = activeElements.modalUserClass.closest('.detail-item'); // Исправлено
-    const detailUserRole = activeElements.modalUserRole.closest('.detail-item');   // Исправлено
-    const detailAdditionalSchool = activeElements.modalAdditionalSchool.closest('.detail-item');
-    const detailSpecialization = activeElements.modalUserSpecialization.closest('.detail-item'); // Исправлено
-    const detailCourse = activeElements.modalUserCourse.closest('.detail-item'); // Исправлено
-
+    const activeElements = getActiveElements();
+    
     currentViewedUser = user;
     console.log('Updating profile UI with:', user);
 
-    // Обновление аватара
+    // Обновление аватара (оставить как есть)
     if (user.has_avatar_photo || user.has_avatar) {
         const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-        modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        modalProfileAvatar.textContent = '';
-        modalProfileAvatar.style.backgroundColor = '';
-        modalProfileAvatar.style.backgroundSize = 'cover';
-        modalProfileAvatar.style.backgroundPosition = 'center';
+        activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+        activeElements.modalProfileAvatar.textContent = '';
+        activeElements.modalProfileAvatar.style.backgroundColor = '';
+        activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
+        activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-        modalProfileAvatar.textContent = initial;
-        modalProfileAvatar.style.backgroundImage = 'none';
-
+        activeElements.modalProfileAvatar.textContent = initial;
+        activeElements.modalProfileAvatar.style.backgroundImage = 'none';
+        
         if (user.avatar_background) {
             const lighterColor = adjustColor(user.avatar_background, 20);
-            modalProfileAvatar.style.background =
+            activeElements.modalProfileAvatar.style.background = 
                 `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
         } else {
-            modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+            activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
         }
     }
 
     // Основная информация
-    modalProfileNickname.textContent = user.nickname || 'Не указано';
-    modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
+    activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+    activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
 
-    // Проверка и отображение школы
-    if (user.main_school_name && user.main_school_name.toLowerCase() !== 'не указано' && user.main_school_name.toLowerCase() !== 'не ук') {
-        modalMainSchool.textContent = user.main_school_name;
-        if (detailMainSchool) detailMainSchool.style.display = 'flex';
-    } else {
-        if (detailMainSchool) detailMainSchool.style.display = 'none';
+    // Функция для проверки и отображения поля
+    function updateField(fieldValue, fieldElement, containerSelector, fieldName) {
+        const container = document.querySelector(containerSelector);
+        if (!container) return;
+        
+        const hasValidValue = fieldValue && 
+                            fieldValue.toLowerCase() !== 'не указано' && 
+                            fieldValue.toLowerCase() !== 'не ук' &&
+                            fieldValue.trim() !== '';
+        
+        if (hasValidValue) {
+            fieldElement.textContent = fieldValue;
+            container.style.display = 'flex';
+            console.log(`${fieldName}: ${fieldValue} (показано)`);
+        } else {
+            container.style.display = 'none';
+            console.log(`${fieldName}: скрыто (значение: ${fieldValue})`);
+        }
     }
 
-    // Проверка и отображение класса
-    if (user.class_number && user.class_letter &&
-        !(user.class_number.toLowerCase() === 'не указано' || user.class_letter.toLowerCase() === 'не ук')) {
-        modalUserClass.textContent = `${user.class_number}${user.class_letter}`; // Исправлено
-        if (detailUserClass) detailUserClass.style.display = 'flex'; // Исправлено
-    } else {
-        if (detailUserClass) detailUserClass.style.display = 'none'; // Исправлено
-    }
-
-    // Проверка и отображение роли
-    if (user.identity && user.identity.toLowerCase() !== 'не указано' && user.identity.toLowerCase() !== 'не ук') {
-        modalUserRole.textContent = user.identity; // Исправлено
-        if (detailUserRole) detailUserRole.style.display = 'flex'; // Исправлено
-    } else {
-        if (detailUserRole) detailUserRole.style.display = 'none'; // Исправлено
-    }
-
-    // Проверка и отображение дополнительной школы
-    if (user.additional_school_name && user.additional_school_name.toLowerCase() !== 'не указано' && user.additional_school_name.toLowerCase() !== 'не ук') {
-        modalAdditionalSchool.textContent = user.additional_school_name;
-        if (detailAdditionalSchool) detailAdditionalSchool.style.display = 'flex';
-    } else {
-        if (detailAdditionalSchool) detailAdditionalSchool.style.display = 'none';
-    }
-
-    // Проверка и отображение специализации
-    if (user.specialization && user.specialization.toLowerCase() !== 'не указано' && user.specialization.toLowerCase() !== 'не ук') {
-        modalUserSpecialization.textContent = user.specialization; // Исправлено
-        if (detailSpecialization) detailSpecialization.style.display = 'flex'; // Исправлено
-    } else {
-        if (detailSpecialization) detailSpecialization.style.display = 'none'; // Исправлено
-    }
-
-    // Проверка и отображение курса
-    if (user.course && user.course.toLowerCase() !== 'не указано' && user.course.toLowerCase() !== 'не ук') {
-        modalUserCourse.textContent = user.course; // Исправлено
-        if (detailCourse) detailCourse.style.display = 'flex'; // Исправлено
-    } else {
-        if (detailCourse) detailCourse.style.display = 'none'; // Исправлено
-    }
+    // Обновляем все поля
+    updateField(user.main_school_name, activeElements.modalMainSchool, 
+               '#modal-main-school-desktop, #modal-main-school-mobile', 'Основная школа');
+    
+    updateField(user.class_number && user.class_letter ? 
+               `${user.class_number}${user.class_letter}` : null, 
+               activeElements.modalUserClass, 
+               '#modal-user-class-desktop, #modal-user-class-mobile', 'Класс');
+    
+    updateField(user.identity, activeElements.modalUserRole, 
+               '#modal-user-role-desktop, #modal-user-role-mobile', 'Роль');
+    
+    updateField(user.additional_school_name, activeElements.modalAdditionalSchool, 
+               '#modal-additional-school-container-desktop, #modal-additional-school-container-mobile', 'Доп. школа');
+    
+    updateField(user.specialization, activeElements.modalUserSpecialization, 
+               '#modal-specialization-container-desktop, #modal-specialization-container-mobile', 'Специализация');
+    
+    updateField(user.course, activeElements.modalUserCourse, 
+               '#modal-course-container-desktop, #modal-course-container-mobile', 'Курс');
 
     // Обработчик клика на аватар
-    modalProfileAvatar.onclick = () => {
+    activeElements.modalProfileAvatar.onclick = () => {
         if (user.has_avatar_photo || user.has_avatar) {
             const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
             openPhotoViewer(avatarUrl);
