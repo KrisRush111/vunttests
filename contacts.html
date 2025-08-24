@@ -1295,15 +1295,15 @@
             
                 <div class="profile-details">
                     <div class="profile-details-title">О себе</div>
-                    <div id="modal-main-school-container-desktop" class="detail-item">
+                    <div class="detail-item">
                         <div class="detail-label">Школа</div>
                         <div id="modal-main-school-desktop" class="detail-value">Загрузка...</div>
                     </div>
-                    <div id="modal-user-class-container-desktop" class="detail-item">
+                    <div class="detail-item">
                         <div class="detail-label">Класс</div>
                         <div id="modal-user-class-desktop" class="detail-value">Загрузка...</div>
                     </div>
-                    <div id="modal-user-role-container-desktop" class="detail-item">
+                    <div class="detail-item">
                         <div class="detail-label">Роль</div>
                         <div id="modal-user-role-desktop" class="detail-value">Загрузка...</div>
                     </div>
@@ -1382,15 +1382,15 @@
          
             <div class="profile-details">
                 <div class="profile-details-title">О себе</div>
-                <div id="modal-main-school-container-mobile" class="detail-item">
+                <div class="detail-item">
                     <div class="detail-label">Школа</div>
                     <div id="modal-main-school-mobile" class="detail-value">Загрузка...</div>
                 </div>
-                <div id="modal-user-class-container-mobile" class="detail-item">
+                <div class="detail-item">
                     <div class="detail-label">Класс</div>
                     <div id="modal-user-class-mobile" class="detail-value">Загрузка...</div>
                 </div>
-                <div id="modal-user-role-container-mobile" class="detail-item">
+                <div class="detail-item">
                     <div class="detail-label">Роль</div>
                     <div id="modal-user-role-mobile" class="detail-value">Загрузка...</div>
                 </div>
@@ -1491,13 +1491,70 @@
         const modalUserClassMobile = document.getElementById('modal-user-class-mobile');
         const modalUserRoleMobile = document.getElementById('modal-user-role-mobile');
         const modalAdditionalSchoolMobile = document.getElementById('modal-additional-school-mobile');
-        const modalUserSpecializationMobile = document = document.getElementById('modal-user-specialization-mobile');
+        const modalUserSpecializationMobile = document.getElementById('modal-user-specialization-mobile');
         const modalUserCourseMobile = document.getElementById('modal-user-course-mobile');
         const modalAdditionalSchoolContainerMobile = document.getElementById('modal-additional-school-container-mobile');
         const modalSpecializationContainerMobile = document.getElementById('modal-specialization-container-mobile');
         const modalCourseContainerMobile = document.getElementById('modal-course-container-mobile');
         const mobileOnlyNav = document.querySelector('.mobile-only-nav');
+// Найти кнопки чата и добавить обработчики
+const chatButtonDesktop = document.getElementById('chatButtonDesktop');
+const chatButtonMobile = document.getElementById('chatButtonMobile');
 
+if (chatButtonDesktop) {
+    chatButtonDesktop.addEventListener('click', () => {
+        openChatWithContact(currentViewedUser);
+    });
+}
+
+if (chatButtonMobile) {
+    chatButtonMobile.addEventListener('click', () => {
+        openChatWithContact(currentViewedUser);
+    });
+}
+
+
+let currentViewedUser = null; // Добавьте эту переменную в начало скрипта
+
+// Функция для открытия чата с контактом
+async function openChatWithContact(user) {
+    if (!user || !user.platform_user_id) return;
+    
+    showLoading('Открытие чата...');
+    
+    try {
+        // Получаем или создаем чат с этим пользователем
+        const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                contact_id: user.platform_user_id
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Сохраняем ID чата в sessionStorage
+            sessionStorage.setItem('openChatId', data.chat_id);
+            sessionStorage.setItem('openChatName', user.nickname || 'Чат');
+            
+            // Переходим на страницу чатов
+            window.location.href = 'chats.html';
+        } else {
+            throw new Error(data.error || 'Не удалось создать чат');
+        }
+    } catch (error) {
+        console.error('Error opening chat:', error);
+        showMessage('Ошибка открытия чата: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
 
        
         function openPhotoViewer(photoUrl) {
@@ -1542,10 +1599,7 @@
                     modalUserCourse: modalUserCourseDesktop,
                     modalAdditionalSchoolContainer: modalAdditionalSchoolContainerDesktop,
                     modalSpecializationContainer: modalSpecializationContainerDesktop,
-                    modalCourseContainer: modalCourseContainerDesktop,
-                    modalUserRoleContainer: document.getElementById('modal-user-role-container-desktop'),
-                    modalMainSchoolContainer: document.getElementById('modal-main-school-container-desktop'),
-                    modalUserClassContainer: document.getElementById('modal-user-class-container-desktop')
+                    modalCourseContainer: modalCourseContainerDesktop
                 };
             } else {
                 return {
@@ -1565,10 +1619,7 @@
                     modalUserCourse: modalUserCourseMobile,
                     modalAdditionalSchoolContainer: modalAdditionalSchoolContainerMobile,
                     modalSpecializationContainer: modalSpecializationContainerMobile,
-                    modalCourseContainer: modalCourseContainerMobile,
-                    modalUserRoleContainer: document.getElementById('modal-user-role-container-mobile'),
-                    modalMainSchoolContainer: document.getElementById('modal-main-school-container-mobile'),
-                    modalUserClassContainer: document.getElementById('modal-user-class-container-mobile')
+                    modalCourseContainer: modalCourseContainerMobile
                 };
             }
         }
@@ -1669,8 +1720,7 @@
                 modalProfileAvatar, modalProfileNickname, modalProfileId,
                 modalMainSchool, modalUserClass, modalUserRole,
                 modalAdditionalSchool, modalUserSpecialization, modalUserCourse,
-                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer,
-                modalUserRoleContainer, modalMainSchoolContainer, modalUserClassContainer
+                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer
             } = getActiveElements();
 
             try {
@@ -1711,22 +1761,11 @@
                 modalProfileAvatar, modalProfileNickname, modalProfileId,
                 modalMainSchool, modalUserClass, modalUserRole,
                 modalAdditionalSchool, modalUserSpecialization, modalUserCourse,
-                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer,
-                modalUserRoleContainer, modalMainSchoolContainer, modalUserClassContainer
+                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer
             } = getActiveElements();
 
-            // Функция для проверки, является ли значение пустым или "не указано"
-            const isEmptyOrNotSpecified = (value) => {
-                if (!value) return true;
-                const normalizedValue = String(value).toLowerCase().trim();
-                return normalizedValue === '' || 
-                       normalizedValue === 'не указано' || 
-                       normalizedValue === 'не ук' ||
-                       normalizedValue === 'не указан' ||
-                       normalizedValue === 'не указана';
-            };
-
-            // Обновляем аватар
+            currentViewedUser = user;
+    
             if (user.has_avatar_photo || user.has_avatar) {
                 const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
                 modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
@@ -1734,7 +1773,7 @@
                 modalProfileAvatar.style.backgroundColor = '';
             } else {
                 const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                modalProfileAvatar.textContent = initial;
+                avatarElement.textContent = initial;
                 modalProfileAvatar.style.backgroundImage = '';
 
                 if (user.avatar_background) {
@@ -1746,74 +1785,38 @@
                 }
             }
 
-            // Обновляем никнейм (показываем только если есть данные)
-            if (!isEmptyOrNotSpecified(user.nickname)) {
-                modalProfileNickname.textContent = user.nickname;
-                modalProfileNickname.style.display = 'block';
-            } else {
-                modalProfileNickname.style.display = 'none';
-            }
-
-            // ID всегда показываем
+            modalProfileNickname.textContent = user.nickname || 'Не указано';
             modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
+            modalUserRole.textContent = user.identity || 'Не указано';
+            modalMainSchool.textContent = user.main_school_name || 'Не указано';
 
-            // Обновляем роль (показываем только если есть данные)
-            if (!isEmptyOrNotSpecified(user.identity)) {
-                modalUserRole.textContent = user.identity;
-                modalUserRoleContainer.style.display = 'flex';
-            } else {
-                modalUserRoleContainer.style.display = 'none';
-            }
-
-            // Обновляем основную школу (показываем только если есть данные)
-            if (!isEmptyOrNotSpecified(user.main_school_name)) {
-                modalMainSchool.textContent = user.main_school_name;
-                modalMainSchoolContainer.style.display = 'flex';
-            } else {
-                modalMainSchoolContainer.style.display = 'none';
-            }
-
-            // Обновляем класс (показываем только если есть данные)
-            const hasClass = !isEmptyOrNotSpecified(user.class_number) && 
-                            !isEmptyOrNotSpecified(user.class_letter);
-            
-            if (hasClass) {
+            if (user.class_number && user.class_letter) {
                 modalUserClass.textContent = `${user.class_number}${user.class_letter}`;
-                modalUserClassContainer.style.display = 'flex';
             } else {
-                modalUserClassContainer.style.display = 'none';
+                modalUserClass.textContent = 'Не указано';
             }
 
-            // Обновляем дополнительные данные (доп. школа, направление, курс)
-            const hasAdditionalSchool = !isEmptyOrNotSpecified(user.additional_school_name);
-            const hasSpecialization = !isEmptyOrNotSpecified(user.specialization);
-            const hasCourse = !isEmptyOrNotSpecified(user.course);
+            const additionalSchoolValue = user.additional_school_name;
+            const hasAdditionalSchool = additionalSchoolValue &&
+                                      additionalSchoolValue !== 'Не указано' &&
+                                      additionalSchoolValue !== 'не указано' &&
+                                      additionalSchoolValue.trim() !== '';
 
-            // Показываем/скрываем блок дополнительной школы
-            if (hasAdditionalSchool) {
-                modalAdditionalSchool.textContent = user.additional_school_name;
-                modalAdditionalSchoolContainer.style.display = 'flex';
-            } else {
+            if (!hasAdditionalSchool) {
                 modalAdditionalSchoolContainer.style.display = 'none';
-            }
-
-            // Показываем/скрываем блок направления
-            if (hasSpecialization) {
-                modalUserSpecialization.textContent = user.specialization;
-                modalSpecializationContainer.style.display = 'flex';
-            } else {
                 modalSpecializationContainer.style.display = 'none';
-            }
-
-            // Показываем/скрываем блок курса
-            if (hasCourse) {
-                modalUserCourse.textContent = user.course;
-                modalCourseContainer.style.display = 'flex';
-            } else {
                 modalCourseContainer.style.display = 'none';
+            } else {
+                modalAdditionalSchoolContainer.style.display = 'flex';
+                modalSpecializationContainer.style.display = 'flex';
+                modalCourseContainer.style.display = 'flex';
+
+                modalAdditionalSchool.textContent = additionalSchoolValue;
+                modalUserSpecialization.textContent = user.specialization || 'Не указано';
+                modalUserCourse.textContent = user.course || 'Не указано';
             }
 
-            // Обработчик клика на аватар
+    
             modalProfileAvatar.onclick = () => {
                 if (user.has_avatar_photo || user.has_avatar) {
                     const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
