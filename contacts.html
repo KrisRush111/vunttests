@@ -1923,6 +1923,14 @@ let currentViewedUser = null;
             }
         }
 
+        // Helper function to check if a value should be hidden
+        function shouldHide(value) {
+            if (value === null || value === undefined) {
+                return true;
+            }
+            const trimmedValue = String(value).trim().toLowerCase();
+            return trimmedValue === '' || trimmedValue === 'не указано' || trimmedValue === 'не ук';
+        }
    
         function updateProfileModalUI(user) {
             const {
@@ -1961,61 +1969,36 @@ let currentViewedUser = null;
             // Основная информация
             modalProfileNickname.textContent = user.nickname || 'Не указано';
             modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
-            modalUserRole.textContent = user.identity || 'Не указано';
-            modalMainSchool.textContent = user.main_school_name || 'Не указано';
+            
+            // Set text content for all fields first, then manage visibility
+            modalMainSchool.textContent = user.main_school_name || '';
+            modalUserClass.textContent = (user.class_number && user.class_letter) ? `${user.class_number}${user.class_letter}` : '';
+            modalUserRole.textContent = user.identity || '';
+            modalAdditionalSchool.textContent = user.additional_school_name || '';
+            modalUserSpecialization.textContent = user.specialization || '';
+            modalUserCourse.textContent = user.course || '';
 
-            // Класс
-            if (user.class_number && user.class_letter) {
-                modalUserClass.textContent = `${user.class_number}${user.class_letter}`;
-            } else {
-                modalUserClass.textContent = 'Не указано';
-            }
-
-            // Логика отображения полей в зависимости от роли
+            // Determine visibility based on user role and data availability
             const isMentor = user.identity && user.identity.toLowerCase().includes('ментор вшп');
 
+            // Always show main school and role if available
+            detailMainSchool.style.display = shouldHide(user.main_school_name) ? 'none' : 'flex';
+            detailUserRole.style.display = shouldHide(user.identity) ? 'none' : 'flex';
+
             if (isMentor) {
-                // Если ментор ВШП: Школа, Направление, Роль
-                detailMainSchool.style.display = 'flex';
-                detailUserClass.style.display = 'none'; // Скрываем класс
-                detailUserRole.style.display = 'flex';
-                detailAdditionalSchool.style.display = 'none'; // Скрываем доп. школу
-                detailSpecialization.style.display = 'flex';
-                detailCourse.style.display = 'none'; // Скрываем курс
+                // Mentor: School, Specialization, Role
+                detailUserClass.style.display = 'none'; // Hide class for mentors
+                detailAdditionalSchool.style.display = 'none'; // Hide additional school for mentors
+                detailCourse.style.display = 'none'; // Hide course for mentors
 
-                modalUserSpecialization.textContent = user.specialization || 'Не указано';
+                detailSpecialization.style.display = shouldHide(user.specialization) ? 'none' : 'flex';
             } else {
-                // Если не ментор ВШП: Школа, Класс, Роль, Доп. школа, Направление, Курс
-                detailMainSchool.style.display = 'flex';
-                detailUserClass.style.display = 'flex';
-                detailUserRole.style.display = 'flex';
-
-                const hasAdditionalSchool = user.additional_school_name && 
-                                          user.additional_school_name !== 'Не указано' && 
-                                          user.additional_school_name !== 'не указано' && 
-                                          user.additional_school_name.trim() !== '';
-
-                const hasSpecialization = user.specialization && 
-                                        user.specialization !== 'Не указано' && 
-                                        user.specialization.trim() !== '';
-
-                const hasCourse = user.course && 
-                                user.course !== 'Не указано' && 
-                                user.course.trim() !== '';
-
-                if (hasAdditionalSchool || hasSpecialization || hasCourse) {
-                    detailAdditionalSchool.style.display = 'flex';
-                    detailSpecialization.style.display = 'flex';
-                    detailCourse.style.display = 'flex';
-
-                    modalAdditionalSchool.textContent = user.additional_school_name || 'Не указано';
-                    modalUserSpecialization.textContent = user.specialization || 'Не указано';
-                    modalUserCourse.textContent = user.course || 'Не указано';
-                } else {
-                    detailAdditionalSchool.style.display = 'none';
-                    detailSpecialization.style.display = 'none';
-                    detailCourse.style.display = 'none';
-                }
+                // Non-mentor: School, Class, Role, Additional School, Specialization, Course
+                detailUserClass.style.display = shouldHide(modalUserClass.textContent) ? 'none' : 'flex';
+                
+                detailAdditionalSchool.style.display = shouldHide(user.additional_school_name) ? 'none' : 'flex';
+                detailSpecialization.style.display = shouldHide(user.specialization) ? 'none' : 'flex';
+                detailCourse.style.display = shouldHide(user.course) ? 'none' : 'flex';
             }
 
             // Обработчик клика на аватар
