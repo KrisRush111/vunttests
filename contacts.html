@@ -1591,32 +1591,19 @@ let currentViewedUser = null;
         // Анимация при наведении
         chatButtonDesktop.addEventListener('mouseenter', () => {
             const icon = chatButtonDesktop.querySelector('.action-button-icon');
-            icon.style.transform = 'translateY(-4px) scale(1.1)';
-            icon.style.boxShadow = '0 6px 12px rgba(0, 0, 0, 0.15)';
-            icon.style.background = 'var(--telegram-blue)';
-            icon.style.color = 'white';
+            icon.style.transform = 'translateY(-3px)';
+            icon.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
         });
 
         chatButtonDesktop.addEventListener('mouseleave', () => {
             const icon = chatButtonDesktop.querySelector('.action-button-icon');
             icon.style.transform = '';
             icon.style.boxShadow = '';
-            icon.style.background = '';
-            icon.style.color = '';
         });
 
-        // Обработчик клика с анимацией
-        chatButtonDesktop.addEventListener('click', (e) => {
-            // Анимация нажатия
-            const icon = chatButtonDesktop.querySelector('.action-button-icon');
-            icon.style.transform = 'translateY(-1px) scale(1.05)';
-            icon.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.1)';
-            
-            setTimeout(() => {
-                icon.style.transform = '';
-                icon.style.boxShadow = '';
-                openChatWithContact(currentViewedUser);
-            }, 150);
+        // Обработчик клика
+        chatButtonDesktop.addEventListener('click', () => {
+            openChatWithContact(currentViewedUser);
         });
     }
 
@@ -1668,6 +1655,47 @@ let currentViewedUser = null;
         } finally {
             hideLoading();
         }
+    }
+
+
+   if (chatButtonDesktop) {
+        // Анимация при наведении
+        chatButtonDesktop.addEventListener('mouseenter', () => {
+            const icon = chatButtonDesktop.querySelector('.action-button-icon');
+            icon.style.transform = 'translateY(-4px) scale(1.1)';
+            icon.style.boxShadow = '0 6px 12px rgba(0, 0, 0, 0.15)';
+            icon.style.background = 'var(--telegram-blue)';
+            icon.style.color = 'white';
+        });
+
+        chatButtonDesktop.addEventListener('mouseleave', () => {
+            const icon = chatButtonDesktop.querySelector('.action-button-icon');
+            icon.style.transform = '';
+            icon.style.boxShadow = '';
+            icon.style.background = '';
+            icon.style.color = '';
+        });
+
+        // Обработчик клика с анимацией
+        chatButtonDesktop.addEventListener('click', (e) => {
+            // Анимация нажатия
+            const icon = chatButtonDesktop.querySelector('.action-button-icon');
+            icon.style.transform = 'translateY(-1px) scale(1.05)';
+            icon.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.1)';
+            
+            setTimeout(() => {
+                icon.style.transform = '';
+                icon.style.boxShadow = '';
+                openChatWithContact(currentViewedUser);
+            }, 150);
+        });
+    }
+
+    // Аналогично для мобильной версии
+    if (chatButtonMobile) {
+        chatButtonMobile.addEventListener('click', () => {
+            openChatWithContact(currentViewedUser);
+        });
     }
 
 
@@ -1797,10 +1825,12 @@ let currentViewedUser = null;
         }
 
         function openProfileModal(userId) {
+            console.log('Opening profile for user ID:', userId);
             showLoading('Загрузка профиля...');
             const { profileModal } = getActiveElements();
 
             if (isDesktop) {
+                console.log('Desktop mode - showing profile');
                 desktopPlaceholder.style.display = 'none';
                 profileModal.style.display = 'flex';
                 profileModal.classList.add('visible');
@@ -1810,6 +1840,7 @@ let currentViewedUser = null;
                     behavior: 'smooth'
                 });
             } else {
+                console.log('Mobile mode - showing profile modal');
                 profileModal.classList.add('active');
                 modalOverlay.classList.add('active');
             }
@@ -1839,6 +1870,7 @@ let currentViewedUser = null;
             } = getActiveElements();
 
             try {
+                console.log('Loading profile data for user:', userId);
                 const response = await fetch(`${SERVER_URL}/get_user_data`, {
                     method: 'POST',
                     headers: {
@@ -1851,7 +1883,7 @@ let currentViewedUser = null;
                 });
 
                 const data = await response.json();
-                console.log('User data from server:', data);
+                console.log('Profile data response:', data);
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Ошибка загрузки профиля');
@@ -1864,7 +1896,9 @@ let currentViewedUser = null;
                 }
             } catch (error) {
                 console.error('Profile loading error:', error);
-          
+                showMessage('Ошибка загрузки профиля: ' + error.message, 'error');
+                // Закрываем модальное окно при ошибке
+                closeProfileModal();
             } finally {
                 hideLoading();
             }
@@ -1880,58 +1914,72 @@ let currentViewedUser = null;
             } = getActiveElements();
 
             currentViewedUser = user;
+            console.log('Updating profile UI with:', user);
     
+            // Обновление аватара
             if (user.has_avatar_photo || user.has_avatar) {
                 const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
                 modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
                 modalProfileAvatar.textContent = '';
                 modalProfileAvatar.style.backgroundColor = '';
+                modalProfileAvatar.style.backgroundSize = 'cover';
+                modalProfileAvatar.style.backgroundPosition = 'center';
             } else {
                 const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                avatarElement.textContent = initial;
-                modalProfileAvatar.style.backgroundImage = '';
+                modalProfileAvatar.textContent = initial;
+                modalProfileAvatar.style.backgroundImage = 'none';
 
                 if (user.avatar_background) {
                     const lighterColor = adjustColor(user.avatar_background, 20);
-                    modalProfileAvatar.style.background =
+                    modalProfileAvatar.style.background = 
                         `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
                 } else {
                     modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
                 }
             }
 
+            // Основная информация
             modalProfileNickname.textContent = user.nickname || 'Не указано';
             modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
             modalUserRole.textContent = user.identity || 'Не указано';
             modalMainSchool.textContent = user.main_school_name || 'Не указано';
 
+            // Класс
             if (user.class_number && user.class_letter) {
                 modalUserClass.textContent = `${user.class_number}${user.class_letter}`;
             } else {
                 modalUserClass.textContent = 'Не указано';
             }
 
-            const additionalSchoolValue = user.additional_school_name;
-            const hasAdditionalSchool = additionalSchoolValue &&
-                                      additionalSchoolValue !== 'Не указано' &&
-                                      additionalSchoolValue !== 'не указано' &&
-                                      additionalSchoolValue.trim() !== '';
+            // Дополнительная школа - улучшенная логика
+            const hasAdditionalSchool = user.additional_school_name && 
+                                      user.additional_school_name !== 'Не указано' && 
+                                      user.additional_school_name !== 'не указано' && 
+                                      user.additional_school_name.trim() !== '';
 
-            if (!hasAdditionalSchool) {
-                modalAdditionalSchoolContainer.style.display = 'none';
-                modalSpecializationContainer.style.display = 'none';
-                modalCourseContainer.style.display = 'none';
-            } else {
+            const hasSpecialization = user.specialization && 
+                                    user.specialization !== 'Не указано' && 
+                                    user.specialization.trim() !== '';
+
+            const hasCourse = user.course && 
+                            user.course !== 'Не указано' && 
+                            user.course.trim() !== '';
+
+            if (hasAdditionalSchool || hasSpecialization || hasCourse) {
                 modalAdditionalSchoolContainer.style.display = 'flex';
                 modalSpecializationContainer.style.display = 'flex';
                 modalCourseContainer.style.display = 'flex';
 
-                modalAdditionalSchool.textContent = additionalSchoolValue;
+                modalAdditionalSchool.textContent = user.additional_school_name || 'Не указано';
                 modalUserSpecialization.textContent = user.specialization || 'Не указано';
                 modalUserCourse.textContent = user.course || 'Не указано';
+            } else {
+                modalAdditionalSchoolContainer.style.display = 'none';
+                modalSpecializationContainer.style.display = 'none';
+                modalCourseContainer.style.display = 'none';
             }
 
-    
+            // Обработчик клика на аватар
             modalProfileAvatar.onclick = () => {
                 if (user.has_avatar_photo || user.has_avatar) {
                     const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
@@ -2310,12 +2358,12 @@ let currentViewedUser = null;
             const { searchResults, noContacts } = getActiveElements();
 
             if (!userId || userId.trim() === '') {
-                console.log('Пожалуйста, введите ID пользователя'); 
+                showMessage('Пожалуйста, введите ID пользователя', 'info');
                 return;
             }
 
             if (userId === userData.platform_user_id) {
-                console.log('Нельзя искать самого себя'); 
+                showMessage('Нельзя искать самого себя', 'info');
                 return;
             }
 
@@ -2324,89 +2372,37 @@ let currentViewedUser = null;
             noContacts.style.display = 'none';
 
             try {
-            
-                const friendshipStatus = await checkFriendshipStatus(userId);
+                // Прямой запрос данных пользователя
+                const response = await fetch(`${SERVER_URL}/get_user_data`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userId
+                    }),
+                    credentials: 'include'
+                });
 
-                if (friendshipStatus === 'accepted') {
-               
-                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform_user_id: userId
-                        }),
-                        credentials: 'include'
-                    });
+                const data = await response.json();
+                console.log('Search response:', data);
 
-                    const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Неизвестная ошибка поиска');
+                }
 
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Неизвестная ошибка поиска');
-                    }
-
-                    if (data.status === 'success' && data.user) {
-                        displayUserResult(data.user, 'added');
-                    } else {
-                        noContacts.textContent = 'Пользователь не найден';
-                        noContacts.style.display = 'block';
-                    }
-                } else if (friendshipStatus === 'request_sent') {
-                   
-                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform_user_id: userId
-                        }),
-                        credentials: 'include'
-                    });
-
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Неизвестная ошибка поиска');
-                    }
-
-                    if (data.status === 'success' && data.user) {
-                        displayUserResult(data.user, 'request_sent');
-                    } else {
-                        noContacts.textContent = 'Пользователь не найден';
-                        noContacts.style.display = 'block';
-                    }
+                if (data.status === 'success' && data.user) {
+                    // Проверяем статус дружбы
+                    const friendshipStatus = await checkFriendshipStatus(userId);
+                    displayUserResult(data.user, friendshipStatus === 'accepted' ? 'added' : 
+                                              friendshipStatus === 'request_sent' ? 'request_sent' : 'default');
                 } else {
-                  
-                    const response = await fetch(`${SERVER_URL}/search_user`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform_user_id: userId,
-                            requester_id: userData.platform_user_id
-                        }),
-                        credentials: 'include'
-                    });
-
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Неизвестная ошибка поиска');
-                    }
-
-                    if (data.status === 'success' && data.user) {
-                        displayUserResult(data.user, 'default');
-                    } else {
-                        noContacts.textContent = 'Пользователь не найден';
-                        noContacts.style.display = 'block';
-                    }
+                    noContacts.textContent = 'Пользователь не найден';
+                    noContacts.style.display = 'block';
                 }
             } catch (error) {
                 console.error('Search error:', error);
-            
+                showMessage('Ошибка при поиске: ' + error.message, 'error');
                 noContacts.textContent = 'Ошибка при поиске';
                 noContacts.style.display = 'block';
             } finally {
