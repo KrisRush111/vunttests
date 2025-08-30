@@ -165,14 +165,6 @@
             box-shadow: var(--telegram-shadow); /* White frame shadow */
         }
 
-        /* Стили для текста "Скоро..." в мобильных модальных окнах */
-        #privacyModuleMobile .desktop-module-content h3,
-        #appearanceModuleMobile .desktop-module-content h3 {
-            color: var(--telegram-hint); /* Серый цвет */
-            text-align: center; /* По центру */
-            margin-top: 0; /* Убираем отступ сверху, если он был */
-        }
-
 
         .profile-back-button {
             position: absolute;
@@ -617,7 +609,41 @@
     display: none !important;
 }
         
-        /* Удален .loading-overlay и связанные с ним стили */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            background: rgba(0,0,0,0.4);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            transition: opacity 0.3s ease-in-out;
+            backdrop-filter: blur(8px);
+        }
+        
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(36, 129, 204, 0.2);
+            border-radius: 50%;
+            border-top-color: var(--telegram-blue);
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+        
+        .loading-text {
+            color: var(--telegram-text);
+            font-size: 15px;
+            font-weight: 500;
+            background: var(--telegram-bg);
+            padding: 8px 16px;
+            border-radius: 20px;
+            box-shadow: var(--telegram-shadow-large);
+        }
         
         .message-box {
             text-align: center;
@@ -1099,7 +1125,10 @@
 </head>
 <body>
   
-    <!-- Удален loadingOverlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">Загрузка профиля...</div>
+    </div>
 
   
     <div id="soonMessage" class="soon-message">Скоро...</div>
@@ -1375,7 +1404,7 @@
         const SERVER_URL = 'https://vuntserver-li96.onrender.com';
         
      
-        // Удален loadingOverlay
+        const loadingOverlay = document.getElementById('loadingOverlay');
         const messageBox = document.getElementById('messageBox'); 
         const avatarInput = document.getElementById('avatar-input');
         const soonMessage = document.getElementById('soonMessage');
@@ -1512,7 +1541,19 @@
         }
 
     
-        // Удалены функции showLoading() и hideLoading()
+        function showLoading(text = 'Загрузка...') {
+            loadingOverlay.querySelector('.loading-text').textContent = text;
+            loadingOverlay.style.display = 'flex';
+            loadingOverlay.style.opacity = '1';
+        }
+
+      
+        function hideLoading() {
+            loadingOverlay.style.opacity = '0';
+            setTimeout(() => {
+                loadingOverlay.style.display = 'none';
+            }, 300);
+        }
 
         function hideAllDesktopModules() {
             const allModules = [profileModalDesktop, privacyModule, appearanceModule];
@@ -1721,7 +1762,8 @@
 
    
         async function handleAvatarRemove() {
-            // Удален showLoading()
+            showLoading('Удаление аватарки...');
+
             try {
                 const response = await fetch(`${SERVER_URL}/remove_avatar`, {
                     method: 'POST',
@@ -1774,7 +1816,7 @@
             } catch (error) {
                 showMessage('Ошибка удаления: ' + error.message);
             } finally {
-                // Удален hideLoading()
+                hideLoading();
             }
         }
 
@@ -1937,7 +1979,7 @@
 
        
         async function loadProfileData() {
-            // Удален showLoading()
+            showLoading();
             try {
                 const dataUpdated = await fetchUserData();
                 
@@ -1954,7 +1996,7 @@
                     window.location.href = 'index.html';
                 }, 5000);
             } finally {
-                // Удален hideLoading()
+                hideLoading();
             }
         }
 
@@ -2067,14 +2109,14 @@
                 return;
             }
             initializeLayout();
-            loadProfileData(); // Теперь без showLoading()
+            loadProfileData();
         });
 
        
         window.addEventListener('pageshow', (event) => {
             if (event.persisted) {
                 initializeLayout();
-                loadProfileData(); // Теперь без showLoading()
+                loadProfileData();
             }
         });
 
@@ -2089,3 +2131,4 @@
     </script>
 </body>
 </html>
+
