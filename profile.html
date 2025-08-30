@@ -1669,93 +1669,96 @@
         }
 
    
-        async function handleAvatarUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            avatarInput.value = '';
+     async function handleAvatarUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    avatarInput.value = '';
 
-            if (!file.type.match('image.*')) {
-                showMessage('Пожалуйста, выберите файл изображения (PNG, JPG, GIF).');
-                return;
-            }
+    if (!file.type.match('image.*')) {
+        showMessage('Пожалуйста, выберите файл изображения (PNG, JPG, GIF).');
+        return;
+    }
 
-            if (file.size > 5 * 1024 * 1024) {
-                showMessage('Размер изображения не должен превышать 5MB.');
-                return;
-            }
+    if (file.size > 5 * 1024 * 1024) {
+        showMessage('Размер изображения не должен превышать 5MB.');
+        return;
+    }
 
-            showLoading('Загрузка аватарки...');
+    // МГНОВЕННОЕ ОТОБРАЖЕНИЕ - создаем локальный URL
+    const localImageUrl = URL.createObjectURL(file);
+    
+    // Немедленно обновляем все аватары
+    const avatarElements = [
+        profileAvatarMobile, 
+        sidebarProfileAvatar, 
+        desktopProfileAvatar,
+        mobileSidebarProfileAvatar
+    ];
+    
+    avatarElements.forEach(element => {
+        element.style.backgroundImage = `url(${localImageUrl})`;
+        element.style.backgroundSize = 'cover';
+        element.style.backgroundPosition = 'center';
+        element.textContent = '';
+        element.style.backgroundColor = '';
+    });
 
-            const formData = new FormData();
-            formData.append('avatar', file);
-            formData.append('platform_user_id', userData.platform_user_id);
+    // Асинхронно загружаем на сервер (без блокировки UI)
+    const formData = new FormData();
+    formData.append('avatar', file);
+    formData.append('platform_user_id', userData.platform_user_id);
 
-            try {
-                const response = await fetch(`${SERVER_URL}/upload_avatar`, {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
+    try {
+        const response = await fetch(`${SERVER_URL}/upload_avatar`, {
+            method: 'POST',
+            body: formData,
+            credentials: 'include'
+        });
 
-                const data = await response.json();
+        const data = await response.json();
 
-                if (!response.ok) {
-                    throw new Error(data.error || 'Неизвестная ошибка загрузки.');
-                }
-                
-                if (data.status !== 'success') {
-                    throw new Error(data.message || data.error || 'Ошибка загрузки.');
-                }
-
-          
-                const newAvatarUrl = data.avatar_url;
-
-                // Update all avatar elements
-                profileAvatarMobile.style.backgroundImage = `url(${newAvatarUrl})`;
-                profileAvatarMobile.style.backgroundSize = 'cover';
-                profileAvatarMobile.style.backgroundPosition = 'center';
-                profileAvatarMobile.textContent = '';
-                profileAvatarMobile.style.backgroundColor = '';
-
-                sidebarProfileAvatar.style.backgroundImage = `url(${newAvatarUrl})`;
-                sidebarProfileAvatar.style.backgroundSize = 'cover';
-                sidebarProfileAvatar.style.backgroundPosition = 'center';
-                sidebarProfileAvatar.textContent = '';
-                sidebarProfileAvatar.style.backgroundColor = '';
-
-                desktopProfileAvatar.style.backgroundImage = `url(${newAvatarUrl})`;
-                desktopProfileAvatar.style.backgroundSize = 'cover';
-                desktopProfileAvatar.style.backgroundPosition = 'center';
-                desktopProfileAvatar.textContent = '';
-                desktopProfileAvatar.style.backgroundColor = '';
-
-                mobileSidebarProfileAvatar.style.backgroundImage = `url(${newAvatarUrl})`;
-                mobileSidebarProfileAvatar.style.backgroundSize = 'cover';
-                mobileSidebarProfileAvatar.style.backgroundPosition = 'center';
-                mobileSidebarProfileAvatar.textContent = '';
-                mobileSidebarProfileAvatar.style.backgroundColor = '';
-                
-                showMessage('Аватар успешно загружен!', 'success');
-                hideLoading();
-
-                userData.has_avatar = true;
-                userData.avatar_background = data.avatar_background || userData.avatar_background;
-                sessionStorage.setItem('userData', JSON.stringify(userData));
-
-            } catch (error) {
-                showMessage('Ошибка загрузки: ' + error.message);
-                hideLoading();
-                
-                if (userData) {
-                    // Reload avatars to ensure correct state (either image or generated background)
-                    loadAvatar(profileAvatarMobile, userData.platform_user_id);
-                    loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
-                    loadAvatar(desktopProfileAvatar, userData.platform_user_id);
-                    loadAvatar(mobileSidebarProfileAvatar, userData.platform_user_id);
-                }
-            }
+        if (!response.ok) {
+            throw new Error(data.error || 'Неизвестная ошибка загрузки.');
         }
+        
+        if (data.status !== 'success') {
+            throw new Error(data.message || data.error || 'Ошибка загрузки.');
+        }
+
+        // Обновляем данные пользователя
+        userData.has_avatar = true;
+        userData.avatar_background = data.avatar_background || userData.avatar_background;
+        sessionStorage.setItem('userData', JSON.stringify(userData));
+
+        // Освобождаем локальный URL и используем серверный
+        avatarElements.forEach(element => {
+            element.style.backgroundImage = `url(${data.avatar_url}?t=${Date.now()})`;
+        });
+        
+        URL.revokeObjectURL(localImageUrl);
+        
+        showMessage('Аватар успешно загружен!', 'success');
+
+    } catch (error) {
+        // В случае ошибки откатываем к предыдущему состоянию
+        if (userData.has_avatar) {
+            loadAvatar(profileAvatarMobile, userData.platform_user_id);
+            loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
+            loadAvatar(desktopProfileAvatar, userData.platform_user_id);
+            loadAvatar(mobileSidebarProfileAvatar, userData.platform_user_id);
+        } else {
+            const firstLetter = userData.nickname?.charAt(0).toUpperCase() || '?';
+            setAvatarBackground(profileAvatarMobile, userData.avatar_background, firstLetter);
+            setAvatarBackground(sidebarProfileAvatar, userData.avatar_background, firstLetter);
+            setAvatarBackground(desktopProfileAvatar, userData.avatar_background, firstLetter);
+            setAvatarBackground(mobileSidebarProfileAvatar, userData.avatar_background, firstLetter);
+        }
+        
+        showMessage('Ошибка загрузки: ' + error.message);
+        URL.revokeObjectURL(localImageUrl);
+    }
+}
 
    
         async function handleAvatarRemove() {
@@ -2128,3 +2131,4 @@
     </script>
 </body>
 </html>
+
