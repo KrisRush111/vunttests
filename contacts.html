@@ -700,19 +700,26 @@
             display: inline-flex;
             align-items: center;
             font-size: 14px;
-            color: var(--online-green);
             font-weight: 500;
+            gap: 6px;
         }
 
-        .profile-status::before {
-            content: '';
+        .status-indicator {
             display: inline-block;
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background-color: var(--online-green);
-            margin-right: 6px;
             animation: pulse 2s infinite;
+        }
+
+        .profile-status.offline .status-indicator {
+            background-color: var(--telegram-hint);
+            animation: none;
+        }
+
+        .profile-status.offline .status-text {
+            color: var(--telegram-hint);
         }
 
      
@@ -1289,6 +1296,14 @@
     transform: scale(1.1);
 }
 
+.user-status {
+    font-size: 13px;
+    color: var(--telegram-hint);
+}
+
+.user-status.online {
+    color: var(--online-green);
+}
 
     </style>
 </head>
@@ -1349,7 +1364,10 @@
                     <div class="profile-info">
                         <div id="modal-profile-nickname-desktop" class="profile-nickname">Загрузка...</div>
                         <div id="modal-profile-id-desktop" class="profile-id">ID: </div>
-                        <div class="profile-status">В сети</div>
+                        <div class="profile-status" id="modal-profile-status-desktop">
+                            <span class="status-indicator"></span>
+                            <span class="status-text">Загрузка...</span>
+                        </div>
                     </div>
                 </div>
 
@@ -1436,7 +1454,10 @@
                 <div class="profile-info">
                     <div id="modal-profile-nickname-mobile" class="profile-nickname">Загрузка...</div>
                     <div id="modal-profile-id-mobile" class="profile-id">ID: </div>
-                    <div class="profile-status">В сети</div>
+                    <div class="profile-status" id="modal-profile-status-mobile">
+                        <span class="status-indicator"></span>
+                        <span class="status-text">Загрузка...</span>
+                    </div>
                 </div>
             </div>
 
@@ -1527,7 +1548,7 @@
 
     <script>
       
-        const SERVER_URL = 'https://vuntserver-csaq.onrender.com';
+        const SERVER_URL = 'https://vuntserver-li96.onrender.com';
 
         
         const loadingOverlay = document.getElementById('loadingOverlay');
@@ -1560,6 +1581,7 @@
         const modalSpecializationContainerDesktop = document.getElementById('modal-specialization-container-desktop');
         const modalCourseContainerDesktop = document.getElementById('modal-course-container-desktop');
         const desktopOnlyNav = document.querySelector('.desktop-only-nav');
+        const modalProfileStatusDesktop = document.getElementById('modal-profile-status-desktop');
 
     
         const mobileContactsContainer = document.querySelector('.contacts-container.mobile-only');
@@ -1581,8 +1603,10 @@
         const modalSpecializationContainerMobile = document.getElementById('modal-specialization-container-mobile');
         const modalCourseContainerMobile = document.getElementById('modal-course-container-mobile');
         const mobileOnlyNav = document.querySelector('.mobile-only-nav');
-    const chatButtonDesktop = document.getElementById('chatButtonDesktop');
-    const chatButtonMobile = document.getElementById('chatButtonMobile');
+        const chatButtonDesktop = document.getElementById('chatButtonDesktop');
+        const chatButtonMobile = document.getElementById('chatButtonMobile');
+        const modalProfileStatusMobile = document.getElementById('modal-profile-status-mobile');
+
 
 let currentViewedUser = null;
 
@@ -1742,7 +1766,8 @@ let currentViewedUser = null;
                     modalUserCourse: modalUserCourseDesktop,
                     modalAdditionalSchoolContainer: modalAdditionalSchoolContainerDesktop,
                     modalSpecializationContainer: modalSpecializationContainerDesktop,
-                    modalCourseContainer: modalCourseContainerDesktop
+                    modalCourseContainer: modalCourseContainerDesktop,
+                    modalProfileStatus: modalProfileStatusDesktop
                 };
             } else {
                 return {
@@ -1762,7 +1787,8 @@ let currentViewedUser = null;
                     modalUserCourse: modalUserCourseMobile,
                     modalAdditionalSchoolContainer: modalAdditionalSchoolContainerMobile,
                     modalSpecializationContainer: modalSpecializationContainerMobile,
-                    modalCourseContainer: modalCourseContainerMobile
+                    modalCourseContainer: modalCourseContainerMobile,
+                    modalProfileStatus: modalProfileStatusMobile
                 };
             }
         }
@@ -1863,7 +1889,8 @@ let currentViewedUser = null;
                 modalProfileAvatar, modalProfileNickname, modalProfileId,
                 modalMainSchool, modalUserClass, modalUserRole,
                 modalAdditionalSchool, modalUserSpecialization, modalUserCourse,
-                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer
+                modalAdditionalSchoolContainer, modalSpecializationContainer, modalCourseContainer,
+                modalProfileStatus
             } = getActiveElements();
 
             try {
@@ -1899,91 +1926,193 @@ let currentViewedUser = null;
         }
 
    
-function updateProfileModalUI(user) {
-    const activeElements = getActiveElements();
-    
-    currentViewedUser = user;
-    console.log('Updating profile UI with:', user);
+        // Добавьте функцию для форматирования времени
+        function formatLastSeen(lastOnline) {
+            const now = new Date();
+            const lastSeen = new Date(lastOnline);
+            const diffMs = now - lastSeen;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
 
-    // Обновление аватара
-    if (user.has_avatar_photo || user.has_avatar) {
-        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-        activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        activeElements.modalProfileAvatar.textContent = '';
-        activeElements.modalProfileAvatar.style.backgroundColor = '';
-        activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
-        activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
-    } else {
-        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-        activeElements.modalProfileAvatar.textContent = initial;
-        activeElements.modalProfileAvatar.style.backgroundImage = 'none';
-        
-        if (user.avatar_background) {
-            const lighterColor = adjustColor(user.avatar_background, 20);
-            activeElements.modalProfileAvatar.style.background = 
-                `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
-        } else {
-            activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+            if (diffMins < 1) {
+                return 'только что';
+            } else if (diffMins < 60) {
+                return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
+            } else if (diffHours < 10) {
+                return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
+            } else if (diffHours < 24) {
+                return `был(а) в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
+            } else if (diffDays < 2) {
+                return `был(а) вчера в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
+            } else {
+                return `был(а) ${lastSeen.getDate().toString().padStart(2, '0')}.${(lastSeen.getMonth() + 1).toString().padStart(2, '0')}.${lastSeen.getFullYear()}`;
+            }
         }
-    }
 
-    // Основная информация
-    activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
-    activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
-
-    // Функция для проверки и отображения поля с учетом всех вариантов "не указано"
-    function updateField(fieldValue, fieldElement, containerElement, fieldName) {
-        if (!containerElement) return;
-        
-        // Все возможные варианты "не указано" которые нужно скрывать
-        const invalidValues = [
-            'не указано', 'не указан', 'не ук', 
-            'not specified', 'none', 'null', 'undefined'
-        ];
-        
-        const hasValidValue = fieldValue && 
-                            !invalidValues.includes(fieldValue.toLowerCase().trim()) &&
-                            fieldValue.trim() !== '';
-        
-        if (hasValidValue) {
-            fieldElement.textContent = fieldValue;
-            containerElement.style.display = 'flex';
-            console.log(`${fieldName}: "${fieldValue}" (показано)`);
-        } else {
-            containerElement.style.display = 'none';
-            console.log(`${fieldName}: скрыто (значение: "${fieldValue}")`);
+        // Функция для склонения русских существительных
+        function getRussianNoun(number, forms) {
+            number = Math.abs(number) % 100;
+            const n1 = number % 10;
+            
+            if (number > 10 && number < 20) return forms[2];
+            if (n1 > 1 && n1 < 5) return forms[1];
+            if (n1 === 1) return forms[0];
+            return forms[2];
         }
-    }
 
-    // Обновляем все поля - используем правильные контейнеры из activeElements
-    updateField(user.main_school_name, activeElements.modalMainSchool, 
-               activeElements.modalMainSchool.closest('.detail-item'), 'Основная школа');
-    
-    updateField(user.class_number && user.class_letter ? 
-               `${user.class_number}${user.class_letter}` : null, 
-               activeElements.modalUserClass, 
-               activeElements.modalUserClass.closest('.detail-item'), 'Класс');
-    
-    updateField(user.identity, activeElements.modalUserRole, 
-               activeElements.modalUserRole.closest('.detail-item'), 'Роль');
-    
-    updateField(user.additional_school_name, activeElements.modalAdditionalSchool, 
-               activeElements.modalAdditionalSchoolContainer, 'Доп. школа');
-    
-    updateField(user.specialization, activeElements.modalUserSpecialization, 
-               activeElements.modalSpecializationContainer, 'Специализация');
-    
-    updateField(user.course, activeElements.modalUserCourse, 
-               activeElements.modalCourseContainer, 'Курс');
-
-    // Обработчик клика на аватар
-    activeElements.modalProfileAvatar.onclick = () => {
-        if (user.has_avatar_photo || user.has_avatar) {
-            const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-            openPhotoViewer(avatarUrl);
+        // Функция для обновления статуса онлайн
+        async function updateUserActivity(isOnline = true) {
+            try {
+                await fetch(`${SERVER_URL}/update_activity`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id,
+                        is_online: isOnline
+                    }),
+                    credentials: 'include'
+                });
+            } catch (error) {
+                console.error('Error updating activity:', error);
+            }
         }
-    };
-}
+
+        // Функция для получения статуса пользователей
+        async function getUsersActivityStatus(userIds) {
+            try {
+                const response = await fetch(`${SERVER_URL}/get_activity_status`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_ids: userIds
+                    }),
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    return data.activity_data;
+                }
+                return {};
+            } catch (error) {
+                console.error('Error getting activity status:', error);
+                return {};
+            }
+        }
+
+        // Обновите функцию updateProfileModalUI
+        async function updateProfileModalUI(user) {
+            const activeElements = getActiveElements();
+            
+            currentViewedUser = user;
+            console.log('Updating profile UI with:', user);
+
+            // Обновление аватара
+            if (user.has_avatar_photo || user.has_avatar) {
+                const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+                activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                activeElements.modalProfileAvatar.textContent = '';
+                activeElements.modalProfileAvatar.style.backgroundColor = '';
+                activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
+                activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
+            } else {
+                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+                activeElements.modalProfileAvatar.textContent = initial;
+                activeElements.modalProfileAvatar.style.backgroundImage = 'none';
+                
+                if (user.avatar_background) {
+                    const lighterColor = adjustColor(user.avatar_background, 20);
+                    activeElements.modalProfileAvatar.style.background = 
+                        `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+                } else {
+                    activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+                }
+            }
+
+            // Основная информация
+            activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+            activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
+
+            // Обновление статуса
+            const statusElement = activeElements.modalProfileStatus;
+            if (statusElement) {
+                const activityData = await getUsersActivityStatus([user.platform_user_id]);
+                const userActivity = activityData[user.platform_user_id];
+
+                const statusTextSpan = statusElement.querySelector('.status-text');
+                const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
+
+                if (userActivity && userActivity.is_online) {
+                    statusTextSpan.textContent = 'В сети';
+                    statusElement.classList.remove('offline');
+                } else if (userActivity) {
+                    const lastSeenText = formatLastSeen(userActivity.last_online);
+                    statusTextSpan.textContent = lastSeenText;
+                    statusElement.classList.add('offline');
+                } else {
+                    statusTextSpan.textContent = 'Неизвестно';
+                    statusElement.classList.add('offline');
+                }
+            }
+
+            // Функция для проверки и отображения поля с учетом всех вариантов "не указано"
+            function updateField(fieldValue, fieldElement, containerElement, fieldName) {
+                if (!containerElement) return;
+                
+                // Все возможные варианты "не указано" которые нужно скрывать
+                const invalidValues = [
+                    'не указано', 'не указан', 'не ук', 
+                    'not specified', 'none', 'null', 'undefined'
+                ];
+                
+                const hasValidValue = fieldValue && 
+                                    !invalidValues.includes(fieldValue.toLowerCase().trim()) &&
+                                    fieldValue.trim() !== '';
+                
+                if (hasValidValue) {
+                    fieldElement.textContent = fieldValue;
+                    containerElement.style.display = 'flex';
+                    console.log(`${fieldName}: "${fieldValue}" (показано)`);
+                } else {
+                    containerElement.style.display = 'none';
+                    console.log(`${fieldName}: скрыто (значение: "${fieldValue}")`);
+                }
+            }
+
+            // Обновляем все поля - используем правильные контейнеры из activeElements
+            updateField(user.main_school_name, activeElements.modalMainSchool, 
+                       activeElements.modalMainSchool.closest('.detail-item'), 'Основная школа');
+            
+            updateField(user.class_number && user.class_letter ? 
+                       `${user.class_number}${user.class_letter}` : null, 
+                       activeElements.modalUserClass, 
+                       activeElements.modalUserClass.closest('.detail-item'), 'Класс');
+            
+            updateField(user.identity, activeElements.modalUserRole, 
+                       activeElements.modalUserRole.closest('.detail-item'), 'Роль');
+            
+            updateField(user.additional_school_name, activeElements.modalAdditionalSchool, 
+                       activeElements.modalAdditionalSchoolContainer, 'Доп. школа');
+            
+            updateField(user.specialization, activeElements.modalUserSpecialization, 
+                       activeElements.modalSpecializationContainer, 'Специализация');
+            
+            updateField(user.course, activeElements.modalUserCourse, 
+                       activeElements.modalCourseContainer, 'Курс');
+
+            // Обработчик клика на аватар
+            activeElements.modalProfileAvatar.onclick = () => {
+                if (user.has_avatar_photo || user.has_avatar) {
+                    const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+                    openPhotoViewer(avatarUrl);
+                }
+            };
+        }
 
   
         function adjustColor(hex, percent) {
@@ -2030,16 +2159,16 @@ function updateProfileModalUI(user) {
                     sessionStorage.setItem('userContacts', JSON.stringify(data.friends));
                   
                     if (data.friends.length > 0) {
-                        data.friends.forEach(user => {
-                            displayUserResult(user, 'added');
-                        });
+                        for (const user of data.friends) {
+                            await displayUserResult(user, 'added');
+                        }
                     }
 
                 
                     if (data.incoming_requests.length > 0) {
-                        data.incoming_requests.forEach(user => {
-                            displayFriendRequest(user);
-                        });
+                        for (const user of data.incoming_requests) {
+                            await displayFriendRequest(user);
+                        }
                     }
 
                    
@@ -2133,6 +2262,28 @@ function updateProfileModalUI(user) {
             infoElement.appendChild(nicknameElement);
             infoElement.appendChild(idElement);
 
+            // Добавьте элемент для статуса
+            const statusElement = document.createElement('div');
+            statusElement.className = 'user-status';
+
+            // Получите статус пользователя
+            const activityData = await getUsersActivityStatus([user.platform_user_id]);
+            const userActivity = activityData[user.platform_user_id];
+            
+            if (userActivity && userActivity.is_online) {
+                statusElement.textContent = 'В сети';
+                statusElement.classList.add('online');
+            } else if (userActivity) {
+                statusElement.textContent = formatLastSeen(userActivity.last_online);
+                statusElement.classList.remove('online');
+            } else {
+                statusElement.textContent = 'Неизвестно';
+                statusElement.classList.remove('online');
+            }
+
+            infoElement.appendChild(statusElement);
+
+
             // Action button
             const actionContainer = document.createElement('div');
 
@@ -2164,7 +2315,7 @@ function updateProfileModalUI(user) {
             searchResults.appendChild(userElement);
         }
 
-        function displayFriendRequest(user) {
+        async function displayFriendRequest(user) {
             const { searchResults } = getActiveElements();
             const requestElement = document.createElement('div');
             requestElement.className = 'user-result';
@@ -2392,7 +2543,7 @@ function updateProfileModalUI(user) {
                     }
 
                     if (data.status === 'success' && data.user) {
-                        displayUserResult(data.user, 'added');
+                        await displayUserResult(data.user, 'added');
                     } else {
                         noContacts.textContent = 'Пользователь не найден';
                         noContacts.style.display = 'block';
@@ -2417,7 +2568,7 @@ function updateProfileModalUI(user) {
                     }
 
                     if (data.status === 'success' && data.user) {
-                        displayUserResult(data.user, 'request_sent');
+                        await displayUserResult(data.user, 'request_sent');
                     } else {
                         noContacts.textContent = 'Пользователь не найден';
                         noContacts.style.display = 'block';
@@ -2443,7 +2594,7 @@ function updateProfileModalUI(user) {
                     }
 
                     if (data.status === 'success' && data.user) {
-                        displayUserResult(data.user, 'default');
+                        await displayUserResult(data.user, 'default');
                     } else {
                         noContacts.textContent = 'Пользователь не найден';
                         noContacts.style.display = 'block';
@@ -2458,6 +2609,23 @@ function updateProfileModalUI(user) {
                 hideLoading();
             }
         }
+
+        // Добавьте обработчики для отслеживания активности
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                updateUserActivity(true);
+            } else {
+                updateUserActivity(false);
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            // Отправляем синхронный запрос при закрытии страницы
+            navigator.sendBeacon(`${SERVER_URL}/update_activity`, JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                is_online: false
+            }));
+        });
 
 
         async function initializePage() {
@@ -2475,6 +2643,10 @@ function updateProfileModalUI(user) {
                 userData = JSON.parse(userDataFromStorage);
                 console.log('User data loaded:', userData);
 
+                // Обновите статус активности при загрузке
+                if (userData.platform_user_id) {
+                    await updateUserActivity(true);
+                }
          
                 isDesktop = window.matchMedia("(min-width: 768px)").matches;
                 console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
@@ -2553,4 +2725,3 @@ function updateProfileModalUI(user) {
     </script>
 </body>
 </html>
-
