@@ -1925,30 +1925,69 @@ let currentViewedUser = null;
             }
         }
 
+
+        // Добавьте эту функцию в ваш клиентский код
+function syncActivityStatus() {
+    if (userData.platform_user_id) {
+        fetch(`${SERVER_URL}/update_activity`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                is_online: true
+            }),
+            credentials: 'include'
+        }).catch(error => {
+            console.error('Activity sync error:', error);
+        });
+    }
+}
+
+// Запускайте синхронизацию каждые 30 секунд
+setInterval(syncActivityStatus, 1000);
+
+// И при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(syncActivityStatus, 1000);
+});
+
+
    
         // Добавьте функцию для форматирования времени
-        function formatLastSeen(lastOnline) {
-            const now = new Date();
-            const lastSeen = new Date(lastOnline);
-            const diffMs = now - lastSeen;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
+function formatLastSeen(lastOnline) {
+    if (!lastOnline) {
+        return 'никогда не был(а) онлайн';
+    }
+    
+    const now = new Date();
+    const lastSeen = new Date(lastOnline);
+    
+    // Проверка на валидность даты
+    if (isNaN(lastSeen.getTime())) {
+        return 'неизвестно';
+    }
+    
+    const diffMs = now - lastSeen;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
 
-            if (diffMins < 1) {
-                return 'только что';
-            } else if (diffMins < 60) {
-                return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
-            } else if (diffHours < 10) {
-                return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
-            } else if (diffHours < 24) {
-                return `был(а) в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
-            } else if (diffDays < 2) {
-                return `был(а) вчера в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
-            } else {
-                return `был(а) ${lastSeen.getDate().toString().padStart(2, '0')}.${(lastSeen.getMonth() + 1).toString().padStart(2, '0')}.${lastSeen.getFullYear()}`;
-            }
-        }
+    if (diffMins < 1) {
+        return 'только что';
+    } else if (diffMins < 60) {
+        return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
+    } else if (diffHours < 10) {
+        return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
+    } else if (diffHours < 24) {
+        return `был(а) в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
+    } else if (diffDays < 2) {
+        return `был(а) вчера в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
+    } else {
+        return `был(а) ${lastSeen.getDate().toString().padStart(2, '0')}.${(lastSeen.getMonth() + 1).toString().padStart(2, '0')}.${lastSeen.getFullYear()}`;
+    }
+}
 
         // Функция для склонения русских существительных
         function getRussianNoun(number, forms) {
@@ -2619,13 +2658,17 @@ let currentViewedUser = null;
             }
         });
 
-        window.addEventListener('beforeunload', () => {
-            // Отправляем синхронный запрос при закрытии страницы
-            navigator.sendBeacon(`${SERVER_URL}/update_activity`, JSON.stringify({
-                platform_user_id: userData.platform_user_id,
-                is_online: false
-            }));
+ window.addEventListener('beforeunload', () => {
+    if (userData.platform_user_id) {
+        // Используем sendBeacon для надежной отправки
+        const data = JSON.stringify({
+            platform_user_id: userData.platform_user_id,
+            is_online: false
         });
+        
+        navigator.sendBeacon(`${SERVER_URL}/update_activity`, data);
+    }
+}); 
 
 
         async function initializePage() {
