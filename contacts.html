@@ -1609,6 +1609,7 @@
 
 
 let currentViewedUser = null;
+let activityUpdateInterval; // Объявление переменной для интервала
 
     // Анимация и функционал для десктопной кнопки чата
     if (chatButtonDesktop) {
@@ -1988,13 +1989,21 @@ let currentViewedUser = null;
         async function sendOfflineStatus() {
             if (userData && userData.platform_user_id) {
                 try {
-                    // Используем navigator.sendBeacon для надежной отправки при закрытии
-                    const data = JSON.stringify({
+                    const data = {
                         platform_user_id: userData.platform_user_id,
                         is_online: false
-                    });
+                    };
                     
-                    navigator.sendBeacon(`${SERVER_URL}/update_activity`, data);
+                    // Используем fetch с keepalive вместо sendBeacon
+                    fetch(`${SERVER_URL}/update_activity`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(data),
+                        credentials: 'include',
+                        keepalive: true // Это обеспечит отправку даже при закрытии страницы
+                    }).catch(() => {}); // Игнорируем ошибки, так как страница может закрываться
                 } catch (error) {
                     console.error('Error sending offline status:', error);
                 }
@@ -2062,21 +2071,30 @@ let currentViewedUser = null;
             // Обновление статуса
             const statusElement = activeElements.modalProfileStatus;
             if (statusElement) {
-                const activityData = await getUsersActivityStatus([user.platform_user_id]);
-                const userActivity = activityData[user.platform_user_id];
+                try {
+                    const activityData = await getUsersActivityStatus([user.platform_user_id]);
+                    const userActivity = activityData[user.platform_user_id];
 
-                const statusTextSpan = statusElement.querySelector('.status-text');
-                const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
+                    const statusTextSpan = statusElement.querySelector('.status-text');
+                    const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
 
-                if (userActivity && userActivity.is_online) {
-                    statusTextSpan.textContent = 'В сети';
-                    statusElement.classList.remove('offline');
-                } else if (userActivity) {
-                    const lastSeenText = formatLastSeen(userActivity.last_online);
-                    statusTextSpan.textContent = lastSeenText;
-                    statusElement.classList.add('offline');
-                } else {
-                    statusTextSpan.textContent = 'Неизвестно';
+                    if (userActivity) {
+                        if (userActivity.is_online) {
+                            statusTextSpan.textContent = 'В сети';
+                            statusElement.classList.remove('offline');
+                        } else {
+                            const lastSeenText = formatLastSeen(userActivity.last_online);
+                            statusTextSpan.textContent = lastSeenText;
+                            statusElement.classList.add('offline');
+                        }
+                    } else {
+                        // Если данных нет, показываем "не в сети" с текущим временем
+                        statusTextSpan.textContent = 'не в сети';
+                        statusElement.classList.add('offline');
+                    }
+                } catch (error) {
+                    console.error('Error getting activity status:', error);
+                    statusTextSpan.textContent = 'не в сети';
                     statusElement.classList.add('offline');
                 }
             }
@@ -2631,8 +2649,21 @@ let currentViewedUser = null;
             }
         }
 
+        // Функция для запуска интервального обновления активности
+        function startActivityUpdates() {
+            // Обновляем статус каждые 30 секунд
+            activityUpdateInterval = setInterval(() => {
+                if (userData && userData.platform_user_id) {
+                    updateUserActivity(true);
+                }
+            }, 30000);
+        }
+
         // Обработчики событий
         window.addEventListener('beforeunload', () => {
+            if (activityUpdateInterval) {
+                clearInterval(activityUpdateInterval);
+            }
             sendOfflineStatus();
         });
 
@@ -2645,8 +2676,10 @@ let currentViewedUser = null;
             if (userData && userData.platform_user_id) {
                 if (document.visibilityState === 'visible') {
                     updateUserActivity(true);
+                    startActivityUpdates(); // Перезапускаем интервал при возвращении на страницу
                 } else {
-                    updateUserActivity(false);
+                    clearInterval(activityUpdateInterval); // Останавливаем интервал при скрытии страницы
+                    sendOfflineStatus();
                 }
             }
         });
@@ -2671,6 +2704,7 @@ let currentViewedUser = null;
                 if (userData.platform_user_id) {
                     setTimeout(() => {
                         updateUserActivity(true);
+                        startActivityUpdates(); // Запускаем интервал при инициализации
                     }, 1000);
                 }
          
