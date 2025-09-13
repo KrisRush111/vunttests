@@ -1963,6 +1963,10 @@ let currentViewedUser = null;
 
         // Функция для обновления статуса онлайн
         async function updateUserActivity(isOnline = true) {
+            if (!userData || !userData.platform_user_id) {
+                console.warn('userData not available for updateUserActivity');
+                return;
+            }
             try {
                 await fetch(`${SERVER_URL}/update_activity`, {
                     method: 'POST',
@@ -1977,6 +1981,23 @@ let currentViewedUser = null;
                 });
             } catch (error) {
                 console.error('Error updating activity:', error);
+            }
+        }
+
+        // Функция для отправки статуса "офлайн"
+        async function sendOfflineStatus() {
+            if (userData && userData.platform_user_id) {
+                try {
+                    // Используем navigator.sendBeacon для надежной отправки при закрытии
+                    const data = JSON.stringify({
+                        platform_user_id: userData.platform_user_id,
+                        is_online: false
+                    });
+                    
+                    navigator.sendBeacon(`${SERVER_URL}/update_activity`, data);
+                } catch (error) {
+                    console.error('Error sending offline status:', error);
+                }
             }
         }
 
@@ -2610,21 +2631,24 @@ let currentViewedUser = null;
             }
         }
 
-        // Добавьте обработчики для отслеживания активности
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                updateUserActivity(true);
-            } else {
-                updateUserActivity(false);
-            }
+        // Обработчики событий
+        window.addEventListener('beforeunload', () => {
+            sendOfflineStatus();
         });
 
-        window.addEventListener('beforeunload', () => {
-            // Отправляем синхронный запрос при закрытии страницы
-            navigator.sendBeacon(`${SERVER_URL}/update_activity`, JSON.stringify({
-                platform_user_id: userData.platform_user_id,
-                is_online: false
-            }));
+        window.addEventListener('pagehide', () => {
+            sendOfflineStatus();
+        });
+
+        // Также обновите обработчик visibilitychange
+        document.addEventListener('visibilitychange', () => {
+            if (userData && userData.platform_user_id) {
+                if (document.visibilityState === 'visible') {
+                    updateUserActivity(true);
+                } else {
+                    updateUserActivity(false);
+                }
+            }
         });
 
 
@@ -2645,7 +2669,9 @@ let currentViewedUser = null;
 
                 // Обновите статус активности при загрузке
                 if (userData.platform_user_id) {
-                    await updateUserActivity(true);
+                    setTimeout(() => {
+                        updateUserActivity(true);
+                    }, 1000);
                 }
          
                 isDesktop = window.matchMedia("(min-width: 768px)").matches;
