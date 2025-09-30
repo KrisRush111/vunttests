@@ -15,12 +15,23 @@
     <!-- Theme Color -->
     <meta name="theme-color" content="#2d5e4f">
     
-    <!-- iOS Meta Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Vuntgram">
-    <link rel="apple-touch-icon" href="/AppImages/ios/180.png">
-    
+<!-- Apple Specific Meta Tags -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Vuntgram">
+<meta name="format-detection" content="telephone=no">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- Apple Touch Icons -->
+<link rel="apple-touch-icon" href="AppImages/ios/180.png">
+<link rel="apple-touch-icon" sizes="152x152" href="AppImages/ios/152.png">
+<link rel="apple-touch-icon" sizes="167x167" href="AppImages/ios/167.png">
+<link rel="apple-touch-icon" sizes="180x180" href="AppImages/ios/180.png">
+
+<!-- Apple Launch Images -->
+<link rel="apple-touch-startup-image" href="AppImages/ios/splash.png">
+
+
     <!-- Windows Meta Tags -->
     <meta name="msapplication-TileColor" content="#2d5e4f">
     <meta name="msapplication-TileImage" content="/AppImages/windows/largetile.scale-100.png">
@@ -478,8 +489,7 @@
         const SERVER_URL = 'https://vuntserver-0ggf.onrender.com'; 
         
       
-
-        function showDebugInfo(message) {
+function showDebugInfo(message) {
     const debugDiv = document.getElementById('debug-info');
     debugDiv.innerHTML += message + '<br>';
     debugDiv.style.display = 'block';
@@ -488,10 +498,21 @@
 
 // Расширенная проверка PWA критериев
 function checkPWAReadiness() {
+    showDebugInfo('=== PWA SUPPORT CHECK ===');
     showDebugInfo('Service Worker supported: ' + ('serviceWorker' in navigator));
     showDebugInfo('HTTPS: ' + (location.protocol === 'https:'));
     showDebugInfo('Display mode: ' + (window.matchMedia('(display-mode: standalone)').matches));
     showDebugInfo('Manifest detected: ' + !!document.querySelector('link[rel="manifest"]'));
+    
+    // Определяем платформу и браузер
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
+    const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    const isChrome = /Chrome/.test(navigator.userAgent);
+    
+    showDebugInfo('Platform: ' + (isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop'));
+    showDebugInfo('Browser: ' + (isSafari ? 'Safari' : isChrome ? 'Chrome' : 'Other'));
+    showDebugInfo('Standalone: ' + navigator.standalone);
     
     // Проверка манифеста
     const manifestLink = document.querySelector('link[rel="manifest"]');
@@ -500,33 +521,61 @@ function checkPWAReadiness() {
     }
 }
 
-// Запускаем проверку
-checkPWAReadiness();
+// Универсальная функция установки для всех платформ
+function initializeUniversalPWA() {
+    let deferredPrompt;
+    const installButton = document.getElementById('installButton');
+    
+    // Определяем платформу
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
+    const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
 
+    // Функция для показа инструкций по установке
+    function getInstallInstructions() {
+        if (isIOS) {
+            return 'Для установки: нажмите кнопку "Поделиться" 📤 и выберите "На экран «Домой»"';
+        } else if (isAndroid && isSafari) {
+            return 'Для установки: в меню браузера выберите "Добавить на главный экран"';
+        } else if (isAndroid) {
+            return 'Для установки: нажмите "Установить" или в меню выберите "Добавить на главный экран"';
+        } else {
+            return 'Для установки: нажмите кнопку "Установить" или используйте меню браузера';
+        }
+    }
 
-   let deferredPrompt;
-        const installButton = document.getElementById('installButton');
+    // Показываем кнопку когда приложение можно установить (Chrome/Android)
+    window.addEventListener('beforeinstallprompt', (e) => {
+        console.log('✅ beforeinstallprompt event fired');
+        showDebugInfo('PWA can be installed (Chrome/Android)');
+        
+        e.preventDefault();
+        deferredPrompt = e;
+        
+        // Показываем кнопку для Chrome/Android
+        showInstallButton();
+    });
 
-        // Показываем кнопку когда приложение можно установить
-        window.addEventListener('beforeinstallprompt', (e) => {
-            console.log('✅ beforeinstallprompt event fired');
-            showDebugInfo('PWA can be installed');
-            
-            e.preventDefault();
-            deferredPrompt = e;
-            
-            // Всегда показываем кнопку при возможности установки
-            installButton.style.display = 'block';
-            installButton.style.animation = 'slideInUp 0.3s ease';
-        });
+    // Функция показа кнопки установки
+    function showInstallButton() {
+        if (isIOS || isSafari) {
+            // Для iOS/Safari показываем специальную кнопку с инструкциями
+            installButton.innerHTML = `<i class="fas fa-mobile-alt"></i>Установить приложение`;
+            installButton.style.background = 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)';
+        } else {
+            // Для Chrome/Android стандартная кнопка
+            installButton.innerHTML = `<i class="fas fa-download"></i>Установить приложение`;
+        }
+        
+        installButton.style.display = 'block';
+        installButton.style.animation = 'slideInUp 0.3s ease';
+        showDebugInfo('Install button shown: ' + getInstallInstructions());
+    }
 
-        // Обработка клика по кнопке установки
-        installButton.addEventListener('click', async () => {
-            if (!deferredPrompt) {
-                console.log('❌ No deferred prompt available');
-                return;
-            }
-            
+    // Обработка клика по кнопке установки для всех платформ
+    installButton.addEventListener('click', async () => {
+        // Chrome/Android с поддержкой beforeinstallprompt
+        if (deferredPrompt) {
             console.log('🔄 Showing installation prompt...');
             showDebugInfo('Showing installation dialog');
             
@@ -537,7 +586,6 @@ checkPWAReadiness();
                 console.log(`✅ User response: ${outcome}`);
                 showDebugInfo(`User ${outcome} installation`);
                 
-                // Скрываем кнопку независимо от выбора пользователя
                 installButton.style.display = 'none';
                 deferredPrompt = null;
                 
@@ -545,122 +593,168 @@ checkPWAReadiness();
                 console.error('❌ Installation error:', error);
                 showDebugInfo('Installation failed: ' + error.message);
             }
-        });
-
-        // Скрываем кнопку если приложение уже установлено
-        window.addEventListener('appinstalled', (evt) => {
-            console.log('🎉 PWA was installed successfully');
-            showDebugInfo('PWA installed successfully');
+        } 
+        // iOS/Safari - показываем инструкции
+        else if (isIOS || isSafari) {
+            showDebugInfo('iOS/Safari: Showing installation instructions');
             
+            // Создаем красивый alert с инструкциями
+            const instruction = getInstallInstructions();
+            alert(`📱 Установка Vuntgram\n\n${instruction}\n\nПосле установки приложение будет доступно с главного экрана!`);
+            
+            // Обновляем кнопку для iOS с визуальной подсказкой
+            if (isIOS) {
+                installButton.innerHTML = `<i class="fas fa-share"></i>Нажмите 📤 затем "На экран «Домой»"`;
+                installButton.style.background = 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)';
+                
+                // Показываем кнопку еще 10 секунд потом скрываем
+                setTimeout(() => {
+                    installButton.style.display = 'none';
+                }, 10000);
+            }
+        }
+        // Fallback для других браузеров
+        else {
+            showDebugInfo('Fallback: Manual installation required');
+            alert('Для установки приложения используйте меню браузера:\n\nChrome: ⋮ → "Установить Vuntgram"\nFirefox: ⋮ → "Установить"\nEdge: ... → "Приложения" → "Установить этот сайт как приложение"');
+        }
+    });
+
+    // Скрываем кнопку если приложение уже установлено
+    window.addEventListener('appinstalled', (evt) => {
+        console.log('🎉 PWA was installed successfully');
+        showDebugInfo('PWA installed successfully');
+        
+        installButton.style.display = 'none';
+        deferredPrompt = null;
+        
+        // Обновляем отладочную информацию
+        setTimeout(() => {
+            showDebugInfo('Display mode after install: ' + (window.matchMedia('(display-mode: standalone)').matches));
+        }, 1000);
+    });
+
+    // Проверяем если приложение уже установлено
+    function checkIfAppIsInstalled() {
+        // Android/Desktop Chrome
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            console.log('📱 Running in standalone mode');
+            showDebugInfo('App is running in standalone mode');
             installButton.style.display = 'none';
-            deferredPrompt = null;
-            
-            // Обновляем отладочную информацию
-            setTimeout(() => {
-                showDebugInfo('Display mode after install: ' + (window.matchMedia('(display-mode: standalone)').matches));
-            }, 1000);
-        });
+            return true;
+        }
+        
+        // iOS Safari
+        if (window.navigator.standalone) {
+            console.log('📱 iOS standalone mode detected');
+            showDebugInfo('iOS app is installed and running');
+            installButton.style.display = 'none';
+            return true;
+        }
+        
+        return false;
+    }
 
-        // Проверяем если приложение уже установлено
-        function checkIfAppIsInstalled() {
-            if (window.matchMedia('(display-mode: standalone)').matches) {
-                console.log('📱 Running in standalone mode');
-                showDebugInfo('App is running in standalone mode');
-                installButton.style.display = 'none';
-                return true;
-            }
-            
-            // Дополнительные проверки для разных браузеров
-            if (window.navigator.standalone) {
-                console.log('📱 iOS standalone mode detected');
-                installButton.style.display = 'none';
-                return true;
-            }
-            
-            return false;
+    // Регистрация Service Worker с улучшенной обработкой ошибок
+    function registerServiceWorker() {
+        if (!('serviceWorker' in navigator)) {
+            console.log('❌ Service Worker not supported');
+            showDebugInfo('Service Worker: Not supported');
+            return;
         }
 
-        // Регистрация Service Worker с улучшенной обработкой ошибок
-        function registerServiceWorker() {
-            if (!('serviceWorker' in navigator)) {
-                console.log('❌ Service Worker not supported');
-                showDebugInfo('Service Worker: Not supported');
-                return;
-            }
-
-            window.addEventListener('load', async function() {
-                console.log('🔄 Attempting Service Worker registration...');
+        window.addEventListener('load', async function() {
+            console.log('🔄 Attempting Service Worker registration...');
+            
+            try {
+                const registration = await navigator.serviceWorker.register('/sw.js');
+                console.log('✅ ServiceWorker зарегистрирован: ', registration.scope);
+                showDebugInfo('Service Worker: Registered successfully');
                 
-                try {
-                    const registration = await navigator.serviceWorker.register('/sw.js');
-                    console.log('✅ ServiceWorker зарегистрирован: ', registration.scope);
-                    showDebugInfo('Service Worker: Registered successfully');
+                // Проверяем готовность PWA
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    console.log('🔄 New Service Worker found');
                     
-                    // Проверяем готовность PWA
-                    registration.addEventListener('updatefound', () => {
-                        const newWorker = registration.installing;
-                        console.log('🔄 New Service Worker found');
+                    newWorker.addEventListener('statechange', () => {
+                        console.log('Service Worker state:', newWorker.state);
+                        showDebugInfo('Service Worker state: ' + newWorker.state);
                         
-                        newWorker.addEventListener('statechange', () => {
-                            console.log('Service Worker state:', newWorker.state);
-                            showDebugInfo('Service Worker state: ' + newWorker.state);
+                        if (newWorker.state === 'activated') {
+                            console.log('✅ Service Worker activated - PWA ready!');
+                            showDebugInfo('Service Worker: Activated and ready');
                             
-                            if (newWorker.state === 'activated') {
-                                console.log('✅ Service Worker activated - PWA ready!');
-                                showDebugInfo('Service Worker: Activated and ready');
-                                
-                                // После активации SW проверяем возможность установки
-                                setTimeout(() => {
-                                    if (!checkIfAppIsInstalled() && !deferredPrompt) {
+                            // После активации SW проверяем возможность установки
+                            setTimeout(() => {
+                                if (!checkIfAppIsInstalled()) {
+                                    // Для iOS/Safari всегда показываем кнопку после активации SW
+                                    if (isIOS || isSafari) {
+                                        showInstallButton();
+                                        showDebugInfo('iOS/Safari: Showing install button after SW activation');
+                                    } else if (!deferredPrompt) {
                                         console.log('🔄 PWA ready for installation');
                                         showDebugInfo('PWA is ready for installation');
                                     }
-                                }, 1000);
-                            }
-                        });
-                    });
-                    
-                } catch (error) {
-                    console.log('❌ Ошибка регистрации ServiceWorker: ', error);
-                    showDebugInfo('Service Worker error: ' + error.message);
-                    
-                    // Показываем кнопку даже если SW не работает (для тестирования)
-                    setTimeout(() => {
-                        if (installButton.style.display === 'none' && !checkIfAppIsInstalled()) {
-                            installButton.style.display = 'block';
-                            console.log('🔄 Showing install button for testing (SW failed)');
-                            showDebugInfo('Showing install button (fallback)');
+                                }
+                            }, 1000);
                         }
-                    }, 3000);
-                }
-            });
-        }
+                    });
+                });
+                
+            } catch (error) {
+                console.log('❌ Ошибка регистрации ServiceWorker: ', error);
+                showDebugInfo('Service Worker error: ' + error.message);
+                
+                // Показываем кнопку даже если SW не работает (для тестирования)
+                setTimeout(() => {
+                    if (installButton.style.display === 'none' && !checkIfAppIsInstalled()) {
+                        showInstallButton();
+                        console.log('🔄 Showing install button for testing (SW failed)');
+                        showDebugInfo('Showing install button (fallback)');
+                    }
+                }, 3000);
+            }
+        });
+    }
 
-        // Инициализация PWA
-        function initializePWA() {
-            // Сначала проверяем не установлено ли уже приложение
-            const isInstalled = checkIfAppIsInstalled();
-            
-            // Регистрируем Service Worker
-            registerServiceWorker();
-            
-            // Дополнительная проверка через 3 секунды
+    // Инициализация PWA
+    function initializePWA() {
+        // Сначала проверяем не установлено ли уже приложение
+        const isInstalled = checkIfAppIsInstalled();
+        
+        // Регистрируем Service Worker
+        registerServiceWorker();
+        
+        // Для iOS/Safari всегда показываем кнопку через 2 секунды
+        if ((isIOS || isSafari) && !isInstalled) {
             setTimeout(() => {
-                if (installButton.style.display === 'none' && !deferredPrompt && !isInstalled) {
-                    console.log('🔄 Force showing install button after timeout');
-                    showDebugInfo('Showing install button (timeout)');
-                    installButton.style.display = 'block';
-                }
-            }, 3000);
-            
-            // Периодическая проверка статуса
-            setInterval(() => {
-                checkIfAppIsInstalled();
-            }, 5000);
+                showInstallButton();
+                showDebugInfo('iOS/Safari: Auto-showing install button');
+            }, 2000);
         }
+        
+        // Дополнительная проверка через 3 секунды для других браузеров
+        setTimeout(() => {
+            if (installButton.style.display === 'none' && !deferredPrompt && !isInstalled && !isIOS && !isSafari) {
+                console.log('🔄 Force showing install button after timeout');
+                showDebugInfo('Showing install button (timeout)');
+                installButton.style.display = 'block';
+            }
+        }, 3000);
+        
+        // Периодическая проверка статуса
+        setInterval(() => {
+            checkIfAppIsInstalled();
+        }, 10000);
+    }
 
-        // Запускаем инициализацию PWA
-        initializePWA();
+    // Запускаем инициализацию PWA
+    initializePWA();
+}
+
+// Запускаем проверку и инициализацию
+checkPWAReadiness();
+initializeUniversalPWA();
 
 
 
