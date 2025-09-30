@@ -1130,6 +1130,106 @@
             transform: translate(-50%, -50%) scale(1);
         }
 
+
+        /* Logout Modal Styles */
+.logout-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(5px);
+}
+
+.logout-modal.active {
+    display: flex;
+    animation: fadeIn 0.3s ease;
+}
+
+.logout-modal-content {
+    background: var(--telegram-bg);
+    border-radius: 16px;
+    padding: 0;
+    width: 90%;
+    max-width: 320px;
+    box-shadow: var(--telegram-shadow-large);
+    border: 2px solid #0088cc;
+    animation: zoomIn 0.3s ease;
+}
+
+.logout-modal-header {
+    padding: 20px 20px 10px;
+    border-bottom: 1px solid var(--telegram-divider);
+}
+
+.logout-modal-header h3 {
+    color: var(--telegram-text);
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    text-align: center;
+}
+
+.logout-modal-body {
+    padding: 20px;
+    text-align: center;
+}
+
+.logout-modal-body p {
+    color: var(--telegram-text);
+    font-size: 16px;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.logout-modal-actions {
+    display: flex;
+    padding: 0 20px 20px;
+    gap: 12px;
+}
+
+.logout-btn {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.logout-btn.cancel {
+    background: var(--telegram-secondary-bg);
+    color: var(--telegram-text);
+    border: 1px solid var(--telegram-divider);
+}
+
+.logout-btn.cancel:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.logout-btn.confirm {
+    background: #0088cc;
+    color: white;
+}
+
+.logout-btn.confirm:hover {
+    background: #0077b3;
+    transform: translateY(-1px);
+}
+
+.logout-btn:active {
+    transform: scale(0.98);
+}
+
+
+
     </style>
 </head>
 <body>
@@ -1178,6 +1278,11 @@
                 <div id="faqBtn" class="settings-item">
                     <div class="settings-item-icon purple"><i class="fas fa-question"></i></div>
                     <div class="settings-item-label">Vuntgram FAQ</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
+                <div id="logoutBtn" class="settings-item">
+                    <div class="settings-item-icon" style="background-color: #0088cc;"><i class="fas fa-sign-out-alt"></i></div>
+                    <div class="settings-item-label">Выйти</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
             </div>
@@ -1303,9 +1408,32 @@
                     <div class="settings-item-label">Vuntgram FAQ</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
+                <div id="logoutBtnMobile" class="settings-item">
+                    <div class="settings-item-icon" style="background-color: #0088cc;"><i class="fas fa-sign-out-alt"></i></div>
+                    <div class="settings-item-label">Выйти</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
             </div>
         </div>
     </div>
+
+
+    <!-- Logout Confirmation Modal -->
+<div id="logoutModal" class="logout-modal">
+    <div class="logout-modal-content">
+        <div class="logout-modal-header">
+            <h3>Подтверждение выхода</h3>
+        </div>
+        <div class="logout-modal-body">
+            <p>Вы уверены, что хотите выйти?</p>
+        </div>
+        <div class="logout-modal-actions">
+            <button id="logoutCancel" class="logout-btn cancel">Нет</button>
+            <button id="logoutConfirm" class="logout-btn confirm">Да</button>
+        </div>
+    </div>
+</div>
+
 
     <!-- Profile Modal for Mobile -->
     <div id="profileModalMobile" class="profile-modal">
@@ -1491,6 +1619,58 @@
         const profileModalMobileBackBtn = document.getElementById('profileModalMobileBackBtn');
         const privacyModuleMobileBackBtn = document.getElementById('privacyModuleMobileBackBtn');
         const appearanceModuleMobileBackBtn = document.getElementById('appearanceModuleMobileBackBtn');
+
+
+                // Logout elements
+        const logoutBtn = document.getElementById('logoutBtn');
+        const logoutBtnMobile = document.getElementById('logoutBtnMobile');
+        const logoutModal = document.getElementById('logoutModal');
+        const logoutCancel = document.getElementById('logoutCancel');
+        const logoutConfirm = document.getElementById('logoutConfirm');
+
+        // Logout functions
+        function showLogoutModal() {
+            logoutModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function hideLogoutModal() {
+            logoutModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        function performLogout() {
+            // Очищаем sessionStorage
+            sessionStorage.removeItem('userData');
+            
+            // Очищаем localStorage (запомненный пользователь)
+            localStorage.removeItem('rememberedUser');
+            
+            // Перенаправляем на страницу входа
+            window.location.href = 'index.html';
+        }
+
+        // Event listeners for logout
+        logoutBtn.addEventListener('click', showLogoutModal);
+        logoutBtnMobile.addEventListener('click', showLogoutModal);
+        logoutCancel.addEventListener('click', hideLogoutModal);
+        logoutConfirm.addEventListener('click', performLogout);
+
+        // Close modal when clicking outside
+        logoutModal.addEventListener('click', (e) => {
+            if (e.target === logoutModal) {
+                hideLogoutModal();
+            }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && logoutModal.classList.contains('active')) {
+                hideLogoutModal();
+            }
+        });
+
+
 
 
         let userData = JSON.parse(sessionStorage.getItem('userData'));
