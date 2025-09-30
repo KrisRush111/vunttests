@@ -7,12 +7,15 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 
+    <!-- В index.html, profile.html, chats.html, contacts.html -->
+    <script src="app.js"></script>  
 
        <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
     
     <!-- Theme Color -->
     <meta name="theme-color" content="#2d5e4f">
+    
     
     <!-- iOS Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1537,8 +1540,44 @@
      
         const SERVER_URL = 'https://vuntserver-0ggf.onrender.com';
         
-     
-        // Removed loadingOverlay constant
+        let userData = null; // Initialize userData as null
+
+        function checkAuthorization() {
+            // Сначала проверяем sessionStorage (текущая сессия)
+            const sessionUser = sessionStorage.getItem('userData');
+            if (sessionUser) {
+                try {
+                    userData = JSON.parse(sessionUser);
+                    if (userData && userData.platform_user_id) {
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('Error parsing session user data:', error);
+                }
+            }
+            
+            // Если в sessionStorage нет, проверяем localStorage (remember me)
+            const rememberedUser = localStorage.getItem('rememberedUser');
+            if (rememberedUser) {
+                try {
+                    userData = JSON.parse(rememberedUser);
+                    if (userData && userData.platform_user_id) {
+                        // Восстанавливаем сессию
+                        sessionStorage.setItem('userData', rememberedUser);
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('Error parsing remembered user:', error);
+                    localStorage.removeItem('rememberedUser');
+                }
+            }
+            
+            // Если пользователь не авторизован - редирект на вход
+            console.log('No valid user data found, redirecting to login');
+            window.location.href = 'index.html';
+            return false;
+        }
+
         const messageBox = document.getElementById('messageBox'); 
         const avatarInput = document.getElementById('avatar-input');
         const soonMessage = document.getElementById('soonMessage');
@@ -1640,11 +1679,10 @@
         }
 
         function performLogout() {
-            // Очищаем sessionStorage
+            // Очищаем ВСЕ данные авторизации
             sessionStorage.removeItem('userData');
-            
-            // Очищаем localStorage (запомненный пользователь)
             localStorage.removeItem('rememberedUser');
+            localStorage.removeItem('consentAccepted'); // если нужно
             
             // Перенаправляем на страницу входа
             window.location.href = 'index.html';
@@ -1673,7 +1711,6 @@
 
 
 
-        let userData = JSON.parse(sessionStorage.getItem('userData'));
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
         
@@ -2279,17 +2316,23 @@
 
       
         window.addEventListener('DOMContentLoaded', () => {
-            if (!userData || !userData.id) {
-                window.location.href = 'index.html';
+            // Проверяем авторизацию
+            if (!checkAuthorization()) {
                 return;
             }
+            
+            // Только если авторизованы - инициализируем интерфейс
             initializeLayout();
-            loadProfileData(); // Call loadProfileData directly without showLoading
+            loadProfileData();
         });
 
        
         window.addEventListener('pageshow', (event) => {
             if (event.persisted) {
+                // Re-check authorization on pageshow for back/forward navigation
+                if (!checkAuthorization()) {
+                    return;
+                }
                 initializeLayout();
                 loadProfileData();
             }
