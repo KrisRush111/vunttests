@@ -483,6 +483,7 @@ const installButton = document.getElementById('installButton');
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 const isAndroid = /Android/.test(navigator.userAgent);
 const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+const isMobile = isIOS || isAndroid;
 
 // Функция для показа инструкций по установке
 function getInstallInstructions() {
@@ -497,27 +498,43 @@ function getInstallInstructions() {
     }
 }
 
+// Функция показа кнопки установки для ВСЕХ платформ
+function showInstallButton() {
+    // Всегда показываем кнопку, если приложение еще не установлено
+    if (checkIfAppIsInstalled()) {
+        installButton.style.display = 'none';
+        return;
+    }
+    
+    const instructions = getInstallInstructions();
+    
+    if (isIOS || isSafari) {
+        // Для iOS/Safari показываем специальную кнопку с инструкциями
+        installButton.innerHTML = `<i class="fas fa-mobile-alt"></i>Установить приложение`;
+        installButton.style.background = 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)';
+        installButton.title = instructions;
+    } else if (isAndroid) {
+        // Для Android
+        installButton.innerHTML = `<i class="fas fa-download"></i>Установить приложение`;
+        installButton.style.background = 'linear-gradient(135deg, #2d5e4f 0%, #48b493 100%)';
+        installButton.title = instructions;
+    } else {
+        // Для Windows/Desktop
+        installButton.innerHTML = `<i class="fas fa-desktop"></i>Установить приложение`;
+        installButton.style.background = 'linear-gradient(135deg, #2d5e4f 0%, #48b493 100%)';
+        installButton.title = 'Установите Vuntgram как приложение для быстрого доступа';
+    }
+    
+    installButton.style.display = 'block';
+    installButton.style.animation = 'slideInUp 0.3s ease';
+}
+
 // Показываем кнопку когда приложение можно установить (Chrome/Android)
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPrompt = e;
     showInstallButton();
 });
-
-// Функция показа кнопки установки
-function showInstallButton() {
-    if (isIOS || isSafari) {
-        // Для iOS/Safari показываем специальную кнопку с инструкциями
-        installButton.innerHTML = `<i class="fas fa-mobile-alt"></i>Установить приложение`;
-        installButton.style.background = 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)';
-    } else {
-        // Для Chrome/Android стандартная кнопка
-        installButton.innerHTML = `<i class="fas fa-download"></i>Установить приложение`;
-    }
-    
-    installButton.style.display = 'block';
-    installButton.style.animation = 'slideInUp 0.3s ease';
-}
 
 // Обработка клика по кнопке установки для всех платформ
 installButton.addEventListener('click', async () => {
@@ -526,34 +543,48 @@ installButton.addEventListener('click', async () => {
         try {
             deferredPrompt.prompt();
             const { outcome } = await deferredPrompt.userChoice;
-            installButton.style.display = 'none';
+            if (outcome === 'accepted') {
+                installButton.style.display = 'none';
+            }
             deferredPrompt = null;
         } catch (error) {
             console.error('Installation error:', error);
+            // Если произошла ошибка, показываем инструкции
+            showInstallInstructions();
         }
     } 
-    // iOS/Safari - показываем инструкции
-    else if (isIOS || isSafari) {
-        // Создаем красивый alert с инструкциями
-        const instruction = getInstallInstructions();
-        alert(`📱 Установка Vuntgram\n\n${instruction}\n\nПосле установки приложение будет доступно с главного экрана!`);
-        
-        // Обновляем кнопку для iOS с визуальной подсказкой
-        if (isIOS) {
-            installButton.innerHTML = `<i class="fas fa-share"></i>Нажмите 📤 затем "На экран «Домой»"`;
-            installButton.style.background = 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)';
-            
-            // Показываем кнопку еще 10 секунд потом скрываем
-            setTimeout(() => {
-                installButton.style.display = 'none';
-            }, 10000);
-        }
-    }
-    // Fallback для других браузеров
+    // iOS/Safari и другие браузеры - показываем инструкции
     else {
-        alert('Для установки приложения используйте меню браузера:\n\nChrome: ⋮ → "Установить Vuntgram"\nFirefox: ⋮ → "Установить"\nEdge: ... → "Приложения" → "Установить этот сайт как приложение"');
+        showInstallInstructions();
     }
 });
+
+// Функция показа инструкций по установке
+function showInstallInstructions() {
+    const instruction = getInstallInstructions();
+    
+    // Создаем красивый alert с инструкциями
+    let message = `📱 Установка Vuntgram\n\n${instruction}\n\nПосле установки приложение будет доступно с главного экрана!`;
+    
+    if (!isMobile) {
+        message += '\n\nChrome: ⋮ → "Установить Vuntgram"\nFirefox: ⋮ → "Установить"\nEdge: ... → "Приложения" → "Установить этот сайт как приложение"';
+    }
+    
+    alert(message);
+    
+    // Для iOS обновляем кнопку с визуальной подсказкой
+    if (isIOS) {
+        installButton.innerHTML = `<i class="fas fa-share"></i>Нажмите 📤 затем "На экран «Домой»"`;
+        installButton.style.background = 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)';
+        
+        // Показываем кнопку еще 10 секунд потом скрываем
+        setTimeout(() => {
+            if (!checkIfAppIsInstalled()) {
+                showInstallButton(); // Возвращаем обычную кнопку
+            }
+        }, 10000);
+    }
+}
 
 // Скрываем кнопку если приложение уже установлено
 window.addEventListener('appinstalled', (evt) => {
@@ -565,13 +596,16 @@ window.addEventListener('appinstalled', (evt) => {
 function checkIfAppIsInstalled() {
     // Android/Desktop Chrome
     if (window.matchMedia('(display-mode: standalone)').matches) {
-        installButton.style.display = 'none';
         return true;
     }
     
     // iOS Safari
     if (window.navigator.standalone) {
-        installButton.style.display = 'none';
+        return true;
+    }
+    
+    // Дополнительные проверки
+    if (window.location.search.includes('mode=standalone')) {
         return true;
     }
     
@@ -581,27 +615,24 @@ function checkIfAppIsInstalled() {
 // Регистрация Service Worker с улучшенной обработкой ошибок
 function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) {
+        console.log('Service Worker не поддерживается');
         return;
     }
 
     window.addEventListener('load', async function() {
         try {
             const registration = await navigator.serviceWorker.register('/sw.js');
+            console.log('ServiceWorker зарегистрирован успешно');
             
-            // Проверяем готовность PWA
             registration.addEventListener('updatefound', () => {
                 const newWorker = registration.installing;
                 
                 newWorker.addEventListener('statechange', () => {
                     if (newWorker.state === 'activated') {
-                        // После активации SW проверяем возможность установки
+                        console.log('ServiceWorker активирован');
+                        // После активации SW показываем кнопку установки
                         setTimeout(() => {
-                            if (!checkIfAppIsInstalled()) {
-                                // Для iOS/Safari всегда показываем кнопку после активации SW
-                                if (isIOS || isSafari) {
-                                    showInstallButton();
-                                }
-                            }
+                            showInstallButton();
                         }, 1000);
                     }
                 });
@@ -609,42 +640,47 @@ function registerServiceWorker() {
             
         } catch (error) {
             console.log('Ошибка регистрации ServiceWorker:', error);
-            
-            // Показываем кнопку даже если SW не работает (для тестирования)
+            // Даже если SW не работает, показываем кнопку установки
             setTimeout(() => {
-                if (installButton.style.display === 'none' && !checkIfAppIsInstalled()) {
-                    showInstallButton();
-                }
-            }, 3000);
+                showInstallButton();
+            }, 2000);
         }
     });
 }
 
 // Инициализация PWA
 function initializePWA() {
+    console.log('Инициализация PWA...');
+    
     // Сначала проверяем не установлено ли уже приложение
-    const isInstalled = checkIfAppIsInstalled();
+    if (checkIfAppIsInstalled()) {
+        console.log('Приложение уже установлено');
+        installButton.style.display = 'none';
+        return;
+    }
     
     // Регистрируем Service Worker
     registerServiceWorker();
     
-    // Для iOS/Safari всегда показываем кнопку через 2 секунды
-    if ((isIOS || isSafari) && !isInstalled) {
-        setTimeout(() => {
-            showInstallButton();
-        }, 2000);
-    }
-    
-    // Дополнительная проверка через 3 секунды для других браузеров
+    // Показываем кнопку установки через 3 секунды независимо от платформы
     setTimeout(() => {
-        if (installButton.style.display === 'none' && !deferredPrompt && !isInstalled && !isIOS && !isSafari) {
-            installButton.style.display = 'block';
+        if (!checkIfAppIsInstalled()) {
+            showInstallButton();
         }
     }, 3000);
     
+    // Дополнительная проверка через 5 секунд
+    setTimeout(() => {
+        if (installButton.style.display === 'none' && !checkIfAppIsInstalled()) {
+            showInstallButton();
+        }
+    }, 5000);
+    
     // Периодическая проверка статуса
     setInterval(() => {
-        checkIfAppIsInstalled();
+        if (checkIfAppIsInstalled()) {
+            installButton.style.display = 'none';
+        }
     }, 10000);
 }
 
