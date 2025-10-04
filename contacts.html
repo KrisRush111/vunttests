@@ -1570,10 +1570,83 @@
         </a>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <script>
       
         const SERVER_URL = 'https://vuntserver-0ggf.onrender.com';
 
+        let socket = null;
+
+        // Функция для подключения к WebSocket
+        function connectWebSocket() {
+            if (!userData.platform_user_id) return;
+            
+            // Используем тот же домен, что и для API
+            const socketUrl = SERVER_URL.replace('https://', 'wss://').replace('http://', 'ws://');
+            
+            socket = io(socketUrl, {
+                query: {
+                    user_id: userData.platform_user_id
+                },
+                transports: ['websocket']
+            });
+
+            socket.on('connect', () => {
+                console.log('WebSocket connected');
+            });
+
+            socket.on('friend_status_update', (data) => {
+                console.log('Friend status update:', data);
+                updateFriendStatusInUI(data.user_id, data.is_online, data.last_online);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('WebSocket disconnected');
+                // Пытаемся переподключиться через 5 секунд
+                setTimeout(connectWebSocket, 5000);
+            });
+        }
+
+        // Функция для обновления статуса друга в UI
+        function updateFriendStatusInUI(userId, isOnline, lastOnline) {
+            // Обновляем статус в списке контактов
+            const userElements = document.querySelectorAll('.user-result');
+            userElements.forEach(element => {
+                const idElement = element.querySelector('.user-id');
+                if (idElement && idElement.textContent.includes(userId)) {
+                    const statusElement = element.querySelector('.user-status');
+                    if (statusElement) {
+                        if (isOnline) {
+                            statusElement.textContent = 'В сети';
+                            statusElement.className = 'user-status online';
+                        } else {
+                            const lastSeenText = formatLastSeen(new Date(lastOnline));
+                            statusElement.textContent = lastSeenText;
+                            statusElement.className = 'user-status';
+                        }
+                    }
+                }
+            });
+
+            // Обновляем статус в открытом профиле, если он просматривается
+            if (currentViewedUser && currentViewedUser.platform_user_id === userId) {
+                const activeElements = getActiveElements();
+                const statusElement = activeElements.modalProfileStatus;
+                if (statusElement) {
+                    const statusTextSpan = statusElement.querySelector('.status-text');
+                    const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
+                    
+                    if (isOnline) {
+                        statusTextSpan.textContent = 'В сети';
+                        statusElement.classList.remove('offline');
+                    } else {
+                        const lastSeenText = formatLastSeen(new Date(lastOnline));
+                        statusTextSpan.textContent = lastSeenText;
+                        statusElement.classList.add('offline');
+                    }
+                }
+            }
+        }
         
         const loadingOverlay = document.getElementById('loadingOverlay');
        
@@ -2688,6 +2761,9 @@ let activityUpdateInterval; // Объявление переменной для 
             if (activityUpdateInterval) {
                 clearInterval(activityUpdateInterval);
             }
+            if (socket) {
+                socket.disconnect();
+            }
             sendOfflineStatus();
         });
 
@@ -2701,6 +2777,10 @@ let activityUpdateInterval; // Объявление переменной для 
                 if (document.visibilityState === 'visible') {
                     updateUserActivity(true);
                     startActivityUpdates(); // Перезапускаем интервал при возвращении на страницу
+                    // Переподключаем WebSocket если отключился
+                    if (!socket || !socket.connected) {
+                        connectWebSocket();
+                    }
                 } else {
                     clearInterval(activityUpdateInterval); // Останавливаем интервал при скрытии страницы
                     sendOfflineStatus();
@@ -2723,6 +2803,9 @@ let activityUpdateInterval; // Объявление переменной для 
 
                 userData = JSON.parse(userDataFromStorage);
                 console.log('User data loaded:', userData);
+
+                // Подключаем WebSocket
+                connectWebSocket();
 
                 // Обновите статус активности при загрузке
                 if (userData.platform_user_id) {
@@ -2809,5 +2892,3 @@ let activityUpdateInterval; // Объявление переменной для 
     </script>
 </body>
 </html>
-
-
