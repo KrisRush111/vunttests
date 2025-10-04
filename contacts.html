@@ -2826,6 +2826,132 @@ function updateProfileModalStatus(userId, statusData) {
 
 
 
+// Функция для подключения к SSE (Server-Sent Events)
+function connectToStatusUpdates() {
+    if (!userData || !userData.platform_user_id) {
+        console.log('No user data, skipping SSE connection');
+        return;
+    }
+
+    // Закрываем предыдущее соединение если есть
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    try {
+        const sseUrl = `${SERVER_URL}/status_updates/${userData.platform_user_id}`;
+        eventSource = new EventSource(sseUrl, { withCredentials: true });
+
+        eventSource.onopen = () => {
+            console.log('SSE connection established for status updates');
+        };
+
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'status_update') {
+                    handleStatusUpdate(data.user_id, data.status_data);
+                } else if (data.type === 'connected') {
+                    console.log('Successfully connected to real-time status updates');
+                }
+            } catch (error) {
+                console.error('Error parsing SSE message:', error);
+            }
+        };
+
+        eventSource.onerror = (error) => {
+            console.error('SSE connection error:', error);
+            
+            // Пытаемся переподключиться через 5 секунд
+            setTimeout(() => {
+                if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                    console.log('Attempting to reconnect to SSE...');
+                    connectToStatusUpdates();
+                }
+            }, 5000);
+        };
+
+    } catch (error) {
+        console.error('Error creating SSE connection:', error);
+    }
+}
+
+// Функция для обработки обновления статуса
+function handleStatusUpdate(userId, statusData) {
+    console.log(`Real-time status update for user ${userId}:`, statusData);
+    
+    // Обновляем статус в списке контактов
+    updateContactStatus(userId, statusData);
+    
+    // Если профиль этого пользователя открыт, обновляем статус там
+    if (currentViewedUser && currentViewedUser.platform_user_id === userId) {
+        updateProfileModalStatus(userId, statusData);
+    }
+}
+
+// Функция для обновления статуса в списке контактов
+function updateContactStatus(userId, statusData) {
+    const userElements = document.querySelectorAll('.user-result');
+    
+    userElements.forEach(element => {
+        const userIdElement = element.querySelector('.user-id');
+        if (userIdElement && userIdElement.textContent.includes(userId)) {
+            const statusElement = element.querySelector('.user-status');
+            if (statusElement) {
+                if (statusData.is_online) {
+                    statusElement.textContent = 'В сети';
+                    statusElement.className = 'user-status online';
+                } else {
+                    const lastSeenText = formatLastSeen(new Date(statusData.last_online));
+                    statusElement.textContent = lastSeenText;
+                    statusElement.className = 'user-status';
+                }
+                
+                // Добавляем анимацию обновления
+                statusElement.style.opacity = '0.7';
+                setTimeout(() => {
+                    statusElement.style.opacity = '1';
+                }, 300);
+            }
+        }
+    });
+}
+
+// Функция для обновления статуса в открытом профиле
+function updateProfileModalStatus(userId, statusData) {
+    const activeElements = getActiveElements();
+    const statusElement = activeElements.modalProfileStatus;
+    
+    if (statusElement && currentViewedUser.platform_user_id === userId) {
+        const statusTextSpan = statusElement.querySelector('.status-text');
+        const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
+        
+        if (statusData.is_online) {
+            statusTextSpan.textContent = 'В сети';
+            statusElement.classList.remove('offline');
+            
+            // Анимация появления онлайн
+            statusIndicatorSpan.style.animation = 'pulse 2s infinite';
+        } else {
+            const lastSeenText = formatLastSeen(new Date(statusData.last_online));
+            statusTextSpan.textContent = lastSeenText;
+            statusElement.classList.add('offline');
+            
+            // Убираем анимацию пульсации
+            statusIndicatorSpan.style.animation = 'none';
+        }
+        
+        // Микро-анимация обновления
+        statusElement.style.transform = 'scale(1.05)';
+        setTimeout(() => {
+            statusElement.style.transform = 'scale(1)';
+        }, 200);
+    }
+}
+
+
+
 
 
 async function initializePage() {
@@ -2949,5 +3075,3 @@ window.addEventListener('pageshow', (event) => {
     </script>
 </body>
 </html>
-
-
