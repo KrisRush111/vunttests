@@ -1975,68 +1975,76 @@ function renderChats(chats) {
         }
 
    
-        function renderContacts(contacts) {
-            if (!contacts || contacts.length === 0) {
-                contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
-                return;
-            }
+     function renderContacts(contacts) {
+    if (!contacts || contacts.length === 0) {
+        contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
+        return;
+    }
 
-            contacts.forEach(contact => {
-                const contactItem = document.createElement('div');
-                contactItem.className = 'contact-item';
-                
-                const initials = contact.nickname 
-                    ? contact.nickname.split(' ').map(n => n[0]).join('') 
-                    : '?';
-                
-                const bgColor = contact.avatar_background || getRandomColor();
+    contacts.forEach(contact => {
+        const contactItem = document.createElement('div');
+        contactItem.className = 'contact-item';
+        
+        const initials = contact.nickname 
+            ? contact.nickname.split(' ').map(n => n[0]).join('') 
+            : '?';
+        
+        const bgColor = contact.avatar_background || getRandomColor();
 
-                const avatarStyle = contact.avatar_background ? 
-    `linear-gradient(135deg, ${contact.avatar_background}, ${adjustColor(contact.avatar_background, 20)})` : 
-    'linear-gradient(135deg, #0088cc, #40a7e3)';
-                
-                contactItem.innerHTML = `
-                    <div class="contact-avatar" style="background-color: ${avatarStyle}">
-                        ${initials}
-                    </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${contact.nickname || 'Без имени'}</div>
-                        <div class="contact-status">был(а) недавно</div>
-                    </div>
-                `;
-                
-                if (contact.has_avatar_photo) {
-                    loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
-                }
-                
-                contactItem.addEventListener('click', () => {
-                    createChatWithContact(contact);
-                });
-                
-                contactsList.appendChild(contactItem);
-            });
+        // Добавляем градиент для консистентности с чатами
+        const avatarStyle = bgColor ?
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :  // Градиент на основе bgColor
+            'linear-gradient(135deg, #0088cc, #40a7e3)';  // Дефолтный градиент, если нет bgColor
+
+        contactItem.innerHTML = `
+            <div class="contact-avatar" style="background: ${avatarStyle}">
+                ${initials}
+            </div>
+            <div class="contact-info">
+                <div class="contact-name">${contact.nickname || 'Без имени'}</div>
+                <div class="contact-status">был(а) недавно</div>
+            </div>
+        `;
+        
+        if (contact.has_avatar_photo) {
+            loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
         }
         
-        function loadContactAvatar(avatarElement, userId, initials, bgColor) {
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-            const img = new Image();
-            
-            img.onload = function() {
-                avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-                avatarElement.style.backgroundSize = 'cover';
-                avatarElement.style.backgroundPosition = 'center';
-                avatarElement.textContent = '';
-            };
-            
-            img.onerror = function() {
-                console.log('Failed to load avatar, using initials');
-                avatarElement.style.backgroundImage = '';
-                avatarElement.textContent = initials;
-                avatarElement.style.backgroundColor = bgColor;
-            };
-            
-            img.src = avatarUrl;
-        }
+        contactItem.addEventListener('click', () => {
+            createChatWithContact(contact);
+        });
+        
+        contactsList.appendChild(contactItem);
+    });
+}
+
+function loadContactAvatar(avatarElement, userId, initials, bgColor) {
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+    const img = new Image();
+    
+    img.onload = function() {
+        // При загрузке фото: применяем фото поверх градиента (если нужно, можно добавить overlay)
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.style.backgroundSize = 'cover';
+        avatarElement.style.backgroundPosition = 'center';
+        avatarElement.style.backgroundBlendMode = 'overlay';  // Опционально: для наложения градиента на фото
+        avatarElement.textContent = '';  // Убираем инициалы
+    };
+    
+    img.onerror = function() {
+        console.log('Failed to load avatar, using initials');
+        avatarElement.style.backgroundImage = '';  // Убираем фото
+        avatarElement.textContent = initials;  // Возвращаем инициалы
+        // Восстанавливаем градиент на основе bgColor
+        const avatarStyle = bgColor ?
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
+        avatarElement.style.background = avatarStyle;
+    };
+    
+    img.src = avatarUrl;
+}
+
 
       
 async function createChatWithContact(contact) {
