@@ -1593,7 +1593,7 @@
         const profileModalDesktop = document.getElementById('profileModalDesktop');
         const profileBackButtonDesktop = document.getElementById('profileBackButtonDesktop');
         const modalProfileAvatarDesktop = document.getElementById('modal-profile-avatar-desktop');
-        const modalProfileNicknameDesktop = document.getElementById('modal-profile-nickname-desktop');
+        const modalProfileNicknameDesktop = document = document.getElementById('modal-profile-nickname-desktop');
         const modalProfileIdDesktop = document.getElementById('modal-profile-id-desktop');
         const modalMainSchoolDesktop = document.getElementById('modal-main-school-desktop');
         const modalUserClassDesktop = document.getElementById('modal-user-class-desktop');
@@ -1634,6 +1634,82 @@
 
 let currentViewedUser = null;
 let activityUpdateInterval; // Объявление переменной для интервала
+
+// Добавьте глобальные переменные
+let allContactIds = new Set();
+let currentActivityData = {};
+// В contacts.html добавьте
+let activityPollInterval;
+
+function startActivityPolling() {
+    // Останавливаем предыдущий интервал если есть
+    if (activityPollInterval) {
+        clearInterval(activityPollInterval);
+    }
+    
+    // Опрашиваем статусы каждые 10 секунд
+    activityPollInterval = setInterval(async () => {
+        await refreshOnlineStatuses();
+    }, 10000);
+}
+
+async function refreshOnlineStatuses() {
+    const { searchResults } = getActiveElements();
+    const userElements = searchResults.querySelectorAll('.user-result');
+    const userIds = [];
+    
+    // Собираем ID всех отображенных пользователей
+    userElements.forEach(element => {
+        const userId = element.getAttribute('data-user-id');
+        if (userId) userIds.push(userId);
+    });
+    
+    if (userIds.length === 0) return;
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_bulk_activity_status`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ user_ids: userIds }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        if (data.status === 'success') {
+            updateOnlineStatusesUI(data.activity_data);
+        }
+    } catch (error) {
+        console.error('Error refreshing online statuses:', error);
+    }
+}
+
+function updateOnlineStatusesUI(activityData) {
+    const { searchResults } = getActiveElements();
+    const userElements = searchResults.querySelectorAll('.user-result');
+    
+    userElements.forEach(element => {
+        const userId = element.getAttribute('data-user-id');
+        const statusElement = element.querySelector('.user-status');
+        
+        if (userId && statusElement && activityData[userId]) {
+            const userActivity = activityData[userId];
+            
+            if (userActivity.is_online) {
+                statusElement.textContent = 'В сети';
+                statusElement.className = 'user-status online';
+            } else {
+                const lastSeenText = formatLastSeen(userActivity.last_online);
+                statusElement.textContent = lastSeenText;
+                statusElement.className = 'user-status';
+            }
+        }
+    });
+}
+
+
+
+
+
 
     // Анимация и функционал для десктопной кнопки чата
     if (chatButtonDesktop) {
@@ -2009,30 +2085,33 @@ let activityUpdateInterval; // Объявление переменной для 
             }
         }
 
-        // Функция для отправки статуса "офлайн"
-        async function sendOfflineStatus() {
-            if (userData && userData.platform_user_id) {
-                try {
-                    const data = {
-                        platform_user_id: userData.platform_user_id,
-                        is_online: false
-                    };
-                    
-                    // Используем fetch с keepalive вместо sendBeacon
-                    fetch(`${SERVER_URL}/update_activity`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(data),
-                        credentials: 'include',
-                        keepalive: true // Это обеспечит отправку даже при закрытии страницы
-                    }).catch(() => {}); // Игнорируем ошибки, так как страница может закрываться
-                } catch (error) {
-                    console.error('Error sending offline status:', error);
-                }
-            }
+// В contacts.html замените sendOfflineStatus на более надежную версию
+async function sendOfflineStatus() {
+    if (userData && userData.platform_user_id) {
+        try {
+            // Используем navigator.sendBeacon для надежной отправки при закрытии страницы
+            const data = new Blob([JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                is_online: false
+            })], {type: 'application/json'});
+            
+            navigator.sendBeacon(`${SERVER_URL}/update_activity`, data);
+        } catch (error) {
+            console.error('Error sending offline status:', error);
+            // Резервный вариант через fetch с keepalive
+            fetch(`${SERVER_URL}/update_activity`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id,
+                    is_online: false
+                }),
+                keepalive: true,
+                credentials: 'include'
+            }).catch(() => {});
         }
+    }
+}
 
         // Функция для получения статуса пользователей
         async function getUsersActivityStatus(userIds) {
@@ -2056,6 +2135,88 @@ let activityUpdateInterval; // Объявление переменной для 
             } catch (error) {
                 console.error('Error getting activity status:', error);
                 return {};
+            }
+        }
+
+        // Функция для получения статусов всех контактов
+        async function updateAllContactsActivity() {
+            if (allContactIds.size === 0) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/get_bulk_activity_status`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_ids: Array.from(allContactIds)
+                    }),
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    currentActivityData = data.activity_data;
+                    updateContactsUI();
+                }
+            } catch (error) {
+                console.error('Error updating contacts activity:', error);
+            }
+        }
+
+        // Функция для обновления UI контактов
+        function updateContactsUI() {
+            const userElements = document.querySelectorAll('.user-result');
+            
+            userElements.forEach(element => {
+                const userId = element.dataset.userId;
+                if (!userId) return;
+                
+                const statusElement = element.querySelector('.user-status');
+                if (!statusElement) return;
+                
+                const activity = currentActivityData[userId];
+                
+                if (activity) {
+                    if (activity.is_online) {
+                        statusElement.textContent = 'В сети';
+                        statusElement.className = 'user-status online';
+                    } else {
+                        const lastSeenText = formatLastSeen(activity.last_online);
+                        statusElement.textContent = lastSeenText;
+                        statusElement.className = 'user-status';
+                    }
+                } else {
+                    statusElement.textContent = 'Неизвестно';
+                    statusElement.className = 'user-status';
+                }
+            });
+        }
+
+        // Функция для обновления статуса в модальном окне профиля
+        function updateProfileModalStatus(userId) {
+            const activeElements = getActiveElements();
+            const statusElement = activeElements.modalProfileStatus;
+            
+            if (!statusElement) return;
+            
+            const activity = currentActivityData[userId];
+            const statusTextSpan = statusElement.querySelector('.status-text');
+            const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
+            
+            if (activity) {
+                if (activity.is_online) {
+                    statusTextSpan.textContent = 'В сети';
+                    statusElement.classList.remove('offline');
+                } else {
+                    const lastSeenText = formatLastSeen(activity.last_online);
+                    statusTextSpan.textContent = lastSeenText;
+                    statusElement.classList.add('offline');
+                }
+            } else {
+                statusTextSpan.textContent = 'не в сети';
+                statusElement.classList.add('offline');
             }
         }
 
@@ -2092,36 +2253,8 @@ let activityUpdateInterval; // Объявление переменной для 
             activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
             activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
 
-            // Обновление статуса
-            const statusElement = activeElements.modalProfileStatus;
-            if (statusElement) {
-                try {
-                    const activityData = await getUsersActivityStatus([user.platform_user_id]);
-                    const userActivity = activityData[user.platform_user_id];
-
-                    const statusTextSpan = statusElement.querySelector('.status-text');
-                    const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
-
-                    if (userActivity) {
-                        if (userActivity.is_online) {
-                            statusTextSpan.textContent = 'В сети';
-                            statusElement.classList.remove('offline');
-                        } else {
-                            const lastSeenText = formatLastSeen(userActivity.last_online);
-                            statusTextSpan.textContent = lastSeenText;
-                            statusElement.classList.add('offline');
-                        }
-                    } else {
-                        // Если данных нет, показываем "не в сети" с текущим временем
-                        statusTextSpan.textContent = 'не в сети';
-                        statusElement.classList.add('offline');
-                    }
-                } catch (error) {
-                    console.error('Error getting activity status:', error);
-                    statusTextSpan.textContent = 'не в сети';
-                    statusElement.classList.add('offline');
-                }
-            }
+            // Обновление статуса - используем кэшированные данные
+            updateProfileModalStatus(user.platform_user_id);
 
             // Функция для проверки и отображения поля с учетом всех вариантов "не указано"
             function updateField(fieldValue, fieldElement, containerElement, fieldName) {
@@ -2199,6 +2332,7 @@ let activityUpdateInterval; // Объявление переменной для 
             const { searchResults, noContacts } = getActiveElements();
             searchResults.innerHTML = '';
             noContacts.style.display = 'none';
+            allContactIds.clear(); // Очищаем список ID контактов перед загрузкой
 
             try {
                 const response = await fetch(`${SERVER_URL}/get_friends`, {
@@ -2239,6 +2373,8 @@ let activityUpdateInterval; // Объявление переменной для 
                         noContacts.textContent = 'Нет контактов';
                         noContacts.style.display = 'block';
                     }
+                    // После загрузки всех контактов, обновляем их статусы
+                    updateAllContactsActivity();
                 } else {
                     throw new Error(data.error || 'Ошибка загрузки контактов');
                 }
@@ -2257,6 +2393,10 @@ let activityUpdateInterval; // Объявление переменной для 
             const { searchResults } = getActiveElements();
             const userElement = document.createElement('div');
             userElement.className = 'user-result';
+            userElement.setAttribute('data-user-id', user.platform_user_id); // Добавляем data-атрибут
+            
+            // Добавляем ID в множество для отслеживания
+            allContactIds.add(user.platform_user_id);
 
            
             userElement.addEventListener('click', (e) => {
@@ -2328,21 +2468,9 @@ let activityUpdateInterval; // Объявление переменной для 
             // Добавьте элемент для статуса
             const statusElement = document.createElement('div');
             statusElement.className = 'user-status';
-
-            // Получите статус пользователя
-            const activityData = await getUsersActivityStatus([user.platform_user_id]);
-            const userActivity = activityData[user.platform_user_id];
             
-            if (userActivity && userActivity.is_online) {
-                statusElement.textContent = 'В сети';
-                statusElement.classList.add('online');
-            } else if (userActivity) {
-                statusElement.textContent = formatLastSeen(userActivity.last_online);
-                statusElement.classList.remove('online');
-            } else {
-                statusElement.textContent = 'Неизвестно';
-                statusElement.classList.remove('online');
-            }
+            // Изначально устанавливаем "Загрузка..."
+            statusElement.textContent = 'Загрузка...';
 
             infoElement.appendChild(statusElement);
 
@@ -2382,6 +2510,10 @@ let activityUpdateInterval; // Объявление переменной для 
             const { searchResults } = getActiveElements();
             const requestElement = document.createElement('div');
             requestElement.className = 'user-result';
+            requestElement.dataset.userId = user.platform_user_id;
+            
+            // Добавляем ID в множество для отслеживания
+            allContactIds.add(user.platform_user_id);
 
             // Обработчик клика на весь элемент пользователя
             requestElement.addEventListener('click', (e) => {
@@ -2429,6 +2561,25 @@ let activityUpdateInterval; // Объявление переменной для 
             infoElement.appendChild(nicknameElement);
             infoElement.appendChild(idElement);
             infoElement.appendChild(requestText);
+
+            // Добавляем элемент статуса
+            const statusElement = document.createElement('div');
+            statusElement.className = 'user-status';
+            
+            const activity = currentActivityData[user.platform_user_id];
+            if (activity) {
+                if (activity.is_online) {
+                    statusElement.textContent = 'В сети';
+                    statusElement.classList.add('online');
+                } else {
+                    const lastSeenText = formatLastSeen(activity.last_online);
+                    statusElement.textContent = lastSeenText;
+                }
+            } else {
+                statusElement.textContent = 'Загрузка...';
+            }
+
+            infoElement.appendChild(statusElement);
 
             const actionsContainer = document.createElement('div');
             actionsContainer.className = 'friend-request-actions';
@@ -2675,12 +2826,33 @@ let activityUpdateInterval; // Объявление переменной для 
 
         // Функция для запуска интервального обновления активности
         function startActivityUpdates() {
-            // Обновляем статус каждые 30 секунд
+            // Увеличьте интервал до 45 секунд для экономии ресурсов
             activityUpdateInterval = setInterval(() => {
                 if (userData && userData.platform_user_id) {
                     updateUserActivity(true);
                 }
-            }, 30000);
+            }, 45000); // 45 секунд вместо 30
+        }
+
+        // Функция для запуска автоматического обновления статусов
+        function startActivityPolling() {
+            // Обновляем статусы каждые 10 секунд
+            activityPollInterval = setInterval(() => {
+                updateAllContactsActivity();
+            }, 10000);
+            
+            // Первое обновление сразу после запуска
+            setTimeout(() => {
+                updateAllContactsActivity();
+            }, 1000);
+        }
+
+        // Функция для остановки автоматического обновления
+        function stopActivityPolling() {
+            if (activityPollInterval) {
+                clearInterval(activityPollInterval);
+                activityPollInterval = null;
+            }
         }
 
         // Обработчики событий
@@ -2688,10 +2860,17 @@ let activityUpdateInterval; // Объявление переменной для 
             if (activityUpdateInterval) {
                 clearInterval(activityUpdateInterval);
             }
+            if (activityPollInterval) {
+                clearInterval(activityPollInterval);
+            }
             sendOfflineStatus();
         });
 
         window.addEventListener('pagehide', () => {
+            stopActivityPolling();
+            if (activityUpdateInterval) {
+                clearInterval(activityUpdateInterval);
+            }
             sendOfflineStatus();
         });
 
@@ -2700,9 +2879,13 @@ let activityUpdateInterval; // Объявление переменной для 
             if (userData && userData.platform_user_id) {
                 if (document.visibilityState === 'visible') {
                     updateUserActivity(true);
-                    startActivityUpdates(); // Перезапускаем интервал при возвращении на страницу
+                    startActivityUpdates(); // Перезапускаем интервал для своего статуса
+                    startActivityPolling(); // Перезапускаем интервал для статусов других
                 } else {
-                    clearInterval(activityUpdateInterval); // Останавливаем интервал при скрытии страницы
+                    stopActivityPolling(); // Останавливаем интервал при скрытии страницы
+                    if (activityUpdateInterval) {
+                        clearInterval(activityUpdateInterval);
+                    }
                     sendOfflineStatus();
                 }
             }
@@ -2724,11 +2907,12 @@ let activityUpdateInterval; // Объявление переменной для 
                 userData = JSON.parse(userDataFromStorage);
                 console.log('User data loaded:', userData);
 
-                // Обновите статус активности при загрузке
+                // Запускаем обновление статусов
                 if (userData.platform_user_id) {
                     setTimeout(() => {
                         updateUserActivity(true);
-                        startActivityUpdates(); // Запускаем интервал при инициализации
+                        startActivityUpdates(); // Для отправки своего статуса
+                        startActivityPolling(); // Для получения статусов других пользователей
                     }, 1000);
                 }
          
@@ -2809,5 +2993,3 @@ let activityUpdateInterval; // Объявление переменной для 
     </script>
 </body>
 </html>
-
-
