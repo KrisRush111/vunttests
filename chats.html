@@ -2042,36 +2042,44 @@ function renderChats(chats) {
         }
 
       
-        async function loadContacts() {
-            showLoading('Загрузка контактов...');
-            contactsList.innerHTML = '';
-            
-            try {
-                const response = await fetch(`${SERVER_URL}/get_friends`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    renderContacts(data.friends);
-                    hideLoading();
-                } else {
-                    throw new Error(data.error || 'Не удалось загрузить контакты');
-                }
-            } catch (error) {
-                console.error('Error loading contacts:', error);
-                showMessage('Ошибка загрузки контактов', 'error');
-                hideLoading();
-            }
+async function loadContacts() {
+    showLoading('Загрузка контактов...');
+    contactsList.innerHTML = '';
+    
+    try {
+        // Проверяем, что userData загружен
+        if (!userData || !userData.platform_user_id) {
+            await loadUserData();
         }
+        
+        const response = await fetch(`${SERVER_URL}/get_friends`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            renderContacts(data.friends);
+            hideLoading();
+        } else {
+            throw new Error(data.error || 'Не удалось загрузить контакты');
+        }
+    } catch (error) {
+        console.error('Error loading contacts:', error);
+        showMessage('Ошибка загрузки контактов: ' + error.message, 'error');
+        hideLoading();
+        
+        // Показываем сообщение, что контактов нет
+        contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов или ошибка загрузки</div>';
+    }
+}
 
    
      function renderContacts(contacts) {
@@ -2809,196 +2817,181 @@ function updateAllMessageStatusesInUI() {
     });
 }
      
- async function initializePage() {
-
-    const userDataFromStorage = sessionStorage.getItem('userData');
-    if (!userDataFromStorage) {
-        window.location.href = 'profile.html';
-        return;
-    }
-    
-    userData = JSON.parse(userDataFromStorage);
-    
-
-    isDesktop = window.matchMedia("(min-width: 768px)").matches;
-
-  
-    if (isDesktop) {
-        mobileChatsContainer.style.display = 'none';
-        mobileOnlyNav.style.display = 'none';
-        desktopSidebar.style.display = 'flex'; 
-        desktopContent.style.display = 'flex';
-        desktopOnlyNav.style.display = 'flex'; 
-        chatModalDesktop.style.display = 'none'; 
-        desktopPlaceholder.style.display = 'flex';
-    } else {
-        mobileChatsContainer.style.display = 'flex';
-        mobileOnlyNav.style.display = 'flex';
-        desktopSidebar.style.display = 'none';
-        desktopContent.style.display = 'none';
-        desktopOnlyNav.style.display = 'none'; 
-        chatModalMobile.classList.remove('active'); 
-    }
-
-
-
-
-
-    await loadUserData();
-    await loadChats();
-    
-     const openChatId = sessionStorage.getItem('openChatId');
-    const openChatName = sessionStorage.getItem('openChatName');
-    
-    if (openChatId && openChatName) {
-        // Создаем временный объект чата для открытия
-        const tempChat = {
-            id: openChatId,
-            name: openChatName,
-            is_temp: false
-        };
+async function initializePage() {
+    try {
+        const userDataFromStorage = sessionStorage.getItem('userData');
+        if (!userDataFromStorage) {
+            window.location.href = 'profile.html';
+            return;
+        }
         
-        // Очищаем storage
-        sessionStorage.removeItem('openChatId');
-        sessionStorage.removeItem('openChatName');
+        userData = JSON.parse(userDataFromStorage);
         
-        // Открываем чат
-        setTimeout(() => {
-            openChat(openChatId);
-        }, 500);
-    }
+        // Загружаем актуальные данные пользователя
+        await loadUserData();
+        
+        isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-    const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
+        if (isDesktop) {
+            mobileChatsContainer.style.display = 'none';
+            mobileOnlyNav.style.display = 'none';
+            desktopSidebar.style.display = 'flex'; 
+            desktopContent.style.display = 'flex';
+            desktopOnlyNav.style.display = 'flex'; 
+            chatModalDesktop.style.display = 'none'; 
+            desktopPlaceholder.style.display = 'flex';
+        } else {
+            mobileChatsContainer.style.display = 'flex';
+            mobileOnlyNav.style.display = 'flex';
+            desktopSidebar.style.display = 'none';
+            desktopContent.style.display = 'none';
+            desktopOnlyNav.style.display = 'none'; 
+            chatModalMobile.classList.remove('active'); 
+        }
 
-    addChatButton.addEventListener('click', (e) => {
-        e.preventDefault();
-        showContactsModal();
-    });
-
-
-
-
-// Обновление статусов онлайн каждые 10 секунд
-setInterval(async () => {
-    const { chatModal } = getActiveElements();
-    
-    // Обновляем статусы в списке чатов
-    await loadChats();
-    
-    // Обновляем статус в открытом чате
-    if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
-        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        if (otherParticipant) {
-            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            const chatStatus = getActiveElements().chatStatus;
+        await loadChats();
+        
+        const openChatId = sessionStorage.getItem('openChatId');
+        const openChatName = sessionStorage.getItem('openChatName');
+        
+        if (openChatId && openChatName) {
+            const tempChat = {
+                id: openChatId,
+                name: openChatName,
+                is_temp: false
+            };
             
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                    chatStatus.classList.add('online');
-                } else {
-                    chatStatus.textContent = formatLastSeen(userActivity.last_online);
-                    chatStatus.classList.remove('online');
-                }
-            } else {
-                chatStatus.textContent = 'был(а) недавно';
-                chatStatus.classList.remove('online');
-            }
+            sessionStorage.removeItem('openChatId');
+            sessionStorage.removeItem('openChatName');
+            
+            setTimeout(() => {
+                openChat(openChatId);
+            }, 500);
         }
-    }
-}, 10000);
 
+        const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
 
-    // Обновляем статус при загрузке страницы
-setTimeout(() => {
-    updateUserActivity(true);
-}, 1000);
-
-// Обновляем статус каждые 30 секунд
-const activityInterval = setInterval(() => {
-    updateUserActivity(true);
-}, 30000);
-
-// Обработчики для отправки статуса офлайн при закрытии страницы
-window.addEventListener('beforeunload', () => {
-    clearInterval(activityInterval);
-    sendOfflineStatus();
-});
-
-window.addEventListener('pagehide', () => {
-    sendOfflineStatus();
-});
-
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        updateUserActivity(true);
-    } else {
-        sendOfflineStatus();
-    }
-});
-
-
-
-    closeContacts.addEventListener('click', hideContactsModal);
-    modalOverlay.addEventListener('click', hideContactsModal);
-    
-    contactsSearchInput.addEventListener('input', (e) => {
-        filterContacts(e.target.value);
-    });
-
-    searchInput.addEventListener('input', (e) => {
-      
-        filterChats(e.target.value);
-    });
-
-    if (backToChats) { 
-        backToChats.addEventListener('click', (e) => { // Updated event listener
+        addChatButton.addEventListener('click', (e) => {
             e.preventDefault();
-            closeChat();
+            showContactsModal();
         });
-    }
-    
-    sendMessageButton.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
-    });
-    
-    
-    setInterval(async () => {
-        const { chatModal } = getActiveElements();
-       
-        if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
+
+        // Обновление статусов онлайн каждые 10 секунд
+        setInterval(async () => {
+            const { chatModal } = getActiveElements();
+            
+            // Обновляем статусы в списке чатов
             await loadChats();
-        }
-    }, 10000); 
+            
+            // Обновляем статус в открытом чате
+            if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) {
+                    const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+                    const userActivity = activityData[otherParticipant.platform_user_id];
+                    const chatStatus = getActiveElements().chatStatus;
+                    
+                    if (userActivity) {
+                        if (userActivity.is_online) {
+                            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                            chatStatus.classList.add('online');
+                        } else {
+                            chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                            chatStatus.classList.remove('online');
+                        }
+                    } else {
+                        chatStatus.textContent = 'был(а) недавно';
+                        chatStatus.classList.remove('online');
+                    }
+                }
+            }
+        }, 10000);
 
+        // Обновляем статус при загрузке страницы
+        setTimeout(() => {
+            updateUserActivity(true);
+        }, 1000);
 
-    window.addEventListener('resize', () => {
-        const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-        if (newIsDesktop !== isDesktop) {
-            isDesktop = newIsDesktop;
-            initializePage(); 
-        }
-    });
+        // Обновляем статус каждые 30 секунд
+        const activityInterval = setInterval(() => {
+            updateUserActivity(true);
+        }, 30000);
 
- 
-    const menuButton = document.querySelector('.menu-button');
-    if (menuButton) {
-        menuButton.addEventListener('click', () => {
-         
-            console.log('Menu button clicked');
+        // Обработчики для отправки статуса офлайн при закрытии страницы
+        window.addEventListener('beforeunload', () => {
+            clearInterval(activityInterval);
+            sendOfflineStatus();
         });
-    }
 
- 
-    const contactsSearchBtn = document.querySelector('.contacts-search-btn');
-    if (contactsSearchBtn) {
-        contactsSearchBtn.addEventListener('click', () => {
-            contactsSearchInput.focus();
+        window.addEventListener('pagehide', () => {
+            sendOfflineStatus();
         });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                updateUserActivity(true);
+            } else {
+                sendOfflineStatus();
+            }
+        });
+
+        closeContacts.addEventListener('click', hideContactsModal);
+        modalOverlay.addEventListener('click', hideContactsModal);
+        
+        contactsSearchInput.addEventListener('input', (e) => {
+            filterContacts(e.target.value);
+        });
+
+        searchInput.addEventListener('input', (e) => {
+            filterChats(e.target.value);
+        });
+
+        if (backToChats) { 
+            backToChats.addEventListener('click', (e) => {
+                e.preventDefault();
+                closeChat();
+            });
+        }
+        
+        sendMessageButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        setInterval(async () => {
+            const { chatModal } = getActiveElements();
+           
+            if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
+                await loadChats();
+            }
+        }, 10000); 
+
+        window.addEventListener('resize', () => {
+            const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+            if (newIsDesktop !== isDesktop) {
+                isDesktop = newIsDesktop;
+                initializePage(); 
+            }
+        });
+
+        const menuButton = document.querySelector('.menu-button');
+        if (menuButton) {
+            menuButton.addEventListener('click', () => {
+                console.log('Menu button clicked');
+            });
+        }
+
+        const contactsSearchBtn = document.querySelector('.contacts-search-btn');
+        if (contactsSearchBtn) {
+            contactsSearchBtn.addEventListener('click', () => {
+                contactsSearchInput.focus();
+            });
+        }
+    } catch (error) {
+        console.error('Error initializing page:', error);
+        showMessage('Ошибка инициализации страницы', 'error');
     }
 }
 
