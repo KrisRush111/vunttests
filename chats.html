@@ -2091,7 +2091,7 @@ function getRussianNoun(number, forms) {
         
         
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-    // Добавляем случайный параметр для обхода кеша
+    // Добавляем случайные параметры для обхода кеша
     const randomParam = Math.random().toString(36).substring(7);
     const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${randomParam}`;
     const img = new Image();
@@ -2106,16 +2106,14 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
     
     img.onerror = function() {
         console.log('Failed to load avatar, using initials');
-        avatarElement.style.backgroundImage = '';
+        // Явно очищаем backgroundImage и показываем инициалы
+        avatarElement.style.backgroundImage = 'none';
         avatarElement.textContent = initials;
         avatarElement.style.backgroundColor = bgColor;
-        // Принудительно очищаем backgroundImage
-        avatarElement.style.backgroundImage = 'none';
     };
     
     img.src = avatarUrl;
 }
-
         
     
         function getRandomColor() {
@@ -2533,19 +2531,26 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
+        // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
         chatAvatar.style.backgroundImage = '';
         chatAvatar.style.backgroundColor = '';
         chatAvatar.textContent = '';
         
-        if (currentChat.avatar_url) {
-            chatAvatar.style.backgroundImage = `url(${currentChat.avatar_url})`;
-            chatAvatar.style.backgroundSize = 'cover';
-            chatAvatar.style.backgroundPosition = 'center';
-             chatAvatar.style.backgroundColor = 'transparent';
+        // ОБНОВЛЕННАЯ ЛОГИКА ЗАГРУЗКИ АВАТАРА С ОБХОДОМ КЕША
+        if (currentChat.has_avatar_photo && currentChat.participants && currentChat.participants.length > 0) {
+            const userId = currentChat.participants[0].platform_user_id;
+            const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+            const bgColor = currentChat.avatar_background || getRandomColor();
+            
+            // Используем ту же функцию, что и в списке чатов, для consistency
+            loadChatAvatar(chatAvatar, userId, initials, bgColor);
         } else {
+            // Если нет аватара, показываем инициалы на фоне
             const bgColor = currentChat.avatar_background || getRandomColor();
             chatAvatar.style.backgroundColor = bgColor;
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+            // Явно очищаем backgroundImage на случай, если был предыдущий аватар
+            chatAvatar.style.backgroundImage = 'none';
         }
         
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
