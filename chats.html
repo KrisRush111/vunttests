@@ -2536,20 +2536,48 @@ async function openChat(chatId) {
         chatAvatar.style.backgroundColor = '';
         chatAvatar.textContent = '';
         
-        // ОБНОВЛЕННАЯ ЛОГИКА ЗАГРУЗКИ АВАТАРА С ОБХОДОМ КЕША
-        if (currentChat.has_avatar_photo && currentChat.participants && currentChat.participants.length > 0) {
-            const userId = currentChat.participants[0].platform_user_id;
-            const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-            const bgColor = currentChat.avatar_background || getRandomColor();
-            
-            // Используем ту же функцию, что и в списке чатов, для consistency
-            loadChatAvatar(chatAvatar, userId, initials, bgColor);
+        // ИСПРАВЛЕННАЯ ЛОГИКА ЗАГРУЗКИ АВАТАРА
+        if (currentChat.participants && currentChat.participants.length > 0) {
+            const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                const userId = otherParticipant.platform_user_id;
+                const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                
+                // Пробуем загрузить аватар для участника чата
+                const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
+                const img = new Image();
+                
+                img.onload = function() {
+                    // Аватар успешно загружен
+                    chatAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                    chatAvatar.style.backgroundSize = 'cover';
+                    chatAvatar.style.backgroundPosition = 'center';
+                    chatAvatar.style.backgroundColor = 'transparent';
+                    chatAvatar.textContent = '';
+                };
+                
+                img.onerror = function() {
+                    // Аватар не загрузился, показываем инициалы
+                    console.log('Failed to load avatar, using initials');
+                    chatAvatar.style.backgroundImage = 'none';
+                    chatAvatar.textContent = initials;
+                    chatAvatar.style.backgroundColor = bgColor;
+                };
+                
+                img.src = avatarUrl;
+            } else {
+                // Если нет другого участника (групповой чат или ошибка)
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                chatAvatar.style.backgroundColor = bgColor;
+                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                chatAvatar.style.backgroundImage = 'none';
+            }
         } else {
-            // Если нет аватара, показываем инициалы на фоне
+            // Если нет участников
             const bgColor = currentChat.avatar_background || getRandomColor();
             chatAvatar.style.backgroundColor = bgColor;
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-            // Явно очищаем backgroundImage на случай, если был предыдущий аватар
             chatAvatar.style.backgroundImage = 'none';
         }
         
@@ -2614,8 +2642,6 @@ async function openChat(chatId) {
         hideLoading();
     }
 }
-
-
 
 
 function closeChat() {
