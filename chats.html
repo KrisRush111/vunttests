@@ -1917,18 +1917,18 @@ async function renderChats(chats) {
         
         // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        let statusText = 'был(а) недавно';
+let statusText = 'был(а) недавно';
         
-        if (otherParticipant) {
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    statusText = 'В сети';
-                } else {
-                    statusText = formatLastSeen(userActivity.last_online);
-                }
-            }
+if (otherParticipant) {
+    const userActivity = activityData[otherParticipant.platform_user_id];
+    if (userActivity) {
+        if (userActivity.is_online) {
+            statusText = 'В сети';
+        } else {
+            statusText = formatLastSeen(userActivity.last_online);
         }
+    }
+}
         
         
         const bgColor = chat.avatar_background || getRandomColor();
@@ -2174,11 +2174,15 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
         }
 
    
-     function renderContacts(contacts) {
+async function renderContacts(contacts) {
     if (!contacts || contacts.length === 0) {
         contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
         return;
     }
+
+    // Получаем статусы активности для всех контактов
+    const userIds = contacts.map(contact => contact.platform_user_id);
+    const activityData = await getUsersActivityStatus(userIds);
 
     contacts.forEach(contact => {
         const contactItem = document.createElement('div');
@@ -2190,10 +2194,21 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
         
         const bgColor = contact.avatar_background || getRandomColor();
 
-        // Добавляем градиент для консистентности с чатами
+        // Получаем статус контакта
+        const userActivity = activityData[contact.platform_user_id];
+        let statusText = 'был(а) недавно';
+        
+        if (userActivity) {
+            if (userActivity.is_online) {
+                statusText = 'В сети';
+            } else {
+                statusText = formatLastSeen(userActivity.last_online);
+            }
+        }
+
         const avatarStyle = bgColor ?
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :  // Градиент на основе bgColor
-            'linear-gradient(135deg, #0088cc, #40a7e3)';  // Дефолтный градиент, если нет bgColor
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
 
         contactItem.innerHTML = `
             <div class="contact-avatar" style="background: ${avatarStyle}">
@@ -2201,9 +2216,18 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
             </div>
             <div class="contact-info">
                 <div class="contact-name">${contact.nickname || 'Без имени'}</div>
-                <div class="contact-status">был(а) недавно</div>
+                <div class="contact-status">${statusText}</div>
             </div>
         `;
+        
+        // Добавляем индикатор онлайн статуса
+        const statusElement = contactItem.querySelector('.contact-status');
+        if (userActivity && userActivity.is_online) {
+            statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+            statusElement.classList.add('online');
+        } else {
+            statusElement.classList.remove('online');
+        }
         
         if (contact.has_avatar_photo) {
             loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
@@ -2216,6 +2240,9 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
         contactsList.appendChild(contactItem);
     });
 }
+
+
+
 
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
@@ -2514,32 +2541,34 @@ async function openChat(chatId) {
         
         chatTitle.textContent = currentChat.name || 'Новый чат';
         
-        // Получаем статус участника чата
-        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        let statusText = 'был(а) недавно';
-        
-        if (otherParticipant) {
-            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    statusText = 'В сети';
-                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                    chatStatus.classList.add('online');
-                } else {
-                    statusText = formatLastSeen(userActivity.last_online);
-                    chatStatus.textContent = statusText;
-                    chatStatus.classList.remove('online');
-                }
-            } else {
-                chatStatus.textContent = statusText;
-                chatStatus.classList.remove('online');
-            }
+  
+// Получаем статус участника чата
+const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+let statusText = 'был(а) недавно';
+
+if (otherParticipant) {
+    const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+    const userActivity = activityData[otherParticipant.platform_user_id];
+    
+    if (userActivity) {
+        if (userActivity.is_online) {
+            statusText = 'В сети';
+            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+            chatStatus.classList.add('online');
         } else {
+            statusText = formatLastSeen(userActivity.last_online);
             chatStatus.textContent = statusText;
             chatStatus.classList.remove('online');
         }
+    } else {
+        // Если данных о активности нет, показываем "был(а) недавно"
+        chatStatus.textContent = statusText;
+        chatStatus.classList.remove('online');
+    }
+} else {
+    chatStatus.textContent = statusText;
+    chatStatus.classList.remove('online');
+}
         
         // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
         chatAvatar.style.backgroundImage = '';
