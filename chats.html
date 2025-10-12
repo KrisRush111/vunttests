@@ -1374,6 +1374,33 @@
 
 
 
+    .user-status {
+    font-size: 13px;
+    color: var(--telegram-hint);
+}
+
+.user-status.online {
+    color: var(--online-green);
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--online-green);
+    animation: pulse 2s infinite;
+    margin-right: 4px;
+}
+
+.user-status.offline .status-indicator {
+    background-color: var(--telegram-hint);
+    animation: none;
+}
+
+.user-status.offline .status-text {
+    color: var(--telegram-hint);
+}
 
 
 
@@ -1444,7 +1471,9 @@
             <div class="chat-avatar" id="chatAvatarDesktop"></div>
             <div>
                 <div class="chat-title" id="chatTitleDesktop"></div>
-                <div class="chat-status" id="chatStatusDesktop">был(а) недавно</div>
+                <div class="chat-status user-status" id="chatStatusDesktop">
+    <span class="status-text">был(а) недавно</span>
+</div>
             </div>
         </div>
         <button class="menu-button">
@@ -1498,7 +1527,9 @@
 
         <div class="chat-title-container">
             <div class="chat-title" id="chatTitleMobile"></div>
-            <div class="chat-status" id="chatStatusMobile">был(а) недавно</div>
+            <div class="chat-status user-status" id="chatStatusMobile">
+    <span class="status-text">был(а) недавно</span>
+</div>
         </div>
         <div class="chat-avatar" id="chatAvatarMobile"></div>
     </div>
@@ -1558,7 +1589,7 @@
 
     <script>
     
-        const SERVER_URL = 'https://vuntserver-0ggf.onrender.com';
+        const SERVER_URL = 'https://vuntbot.onrender.com';
         
      
         const loadingOverlay = document.getElementById('loadingOverlay');
@@ -1850,18 +1881,31 @@ function formatDateHeader(timestamp) {
         }
         
        
-function renderChats(chats) {
+async function renderChats(chats) {
     const { chatsList, noChats } = getActiveElements();
     chatsList.innerHTML = '';
 
-    chats = chats.filter(chat => !chat.is_temp);
-    
     if (!chats || chats.length === 0) {
         noChats.style.display = 'block';
         return;
     }
     
     noChats.style.display = 'none';
+    
+    // Получаем статусы активности для всех пользователей в чатах
+    const userIds = [];
+    chats.forEach(chat => {
+        if (chat.participants && chat.participants.length > 0) {
+            chat.participants.forEach(participant => {
+                if (participant.platform_user_id !== userData.platform_user_id) {
+                    userIds.push(participant.platform_user_id);
+                }
+            });
+        }
+    });
+    
+    const activityData = await getUsersActivityStatus(userIds);
+    
     chats.forEach(chat => {
         const chatItem = document.createElement('div');
         chatItem.className = 'chat-item';
@@ -1872,30 +1916,51 @@ function renderChats(chats) {
             : '?';
         
         const bgColor = chat.avatar_background || getRandomColor();
-
-        const avatarStyle = chat.avatar_background ? 
-    `linear-gradient(135deg, ${chat.avatar_background}, ${adjustColor(chat.avatar_background, 20)})` : 
-    'linear-gradient(135deg, #0088cc, #40a7e3)';
-
         
-       
+        // Находим участника чата (исключая текущего пользователя)
+        const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        let statusText = 'был(а) недавно';
+        
+        if (otherParticipant) {
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    statusText = 'В сети';
+                } else {
+                    statusText = formatLastSeen(userActivity.last_online);
+                }
+            }
+        }
+        
         chatItem.innerHTML = `
-     <div class="chat-avatar" style="background: ${avatarStyle}">
+            <div class="chat-avatar" style="background-color: ${bgColor}">
                 ${initials}
             </div>
             <div class="chat-info">
                 <div class="chat-name">${chat.name || 'Новый чат'}</div>
                 <div class="last-message">${chat.last_message || ''}</div>
-                <div class="chat-time">${chat.last_message ? formatChatListTime(chat.last_message_time) : ''}</div>
+                <div class="chat-status user-status">${statusText}</div>
             </div>
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
+        
+        // Обновляем статус онлайн/офлайн
+        if (otherParticipant) {
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            const statusElement = chatItem.querySelector('.chat-status');
+            if (userActivity && userActivity.is_online) {
+                statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                statusElement.classList.add('online');
+            } else {
+                statusElement.classList.remove('online');
+            }
+        }
         
         if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
             loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
         }
         
-        chatItem.addEventListener('click', (e) => { // Updated event listener
+        chatItem.addEventListener('click', (e) => {
             e.preventDefault();
             openChat(chat.id);
         });
@@ -1903,6 +1968,129 @@ function renderChats(chats) {
         chatsList.appendChild(chatItem);
     });
 }
+
+
+
+
+async function updateUserActivity(isOnline = true) {
+    if (!userData || !userData.platform_user_id) {
+        console.warn('userData not available for updateUserActivity');
+        return;
+    }
+    try {
+        await fetch(`${SERVER_URL}/update_activity`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                is_online: isOnline
+            }),
+            credentials: 'include'
+        });
+    } catch (error) {
+        console.error('Error updating activity:', error);
+    }
+}
+
+async function sendOfflineStatus() {
+    if (userData && userData.platform_user_id) {
+        try {
+            const data = {
+                platform_user_id: userData.platform_user_id,
+                is_online: false
+            };
+            
+            fetch(`${SERVER_URL}/update_activity`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+                credentials: 'include',
+                keepalive: true
+            }).catch(() => {});
+        } catch (error) {
+            console.error('Error sending offline status:', error);
+        }
+    }
+}
+
+
+
+
+
+async function getUsersActivityStatus(userIds) {
+    try {
+        const response = await fetch(`${SERVER_URL}/get_activity_status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                user_ids: userIds
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+        if (data.status === 'success') {
+            return data.activity_data;
+        }
+        return {};
+    } catch (error) {
+        console.error('Error getting activity status:', error);
+        return {};
+    }
+}
+
+
+
+// Функция для отправки статуса офлайн
+async function sendOfflineStatus() {
+    await updateUserActivity(false);
+}
+
+// Функция для форматирования времени последнего посещения
+function formatLastSeen(timestamp) {
+    if (!timestamp) return 'был(а) недавно';
+    
+    const now = new Date();
+    const lastSeen = new Date(timestamp);
+    const diffMs = now - lastSeen;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffMins < 1) {
+        return 'только что';
+    } else if (diffMins < 60) {
+        return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
+    } else if (diffHours < 24) {
+        return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
+    } else if (diffDays < 7) {
+        return `был(а) ${diffDays} ${getRussianNoun(diffDays, ['день', 'дня', 'дней'])} назад`;
+    } else {
+        return lastSeen.toLocaleDateString('ru-RU', { 
+            day: 'numeric', 
+            month: 'long' 
+        });
+    }
+}
+
+// Вспомогательная функция для склонения русских существительных
+function getRussianNoun(number, forms) {
+    number = Math.abs(number) % 100;
+    const remainder = number % 10;
+    
+    if (number > 10 && number < 20) return forms[2];
+    if (remainder > 1 && remainder < 5) return forms[1];
+    if (remainder === 1) return forms[0];
+    return forms[2];
+}
+
+
         
         
         function loadChatAvatar(avatarElement, userId, initials, bgColor) {
@@ -2284,30 +2472,22 @@ async function sendMessage() {
 }
        
 async function openChat(chatId) {
-    if (isOpeningChat) return; // Prevent multiple chat openings
+    if (isOpeningChat) return;
     isOpeningChat = true;
 
-    // Close previous chat before opening a new one
-    if (currentChat && currentChat.id !== chatId) {
-        closeChat();
-    }
-    
     showLoading('Загрузка чата...');
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
     try {
-        // Clear previous messages and show loading state
         messagesContainer.innerHTML = '';
         noMessages.style.display = 'block';
         noMessages.textContent = 'Загрузка...';
 
-        // Apply changing class for animation
         chatModal.classList.add('changing');
         setTimeout(() => {
             chatModal.classList.remove('changing');
         }, 300);
         
-        // Get chat information
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {
@@ -2328,11 +2508,35 @@ async function openChat(chatId) {
         
         currentChat = chatData.chat;
         
-        // Update chat information in UI
         chatTitle.textContent = currentChat.name || 'Новый чат';
-        chatStatus.textContent = 'был(а) недавно';
         
-        // Set avatar
+        // Получаем статус участника чата
+        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        let statusText = 'был(а) недавно';
+        
+        if (otherParticipant) {
+            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    statusText = 'В сети';
+                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    chatStatus.classList.add('online');
+                } else {
+                    statusText = formatLastSeen(userActivity.last_online);
+                    chatStatus.textContent = statusText;
+                    chatStatus.classList.remove('online');
+                }
+            } else {
+                chatStatus.textContent = statusText;
+                chatStatus.classList.remove('online');
+            }
+        } else {
+            chatStatus.textContent = statusText;
+            chatStatus.classList.remove('online');
+        }
+        
         chatAvatar.style.backgroundImage = '';
         chatAvatar.style.backgroundColor = '';
         chatAvatar.textContent = '';
@@ -2347,7 +2551,6 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
-        // Load messages
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -2366,7 +2569,6 @@ async function openChat(chatId) {
             currentMessages = messagesData.messages;
             renderMessages(currentMessages);
             
-            // Mark all messages as read
             markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
@@ -2381,7 +2583,6 @@ async function openChat(chatId) {
             noMessages.textContent = 'Сообщений пока нет...';
         }
         
-        // Show chat modal
         if (isDesktop) {
             desktopPlaceholder.style.display = 'none';
             chatModal.style.display = 'flex';
@@ -2390,14 +2591,12 @@ async function openChat(chatId) {
             document.body.style.overflow = 'hidden';
         }
         
-        // Scroll to the last message
         if (currentMessages.length > 0) {
             setTimeout(() => {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }, 100);
         }
 
-        // Update chat list item
         updateChatItemInDOM(chatId, {
             last_message: currentChat.last_message,
             last_message_time: currentChat.last_message_time,
@@ -2407,12 +2606,15 @@ async function openChat(chatId) {
     } catch (error) {
         console.error('Error opening chat:', error);
         showMessage('Ошибка загрузки чата', 'error');
-        closeChat(); // Ensure UI is reset on error
+        closeChat();
     } finally {
-        isOpeningChat = false; // Reset flag
+        isOpeningChat = false;
         hideLoading();
     }
 }
+
+
+
 
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
@@ -2490,13 +2692,11 @@ function moveChatToTop(chatId) {
 
 
 function updateChatItemInDOM(chatId, chatData) {
-  
     [chatsListDesktop, chatsListMobile].forEach(list => {
         if (!list) return;
         
         const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
         if (chatItem) {
-           
             const lastMessageEl = chatItem.querySelector('.last-message');
             const chatTimeEl = chatItem.querySelector('.chat-time');
             
@@ -2508,7 +2708,6 @@ function updateChatItemInDOM(chatId, chatData) {
                 chatTimeEl.textContent = formatChatListTime(chatData.last_message_time);
             }
             
-        
             if (chatData.unread_count > 0) {
                 let badge = chatItem.querySelector('.unread-badge');
                 if (!badge) {
@@ -2524,7 +2723,6 @@ function updateChatItemInDOM(chatId, chatData) {
                 }
             }
             
-   
             list.prepend(chatItem);
         }
     });
@@ -2703,8 +2901,7 @@ function updateAllMessageStatusesInUI() {
     });
 }
      
- async function initializePage() {
-
+async function initializePage() {
     const userDataFromStorage = sessionStorage.getItem('userData');
     if (!userDataFromStorage) {
         window.location.href = 'profile.html';
@@ -2713,10 +2910,8 @@ function updateAllMessageStatusesInUI() {
     
     userData = JSON.parse(userDataFromStorage);
     
-
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-  
     if (isDesktop) {
         mobileChatsContainer.style.display = 'none';
         mobileOnlyNav.style.display = 'none';
@@ -2734,11 +2929,10 @@ function updateAllMessageStatusesInUI() {
         chatModalMobile.classList.remove('active'); 
     }
 
-
     await loadUserData();
     await loadChats();
     
-     const openChatId = sessionStorage.getItem('openChatId');
+    const openChatId = sessionStorage.getItem('openChatId');
     const openChatName = sessionStorage.getItem('openChatName');
     
     if (openChatId && openChatName) {
@@ -2774,12 +2968,11 @@ function updateAllMessageStatusesInUI() {
     });
 
     searchInput.addEventListener('input', (e) => {
-      
         filterChats(e.target.value);
     });
 
     if (backToChats) { 
-        backToChats.addEventListener('click', (e) => { // Updated event listener
+        backToChats.addEventListener('click', (e) => {
             e.preventDefault();
             closeChat();
         });
@@ -2792,34 +2985,72 @@ function updateAllMessageStatusesInUI() {
         }
     });
     
-    
+    // Обновление статусов онлайн каждые 10 секунд
     setInterval(async () => {
         const { chatModal } = getActiveElements();
-       
-        if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
-            await loadChats();
+        
+        // Обновляем статусы в списке чатов
+        await loadChats();
+        
+        // Обновляем статус в открытом чате
+        if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+            const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+                const userActivity = activityData[otherParticipant.platform_user_id];
+                const chatStatus = getActiveElements().chatStatus;
+                
+                if (userActivity) {
+                    if (userActivity.is_online) {
+                        chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        chatStatus.classList.add('online');
+                    } else {
+                        chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                        chatStatus.classList.remove('online');
+                    }
+                } else {
+                    chatStatus.textContent = 'был(а) недавно';
+                    chatStatus.classList.remove('online');
+                }
+            }
         }
-    }, 10000); 
+    }, 10000);
 
+    // Обновляем статус при загрузке страницы
+    setTimeout(() => {
+        updateUserActivity(true);
+    }, 1000);
 
-    window.addEventListener('resize', () => {
-        const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-        if (newIsDesktop !== isDesktop) {
-            isDesktop = newIsDesktop;
-            initializePage(); 
-        }
+    // Обновляем статус каждые 30 секунд
+    const activityInterval = setInterval(() => {
+        updateUserActivity(true);
+    }, 30000);
+
+    // Обработчики для отправки статуса офлайн при закрытии страницы
+    window.addEventListener('beforeunload', () => {
+        clearInterval(activityInterval);
+        sendOfflineStatus();
     });
 
- 
+    window.addEventListener('pagehide', () => {
+        sendOfflineStatus();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            updateUserActivity(true);
+        } else {
+            sendOfflineStatus();
+        }
+    });
+    
     const menuButton = document.querySelector('.menu-button');
     if (menuButton) {
         menuButton.addEventListener('click', () => {
-         
             console.log('Menu button clicked');
         });
     }
 
- 
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
