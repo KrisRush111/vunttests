@@ -1915,15 +1915,6 @@ async function renderChats(chats) {
             ? chat.name.split(' ').map(n => n[0]).join('') 
             : '?';
         
-        // ИСПРАВЛЕНИЕ: Используем avatar_background первого участника, если в чате не задан
-        let bgColor = chat.avatar_background;
-        if (!bgColor && chat.participants && chat.participants.length > 0) {
-            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant && otherParticipant.avatar_background) {
-                bgColor = otherParticipant.avatar_background;
-            }
-        }
-        bgColor = bgColor || getRandomColor();
         
         // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
@@ -1940,6 +1931,9 @@ async function renderChats(chats) {
             }
         }
         
+        
+        const bgColor = chat.avatar_background || getRandomColor();
+        
         chatItem.innerHTML = `
             <div class="chat-avatar" style="background-color: ${bgColor}">
                 ${initials}
@@ -1947,10 +1941,16 @@ async function renderChats(chats) {
             <div class="chat-info">
                 <div class="chat-name">${chat.name || 'Новый чат'}</div>
                 <div class="last-message">${chat.last_message || ''}</div>
-                <div class="chat-status user-status">${statusText}</div>
+                <div class="chat-time">${chat.last_message ? formatChatListTime(chat.last_message_time) : ''}</div>
             </div>
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
+        
+        // ИСПРАВЛЕНИЕ: загружаем аватар только если он есть
+        if (chat.has_avatar_photo) {
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.id, initials, bgColor);
+        }
+
         
         // Обновляем статус онлайн/офлайн
         if (otherParticipant) {
@@ -1964,10 +1964,8 @@ async function renderChats(chats) {
             }
         }
         
-        // ИСПРАВЛЕНИЕ: Передаем правильный bgColor в loadChatAvatar
         if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-            const participantForAvatar = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id) || chat.participants[0];
-            loadChatAvatar(chatItem.querySelector('.chat-avatar'), participantForAvatar.platform_user_id, initials, bgColor);
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
         }
         
         chatItem.addEventListener('click', (e) => {
@@ -1978,6 +1976,7 @@ async function renderChats(chats) {
         chatsList.appendChild(chatItem);
     });
 }
+
 
 
 
