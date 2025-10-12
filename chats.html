@@ -1915,7 +1915,15 @@ async function renderChats(chats) {
             ? chat.name.split(' ').map(n => n[0]).join('') 
             : '?';
         
-        const bgColor = chat.avatar_background || getRandomColor();
+        // ИСПРАВЛЕНИЕ: Используем avatar_background первого участника, если в чате не задан
+        let bgColor = chat.avatar_background;
+        if (!bgColor && chat.participants && chat.participants.length > 0) {
+            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant && otherParticipant.avatar_background) {
+                bgColor = otherParticipant.avatar_background;
+            }
+        }
+        bgColor = bgColor || getRandomColor();
         
         // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
@@ -1956,8 +1964,10 @@ async function renderChats(chats) {
             }
         }
         
+        // ИСПРАВЛЕНИЕ: Передаем правильный bgColor в loadChatAvatar
         if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
+            const participantForAvatar = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id) || chat.participants[0];
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), participantForAvatar.platform_user_id, initials, bgColor);
         }
         
         chatItem.addEventListener('click', (e) => {
@@ -1968,7 +1978,6 @@ async function renderChats(chats) {
         chatsList.appendChild(chatItem);
     });
 }
-
 
 
 
