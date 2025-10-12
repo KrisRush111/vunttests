@@ -2242,13 +2242,12 @@ function loadContactAvatar(avatarElement, userId, initials, bgColor) {
 
       
 async function createChatWithContact(contact) {
-    if (isOpeningChat) return; // Prevent multiple chat creations
+    if (isOpeningChat) return;
     isOpeningChat = true;
 
     showLoading('Подготовка чата...');
     
     try {
-      
         const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
             method: 'POST',
             headers: {
@@ -2268,13 +2267,15 @@ async function createChatWithContact(contact) {
         }
 
         if (!data.is_new) {
-       
-            openChat(data.chat_id);
-            hideLoading();
+            // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
+            hideContactsModal(); // Добавляем закрытие модального окна
+            setTimeout(() => {
+                openChat(data.chat_id);
+            }, 300);
             return;
         }
 
-     
+        // СОЗДАЕМ НОВЫЙ ЧАТ
         const tempChat = {
             id: `temp_${Date.now()}`, 
             is_group: false,
@@ -2289,18 +2290,22 @@ async function createChatWithContact(contact) {
             is_temp: true 
         };
         
-    
-        openTempChat(tempChat);
-        hideLoading();
+        // ЗАКРЫВАЕМ МОДАЛЬНОЕ ОКНО И ОТКРЫВАЕМ ЧАТ
+        hideContactsModal();
+        setTimeout(() => {
+            openTempChat(tempChat);
+        }, 300);
         
     } catch (error) {
         console.error('Error preparing chat:', error);
         showMessage('Ошибка подготовки чата: ' + error.message, 'error');
-        hideLoading();
     } finally {
+        hideLoading();
         isOpeningChat = false;
     }
 }
+
+
 
 function openTempChat(tempChat) {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
