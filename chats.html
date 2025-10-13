@@ -1639,6 +1639,7 @@
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false; // Flag to prevent multiple chat openings
+        let currentChatsList = []; // Кэш списка чатов
         
 
 function adjustTimeToMoscow(timestamp) {
@@ -1661,7 +1662,6 @@ function formatChatListTime(timestamp) {
         minute: '2-digit'
     });
 }
-
 
 
 
@@ -1867,13 +1867,16 @@ function formatDateHeader(timestamp) {
                 const data = await response.json();
                 
                 if (data.status === 'success') {
+                    currentChatsList = data.chats; // Сохраняем в кэш
                     renderChats(data.chats);
                 } else {
+                    currentChatsList = [];
                     renderChats([]);
                 }
                 hideLoading();
             } catch (error) {
                 console.error('Error loading chats:', error);
+                currentChatsList = [];
                 renderChats([]);
                 hideLoading();
             }
@@ -1981,7 +1984,6 @@ if (otherParticipant) {
 
 
 
-
 async function updateUserActivity(isOnline = true) {
     if (!userData || !userData.platform_user_id) {
         console.warn('userData not available for updateUserActivity');
@@ -2026,7 +2028,6 @@ async function sendOfflineStatus() {
         }
     }
 }
-
 
 
 
@@ -2244,7 +2245,6 @@ async function renderContacts(contacts) {
         contactsList.appendChild(contactItem);
     });
 }
-
 
 
 
@@ -2970,6 +2970,63 @@ function updateAllMessageStatusesInUI() {
         }
     });
 }
+
+// Новая функция для обновления только статусов без перезагрузки чатов
+async function updateChatStatuses() {
+    if (!currentChatsList || currentChatsList.length === 0) {
+        return;
+    }
+
+    // Получаем ID всех пользователей из текущих чатов
+    const userIds = [];
+    currentChatsList.forEach(chat => {
+        if (chat.participants && chat.participants.length > 0) {
+            chat.participants.forEach(participant => {
+                if (participant.platform_user_id !== userData.platform_user_id) {
+                    userIds.push(participant.platform_user_id);
+                }
+            });
+        }
+    });
+
+    if (userIds.length === 0) return;
+
+    try {
+        const activityData = await getUsersActivityStatus(userIds);
+        
+        // Обновляем статусы в DOM без перерисовки всего списка
+        [chatsListDesktop, chatsListMobile].forEach(list => {
+            if (!list) return;
+            
+            const chatItems = list.querySelectorAll('.chat-item');
+            chatItems.forEach(chatItem => {
+                const chatId = chatItem.getAttribute('data-chat-id');
+                const chat = currentChatsList.find(c => c.id === chatId);
+                
+                if (chat && chat.participants) {
+                    const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+                    if (otherParticipant) {
+                        const userActivity = activityData[otherParticipant.platform_user_id];
+                        const statusElement = chatItem.querySelector('.chat-status');
+                        
+                        if (statusElement) {
+                            if (userActivity && userActivity.is_online) {
+                                statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                                statusElement.classList.add('online');
+                            } else {
+                                const statusText = userActivity ? formatLastSeen(userActivity.last_online) : 'был(а) недавно';
+                                statusElement.textContent = statusText;
+                                statusElement.classList.remove('online');
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    } catch (error) {
+        console.error('Error updating chat statuses:', error);
+    }
+}
      
 async function initializePage() {
     const userDataFromStorage = sessionStorage.getItem('userData');
@@ -3055,12 +3112,12 @@ async function initializePage() {
         }
     });
     
-    // Обновление статусов онлайн каждые 10 секунд
+    // ИСПРАВЛЕННЫЙ интервал - обновляем только статусы, а не весь список чатов
     setInterval(async () => {
         const { chatModal } = getActiveElements();
         
-        // Обновляем статусы в списке чатов
-        await loadChats();
+        // Обновляем статусы в списке чатов БЕЗ перезагрузки списка
+        await updateChatStatuses();
         
         // Обновляем статус в открытом чате
         if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
@@ -3174,4 +3231,3 @@ function filterContacts(searchTerm) {
     </script>
 </body>
 </html>
-
