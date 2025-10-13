@@ -1847,36 +1847,48 @@ function formatDateHeader(timestamp) {
         }
         
      
-        async function loadChats() {
-            showLoading('Загрузка чатов...');
-            const { chatsList, noChats } = getActiveElements();
-            
-            try {
-                const response = await fetch(`${SERVER_URL}/get_chats`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    renderChats(data.chats);
-                } else {
-                    renderChats([]);
-                }
-                hideLoading();
-            } catch (error) {
-                console.error('Error loading chats:', error);
-                renderChats([]);
-                hideLoading();
-            }
+// Добавьте глобальную переменную для хранения всех чатов
+let allChats = [];
+
+// Обновите функцию loadChats для сохранения чатов
+async function loadChats() {
+    showLoading('Загрузка чатов...');
+    const { chatsList, noChats } = getActiveElements();
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chats`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            allChats = data.chats; // Сохраняем чаты в глобальную переменную
+            renderChats(data.chats);
+        } else {
+            allChats = [];
+            renderChats([]);
         }
+        hideLoading();
+    } catch (error) {
+        console.error('Error loading chats:', error);
+        allChats = [];
+        renderChats([]);
+        hideLoading();
+    }
+}
+
+// Обновите функцию getChatById
+function getChatById(chatId) {
+    return allChats.find(chat => chat.id === chatId);
+}
         
        
 async function renderChats(chats) {
@@ -2355,7 +2367,37 @@ async function updateAllChatsStatuses() {
 
     try {
         const activityData = await getUsersActivityStatus(userIds);
-        updateChatsStatusesUI(activityData);
+        
+        // Обновляем статусы в UI
+        chatItems.forEach(chatItem => {
+            const chatId = chatItem.getAttribute('data-chat-id');
+            const chat = getChatById(chatId);
+            
+            if (!chat || !chat.participants) return;
+
+            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (!otherParticipant) return;
+
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            const statusElement = chatItem.querySelector('.chat-status');
+            
+            if (statusElement) {
+                if (userActivity) {
+                    if (userActivity.is_online) {
+                        statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        statusElement.classList.add('online');
+                    } else {
+                        const lastSeenText = formatLastSeen(userActivity.last_online);
+                        statusElement.textContent = lastSeenText;
+                        statusElement.classList.remove('online');
+                    }
+                } else {
+                    // Если данных нет, показываем "был(а) недавно"
+                    statusElement.textContent = 'был(а) недавно';
+                    statusElement.classList.remove('online');
+                }
+            }
+        });
         
         // Также обновляем статус в открытом чате, если он есть
         if (currentChat) {
@@ -2363,8 +2405,18 @@ async function updateAllChatsStatuses() {
         }
     } catch (error) {
         console.error('Error updating chats statuses:', error);
+        
+        // При ошибке устанавливаем статусы по умолчанию
+        chatItems.forEach(chatItem => {
+            const statusElement = chatItem.querySelector('.chat-status');
+            if (statusElement) {
+                statusElement.textContent = 'был(а) недавно';
+                statusElement.classList.remove('online');
+            }
+        });
     }
 }
+
 
 function updateChatsStatusesUI(activityData) {
     const { chatsList } = getActiveElements();
