@@ -1921,25 +1921,33 @@ async function renderChats(chats) {
         
         const bgColor = chat.avatar_background || getRandomColor();
 
-        // ИНИЦИАЛИЗИРУЕМ СТАТУС ДЛЯ КАЖДОГО ЧАТА ОТДЕЛЬНО
-        let statusText = 'был(а) недавно';
-        let isOnline = false;
-        
         // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         
-        if (otherParticipant) {
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    statusText = 'В сети';
-                    isOnline = true;
-                } else {
-                    statusText = formatLastSeen(userActivity.last_online);
-                    isOnline = false;
-                }
-            }
+        // Статус по умолчанию
+let statusText = 'был(а) недавно';
+let isOnline = false;
+
+if (otherParticipant) {
+    const userActivity = activityData[otherParticipant.platform_user_id];
+    if (userActivity) {
+        if (userActivity.is_online) {
+            statusText = 'В сети';
+            isOnline = true;
+        } else {
+            statusText = formatLastSeen(userActivity.last_online);
+            isOnline = false;
         }
+    } else {
+        // Если данных о активности нет, считаем что пользователь не в сети
+        statusText = 'был(а) недавно';
+        isOnline = false;
+    }
+} else {
+    // Если нет другого участника
+    statusText = '';
+    isOnline = false;
+}
         
         const avatarStyle = bgColor ?
             `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
@@ -2170,6 +2178,35 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
             }
         }
 
+
+
+
+
+        // Добавьте эту функцию для отладки
+async function debugActivityStatus(userId) {
+    try {
+        const response = await fetch(`${SERVER_URL}/get_activity_status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                user_ids: [userId]
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+        console.log('Activity data for user', userId, ':', data);
+        return data;
+    } catch (error) {
+        console.error('Debug activity error:', error);
+        return null;
+    }
+}
+
+
+
    
 async function renderContacts(contacts) {
     if (!contacts || contacts.length === 0) {
@@ -2192,10 +2229,10 @@ async function renderContacts(contacts) {
         const bgColor = contact.avatar_background || getRandomColor();
 
         // Получаем статус контакта
-        const userActivity = activityData[contact.platform_user_id];
+        const userActivity = activityData[contact.platform_user_id]; // ДОБАВЬТЕ ЭТУ СТРОКУ!
         let statusText = 'был(а) недавно';
         let isOnline = false;
-        
+
         if (userActivity) {
             if (userActivity.is_online) {
                 statusText = 'В сети';
@@ -2204,6 +2241,10 @@ async function renderContacts(contacts) {
                 statusText = formatLastSeen(userActivity.last_online);
                 isOnline = false;
             }
+        } else {
+            // Если данных о активности нет
+            statusText = 'был(а) недавно';
+            isOnline = false;
         }
 
         const avatarStyle = bgColor ?
@@ -2236,7 +2277,6 @@ async function renderContacts(contacts) {
         contactsList.appendChild(contactItem);
     });
 }
-
 
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
@@ -2967,7 +3007,6 @@ async function updateChatStatuses() {
         return;
     }
 
-    // Получаем ID всех пользователей из текущих чатов
     const userIds = [];
     currentChatsList.forEach(chat => {
         if (chat.participants && chat.participants.length > 0) {
@@ -2984,7 +3023,6 @@ async function updateChatStatuses() {
     try {
         const activityData = await getUsersActivityStatus(userIds);
         
-        // Обновляем статусы в DOM без перерисовки всего списка
         [chatsListDesktop, chatsListMobile].forEach(list => {
             if (!list) return;
             
@@ -3102,11 +3140,11 @@ async function initializePage() {
         }
     });
     
-// ИСПРАВЛЕННЫЙ интервал - обновляем только статусы, а не весь список чатов
+// Обновите интервал обновления статусов
 setInterval(async () => {
     const { chatModal } = getActiveElements();
     
-    // Обновляем статусы в списке чатов БЕЗ перезагрузки списка
+    // Обновляем статусы в списке чатов
     await updateChatStatuses();
     
     // Обновляем статус в открытом чате
