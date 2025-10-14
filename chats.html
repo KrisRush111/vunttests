@@ -1919,34 +1919,28 @@ async function renderChats(chats) {
             ? chat.name.split(' ').map(n => n[0]).join('') 
             : '?';
         
+        const bgColor = chat.avatar_background || getRandomColor();
+
+        // ИНИЦИАЛИЗИРУЕМ СТАТУС ДЛЯ КАЖДОГО ЧАТА ОТДЕЛЬНО
+        let statusText = 'был(а) недавно';
+        let isOnline = false;
+        
         // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        let statusText = 'в сети';
-        let isOnline = false;
         
         if (otherParticipant) {
             const userActivity = activityData[otherParticipant.platform_user_id];
             if (userActivity) {
-                // ИСПРАВЛЕНИЕ: Более точная проверка онлайн статуса
-                if (userActivity.is_online === true) {
+                if (userActivity.is_online) {
                     statusText = 'В сети';
                     isOnline = true;
                 } else {
-                    // Проверяем, насколько недавно был онлайн
-                    const lastOnlineTime = new Date(userActivity.last_online);
-                    const now = new Date();
-                    const diffMinutes = Math.floor((now - lastOnlineTime) / 60000);
-                    
-                    if (diffMinutes < 2) {
-                        statusText = 'только что';
-                    } else {
-                        statusText = formatLastSeen(userActivity.last_online);
-                    }
+                    statusText = formatLastSeen(userActivity.last_online);
+                    isOnline = false;
                 }
             }
         }
         
-        const bgColor = chat.avatar_background || getRandomColor();
         const avatarStyle = bgColor ?
             `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
             'linear-gradient(135deg, #0088cc, #40a7e3)';
@@ -1958,7 +1952,12 @@ async function renderChats(chats) {
             <div class="chat-info">
                 <div class="chat-name">${chat.name || 'Новый чат'}</div>
                 <div class="last-message">${chat.last_message || ''}</div>
-                <div class="chat-status user-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">' + statusText + '</span>' : statusText}</div>
+                <div class="chat-status user-status ${isOnline ? 'online' : ''}">
+                    ${isOnline ? 
+                        '<span class="status-indicator"></span><span class="status-text">В сети</span>' : 
+                        statusText
+                    }
+                </div>
             </div>
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
@@ -2196,12 +2195,15 @@ async function renderContacts(contacts) {
         // Получаем статус контакта
         const userActivity = activityData[contact.platform_user_id];
         let statusText = 'был(а) недавно';
+        let isOnline = false;
         
         if (userActivity) {
             if (userActivity.is_online) {
                 statusText = 'В сети';
+                isOnline = true;
             } else {
                 statusText = formatLastSeen(userActivity.last_online);
+                isOnline = false;
             }
         }
 
@@ -2215,18 +2217,14 @@ async function renderContacts(contacts) {
             </div>
             <div class="contact-info">
                 <div class="contact-name">${contact.nickname || 'Без имени'}</div>
-                <div class="contact-status">${statusText}</div>
+                <div class="contact-status ${isOnline ? 'online' : ''}">
+                    ${isOnline ? 
+                        '<span class="status-indicator"></span><span class="status-text">В сети</span>' : 
+                        statusText
+                    }
+                </div>
             </div>
         `;
-        
-        // Добавляем индикатор онлайн статуса
-        const statusElement = contactItem.querySelector('.contact-status');
-        if (userActivity && userActivity.is_online) {
-            statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-            statusElement.classList.add('online');
-        } else {
-            statusElement.classList.remove('online');
-        }
         
         if (contact.has_avatar_photo) {
             loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
@@ -2239,7 +2237,6 @@ async function renderContacts(contacts) {
         contactsList.appendChild(contactItem);
     });
 }
-
 
 
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
@@ -2965,7 +2962,6 @@ function updateAllMessageStatusesInUI() {
     });
 }
 
-// Новая функция для обновления только статусов без перезагрузки чатов
 async function updateChatStatuses() {
     if (!currentChatsList || currentChatsList.length === 0) {
         return;
@@ -3009,7 +3005,7 @@ async function updateChatStatuses() {
                                 statusElement.classList.add('online');
                             } else {
                                 const statusText = userActivity ? formatLastSeen(userActivity.last_online) : 'был(а) недавно';
-                                statusElement.textContent = statusText;
+                                statusElement.innerHTML = statusText; // Используем innerHTML вместо textContent
                                 statusElement.classList.remove('online');
                             }
                         }
