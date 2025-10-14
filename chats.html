@@ -1919,30 +1919,37 @@ async function renderChats(chats) {
             ? chat.name.split(' ').map(n => n[0]).join('') 
             : '?';
         
-
-        
         // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-let statusText = 'был(а) недавно';
+        let statusText = 'в сети';
+        let isOnline = false;
         
-if (otherParticipant) {
-    const userActivity = activityData[otherParticipant.platform_user_id];
-    if (userActivity) {
-        if (userActivity.is_online) {
-            statusText = 'В сети';
-        } else {
-            statusText = formatLastSeen(userActivity.last_online);
+        if (otherParticipant) {
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            if (userActivity) {
+                // ИСПРАВЛЕНИЕ: Более точная проверка онлайн статуса
+                if (userActivity.is_online === true) {
+                    statusText = 'В сети';
+                    isOnline = true;
+                } else {
+                    // Проверяем, насколько недавно был онлайн
+                    const lastOnlineTime = new Date(userActivity.last_online);
+                    const now = new Date();
+                    const diffMinutes = Math.floor((now - lastOnlineTime) / 60000);
+                    
+                    if (diffMinutes < 2) {
+                        statusText = 'только что';
+                    } else {
+                        statusText = formatLastSeen(userActivity.last_online);
+                    }
+                }
+            }
         }
-    }
-}
-        
         
         const bgColor = chat.avatar_background || getRandomColor();
-
-        // Добавляем градиент для консистентности с чатами
         const avatarStyle = bgColor ?
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :  // Градиент на основе bgColor
-            'linear-gradient(135deg, #0088cc, #40a7e3)';  // Дефолтный градиент, если нет bgColor
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
 
         chatItem.innerHTML = `
             <div class="chat-avatar" style="background: ${avatarStyle}">
@@ -1951,22 +1958,10 @@ if (otherParticipant) {
             <div class="chat-info">
                 <div class="chat-name">${chat.name || 'Новый чат'}</div>
                 <div class="last-message">${chat.last_message || ''}</div>
-                <div class="chat-status user-status">${statusText}</div>
+                <div class="chat-status user-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">' + statusText + '</span>' : statusText}</div>
             </div>
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
-        
-        // Обновляем статус онлайн/офлайн
-        if (otherParticipant) {
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            const statusElement = chatItem.querySelector('.chat-status');
-            if (userActivity && userActivity.is_online) {
-                statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                statusElement.classList.add('online');
-            } else {
-                statusElement.classList.remove('online');
-            }
-        }
         
         if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
             loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
@@ -2058,7 +2053,7 @@ async function getUsersActivityStatus(userIds) {
 
 
 function formatLastSeen(lastOnline) {
-    if (!lastOnline) return 'был(а) недавно';
+    if (!lastOnline) return 'в сети';
     
     const now = new Date();
     const lastSeen = new Date(lastOnline);
