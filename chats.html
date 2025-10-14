@@ -2085,7 +2085,6 @@ function getRussianNoun(number, forms) {
     if (n1 === 1) return forms[0];
     return forms[2];
 }
-
         
         
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
@@ -2540,6 +2539,7 @@ async function openChat(chatId) {
 // Получаем статус участника чата
 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
 let statusText = 'был(а) недавно';
+let isOnline = false;
 
 if (otherParticipant) {
     const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
@@ -2548,18 +2548,18 @@ if (otherParticipant) {
     if (userActivity) {
         if (userActivity.is_online) {
             statusText = 'В сети';
-            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-            chatStatus.classList.add('online');
+            isOnline = true;
         } else {
             statusText = formatLastSeen(userActivity.last_online);
-            chatStatus.textContent = statusText;
-            chatStatus.classList.remove('online');
+            isOnline = false;
         }
-    } else {
-        // Если данных о активности нет, показываем "был(а) недавно"
-        chatStatus.textContent = statusText;
-        chatStatus.classList.remove('online');
     }
+}
+
+// Обновляем статус в заголовке чата
+if (isOnline) {
+    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+    chatStatus.classList.add('online');
 } else {
     chatStatus.textContent = statusText;
     chatStatus.classList.remove('online');
@@ -3005,7 +3005,7 @@ async function updateChatStatuses() {
                                 statusElement.classList.add('online');
                             } else {
                                 const statusText = userActivity ? formatLastSeen(userActivity.last_online) : 'был(а) недавно';
-                                statusElement.innerHTML = statusText; // Используем innerHTML вместо textContent
+                                statusElement.innerHTML = statusText;
                                 statusElement.classList.remove('online');
                             }
                         }
@@ -3102,36 +3102,36 @@ async function initializePage() {
         }
     });
     
-    // ИСПРАВЛЕННЫЙ интервал - обновляем только статусы, а не весь список чатов
-    setInterval(async () => {
-        const { chatModal } = getActiveElements();
-        
-        // Обновляем статусы в списке чатов БЕЗ перезагрузки списка
-        await updateChatStatuses();
-        
-        // Обновляем статус в открытом чате
-        if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
-            const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant) {
-                const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-                const userActivity = activityData[otherParticipant.platform_user_id];
-                const chatStatus = getActiveElements().chatStatus;
-                
-                if (userActivity) {
-                    if (userActivity.is_online) {
-                        chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                        chatStatus.classList.add('online');
-                    } else {
-                        chatStatus.textContent = formatLastSeen(userActivity.last_online);
-                        chatStatus.classList.remove('online');
-                    }
+// ИСПРАВЛЕННЫЙ интервал - обновляем только статусы, а не весь список чатов
+setInterval(async () => {
+    const { chatModal } = getActiveElements();
+    
+    // Обновляем статусы в списке чатов БЕЗ перезагрузки списка
+    await updateChatStatuses();
+    
+    // Обновляем статус в открытом чате
+    if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            const chatStatus = getActiveElements().chatStatus;
+            
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    chatStatus.classList.add('online');
                 } else {
-                    chatStatus.textContent = 'был(а) недавно';
+                    chatStatus.textContent = formatLastSeen(userActivity.last_online);
                     chatStatus.classList.remove('online');
                 }
+            } else {
+                chatStatus.textContent = 'был(а) недавно';
+                chatStatus.classList.remove('online');
             }
         }
-    }, 10000);
+    }
+}, 10000);
 
     // Обновляем статус при загрузке страницы
     setTimeout(() => {
