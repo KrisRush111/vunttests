@@ -1639,7 +1639,56 @@
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false; // Flag to prevent multiple chat openings
         let currentChatsList = []; // Кэш списка чатов
+        // В разделе с другими глобальными переменными добавьте:
+        let activityPollInterval;
+        let currentActivityData = {};
         
+
+
+        // Добавьте эту функцию после других функций
+function startActivityPolling() {
+    // Останавливаем предыдущий интервал если есть
+    if (activityPollInterval) {
+        clearInterval(activityPollInterval);
+    }
+    
+    // Опрашиваем статусы каждые 10 секунд
+    activityPollInterval = setInterval(async () => {
+        await refreshOnlineStatuses();
+    }, 10000);
+}
+
+async function refreshOnlineStatuses() {
+    // Обновляем статусы в списке чатов
+    await updateChatStatuses();
+    
+    // Обновляем статус в открытом чате
+    const { chatModal } = getActiveElements();
+    
+    if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            const chatStatus = getActiveElements().chatStatus;
+            
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    chatStatus.classList.add('online');
+                } else {
+                    chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                    chatStatus.classList.remove('online');
+                }
+            } else {
+                chatStatus.textContent = 'был(а) недавно';
+                chatStatus.classList.remove('online');
+            }
+        }
+    }
+}
+
+
 
 function adjustTimeToMoscow(timestamp) {
     if (!timestamp) return null;
@@ -3022,6 +3071,7 @@ async function updateChatStatuses() {
 
     try {
         const activityData = await getUsersActivityStatus(userIds);
+        currentActivityData = activityData; // Сохраняем данные для использования
         
         [chatsListDesktop, chatsListMobile].forEach(list => {
             if (!list) return;
@@ -3170,6 +3220,7 @@ setInterval(async () => {
         }
     }
 }, 10000);
+
 
     // Обновляем статус при загрузке страницы
     setTimeout(() => {
