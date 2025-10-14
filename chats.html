@@ -3190,9 +3190,15 @@ async function initializePage() {
         }
     });
     
-// Обновите интервал обновления статусов
+// В функции initializePage замените интервал:
 setInterval(async () => {
     const { chatModal } = getActiveElements();
+    
+    // Принудительно обновляем статусы на сервере
+    await fetch(`${SERVER_URL}/refresh_activity`, {
+        method: 'POST',
+        credentials: 'include'
+    }).catch(() => {}); // Игнорируем ошибки
     
     // Обновляем статусы в списке чатов
     await updateChatStatuses();
@@ -3219,8 +3225,41 @@ setInterval(async () => {
             }
         }
     }
-}, 10000);
+}, 5000); // Уменьшено с 10000 до 5000 мс (5 секунд)
 
+
+
+// В initializePage добавьте:
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        // При возвращении на вкладку сразу обновляем статусы
+        updateChatStatuses();
+        if (currentChat) {
+            const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                getUsersActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
+                    const userActivity = activityData[otherParticipant.platform_user_id];
+                    const chatStatus = getActiveElements().chatStatus;
+                    
+                    if (userActivity) {
+                        if (userActivity.is_online) {
+                            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                            chatStatus.classList.add('online');
+                        } else {
+                            chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                            chatStatus.classList.remove('online');
+                        }
+                    }
+                });
+            }
+        }
+    }
+});
+
+// Также обновляем при активации окна
+window.addEventListener('focus', () => {
+    updateChatStatuses();
+});
 
     // Обновляем статус при загрузке страницы
     setTimeout(() => {
