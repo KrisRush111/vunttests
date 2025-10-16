@@ -13,28 +13,44 @@ class ActivityTracker {
         this.isInitialized = false;
         this.currentPage = this.detectCurrentPage();
         
+        // Добавляем отслеживание платформы
+        this.platformPages = ['contacts', 'chats', 'profile'];
+        this.isOnPlatform = this.platformPages.includes(this.currentPage);
+        
         // Кэш статусов пользователей
         this.activityDataCache = {};
         this.lastCacheUpdate = 0;
         this.cacheTTL = 5000; // Уменьшено до 5 секунд
         
-        console.log(`ActivityTracker initialized for page: ${this.currentPage}`);
+        console.log(`ActivityTracker initialized for page: ${this.currentPage}, on platform: ${this.isOnPlatform}`);
         
-        // Более быстрая инициализация
-        setTimeout(() => this.init(), 500);
+        // Инициализация только если на платформе
+        if (this.isOnPlatform) {
+            setTimeout(() => this.init(), 500);
+        }
     }
 
-    // Определение текущей страницы
+    // Определение текущей страницы - расширенная версия
     detectCurrentPage() {
+        const hostname = window.location.hostname;
         const path = window.location.pathname;
+        
+        // Проверяем, что находимся на домене платформы
+        const isPlatformDomain = hostname.includes('vuntgram') || 
+                                hostname.includes('localhost') || 
+                                hostname.includes('127.0.0.1');
+        
+        if (!isPlatformDomain) return 'external';
+
         if (path.includes('contacts.html')) return 'contacts';
         if (path.includes('chats.html')) return 'chats';
         if (path.includes('profile.html')) return 'profile';
-        return 'unknown';
+        return 'other_platform_page';
     }
 
     async init() {
-        if (this.isInitialized) return;
+        // Инициализируем только если на платформе
+        if (!this.isOnPlatform || this.isInitialized) return;
         
         try {
             // Получаем данные пользователя из sessionStorage
@@ -46,7 +62,7 @@ class ActivityTracker {
 
             this.userData = JSON.parse(userDataFromStorage);
             
-            // Сразу отмечаем как онлайн при инициализации
+            // Сразу отмечаем как онлайн при инициализации на платформе
             await this.updateOnlineStatus(true);
             
             // Запускаем отслеживание активности
@@ -66,7 +82,7 @@ class ActivityTracker {
 
         // Обновляем статус каждые 25 секунд (чаще)
         this.activityInterval = setInterval(() => {
-            if (document.visibilityState === 'visible') {
+            if (document.visibilityState === 'visible' && this.isOnPlatform) {
                 this.updateOnlineStatus(true);
             }
         }, 25000);
@@ -84,7 +100,7 @@ class ActivityTracker {
         const pollInterval = this.currentPage === 'chats' ? 2000 : 3000;
         
         this.statusPollInterval = setInterval(() => {
-            if (document.visibilityState === 'visible') {
+            if (document.visibilityState === 'visible' && this.isOnPlatform) {
                 this.refreshOnlineStatuses();
             }
         }, pollInterval);
@@ -104,7 +120,8 @@ class ActivityTracker {
 
         const activityHandler = () => {
             this.lastActivityTime = Date.now();
-            if (!this.isOnline && document.visibilityState === 'visible') {
+            // Обновляем статус только если на платформе
+            if (!this.isOnline && document.visibilityState === 'visible' && this.isOnPlatform) {
                 this.updateOnlineStatus(true);
             }
         };
@@ -115,15 +132,15 @@ class ActivityTracker {
 
         // Отслеживание видимости страницы - УЛУЧШЕННАЯ ЛОГИКА
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                // При возвращении на вкладку сразу обновляем статус
+            if (document.visibilityState === 'visible' && this.isOnPlatform) {
+                // При возвращении на вкладку платформы сразу обновляем статус
                 this.updateOnlineStatus(true);
                 // Принудительно обновляем статусы других пользователей
                 setTimeout(() => this.refreshOnlineStatuses(), 500);
             } else {
-                // При скрытии вкладки НЕ СРАЗУ ставим офлайн, ждем 30 секунд
+                // При скрытии вкладки платформы ставим офлайн через 30 секунд
                 setTimeout(() => {
-                    if (document.visibilityState === 'hidden') {
+                    if (document.visibilityState === 'hidden' && this.isOnPlatform) {
                         this.updateOnlineStatus(false);
                     }
                 }, 30000);
@@ -132,23 +149,79 @@ class ActivityTracker {
 
         // Отслеживание фокуса окна
         window.addEventListener('focus', () => {
-            this.updateOnlineStatus(true);
-            setTimeout(() => this.refreshOnlineStatuses(), 500);
+            if (this.isOnPlatform) {
+                this.updateOnlineStatus(true);
+                setTimeout(() => this.refreshOnlineStatuses(), 500);
+            }
         });
+
+        // Отслеживание перехода между страницами платформы
+        window.addEventListener('popstate', () => {
+            this.handlePageChange();
+        });
+
+        // Отслеживание кликов по ссылкам
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (link && link.href) {
+                setTimeout(() => this.handlePageChange(), 100);
+            }
+        });
+    }
+
+    // Обработчик смены страницы
+    handlePageChange() {
+        const previousPage = this.currentPage;
+        const previousPlatformStatus = this.isOnPlatform;
+        
+        this.currentPage = this.detectCurrentPage();
+        this.isOnPlatform = this.platformPages.includes(this.currentPage);
+        
+        // Если ушли с платформы - ставим офлайн
+        if (previousPlatformStatus && !this.isOnPlatform) {
+            console.log('ActivityTracker: Left platform, setting offline');
+            this.updateOnlineStatus(false);
+            this.stopTracking();
+        }
+        // Если вернулись на платформу - ставим онлайн
+        else if (!previousPlatformStatus && this.isOnPlatform) {
+            console.log('ActivityTracker: Returned to platform, setting online');
+            this.updateOnlineStatus(true);
+            this.startActivityTracking();
+            this.startStatusPolling();
+        }
+        // Если перешли между страницами платформы - обновляем статус
+        else if (this.isOnPlatform && previousPage !== this.currentPage) {
+            console.log(`ActivityTracker: Switched platform page from ${previousPage} to ${this.currentPage}`);
+            this.updateOnlineStatus(true);
+        }
+    }
+
+    // Остановка отслеживания при уходе с платформы
+    stopTracking() {
+        if (this.activityInterval) {
+            clearInterval(this.activityInterval);
+            this.activityInterval = null;
+        }
+        if (this.statusPollInterval) {
+            clearInterval(this.statusPollInterval);
+            this.statusPollInterval = null;
+        }
     }
 
     // Настройка обработчиков закрытия страницы
     setupPageUnload() {
         const sendOffline = () => {
-            // Используем sendBeacon для надежной отправки при закрытии
-            if (this.userData && navigator.sendBeacon) {
+            // Отправляем офлайн статус только если были на платформе
+            if (this.isOnPlatform && this.userData && navigator.sendBeacon) {
                 const data = new Blob([JSON.stringify({
                     platform_user_id: this.userData.platform_user_id,
-                    is_online: false
+                    is_online: false,
+                    reason: 'page_unload'
                 })], {type: 'application/json'});
                 
                 navigator.sendBeacon(`${SERVER_URL}/update_activity`, data);
-            } else {
+            } else if (this.isOnPlatform) {
                 this.updateOnlineStatus(false);
             }
         };
@@ -160,6 +233,12 @@ class ActivityTracker {
 
     // Обновление статуса онлайн - УЛУЧШЕННАЯ ВЕРСИЯ
     async updateOnlineStatus(isOnline) {
+        // Если пытаемся установить онлайн, но не на платформе - игнорируем
+        if (isOnline && !this.isOnPlatform) {
+            console.log('ActivityTracker: Cannot set online when not on platform');
+            return;
+        }
+        
         if (!this.userData) return;
 
         try {
@@ -171,14 +250,15 @@ class ActivityTracker {
                 body: JSON.stringify({
                     platform_user_id: this.userData.platform_user_id,
                     is_online: isOnline,
-                    force_update: true // Добавляем флаг принудительного обновления
+                    force_update: true, // Добавляем флаг принудительного обновления
+                    current_page: this.currentPage // Добавляем информацию о текущей странице
                 }),
                 credentials: 'include'
             });
 
             if (response.ok) {
                 this.isOnline = isOnline;
-                console.log(`ActivityTracker: User is ${isOnline ? 'online' : 'offline'}`);
+                console.log(`ActivityTracker: User is ${isOnline ? 'online' : 'offline'} on page: ${this.currentPage}`);
                 
                 // Обновляем свой статус на текущей странице если нужно
                 if (this.currentPage === 'profile') {
@@ -209,7 +289,7 @@ class ActivityTracker {
 
     // Обновление статусов других пользователей - УЛУЧШЕННАЯ ВЕРСИЯ
     async refreshOnlineStatuses() {
-        if (!this.userData) return;
+        if (!this.userData || !this.isOnPlatform) return;
 
         try {
             const userIds = this.getUsersToUpdate();
@@ -254,6 +334,9 @@ class ActivityTracker {
     // Получение списка пользователей для обновления статусов
     getUsersToUpdate() {
         const userIds = new Set();
+        
+        // Собираем ID только если на платформе
+        if (!this.isOnPlatform) return Array.from(userIds);
         
         switch (this.currentPage) {
             case 'contacts':
@@ -347,6 +430,9 @@ class ActivityTracker {
 
     // Обновление статусов в UI
     updateUIStatuses(activityData) {
+        // Обновляем UI только если на платформе
+        if (!this.isOnPlatform) return;
+        
         switch (this.currentPage) {
             case 'contacts':
                 this.updateContactsUI(activityData);
@@ -532,15 +618,18 @@ window.activityTracker = new ActivityTracker();
 
 // Автоматическая инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
-    if (window.activityTracker && !window.activityTracker.isInitialized) {
+    if (window.activityTracker && window.activityTracker.isOnPlatform && !window.activityTracker.isInitialized) {
         setTimeout(() => window.activityTracker.init(), 1000);
     }
 });
 
 // Слушатель для обновления при возвращении на вкладку
 document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && window.activityTracker && window.activityTracker.isInitialized) {
-        // При возвращении на вкладку принудительно обновляем статусы
+    if (document.visibilityState === 'visible' && 
+        window.activityTracker && 
+        window.activityTracker.isInitialized &&
+        window.activityTracker.isOnPlatform) {
+        // При возвращении на вкладку платформы принудительно обновляем статусы
         setTimeout(() => {
             window.activityTracker.updateOnlineStatus(true);
             window.activityTracker.forceRefresh();
@@ -559,7 +648,7 @@ window.addEventListener('storage', (e) => {
 window.ActivityTrackerUtils = {
     // Принудительное обновление статусов
     refreshStatuses: () => {
-        if (window.activityTracker) {
+        if (window.activityTracker && window.activityTracker.isOnPlatform) {
             window.activityTracker.forceRefresh();
         }
     },
@@ -579,11 +668,23 @@ window.ActivityTrackerUtils = {
         }
     },
     
-    // Ручное обновление статуса онлайн
+    // Ручное обновление статуса онлайн (только если на платформе)
     setOnline: () => {
-        if (window.activityTracker) {
+        if (window.activityTracker && window.activityTracker.isOnPlatform) {
             window.activityTracker.updateOnlineStatus(true);
         }
+    },
+    
+    // Принудительная установка офлайн статуса
+    setOffline: () => {
+        if (window.activityTracker) {
+            window.activityTracker.updateOnlineStatus(false);
+        }
+    },
+    
+    // Проверка, находится ли пользователь на платформе
+    isOnPlatform: () => {
+        return window.activityTracker ? window.activityTracker.isOnPlatform : false;
     }
 };
 
