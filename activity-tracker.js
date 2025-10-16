@@ -16,11 +16,12 @@ class ActivityTracker {
         // Кэш статусов пользователей
         this.activityDataCache = {};
         this.lastCacheUpdate = 0;
-        this.cacheTTL = 10000; // 10 секунд
+        this.cacheTTL = 5000; // Уменьшено до 5 секунд
         
         console.log(`ActivityTracker initialized for page: ${this.currentPage}`);
         
-    setTimeout(() => this.init(), 1000);
+        // Более быстрая инициализация
+        setTimeout(() => this.init(), 500);
     }
 
     // Определение текущей страницы
@@ -45,6 +46,9 @@ class ActivityTracker {
 
             this.userData = JSON.parse(userDataFromStorage);
             
+            // Сразу отмечаем как онлайн при инициализации
+            await this.updateOnlineStatus(true);
+            
             // Запускаем отслеживание активности
             this.startActivityTracking();
             this.startStatusPolling();
@@ -60,13 +64,12 @@ class ActivityTracker {
     startActivityTracking() {
         if (!this.userData) return;
 
-        // Сразу отмечаем как онлайн
-        this.updateOnlineStatus(true);
-
-        // Обновляем статус каждые 30 секунд
+        // Обновляем статус каждые 25 секунд (чаще)
         this.activityInterval = setInterval(() => {
-            this.updateOnlineStatus(true);
-        }, 30000);
+            if (document.visibilityState === 'visible') {
+                this.updateOnlineStatus(true);
+            }
+        }, 25000);
 
         // Отслеживаем действия пользователя
         this.setupActivityListeners();
@@ -77,14 +80,16 @@ class ActivityTracker {
 
     // Опрос статусов других пользователей
     startStatusPolling() {
-        // Обновляем статусы в зависимости от страницы
-        const pollInterval = this.currentPage === 'chats' ? 3000 : 5000;
+        // Более агрессивный polling для мгновенных обновлений
+        const pollInterval = this.currentPage === 'chats' ? 2000 : 3000;
         
         this.statusPollInterval = setInterval(() => {
-            this.refreshOnlineStatuses();
+            if (document.visibilityState === 'visible') {
+                this.refreshOnlineStatuses();
+            }
         }, pollInterval);
 
-        // Первое обновление через 1 секунду
+        // Первое обновление сразу
         setTimeout(() => {
             this.refreshOnlineStatuses();
         }, 1000);
@@ -97,36 +102,55 @@ class ActivityTracker {
             'touchstart', 'click', 'input', 'touchmove'
         ];
 
+        const activityHandler = () => {
+            this.lastActivityTime = Date.now();
+            if (!this.isOnline && document.visibilityState === 'visible') {
+                this.updateOnlineStatus(true);
+            }
+        };
+
         activityEvents.forEach(event => {
-            document.addEventListener(event, () => {
-                this.lastActivityTime = Date.now();
-                if (!this.isOnline) {
-                    this.updateOnlineStatus(true);
-                }
-            }, { passive: true });
+            document.addEventListener(event, activityHandler, { passive: true });
         });
 
-        // Отслеживание видимости страницы
+        // Отслеживание видимости страницы - УЛУЧШЕННАЯ ЛОГИКА
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
+                // При возвращении на вкладку сразу обновляем статус
                 this.updateOnlineStatus(true);
-                this.refreshOnlineStatuses(); // Сразу обновляем статусы при возвращении
+                // Принудительно обновляем статусы других пользователей
+                setTimeout(() => this.refreshOnlineStatuses(), 500);
             } else {
-                this.updateOnlineStatus(false);
+                // При скрытии вкладки НЕ СРАЗУ ставим офлайн, ждем 30 секунд
+                setTimeout(() => {
+                    if (document.visibilityState === 'hidden') {
+                        this.updateOnlineStatus(false);
+                    }
+                }, 30000);
             }
         });
 
         // Отслеживание фокуса окна
         window.addEventListener('focus', () => {
             this.updateOnlineStatus(true);
-            this.refreshOnlineStatuses();
+            setTimeout(() => this.refreshOnlineStatuses(), 500);
         });
     }
 
     // Настройка обработчиков закрытия страницы
     setupPageUnload() {
         const sendOffline = () => {
-            this.updateOnlineStatus(false);
+            // Используем sendBeacon для надежной отправки при закрытии
+            if (this.userData && navigator.sendBeacon) {
+                const data = new Blob([JSON.stringify({
+                    platform_user_id: this.userData.platform_user_id,
+                    is_online: false
+                })], {type: 'application/json'});
+                
+                navigator.sendBeacon(`${SERVER_URL}/update_activity`, data);
+            } else {
+                this.updateOnlineStatus(false);
+            }
         };
 
         window.addEventListener('beforeunload', sendOffline);
@@ -134,9 +158,9 @@ class ActivityTracker {
         window.addEventListener('unload', sendOffline);
     }
 
-    // Обновление статуса онлайн
+    // Обновление статуса онлайн - УЛУЧШЕННАЯ ВЕРСИЯ
     async updateOnlineStatus(isOnline) {
-        if (!this.userData || this.isOnline === isOnline) return;
+        if (!this.userData) return;
 
         try {
             const response = await fetch(`${SERVER_URL}/update_activity`, {
@@ -146,7 +170,8 @@ class ActivityTracker {
                 },
                 body: JSON.stringify({
                     platform_user_id: this.userData.platform_user_id,
-                    is_online: isOnline
+                    is_online: isOnline,
+                    force_update: true // Добавляем флаг принудительного обновления
                 }),
                 credentials: 'include'
             });
@@ -159,6 +184,9 @@ class ActivityTracker {
                 if (this.currentPage === 'profile') {
                     this.updateOwnStatusUI(isOnline);
                 }
+                
+                // При смене статуса очищаем кэш для мгновенного обновления
+                this.lastCacheUpdate = 0;
             }
         } catch (error) {
             console.error('ActivityTracker: Error updating online status:', error);
@@ -179,7 +207,7 @@ class ActivityTracker {
         }
     }
 
-    // Обновление статусов других пользователей
+    // Обновление статусов других пользователей - УЛУЧШЕННАЯ ВЕРСИЯ
     async refreshOnlineStatuses() {
         if (!this.userData) return;
 
@@ -187,10 +215,11 @@ class ActivityTracker {
             const userIds = this.getUsersToUpdate();
             if (userIds.length === 0) return;
 
-            // Проверяем кэш
+            // Более агрессивное обновление кэша - каждые 5 секунд
             const now = Date.now();
-            if (now - this.lastCacheUpdate < this.cacheTTL && 
-                Object.keys(this.activityDataCache).length > 0) {
+            const shouldUpdateCache = now - this.lastCacheUpdate > this.cacheTTL;
+
+            if (!shouldUpdateCache && Object.keys(this.activityDataCache).length > 0) {
                 this.updateUIStatuses(this.activityDataCache);
                 return;
             }
@@ -201,7 +230,8 @@ class ActivityTracker {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    user_ids: userIds
+                    user_ids: userIds,
+                    force_refresh: true // Флаг для сервера
                 }),
                 credentials: 'include'
             });
@@ -210,7 +240,7 @@ class ActivityTracker {
                 const data = await response.json();
                 if (data.status === 'success') {
                     // Обновляем кэш
-                    this.activityDataCache = { ...this.activityDataCache, ...data.activity_data };
+                    this.activityDataCache = { ...data.activity_data };
                     this.lastCacheUpdate = now;
                     
                     this.updateUIStatuses(data.activity_data);
@@ -233,7 +263,8 @@ class ActivityTracker {
                 this.collectChatUserIds(userIds);
                 break;
             case 'profile':
-                // На странице профиля обычно не нужно обновлять статусы других пользователей
+                // На странице профиля можем отслеживать статусы друзей если нужно
+                this.collectFriendsUserIds(userIds);
                 break;
         }
 
@@ -243,9 +274,10 @@ class ActivityTracker {
     // Сбор ID пользователей со страницы контактов
     collectContactUserIds(userIds) {
         // Из списка контактов
-        const contactItems = document.querySelectorAll('.user-result, .contact-item');
+        const contactItems = document.querySelectorAll('.user-result, .contact-item, .settings-item');
         contactItems.forEach(item => {
-            const userId = item.getAttribute('data-user-id');
+            const userId = item.getAttribute('data-user-id') || 
+                          item.getAttribute('data-participant-id');
             if (userId && userId !== this.userData.platform_user_id) {
                 userIds.add(userId);
             }
@@ -263,9 +295,17 @@ class ActivityTracker {
         // Из списка чатов
         const chatItems = document.querySelectorAll('.chat-item');
         chatItems.forEach(item => {
-            const participantId = item.getAttribute('data-participant-id');
-            if (participantId && participantId !== this.userData.platform_user_id) {
-                userIds.add(participantId);
+            const chatId = item.getAttribute('data-chat-id');
+            // Находим участников чата из глобальной переменной или данных
+            if (window.currentChatsList) {
+                const chat = window.currentChatsList.find(c => c.id === chatId);
+                if (chat && chat.participants) {
+                    chat.participants.forEach(participant => {
+                        if (participant.platform_user_id !== this.userData.platform_user_id) {
+                            userIds.add(participant.platform_user_id);
+                        }
+                    });
+                }
             }
         });
 
@@ -278,6 +318,12 @@ class ActivityTracker {
                 }
             });
         }
+    }
+
+    // Сбор ID друзей для страницы профиля
+    collectFriendsUserIds(userIds) {
+        // Можно добавить логику для сбора ID друзей на странице профиля
+        // если в будущем понадобится отображать их статусы
     }
 
     // Получение ID пользователя из модального окна
@@ -309,7 +355,7 @@ class ActivityTracker {
                 this.updateChatsUI(activityData);
                 break;
             case 'profile':
-                // На странице профиля обычно не нужно обновлять статусы других пользователей
+                this.updateProfileUI(activityData);
                 break;
         }
     }
@@ -320,7 +366,7 @@ class ActivityTracker {
         const contactItems = document.querySelectorAll('.user-result, .contact-item');
         contactItems.forEach(item => {
             const userId = item.getAttribute('data-user-id');
-            const statusElement = item.querySelector('.user-status, .contact-status');
+            const statusElement = item.querySelector('.user-status, .contact-status, .chat-status');
             
             if (userId && statusElement && activityData[userId]) {
                 this.updateStatusElement(statusElement, activityData[userId]);
@@ -336,16 +382,30 @@ class ActivityTracker {
         // Обновление списка чатов
         const chatItems = document.querySelectorAll('.chat-item');
         chatItems.forEach(item => {
-            const participantId = item.getAttribute('data-participant-id');
+            const chatId = item.getAttribute('data-chat-id');
             const statusElement = item.querySelector('.chat-status, .user-status');
             
-            if (participantId && statusElement && activityData[participantId]) {
-                this.updateStatusElement(statusElement, activityData[participantId]);
+            // Находим участника чата
+            if (chatId && statusElement && window.currentChatsList) {
+                const chat = window.currentChatsList.find(c => c.id === chatId);
+                if (chat && chat.participants) {
+                    const otherParticipant = chat.participants.find(
+                        p => p.platform_user_id !== this.userData.platform_user_id
+                    );
+                    if (otherParticipant && activityData[otherParticipant.platform_user_id]) {
+                        this.updateStatusElement(statusElement, activityData[otherParticipant.platform_user_id]);
+                    }
+                }
             }
         });
 
         // Обновление текущего чата
         this.updateCurrentChatStatus(activityData);
+    }
+
+    // Обновление UI профиля
+    updateProfileUI(activityData) {
+        // Можно добавить обновление статусов друзей на странице профиля
     }
 
     // Обновление статуса в модальном окне контакта
@@ -473,7 +533,18 @@ window.activityTracker = new ActivityTracker();
 // Автоматическая инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
     if (window.activityTracker && !window.activityTracker.isInitialized) {
-        window.activityTracker.init();
+        setTimeout(() => window.activityTracker.init(), 1000);
+    }
+});
+
+// Слушатель для обновления при возвращении на вкладку
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && window.activityTracker && window.activityTracker.isInitialized) {
+        // При возвращении на вкладку принудительно обновляем статусы
+        setTimeout(() => {
+            window.activityTracker.updateOnlineStatus(true);
+            window.activityTracker.forceRefresh();
+        }, 500);
     }
 });
 
@@ -505,6 +576,13 @@ window.ActivityTrackerUtils = {
     updateTrackerUserData: () => {
         if (window.activityTracker) {
             window.activityTracker.updateUserData();
+        }
+    },
+    
+    // Ручное обновление статуса онлайн
+    setOnline: () => {
+        if (window.activityTracker) {
+            window.activityTracker.updateOnlineStatus(true);
         }
     }
 };
