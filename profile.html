@@ -2349,6 +2349,102 @@
                 updateProfileUI(); 
             }
         });
+
+
+
+
+
+
+        // Инициализация ActivityTracker для profile.html
+document.addEventListener('DOMContentLoaded', function() {
+    // Проверяем авторизацию и инициализируем трекер
+    if (checkAuthorization()) {
+        // Даем время на загрузку страницы
+        setTimeout(() => {
+            if (window.activityTracker && !window.activityTracker.isInitialized) {
+                window.activityTracker.init();
+            }
+            
+            // Принудительно обновляем статус при загрузке профиля
+            updateUserActivityStatus();
+        }, 1000);
+    }
+});
+
+// Функция для обновления статуса активности
+async function updateUserActivityStatus() {
+    try {
+        const userData = JSON.parse(sessionStorage.getItem('userData'));
+        if (!userData || !userData.platform_user_id) return;
+
+        // Отправляем статус "онлайн" при загрузке профиля
+        const response = await fetch('https://vuntserver.onrender.com/update_activity', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                is_online: true,
+                force_update: true
+            }),
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            console.log('Profile: Activity status updated to online');
+            
+            // Обновляем UI статуса на странице профиля
+            updateProfileStatusUI(true);
+        }
+    } catch (error) {
+        console.error('Profile: Error updating activity status:', error);
+    }
+}
+
+// Обновление UI статуса на странице профиля
+function updateProfileStatusUI(isOnline) {
+    const statusElements = document.querySelectorAll('.profile-status');
+    statusElements.forEach(element => {
+        if (isOnline) {
+            element.innerHTML = '<span class="status-indicator"></span>В сети';
+            element.style.color = 'var(--online-green)';
+        } else {
+            element.textContent = 'не в сети';
+            element.style.color = 'var(--telegram-hint)';
+        }
+    });
+}
+
+// Слушатель видимости страницы для профиля
+document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+        // При возвращении на вкладку профиля обновляем статус
+        setTimeout(updateUserActivityStatus, 300);
+    }
+});
+
+// Периодическое обновление статуса (каждые 20 секунд)
+setInterval(updateUserActivityStatus, 20000);
+
+// Обработчик перед закрытием страницы
+window.addEventListener('beforeunload', function() {
+    // Используем sendBeacon для надежной отправки статуса офлайн
+    const userData = JSON.parse(sessionStorage.getItem('userData'));
+    if (userData && userData.platform_user_id && navigator.sendBeacon) {
+        const data = new Blob([JSON.stringify({
+            platform_user_id: userData.platform_user_id,
+            is_online: false
+        })], {type: 'application/json'});
+        
+        navigator.sendBeacon('https://vuntserver.onrender.com/update_activity', data);
+    }
+});
+
+
+
+
+
     </script>
 
      <script src="activity-tracker.js"></script>
