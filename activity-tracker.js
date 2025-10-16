@@ -20,8 +20,7 @@ class ActivityTracker {
         
         console.log(`ActivityTracker initialized for page: ${this.currentPage}`);
         
-        // Инициализация при создании
-        this.init();
+    setTimeout(() => this.init(), 1000);
     }
 
     // Определение текущей страницы
