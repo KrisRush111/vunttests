@@ -1329,6 +1329,133 @@
     color: var(--online-green);
 }
 
+
+
+
+
+.friends-recommendations {
+    margin-top: 20px;
+    background: var(--telegram-bg);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--telegram-shadow);
+    animation: fadeInUp 0.3s ease-out;
+}
+
+.recommendations-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--telegram-text);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--telegram-divider);
+}
+
+.recommendations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.recommendation-user {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.recommendation-user:hover {
+    background-color: rgba(0,0,0,0.02);
+}
+
+@media (prefers-color-scheme: dark) {
+    .recommendation-user:hover {
+        background-color: rgba(255,255,255,0.04);
+    }
+}
+
+.recommendation-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    margin-right: 12px;
+    flex-shrink: 0;
+    background-size: cover;
+    background-position: center;
+}
+
+.recommendation-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.recommendation-nickname {
+    font-weight: 500;
+    font-size: 14px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--telegram-text);
+}
+
+.recommendation-details {
+    font-size: 12px;
+    color: var(--telegram-hint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.recommendation-add-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background-color: var(--telegram-blue);
+    color: white;
+    flex-shrink: 0;
+}
+
+.recommendation-add-btn:hover {
+    background-color: #006ba1;
+    transform: translateY(-1px);
+}
+
+.recommendation-add-btn:active {
+    transform: scale(0.95);
+}
+
+.recommendation-add-btn.added {
+    background-color: rgba(0, 199, 60, 0.1);
+    color: var(--telegram-success);
+    cursor: default;
+}
+
+.recommendation-add-btn.sent {
+    background-color: rgba(36, 129, 204, 0.1);
+    color: var(--telegram-blue);
+    cursor: not-allowed;
+}
+
+.no-recommendations {
+    text-align: center;
+    color: var(--telegram-hint);
+    font-size: 14px;
+    padding: 20px;
+}
+
+
     </style>
 </head>
 <body>
@@ -1393,6 +1520,11 @@
                             <span class="status-text">Загрузка...</span>
                         </div>
                     </div>
+
+                        <div id="friendsRecommendationsDesktop" class="friends-recommendations">
+        <div class="recommendations-title">Возможно вы также знаете:</div>
+        <div id="recommendationsListDesktop" class="recommendations-list"></div>
+    </div>
                 </div>
 
                 <div class="profile-actions">
@@ -1482,6 +1614,12 @@
                         <span class="status-indicator"></span>
                         <span class="status-text">Загрузка...</span>
                     </div>
+
+                        <div id="friendsRecommendationsMobile" class="friends-recommendations">
+        <div class="recommendations-title">Возможно вы также знаете:</div>
+        <div id="recommendationsListMobile" class="recommendations-list"></div>
+    </div>
+
                 </div>
             </div>
 
@@ -1644,6 +1782,214 @@ let allContactIds = new Set();
 let currentActivityData = {};
 // В contacts.html добавьте
 let activityPollInterval;
+
+
+// Глобальные переменные для рекомендаций
+let friendsRecommendations = [];
+
+// Функция для загрузки рекомендаций
+async function loadFriendsRecommendations() {
+    if (!userData || !userData.platform_user_id) return;
+
+    try {
+        const response = await fetch(`${SERVER_URL}/get_friends_recommendations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                limit: 10
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            friendsRecommendations = data.recommendations || [];
+            displayFriendsRecommendations();
+        }
+    } catch (error) {
+        console.error('Error loading friends recommendations:', error);
+    }
+}
+
+// Функция для отображения рекомендаций
+function displayFriendsRecommendations() {
+    const isDesktopView = window.matchMedia("(min-width: 768px)").matches;
+    const recommendationsContainer = isDesktopView ? 
+        document.getElementById('friendsRecommendationsDesktop') : 
+        document.getElementById('friendsRecommendationsMobile');
+    const recommendationsList = isDesktopView ? 
+        document.getElementById('recommendationsListDesktop') : 
+        document.getElementById('recommendationsListMobile');
+
+    if (!recommendationsContainer || !recommendationsList) return;
+
+    // Скрываем контейнер если нет рекомендаций
+    if (friendsRecommendations.length === 0) {
+        recommendationsContainer.style.display = 'none';
+        return;
+    }
+
+    recommendationsContainer.style.display = 'block';
+    recommendationsList.innerHTML = '';
+
+    friendsRecommendations.forEach(user => {
+        const userElement = createRecommendationUserElement(user);
+        recommendationsList.appendChild(userElement);
+    });
+}
+
+// Функция создания элемента рекомендации
+function createRecommendationUserElement(user) {
+    const userElement = document.createElement('div');
+    userElement.className = 'recommendation-user';
+    userElement.setAttribute('data-user-id', user.platform_user_id);
+
+    // Обработчик клика для открытия профиля
+    userElement.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('recommendation-add-btn')) {
+            openProfileModal(user.platform_user_id);
+        }
+    });
+
+    // Аватар
+    const avatarElement = document.createElement('div');
+    avatarElement.className = 'recommendation-avatar';
+
+    if (user.has_avatar_photo || user.has_avatar) {
+        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.textContent = '';
+    } else {
+        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+        avatarElement.textContent = initial;
+        if (user.avatar_background) {
+            const colors = [user.avatar_background, adjustColor(user.avatar_background, 20)];
+            avatarElement.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
+        } else {
+            avatarElement.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+        }
+    }
+
+    // Информация
+    const infoElement = document.createElement('div');
+    infoElement.className = 'recommendation-info';
+
+    const nicknameElement = document.createElement('div');
+    nicknameElement.className = 'recommendation-nickname';
+    nicknameElement.textContent = user.nickname || 'Не указано';
+
+    const detailsElement = document.createElement('div');
+    detailsElement.className = 'recommendation-details';
+    
+    // Формируем детали в зависимости от доступной информации
+    const details = [];
+    if (user.main_school_name && user.main_school_name !== 'не указано') {
+        details.push(user.main_school_name);
+    }
+    if (user.class_number && user.class_number !== 'не указано') {
+        const classInfo = user.class_letter && user.class_letter !== 'не указано' ? 
+            `${user.class_number}${user.class_letter}` : user.class_number;
+        details.push(`${classInfo} класс`);
+    }
+    
+    detailsElement.textContent = details.join(' • ') || 'Пользователь Vuntgram';
+
+    infoElement.appendChild(nicknameElement);
+    infoElement.appendChild(detailsElement);
+
+    // Кнопка добавления
+    const addButton = document.createElement('button');
+    addButton.className = 'recommendation-add-btn';
+    addButton.innerHTML = '<i class="fas fa-user-plus"></i>';
+    
+    // Проверяем статус дружбы
+    updateRecommendationButtonStatus(addButton, user.platform_user_id);
+
+    addButton.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await sendFriendRequestFromRecommendation(user.platform_user_id, addButton);
+    });
+
+    // Собираем элементы
+    userElement.appendChild(avatarElement);
+    userElement.appendChild(infoElement);
+    userElement.appendChild(addButton);
+
+    return userElement;
+}
+
+// Функция для обновления статуса кнопки
+async function updateRecommendationButtonStatus(button, userId) {
+    try {
+        const friendshipStatus = await checkFriendshipStatus(userId);
+        
+        switch (friendshipStatus) {
+            case 'accepted':
+                button.innerHTML = '<i class="fas fa-check"></i>';
+                button.classList.add('added');
+                button.disabled = true;
+                break;
+            case 'request_sent':
+                button.innerHTML = '<i class="fas fa-clock"></i>';
+                button.classList.add('sent');
+                button.disabled = true;
+                break;
+            default:
+                button.innerHTML = '<i class="fas fa-user-plus"></i>';
+                button.classList.remove('added', 'sent');
+                button.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error checking friendship status:', error);
+    }
+}
+
+// Функция для отправки запроса из рекомендаций
+async function sendFriendRequestFromRecommendation(receiverId, button) {
+    showLoading('Отправка запроса...');
+
+    try {
+        const response = await fetch(`${SERVER_URL}/send_friend_request`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sender_id: userData.platform_user_id,
+                receiver_id: receiverId
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            // Обновляем кнопку
+            button.innerHTML = '<i class="fas fa-clock"></i>';
+            button.classList.add('sent');
+            button.disabled = true;
+            
+            // Перезагружаем рекомендации через некоторое время
+            setTimeout(() => {
+                loadFriendsRecommendations();
+            }, 2000);
+        } else {
+            throw new Error(data.error || 'Ошибка отправки запроса');
+        }
+    } catch (error) {
+        console.error('Send friend request error:', error);
+        showMessage('Ошибка при отправке запроса', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+
+
 
 function startActivityPolling() {
     // Останавливаем предыдущий интервал если есть
@@ -2642,6 +2988,7 @@ async function sendOfflineStatus() {
                     console.log('Запрос на дружбу отправлен'); 
                    
                     loadContacts();
+                    await loadFriendsRecommendations();
                 } else {
                     throw new Error(data.error || 'Ошибка отправки запроса');
                 }
@@ -2680,6 +3027,7 @@ async function sendOfflineStatus() {
                     console.log(action === 'accept' ? 'Запрос принят! Пользователь добавлен в контакты' : 'Запрос отклонен'); // Log success
                  
                     loadContacts();
+                    await loadFriendsRecommendations();
                 } else {
                     throw new Error(data.error || 'Ошибка обработки запроса');
                 }
@@ -2939,6 +3287,8 @@ async function sendOfflineStatus() {
                 await loadUserData();
                 console.log('Loading contacts...');
                 await loadContacts();
+                console.log('Loading recommendations...');
+                await loadFriendsRecommendations();
 
            
                 const { searchInput } = getActiveElements();
