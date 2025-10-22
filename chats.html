@@ -21,19 +21,6 @@
 <link rel="icon" type="image/png" href="icon-192x192.png">
 <link rel="apple-touch-icon" href="icon-192x192.png">
 
-
-    <link rel="preload" as="image" href="https://s14.gifyu.com/images/bNh1k.jpg" fetchpriority="high">
-    
-    <!-- Скрытая предзагрузка для браузеров которые не поддерживают preload -->
-    <link rel="stylesheet" href="data:text/css,
-    #preloadWallpaper {
-        background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        opacity: 0.001;
-    }">
-
 <!-- iOS Meta Tags -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -685,9 +672,6 @@ input, textarea {
         margin-right: 40px;
     }
 
-    
-
-
 .chat-header .chat-avatar {
     width: 40px;
     height: 40px;
@@ -768,26 +752,76 @@ input, textarea {
         }
     }
 
-    .messages-container {
-        flex: 1;
-        height: calc(100vh - 120px);
-        max-height: calc(100vh - 120px);
-        padding: 16px;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        /* ИСПОЛЬЗУЕМ ПРЯМОЙ URL НО С ПРЕДЗАГРУЗКОЙ */
-        background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-        background-repeat: no-repeat;
-        position: relative;
-        align-items: center;
-        /* Гарантируем что обои загрузятся сразу */
-        background-color: transparent;
+.messages-container {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed; /* Убираем fixed */
+    background-repeat: no-repeat;
+    position: relative;
+    align-items: center;
+    /* Добавляем для предотвращения "погружения" */
+    background-attachment: local !important;
+    transform: translateZ(0); /* Аппаратное ускорение */
+    will-change: transform;
+}
+
+.desktop-content {
+    margin-left: var(--desktop-sidebar-width);
+    flex: 1;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    /* Добавляем для стабильности фона */
+    background-attachment: local;
+    position: relative;
+}
+
+/* Создаем псевдо-элемент для статичного фона */
+.messages-container::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: -1;
+    /* Для десктопной версии */
+    margin-left: var(--desktop-sidebar-width);
+}
+
+/* Для мобильной версии */
+@media (max-width: 767px) {
+    .messages-container::before {
+        margin-left: 0;
     }
-    
+}
+
+/* Улучшаем производительность скролла */
+.messages-container {
+    -webkit-overflow-scrolling: touch;
+    overflow-anchor: none;
+}
+
+/* Предотвращаем перемещение фона при скролле */
+.message {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000;
+}
 
     .no-messages {
         position: absolute;
@@ -1554,8 +1588,6 @@ input, textarea {
         <div class="spinner"></div>
         <div class="loading-text">Загрузка данных...</div>
     </div>
-
-     <div id="preloadWallpaper"></div>
 
 
     <div class="desktop-sidebar">
@@ -3320,18 +3352,7 @@ async function updateChatStatuses() {
     }
 }
      
-
-
-function forceLoadWallpaper() {
-    const img = new Image();
-    img.src = 'https://s14.gifyu.com/images/bNh1k.jpg';
-    // Просто загружаем изображение, ничего не делаем с ним
-}
-
-
 async function initializePage() {
-
-    forceLoadWallpaper();
     const userDataFromStorage = sessionStorage.getItem('userData');
     if (!userDataFromStorage) {
         window.location.href = 'profile.html';
@@ -3361,7 +3382,6 @@ async function initializePage() {
 
     await loadUserData();
     await loadChats();
-    
     
     
     const openChatId = sessionStorage.getItem('openChatId');
