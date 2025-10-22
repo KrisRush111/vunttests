@@ -1836,6 +1836,100 @@ function formatChatListTime(timestamp) {
 
 
 
+
+
+
+
+
+// Функция для кэширования изображения в localStorage
+function cacheBackgroundImage(url) {
+    return new Promise((resolve, reject) => {
+        // Проверяем, есть ли уже кэшированное изображение
+        const cached = localStorage.getItem(`bg_${btoa(url)}`);
+        if (cached) {
+            resolve(cached);
+            return;
+        }
+
+        // Если нет, загружаем и кэшируем
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            try {
+                const dataURL = canvas.toDataURL('image/jpeg', 0.8);
+                localStorage.setItem(`bg_${btoa(url)}`, dataURL);
+                localStorage.setItem(`bg_timestamp_${btoa(url)}`, Date.now().toString());
+                resolve(dataURL);
+            } catch (error) {
+                console.error('Error caching image:', error);
+                resolve(url); // Возвращаем оригинальный URL в случае ошибки
+            }
+        };
+        
+        img.onerror = function() {
+            console.error('Failed to load image for caching:', url);
+            resolve(url); // Возвращаем оригинальный URL в случае ошибки
+        };
+        
+        img.src = url;
+    });
+}
+
+// Функция для получения кэшированного изображения (с проверкой свежести)
+function getCachedBackgroundImage(url, maxAge = 24 * 60 * 60 * 1000) { // 24 часа по умолчанию
+    const cached = localStorage.getItem(`bg_${btoa(url)}`);
+    const timestamp = localStorage.getItem(`bg_timestamp_${btoa(url)}`);
+    
+    if (!cached || !timestamp) {
+        return null;
+    }
+    
+    // Проверяем свежесть кэша
+    const age = Date.now() - parseInt(timestamp);
+    if (age > maxAge) {
+        // Удаляем устаревший кэш
+        localStorage.removeItem(`bg_${btoa(url)}`);
+        localStorage.removeItem(`bg_timestamp_${btoa(url)}`);
+        return null;
+    }
+    
+    return cached;
+}
+
+
+
+
+// Функция для установки фонового изображения с кэшированием
+async function setCachedBackground(container, imageUrl) {
+    if (!imageUrl) return;
+    
+    // Пробуем получить из кэша
+    const cachedImage = getCachedBackgroundImage(imageUrl);
+    
+    if (cachedImage) {
+        // Используем кэшированное изображение
+        container.style.backgroundImage = `url(${cachedImage})`;
+    } else {
+        // Устанавливаем оригинальное изображение и запускаем кэширование
+        container.style.backgroundImage = `url(${imageUrl})`;
+        
+        // Асинхронно кэшируем для будущего использования
+        cacheBackgroundImage(imageUrl).then(cachedUrl => {
+            // Можно обновить на кэшированную версию, если нужно
+            // container.style.backgroundImage = `url(${cachedUrl})`;
+        }).catch(error => {
+            console.error('Background caching failed:', error);
+        });
+    }
+}
+
+
 function adjustColor(hex, percent) {
     const num = parseInt(hex.replace("#", ""), 16);
     const amt = Math.round(2.55 * percent);
@@ -2773,6 +2867,9 @@ async function openChat(chatId) {
         noMessages.style.display = 'block';
         noMessages.textContent = 'Загрузка...';
 
+
+        await setCachedBackground(messagesContainer, 'https://s14.gifyu.com/images/bNh1k.jpg');
+
         chatModal.classList.add('changing');
         setTimeout(() => {
             chatModal.classList.remove('changing');
@@ -3314,6 +3411,7 @@ async function initializePage() {
         desktopOnlyNav.style.display = 'flex'; 
         chatModalDesktop.style.display = 'none'; 
         desktopPlaceholder.style.display = 'flex';
+        await setCachedBackground(desktopContent, 'https://s14.gifyu.com/images/bNh1k.jpg');
     } else {
         mobileChatsContainer.style.display = 'flex';
         mobileOnlyNav.style.display = 'flex';
