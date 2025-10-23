@@ -758,7 +758,6 @@ input, textarea {
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        background-image: url('https://s14.gifyu.com/images/bNh1k.jpg');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -2493,6 +2492,46 @@ function loadContactAvatar(avatarElement, userId, initials, bgColor) {
 }
 
 
+
+// Функция для очистки устаревших кэшей обоев
+function cleanupWallpaperCache() {
+    const maxCacheSize = 50 * 1024 * 1024; // 50MB
+    const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 дней
+    
+    try {
+        const keysToRemove = [];
+        let totalSize = 0;
+        
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('wallpaper_')) {
+                const value = localStorage.getItem(key);
+                totalSize += new Blob([value]).size;
+                
+                // Проверяем возраст кэша
+                // (можно добавить метаданные о времени создания)
+                if (Date.now() - parseInt(key.split('_')[2] || 0) > maxAge) {
+                    keysToRemove.push(key);
+                }
+            }
+        }
+        
+        // Если превышен лимит размера, удаляем самые старые
+        if (totalSize > maxCacheSize) {
+            // Простая реализация - удаляем первые 10
+            for (let i = 0; i < Math.min(10, keysToRemove.length); i++) {
+                localStorage.removeItem(keysToRemove[i]);
+            }
+        }
+        
+    } catch (e) {
+        console.warn('Wallpaper cache cleanup failed:', e);
+    }
+}
+
+// Вызывайте эту функцию периодически или при старте приложения
+
+
       
 async function createChatWithContact(contact) {
     if (isOpeningChat) return;
@@ -2556,6 +2595,115 @@ async function createChatWithContact(contact) {
         hideLoading();
         isOpeningChat = false;
     }
+}
+
+
+// Функция для предварительной загрузки обоев при старте приложения
+function preloadWallpapers() {
+    const defaultWallpaper = 'https://s14.gifyu.com/images/bNh1k.jpg';
+    
+    // Проверяем, нужно ли кэшировать
+    if (!getCachedWallpaper(defaultWallpaper)) {
+        cacheChatWallpaper(defaultWallpaper).then(() => {
+            console.log('Default wallpaper pre-cached');
+        }).catch(console.error);
+    }
+}
+
+// Добавьте эту функцию в раздел с другими функциями
+function cacheChatWallpaper(wallpaperUrl) {
+    if (!wallpaperUrl) return null;
+    
+    return new Promise((resolve, reject) => {
+        // Создаем ключ для кэша на основе URL
+        const cacheKey = `wallpaper_${btoa(wallpaperUrl)}`;
+        
+        // Проверяем, есть ли уже кэшированное изображение
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+            resolve(cached);
+            return;
+        }
+        
+        // Загружаем и кэшируем изображение
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        img.onload = function() {
+            // Создаем canvas для преобразования в base64
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Конвертируем в base64
+            const base64 = canvas.toDataURL('image/jpeg', 0.8);
+            
+            // Сохраняем в localStorage
+            try {
+                localStorage.setItem(cacheKey, base64);
+                resolve(base64);
+            } catch (e) {
+                // Если localStorage переполнен, используем оригинальный URL
+                console.warn('LocalStorage full, using original URL');
+                resolve(wallpaperUrl);
+            }
+        };
+        
+        img.onerror = function() {
+            reject(new Error('Failed to load wallpaper'));
+        };
+        
+        img.src = wallpaperUrl;
+    });
+}
+
+
+
+
+
+// Обновите эту функцию или создайте новую
+async function applyChatWallpaper(wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg') {
+    const { messagesContainer } = getActiveElements();
+    
+    try {
+        // Пытаемся получить кэшированную версию
+        let backgroundUrl = getCachedWallpaper(wallpaperUrl);
+        
+        // Если нет в кэше, кэшируем (но не блокируем интерфейс)
+        if (backgroundUrl === wallpaperUrl) {
+            cacheChatWallpaper(wallpaperUrl).then(cachedUrl => {
+                // Применяем кэшированные обои при следующем открытии чата
+                console.log('Wallpaper cached successfully');
+            }).catch(console.error);
+        }
+        
+        // Применяем обои (кэшированные или оригинальные)
+        messagesContainer.style.backgroundImage = `url('${backgroundUrl}')`;
+        messagesContainer.style.backgroundSize = 'cover';
+        messagesContainer.style.backgroundPosition = 'center';
+        messagesContainer.style.backgroundAttachment = 'fixed';
+        
+    } catch (error) {
+        console.error('Error applying wallpaper:', error);
+        // Fallback на оригинальные обои
+        messagesContainer.style.backgroundImage = `url('${wallpaperUrl}')`;
+        messagesContainer.style.backgroundSize = 'cover';
+        messagesContainer.style.backgroundPosition = 'center';
+        messagesContainer.style.backgroundAttachment = 'fixed';
+    }
+}
+
+
+
+// Функция для получения кэшированных обоев
+function getCachedWallpaper(wallpaperUrl) {
+    if (!wallpaperUrl) return null;
+    
+    const cacheKey = `wallpaper_${btoa(wallpaperUrl)}`;
+    return localStorage.getItem(cacheKey) || wallpaperUrl;
 }
 
 
@@ -2772,6 +2920,7 @@ async function openChat(chatId) {
         messagesContainer.innerHTML = '';
         noMessages.style.display = 'block';
         noMessages.textContent = 'Загрузка...';
+        await applyChatWallpaper();
 
         chatModal.classList.add('changing');
         setTimeout(() => {
@@ -3325,6 +3474,8 @@ async function initializePage() {
 
     await loadUserData();
     await loadChats();
+
+    preloadWallpapers();
     
     
     const openChatId = sessionStorage.getItem('openChatId');
