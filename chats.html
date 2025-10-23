@@ -1706,14 +1706,32 @@ input, textarea {
 
 
     <script>
-        function applyChatWallpaper() {
+function applyChatWallpaper() {
     const { messagesContainer } = getActiveElements();
     
-    messagesContainer.style.backgroundImage = `url('${WALLPAPER_BASE64}')`;
+    // Используем стандартные обои
+    const wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg';
+    
+    // Просто применяем обои без сложного кэширования
+    messagesContainer.style.backgroundImage = `url('${wallpaperUrl}')`;
     messagesContainer.style.backgroundSize = 'cover';
     messagesContainer.style.backgroundPosition = 'center';
+    messagesContainer.style.backgroundRepeat = 'no-repeat';
     messagesContainer.style.backgroundAttachment = 'fixed';
+    
+    console.log('Wallpaper applied:', wallpaperUrl);
 }
+
+// Упрощенная функция предзагрузки
+function preloadWallpapers() {
+    const wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg';
+    const img = new Image();
+    img.src = wallpaperUrl;
+    img.onload = () => console.log('Wallpaper preloaded');
+    img.onerror = () => console.warn('Wallpaper preload failed');
+}
+
+
     
         const SERVER_URL = 'https://vuntserver.onrender.com';
         
@@ -2566,120 +2584,12 @@ async function createChatWithContact(contact) {
 }
 
 
-// Функция для предварительной загрузки обоев при старте приложения
-function preloadWallpapers() {
-    const defaultWallpaper = 'https://s14.gifyu.com/images/bNh1k.jpg';
-    
-    // Проверяем, нужно ли кэшировать
-    if (!getCachedWallpaper(defaultWallpaper)) {
-        cacheChatWallpaper(defaultWallpaper).then(() => {
-            console.log('Default wallpaper pre-cached');
-        }).catch(console.error);
-    }
-}
-
-// Добавьте эту функцию в раздел с другими функциями
-function cacheChatWallpaper(wallpaperUrl) {
-    if (!wallpaperUrl) return null;
-    
-    return new Promise((resolve, reject) => {
-        // Создаем ключ для кэша на основе URL
-        const cacheKey = `wallpaper_${btoa(wallpaperUrl)}`;
-        
-        // Проверяем, есть ли уже кэшированное изображение
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-            resolve(cached);
-            return;
-        }
-        
-        // Загружаем и кэшируем изображение
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        
-        img.onload = function() {
-            // Создаем canvas для преобразования в base64
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            
-            // Конвертируем в base64
-            const base64 = canvas.toDataURL('image/jpeg', 0.8);
-            
-            // Сохраняем в localStorage
-            try {
-                localStorage.setItem(cacheKey, base64);
-                resolve(base64);
-            } catch (e) {
-                // Если localStorage переполнен, используем оригинальный URL
-                console.warn('LocalStorage full, using original URL');
-                resolve(wallpaperUrl);
-            }
-        };
-        
-        img.onerror = function() {
-            reject(new Error('Failed to load wallpaper'));
-        };
-        
-        img.src = wallpaperUrl;
-    });
-}
-
-
-
-
-
-// Обновите эту функцию или создайте новую
-async function applyChatWallpaper(wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg') {
-    const { messagesContainer } = getActiveElements();
-    
-    try {
-        // Пытаемся получить кэшированную версию
-        let backgroundUrl = getCachedWallpaper(wallpaperUrl);
-        
-        // Если нет в кэше, кэшируем (но не блокируем интерфейс)
-        if (backgroundUrl === wallpaperUrl) {
-            cacheChatWallpaper(wallpaperUrl).then(cachedUrl => {
-                // Применяем кэшированные обои при следующем открытии чата
-                console.log('Wallpaper cached successfully');
-            }).catch(console.error);
-        }
-        
-        // Применяем обои (кэшированные или оригинальные)
-        messagesContainer.style.backgroundImage = `url('${backgroundUrl}')`;
-        messagesContainer.style.backgroundSize = 'cover';
-        messagesContainer.style.backgroundPosition = 'center';
-        messagesContainer.style.backgroundAttachment = 'fixed';
-        
-    } catch (error) {
-        console.error('Error applying wallpaper:', error);
-        // Fallback на оригинальные обои
-        messagesContainer.style.backgroundImage = `url('${wallpaperUrl}')`;
-        messagesContainer.style.backgroundSize = 'cover';
-        messagesContainer.style.backgroundPosition = 'center';
-        messagesContainer.style.backgroundAttachment = 'fixed';
-    }
-}
-
-
-
-// Функция для получения кэшированных обоев
-function getCachedWallpaper(wallpaperUrl) {
-    if (!wallpaperUrl) return null;
-    
-    const cacheKey = `wallpaper_${btoa(wallpaperUrl)}`;
-    return localStorage.getItem(cacheKey) || wallpaperUrl;
-}
-
-
 
 function openTempChat(tempChat) {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
     currentChat = tempChat;
+    applyChatWallpaper();
     
     // Apply changing class for animation
     chatModal.classList.add('changing');
@@ -2888,6 +2798,8 @@ async function openChat(chatId) {
         messagesContainer.innerHTML = '';
         noMessages.style.display = 'block';
         noMessages.textContent = 'Загрузка...';
+        applyChatWallpaper();
+
 
         chatModal.classList.add('changing');
         setTimeout(() => {
@@ -3442,7 +3354,10 @@ async function initializePage() {
     await loadUserData();
     await loadChats();
 
-    preloadWallpapers();
+        setTimeout(() => {
+        preloadWallpapers();
+    }, 1000);
+
     
     
     const openChatId = sessionStorage.getItem('openChatId');
