@@ -1706,30 +1706,6 @@ input, textarea {
 
 
     <script>
-function applyChatWallpaper() {
-    const { messagesContainer } = getActiveElements();
-    
-    // Используем стандартные обои
-    const wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg';
-    
-    // Просто применяем обои без сложного кэширования
-    messagesContainer.style.backgroundImage = `url('${wallpaperUrl}')`;
-    messagesContainer.style.backgroundSize = 'cover';
-    messagesContainer.style.backgroundPosition = 'center';
-    messagesContainer.style.backgroundRepeat = 'no-repeat';
-    messagesContainer.style.backgroundAttachment = 'fixed';
-    
-    console.log('Wallpaper applied:', wallpaperUrl);
-}
-
-// Упрощенная функция предзагрузки
-function preloadWallpapers() {
-    const wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg';
-    const img = new Image();
-    img.src = wallpaperUrl;
-    img.onload = () => console.log('Wallpaper preloaded');
-    img.onerror = () => console.warn('Wallpaper preload failed');
-}
 
 
     
@@ -1876,6 +1852,72 @@ function adjustColor(hex, percent) {
     ).toString(16).slice(1)}`;
 }
 
+
+
+
+
+function applyChatWallpaper() {
+    const { messagesContainer } = getActiveElements();
+    
+    const savedWallpaper = localStorage.getItem('chatWallpaper');
+    
+    if (savedWallpaper) {
+        const img = new Image();
+        img.onload = function() {
+            messagesContainer.style.backgroundImage = `url('${savedWallpaper}')`;
+            console.log('Custom wallpaper loaded successfully');
+        };
+        img.onerror = function() {
+            // Если кастомные обои не загружаются, используем стандартные
+            console.warn('Custom wallpaper failed to load, using default');
+            applyDefaultWallpaper();
+        };
+        img.src = savedWallpaper;
+    } else {
+        applyDefaultWallpaper();
+    }
+    
+    // Общие настройки
+    messagesContainer.style.backgroundSize = 'cover';
+    messagesContainer.style.backgroundPosition = 'center';
+    messagesContainer.style.backgroundRepeat = 'no-repeat';
+    messagesContainer.style.backgroundAttachment = 'fixed';
+}
+
+function applyDefaultWallpaper() {
+    const { messagesContainer } = getActiveElements();
+    const wallpaperUrl = 'https://s14.gifyu.com/images/bNh1k.jpg';
+    messagesContainer.style.backgroundImage = `url('${wallpaperUrl}')`;
+}
+
+function saveWallpaper(base64Data) {
+    try {
+        localStorage.setItem('chatWallpaper', base64Data);
+        console.log('Wallpaper saved to localStorage');
+        
+        // Применяем новые обои сразу
+        applyChatWallpaper();
+        
+        return true;
+    } catch (error) {
+        console.error('Error saving wallpaper:', error);
+        showMessage('Ошибка сохранения обоев', 'error');
+        return false;
+    }
+}
+
+
+function checkWallpaperSize(base64Data) {
+    // Примерная проверка размера (localStorage обычно ~5MB)
+    const sizeInBytes = (base64Data.length * 3) / 4; // Примерный расчет размера
+    const maxSize = 4 * 1024 * 1024; // 4MB
+    
+    if (sizeInBytes > maxSize) {
+        showMessage('Слишком большой файл обоев. Максимальный размер: 4MB', 'error');
+        return false;
+    }
+    return true;
+}
 
 
     
