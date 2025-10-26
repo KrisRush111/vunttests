@@ -1922,31 +1922,34 @@ function formatDateHeader(timestamp) {
         }
         
        
-        async function loadUserData() {
-            
-            try {
-                const cachedData = sessionStorage.getItem('userData');
-                if (cachedData) {
-                    userData = JSON.parse(cachedData);
-                    return true;
-                }
-                
-                const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id 
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    userData = data.user;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
+async function loadUserData() {
+    try {
+        const cachedData = sessionStorage.getItem('userData');
+        if (cachedData) {
+            userData = JSON.parse(cachedData);
+            return true;
+        }
+        
+        // Получаем platform_user_id из другого источника
+        const tempUserId = await getCurrentUserId(); // Нужно реализовать эту функцию
+        if (!tempUserId) return false;
+        
+        const response = await fetch(`${SERVER_URL}/get_user_data`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: tempUserId
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            userData = data.user;
+            sessionStorage.setItem('userData', JSON.stringify(userData));
             return true;
         }
         return false;
@@ -1954,9 +1957,23 @@ function formatDateHeader(timestamp) {
         console.error('Error loading user data:', error);
         return false;
     }
-}
-        
+}   
      
+
+     async function getCurrentUserId() {
+    // Попробуйте получить из sessionStorage
+    const cachedData = sessionStorage.getItem('userData');
+    if (cachedData) {
+        const user = JSON.parse(cachedData);
+        return user.platform_user_id;
+    }
+    
+    // Или из URL параметров, если приходит из Telegram
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('user_id') || null;
+}
+
+
 
 
 
