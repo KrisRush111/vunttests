@@ -2723,6 +2723,7 @@ async function sendMessage() {
     const messageInput = isMobile ? document.getElementById('messageInputMobile') : document.getElementById('messageInputDesktop');
     const sendButton = isMobile ? document.getElementById('sendMessageButtonMobile') : document.getElementById('sendMessageButtonDesktop');
     const mobileInputContainer = document.querySelector('.message-input-container.mobile-input');
+    const { messagesContainer, noMessages } = getActiveElements();
     
     const content = messageInput.value.trim();
     if (!content || !currentChat) return;
@@ -2730,8 +2731,7 @@ async function sendMessage() {
     sendButton.disabled = true;
     
     try {
-        // ... существующая логика отправки сообщения ...
-        
+        // Создаем чат если это временный чат
         if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
                 method: 'POST',
@@ -2755,6 +2755,7 @@ async function sendMessage() {
             await loadChats();
         }
         
+        // Отправляем сообщение
         const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2772,6 +2773,7 @@ async function sendMessage() {
             throw new Error(messageData.error || 'Не удалось отправить сообщение');
         }
         
+        // Создаем объект сообщения
         const newMessage = {
             id: messageData.message_id,
             sender_id: userData.platform_user_id,
@@ -2784,16 +2786,19 @@ async function sendMessage() {
             is_me: true
         };
         
+        // Обновляем список сообщений
         currentMessages = [...currentMessages, newMessage];
         
-        const { messagesContainer, noMessages } = getActiveElements();
+        // Обновляем UI
         noMessages.style.display = 'none';
         renderMessages(currentMessages);
         
+        // Прокручиваем к последнему сообщению
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
         
+        // Обновляем список чатов если это не временный чат
         if (!currentChat.is_temp) {
             updateChatItemInDOM(currentChat.id, {
                 last_message: content,
@@ -2809,12 +2814,13 @@ async function sendMessage() {
             });
         }
 
-        // После отправки очищаем поле и скрываем кнопку отправки на мобильных
+        // Очищаем поле ввода и обновляем UI для мобильной версии
         messageInput.value = '';
         if (isMobile) {
             mobileInputContainer.classList.remove('has-text');
         }
         
+        // Возвращаем фокус на поле ввода
         setTimeout(() => {
             messageInput.focus();
         }, 100);
@@ -2822,12 +2828,16 @@ async function sendMessage() {
     } catch (error) {
         console.error('Error sending message:', error);
         showMessage('Ошибка отправки сообщения: ' + error.message, 'error');
+        
+        // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
+        
+        // Для мобильной версии показываем кнопку отправки если есть текст
         if (isMobile && content) {
             mobileInputContainer.classList.add('has-text');
         }
         
-        const { noMessages } = getActiveElements();
+        // Показываем сообщение "нет сообщений" если сообщений действительно нет
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
         }
