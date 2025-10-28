@@ -1,7 +1,7 @@
 // activity-tracker.js
 // Универсальный трекер активности для Vuntgram (Contacts, Chats, Profile)
 
-const SERVER_URL = 'https://vuntserver.onrender.com';
+const SERVER_URL = 'https://vuntserver-479v.onrender.com';
 
 class ActivityTracker {
     constructor() {
@@ -692,3 +692,4 @@ window.ActivityTrackerUtils = {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = ActivityTracker;
 }
+
