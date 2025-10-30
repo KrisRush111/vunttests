@@ -2859,6 +2859,11 @@ function updateProfileModalStatus(userId) {
     
     if (!statusElement) return;
     
+
+    setupAvatarClickHandler();
+    
+    console.log('Profile UI updated and avatar handlers set up');
+
     const activity = currentActivityData[userId];
     const statusTextSpan = statusElement.querySelector('.status-text');
     const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
@@ -2880,6 +2885,51 @@ function updateProfileModalStatus(userId) {
         statusIndicatorSpan.style.display = 'none'; // Скрываем кружок если статус неизвестен
     }
 }
+
+
+
+
+
+
+function setupAvatarClickHandler() {
+    const desktopAvatar = document.getElementById('modal-profile-avatar-desktop');
+    const mobileAvatar = document.getElementById('modal-profile-avatar-mobile');
+    
+    function handleAvatarClick() {
+        if (!currentViewedUser) {
+            console.log('No current viewed user');
+            return;
+        }
+        
+        console.log('Avatar clicked, user:', currentViewedUser);
+        
+        if (currentViewedUser.has_avatar_photo || currentViewedUser.has_avatar) {
+            const avatarUrl = `${SERVER_URL}/avatar/${currentViewedUser.platform_user_id}?t=${Date.now()}`;
+            console.log('Opening photo viewer with URL:', avatarUrl);
+            openPhotoViewer(avatarUrl);
+        } else {
+            console.log('No avatar available for this user');
+        }
+    }
+    
+    // Настройка для десктопной аватарки
+    if (desktopAvatar) {
+        desktopAvatar.removeEventListener('click', handleAvatarClick); // Удаляем старый обработчик если есть
+        desktopAvatar.addEventListener('click', handleAvatarClick);
+        desktopAvatar.style.cursor = 'pointer';
+        console.log('Desktop avatar click handler set up');
+    }
+    
+    // Настройка для мобильной аватарки
+    if (mobileAvatar) {
+        mobileAvatar.removeEventListener('click', handleAvatarClick); // Удаляем старый обработчик если есть
+        mobileAvatar.addEventListener('click', handleAvatarClick);
+        mobileAvatar.style.cursor = 'pointer';
+        console.log('Mobile avatar click handler set up');
+    }
+}
+
+
 
 
         // Обновите функцию updateProfileModalUI
@@ -3539,73 +3589,73 @@ function setupSearchHandlers() {
         });
 
 
-        async function initializePage() {
-            console.log('Initializing page...'); 
+async function initializePage() {
+    console.log('Initializing page...'); 
 
-            try {
+    try {
+        const userDataFromStorage = sessionStorage.getItem('userData');
+        if (!userDataFromStorage) {
+            console.warn('No user data found, redirecting to profile');
+            window.location.href = 'profile.html';
+            return;
+        }
+
+        userData = JSON.parse(userDataFromStorage);
+        console.log('User data loaded:', userData);
+
+        // Запускаем обновление статусов
+        if (userData.platform_user_id) {
+            setTimeout(() => {
+                updateUserActivity(true);
+                startActivityUpdates(); // Для отправки своего статуса
+                startActivityPolling(); // Для получения статусов других пользователей
+            }, 1000);
+        }
+ 
+        isDesktop = window.matchMedia("(min-width: 768px)").matches;
+        console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
+
+    
+        if (isDesktop) {
+            profileModalDesktop.classList.remove('active'); 
+            profileModalDesktop.classList.add('desktop-profile'); 
+            desktopPlaceholder.style.display = 'flex';
+            profileModalDesktop.style.display = 'none'; 
+        } else {
+            profileModalMobile.classList.remove('active', 'desktop-profile'); 
+        }
+
+        // НАСТРОЙКА ОБРАБОТЧИКОВ АВАТАРОК ПРИ ИНИЦИАЛИЗАЦИИ
+        console.log('Setting up avatar click handlers...');
+        setupAvatarClickHandler();
+
+        console.log('Loading user data...');
+        await loadUserData();
+        console.log('Loading contacts...');
+        await loadContacts();
+        console.log('Loading recommendations...');
+        await loadFriendsRecommendations();
+
    
-                const userDataFromStorage = sessionStorage.getItem('userData');
-                if (!userDataFromStorage) {
-                    console.warn('No user data found, redirecting to profile');
-                    window.location.href = 'profile.html';
-                    return;
-                }
+        const { searchInput } = getActiveElements();
+        console.log('Setting up search input handler');
+        setupSearchHandlers();
 
-                userData = JSON.parse(userDataFromStorage);
-                console.log('User data loaded:', userData);
+ 
+        if (!isDesktop) {
+            console.log('Setting up mobile event listeners');
+            if (profileBackButtonMobile) {
+                profileBackButtonMobile.addEventListener('click', () => {
+                    console.log('Profile back button clicked');
+                    closeProfileModal();
+                });
+            }
 
-                // Запускаем обновление статусов
-                if (userData.platform_user_id) {
-                    setTimeout(() => {
-                        updateUserActivity(true);
-                        startActivityUpdates(); // Для отправки своего статуса
-                        startActivityPolling(); // Для получения статусов других пользователей
-                    }, 1000);
-                }
-         
-                isDesktop = window.matchMedia("(min-width: 768px)").matches;
-                console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
-
-            
-                if (isDesktop) {
-                    profileModalDesktop.classList.remove('active'); 
-                    profileModalDesktop.classList.add('desktop-profile'); 
-                    desktopPlaceholder.style.display = 'flex';
-                    profileModalDesktop.style.display = 'none'; 
-                } else {
-                    profileModalMobile.classList.remove('active', 'desktop-profile'); 
-                }
-
-
-         
-                console.log('Loading user data...');
-                await loadUserData();
-                console.log('Loading contacts...');
-                await loadContacts();
-                console.log('Loading recommendations...');
-                await loadFriendsRecommendations();
-
-           
-                const { searchInput } = getActiveElements();
-                console.log('Setting up search input handler');
-                setupSearchHandlers();
-
-         
-                if (!isDesktop) {
-                    console.log('Setting up mobile event listeners');
-                    if (profileBackButtonMobile) {
-                        profileBackButtonMobile.addEventListener('click', () => {
-                            console.log('Profile back button clicked');
-                            closeProfileModal();
-                        });
-                    }
-
-                    modalOverlay.addEventListener('click', () => {
-                        console.log('Modal overlay clicked');
-                        closeProfileModal();
-                    });
-                }
-
+            modalOverlay.addEventListener('click', () => {
+                console.log('Modal overlay clicked');
+                closeProfileModal();
+            });
+        }
 
                 console.log('Setting up resize handler');
                 window.addEventListener('resize', () => {
