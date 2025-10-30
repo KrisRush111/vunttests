@@ -3380,113 +3380,85 @@ function updateProfileModalStatus(userId) {
         }
 
   
-        async function searchUserById(userId) {
-            const { searchResults, noContacts } = getActiveElements();
+  async function searchUserById(userId) {
+    const { searchResults, noContacts } = getActiveElements();
 
-            if (!userId || userId.trim() === '') {
-                console.log('Пожалуйста, введите ID пользователя'); 
-                return;
-            }
+    if (!userId || userId.trim() === '') {
+        showMessage('Пожалуйста, введите ID пользователя', 'error');
+        return;
+    }
 
-            if (userId === userData.platform_user_id) {
-                console.log('Нельзя искать самого себя'); 
-                return;
-            }
+    // Очищаем предыдущие результаты
+    const cleanUserId = userId.trim();
+    searchResults.innerHTML = '';
+    noContacts.style.display = 'none';
 
-            showLoading('Поиск пользователя...');
-            searchResults.innerHTML = '';
-            noContacts.style.display = 'none';
+    showLoading('Поиск пользователя...');
 
-            try {
-            
-                const friendshipStatus = await checkFriendshipStatus(userId);
+    try {
+        // Всегда используем единый эндпоинт для поиска
+        const response = await fetch(`${SERVER_URL}/search_user`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: cleanUserId,
+                requester_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
 
-                if (friendshipStatus === 'accepted') {
-               
-                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform_user_id: userId
-                        }),
-                        credentials: 'include'
-                    });
+        const data = await response.json();
+        console.log('Search response:', data); // Для отладки
 
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Неизвестная ошибка поиска');
-                    }
-
-                    if (data.status === 'success' && data.user) {
-                        await displayUserResult(data.user, 'added');
-                    } else {
-                        noContacts.textContent = 'Пользователь не найден';
-                        noContacts.style.display = 'block';
-                    }
-                } else if (friendshipStatus === 'request_sent') {
-                   
-                    const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform_user_id: userId
-                        }),
-                        credentials: 'include'
-                    });
-
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Неизвестная ошибка поиска');
-                    }
-
-                    if (data.status === 'success' && data.user) {
-                        await displayUserResult(data.user, 'request_sent');
-                    } else {
-                        noContacts.textContent = 'Пользователь не найден';
-                        noContacts.style.display = 'block';
-                    }
-                } else {
-                  
-                    const response = await fetch(`${SERVER_URL}/search_user`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform_user_id: userId,
-                            requester_id: userData.platform_user_id
-                        }),
-                        credentials: 'include'
-                    });
-
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Неизвестная ошибка поиска');
-                    }
-
-                    if (data.status === 'success' && data.user) {
-                        await displayUserResult(data.user, 'default');
-                    } else {
-                        noContacts.textContent = 'Пользователь не найден';
-                        noContacts.style.display = 'block';
-                    }
-                }
-            } catch (error) {
-                console.error('Search error:', error);
-            
-                noContacts.textContent = 'Ошибка при поиске';
-                noContacts.style.display = 'block';
-            } finally {
-                hideLoading();
-            }
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP error! status: ${response.status}`);
         }
+
+        if (data.status === 'success' && data.user) {
+            // Проверяем статус дружбы для правильного отображения кнопки
+            const friendshipStatus = await checkFriendshipStatus(cleanUserId);
+            await displayUserResult(data.user, friendshipStatus === 'accepted' ? 'added' : 
+                                  friendshipStatus === 'request_sent' ? 'request_sent' : 'default');
+        } else {
+            noContacts.textContent = data.error || 'Пользователь не найден';
+            noContacts.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Search error:', error);
+        // Показываем конкретную ошибку
+        noContacts.textContent = `Ошибка поиска: ${error.message}`;
+        noContacts.style.display = 'block';
+    } finally {
+        hideLoading();
+    }
+}
+
+
+
+// Добавьте после существующих обработчиков
+function setupSearchHandlers() {
+    const { searchInput } = getActiveElements();
+    
+    // Обработчик Enter
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const searchId = searchInput.value.trim();
+            searchUserById(searchId);
+        }
+    });
+
+    // Обработчик очистки (опционально)
+    searchInput.addEventListener('input', (e) => {
+        if (e.target.value.trim() === '') {
+            // Если поле пустое, показываем контакты
+            loadContacts();
+        }
+    });
+}
+
+
 
         // Функция для запуска интервального обновления активности
         function startActivityUpdates() {
@@ -3605,13 +3577,7 @@ function updateProfileModalStatus(userId) {
            
                 const { searchInput } = getActiveElements();
                 console.log('Setting up search input handler');
-                searchInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        const searchId = searchInput.value.trim();
-                        console.log('Searching for user:', searchId);
-                        searchUserById(searchId);
-                    }
-                });
+                setupSearchHandlers();
 
          
                 if (!isDesktop) {
