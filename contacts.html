@@ -2919,32 +2919,51 @@ function updateProfileModalStatus(userId) {
 
 
 
-function setupAvatarClickHandler() {
+// Новая функция для настройки обработчиков клика на аватар
+function setupAvatarClickHandlers(user) {
     const desktopAvatar = document.getElementById('modal-profile-avatar-desktop');
     const mobileAvatar = document.getElementById('modal-profile-avatar-mobile');
     
     function handleAvatarClick() {
-        if (!currentViewedUser) return;
-        
-        if (currentViewedUser.has_avatar_photo || currentViewedUser.has_avatar) {
-            const avatarUrl = `${SERVER_URL}/avatar/${currentViewedUser.platform_user_id}?t=${Date.now()}`;
+        if (user.has_avatar_photo || user.has_avatar) {
+            const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+            console.log('Opening avatar viewer:', avatarUrl);
             openPhotoViewer(avatarUrl);
+        } else {
+            console.log('No avatar available for user');
         }
     }
     
-    // Для десктопной аватарки
+    // Настройка для десктопной аватарки
     if (desktopAvatar) {
-        desktopAvatar.style.cursor = 'pointer';
-        desktopAvatar.addEventListener('click', handleAvatarClick);
+        // Удаляем старые обработчики
+        desktopAvatar.replaceWith(desktopAvatar.cloneNode(true));
+        const newDesktopAvatar = document.getElementById('modal-profile-avatar-desktop');
+        
+        newDesktopAvatar.style.cursor = 'pointer';
+        newDesktopAvatar.addEventListener('click', handleAvatarClick);
+        newDesktopAvatar.addEventListener('mouseenter', function() {
+            this.style.transform = 'scale(1.05)';
+            this.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.2)';
+        });
+        newDesktopAvatar.addEventListener('mouseleave', function() {
+            this.style.transform = 'scale(1)';
+            this.style.boxShadow = 'none';
+        });
+        console.log('Desktop avatar handlers set');
     }
     
-    // Для мобильной аватарки
+    // Настройка для мобильной аватарки
     if (mobileAvatar) {
-        mobileAvatar.style.cursor = 'pointer';
-        mobileAvatar.addEventListener('click', handleAvatarClick);
+        // Удаляем старые обработчики
+        mobileAvatar.replaceWith(mobileAvatar.cloneNode(true));
+        const newMobileAvatar = document.getElementById('modal-profile-avatar-mobile');
+        
+        newMobileAvatar.style.cursor = 'pointer';
+        newMobileAvatar.addEventListener('click', handleAvatarClick);
+        console.log('Mobile avatar handlers set');
     }
 }
-
 
 
   // Обновите функцию updateProfileModalUI
@@ -3040,6 +3059,79 @@ async function updateProfileModalUI(user) {
     console.log('Profile UI updated successfully');
 }
   
+
+
+// Функция для настройки обработчиков кнопок действий
+function setupActionButtonsHandlers(user) {
+    // Обработчики для десктопных кнопок
+    if (isDesktop) {
+        const chatButton = document.getElementById('chatButtonDesktop');
+        const soundButton = document.getElementById('soundButtonDesktop');
+        const moreButton = document.getElementById('moreButtonDesktop');
+        
+        if (chatButton) {
+            chatButton.onclick = () => openChatWithContact(user);
+            setupButtonHoverEffects(chatButton, 'var(--telegram-blue)');
+        }
+        if (soundButton) {
+            soundButton.onclick = () => toggleSoundSettings(user);
+            setupButtonHoverEffects(soundButton, '#FF9800');
+        }
+        if (moreButton) {
+            moreButton.onclick = () => showMoreOptions(user);
+            setupButtonHoverEffects(moreButton, '#9C27B0');
+        }
+    } else {
+        // Обработчики для мобильных кнопок
+        const chatButton = document.getElementById('chatButtonMobile');
+        const soundButton = document.getElementById('soundButtonMobile');
+        const moreButton = document.getElementById('moreButtonMobile');
+        
+        if (chatButton) {
+            chatButton.onclick = () => openChatWithContact(user);
+        }
+        if (soundButton) {
+            soundButton.onclick = () => toggleSoundSettings(user);
+        }
+        if (moreButton) {
+            moreButton.onclick = () => showMoreOptions(user);
+        }
+    }
+}
+
+
+
+// Функция для настройки hover-эффектов кнопок (только для десктопа)
+function setupButtonHoverEffects(button, hoverColor) {
+    if (!isDesktop) return;
+    
+    const icon = button.querySelector('.action-button-icon');
+    if (!icon) return;
+    
+    button.addEventListener('mouseenter', () => {
+        icon.style.transform = 'translateY(-4px) scale(1.1)';
+        icon.style.boxShadow = `0 6px 12px rgba(0, 0, 0, 0.15)`;
+        icon.style.background = hoverColor;
+        icon.style.color = 'white';
+    });
+    
+    button.addEventListener('mouseleave', () => {
+        icon.style.transform = '';
+        icon.style.boxShadow = '';
+        icon.style.background = '';
+        icon.style.color = '';
+    });
+    
+    button.addEventListener('mousedown', () => {
+        icon.style.transform = 'translateY(-1px) scale(1.05)';
+    });
+    
+    button.addEventListener('mouseup', () => {
+        icon.style.transform = 'translateY(-4px) scale(1.1)';
+    });
+}
+
+
         function adjustColor(hex, percent) {
             const num = parseInt(hex.replace("#", ""), 16);
             const amt = Math.round(2.55 * percent);
