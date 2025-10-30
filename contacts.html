@@ -1529,8 +1529,6 @@
 
 
 
-
-
 /* НОВЫЕ СТИЛИ С ГРАДИЕНТАМИ И АНИМАЦИЯМИ (аватары не трогаем) */
 
 /* Основные стили для всех кнопок */
@@ -1566,6 +1564,8 @@
     );
     transition: left 0.5s ease;
 }
+
+
 
 .add-button:hover::before, .accept-button:hover::before, 
 .reject-button:hover::before, .recommendation-add-btn:hover::before {
@@ -1690,15 +1690,20 @@
     box-shadow: 0 6px 20px rgba(36, 129, 204, 0.4);
 }
 
-/* Улучшенная анимация для онлайн-статуса */
 .status-indicator {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #00c73c, #00e676);
-    animation: pulse 2s infinite, shimmer 3s infinite;
-    box-shadow: 0 0 10px rgba(0, 199, 60, 0.5);
+    background-color: var(--online-green);
+}
+
+.profile-status.offline .status-indicator {
+    display: none; /* Полностью скрываем кружок когда не в сети */
+}
+
+.profile-status.offline .status-text {
+    color: var(--telegram-hint);
 }
 
 @keyframes shimmer {
@@ -2847,31 +2852,35 @@ async function sendOfflineStatus() {
             });
         }
 
-        // Функция для обновления статуса в модальном окне профиля
-        function updateProfileModalStatus(userId) {
-            const activeElements = getActiveElements();
-            const statusElement = activeElements.modalProfileStatus;
-            
-            if (!statusElement) return;
-            
-            const activity = currentActivityData[userId];
-            const statusTextSpan = statusElement.querySelector('.status-text');
-            const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
-            
-            if (activity) {
-                if (activity.is_online) {
-                    statusTextSpan.textContent = 'В сети';
-                    statusElement.classList.remove('offline');
-                } else {
-                    const lastSeenText = formatLastSeen(activity.last_online);
-                    statusTextSpan.textContent = lastSeenText;
-                    statusElement.classList.add('offline');
-                }
-            } else {
-                statusTextSpan.textContent = 'не в сети';
-                statusElement.classList.add('offline');
-            }
+
+function updateProfileModalStatus(userId) {
+    const activeElements = getActiveElements();
+    const statusElement = activeElements.modalProfileStatus;
+    
+    if (!statusElement) return;
+    
+    const activity = currentActivityData[userId];
+    const statusTextSpan = statusElement.querySelector('.status-text');
+    const statusIndicatorSpan = statusElement.querySelector('.status-indicator');
+    
+    if (activity) {
+        if (activity.is_online) {
+            statusTextSpan.textContent = 'В сети';
+            statusElement.classList.remove('offline');
+            statusIndicatorSpan.style.display = 'inline-block'; // Показываем кружок онлайн
+        } else {
+            const lastSeenText = formatLastSeen(activity.last_online);
+            statusTextSpan.textContent = lastSeenText;
+            statusElement.classList.add('offline');
+            statusIndicatorSpan.style.display = 'none'; // Скрываем кружок оффлайн
         }
+    } else {
+        statusTextSpan.textContent = 'не в сети';
+        statusElement.classList.add('offline');
+        statusIndicatorSpan.style.display = 'none'; // Скрываем кружок если статус неизвестен
+    }
+}
+
 
         // Обновите функцию updateProfileModalUI
         async function updateProfileModalUI(user) {
@@ -3209,7 +3218,7 @@ async function sendOfflineStatus() {
 
             const requestText = document.createElement('div');
             requestText.className = 'request-label';
-            requestText.textContent = 'Запрос на добавление в друзья';
+            requestText.textContent = 'Запрос на дружбу';
 
             infoElement.appendChild(nicknameElement);
             infoElement.appendChild(idElement);
