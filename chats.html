@@ -520,8 +520,7 @@ input, textarea {
         pointer-events: none;
     }
 
-
-@media (max-width: 767px) {
+    @media (max-width: 767px) {
     .chat-modal {
         position: fixed;
         top: 0;
@@ -530,67 +529,72 @@ input, textarea {
         bottom: 0;
         width: 100vw;
         height: 100vh;
-        display: flex;
-        flex-direction: column;
-        background: var(--telegram-bg);
+        max-height: 100vh;
+        border-radius: 0;
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
-        overflow: hidden;
     }
 
     .chat-modal.active {
         transform: translateX(0);
     }
 
-    .chat-header {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 60px;
-        min-height: 60px;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--telegram-divider);
-        background: var(--telegram-bg);
-        z-index: 1000;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-    }
+
 
     .messages-container {
         flex: 1;
+        height: calc(100vh - 120px); /* 60px header + 60px input */
+        max-height: calc(100vh - 120px);
         padding: 16px;
         overflow-y: auto;
-        margin-top: 60px; /* Отступ для хедера */
-        margin-bottom: 60px; /* Отступ для поля ввода */
-        height: calc(100vh - 120px); /* 60px хедер + 60px инпут */
-        max-height: calc(100vh - 120px);
+        margin-top: 0; /* Убираем отступ */
     }
 
     .message-input-container {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
         height: 60px;
         min-height: 60px;
         padding: 12px;
         background: var(--telegram-bg);
         border-top: 1px solid var(--telegram-divider);
-        z-index: 1000;
+        position: sticky;
+        bottom: 0;
+         margin-bottom: 10px;
     }
 
-    /* Убедимся, что контейнер сообщений правильно отображается */
-    .messages-container::-webkit-scrollbar {
-        display: none;
+
+    .chat-header {
+        position: fixed; /* Sticky вместо fixed */
+        top: 0;
+        height: 60px;
+        min-height: 60px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--telegram-divider);
+        background: var(--telegram-bg);
+        z-index: 10;
     }
+
     
-    .messages-container {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
+    /* Скрываем навигацию когда открыт чат */
+    .chat-modal.active ~ .bottom-nav {
+        display: none !important;
+    }
+
+    /* Убираем любые отступы у body */
+    body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    /* Гарантируем что контейнер чата занимает всю высоту */
+    .chats-container.mobile-only {
+        height: 100vh;
+        max-height: 100vh;
+        padding-bottom: 80px; /* место для навигации */
     }
 }
+
     @media (min-width: 768px) {
         .chat-modal {
             position: static;
@@ -612,7 +616,7 @@ input, textarea {
     padding: 12px 16px;
     border-bottom: 1px solid var(--telegram-divider);
     background: var(--telegram-bg);
-    position: sticky;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
@@ -651,6 +655,7 @@ input, textarea {
     height: 40px;
     border-radius: 20px;
     margin-right: 12px;
+    position: fixed;
     /* Добавляем градиент как фон по умолчанию */
     background: linear-gradient(135deg, #0088cc, #40a7e3);
     display: flex;
@@ -666,6 +671,7 @@ input, textarea {
         font-weight: 600;
         font-size: 16px;
         white-space: nowrap;
+        position: fixed;
         overflow: hidden;
         text-overflow: ellipsis;
         text-align: center;
@@ -674,6 +680,7 @@ input, textarea {
     .chat-header .chat-status {
         font-size: 13px;
         color: var(--telegram-hint);
+        position: fixed;
         margin-top: 2px;
         text-align: center;
     }
@@ -685,6 +692,7 @@ input, textarea {
         align-items: center;
         background: none;
         border: none;
+        position: fixed;
         color: var(--telegram-blue);
         font-size: 18px; /* Увеличиваем размер шрифта */
         cursor: pointer;
@@ -696,6 +704,7 @@ input, textarea {
     
     .chat-header .back-button span {
         display: inline !important;
+        position: fixed;
         font-size: 18px; /* Увеличиваем размер текста */
         color: var(--telegram-blue);
         font-weight: 500; /* Делаем текст немного жирнее */
@@ -1827,72 +1836,6 @@ function adjustColor(hex, percent) {
 
 
 
-
-
-
-// Добавьте эту функцию в раздел с другими функциями
-function setupKeyboardHeaderFix() {
-    if (isDesktop) return;
-    
-    const { messageInput, chatHeader, messagesContainer } = getActiveElements();
-    let originalHeaderPosition = '';
-    
-    // Сохраняем оригинальное положение
-    function saveOriginalPosition() {
-        originalHeaderPosition = window.getComputedStyle(chatHeader).position;
-    }
-    
-    // Фиксируем хедер при фокусе на поле ввода
-    messageInput.addEventListener('focus', () => {
-        saveOriginalPosition();
-        chatHeader.style.position = 'fixed';
-        chatHeader.style.top = '0';
-        chatHeader.style.left = '0';
-        chatHeader.style.right = '0';
-        chatHeader.style.zIndex = '1000';
-        
-        // Плавно скроллим к низу при открытии клавиатуры
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 300);
-    });
-    
-    // Восстанавливаем при потере фокуса
-    messageInput.addEventListener('blur', () => {
-        setTimeout(() => {
-            chatHeader.style.position = originalHeaderPosition;
-            chatHeader.style.top = '';
-            chatHeader.style.left = '';
-            chatHeader.style.right = '';
-            chatHeader.style.zIndex = '';
-        }, 200);
-    });
-    
-    // Обработка изменения размера окна (клавиатура открывается/закрывается)
-    let visualViewport = window.visualViewport;
-    if (visualViewport) {
-        visualViewport.addEventListener('resize', () => {
-            if (document.activeElement === messageInput) {
-                // Подстраиваем высоту контейнера сообщений под видимую область
-                const viewportHeight = visualViewport.height;
-                const headerHeight = chatHeader.offsetHeight;
-                const inputHeight = document.querySelector('.message-input-container').offsetHeight;
-                
-                messagesContainer.style.height = `${viewportHeight - headerHeight - inputHeight}px`;
-                messagesContainer.style.maxHeight = `${viewportHeight - headerHeight - inputHeight}px`;
-                
-                // Скроллим к последнему сообщению
-                setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }, 100);
-            }
-        });
-    }
-}
-
-
-
-
     
     function formatChatMessageTime(timestamp) {
         if (!timestamp) return 'только что';
@@ -2748,51 +2691,6 @@ async function sendMessage() {
 }
 
 
-function setupMobileLayout() {
-    if (isDesktop) return;
-    
-    const { chatHeader, messagesContainer, messageInputContainer, messageInput } = getActiveElements();
-    
-    // Функция для обновления высоты с учетом клавиатуры
-    function updateLayout() {
-        const headerHeight = chatHeader.offsetHeight;
-        const inputHeight = messageInputContainer.offsetHeight;
-        const windowHeight = window.innerHeight;
-        
-        // Высота контейнера сообщений = общая высота - хедер - инпут
-        const messagesHeight = windowHeight - headerHeight - inputHeight;
-        
-        messagesContainer.style.height = `${messagesHeight}px`;
-        messagesContainer.style.maxHeight = `${messagesHeight}px`;
-        messagesContainer.style.marginTop = `${headerHeight}px`;
-        messagesContainer.style.marginBottom = `${inputHeight}px`;
-        
-        // Автоскролл к последнему сообщению при фокусе
-        setTimeout(() => {
-            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        }, 100);
-    }
-    
-    // Обработчики событий
-    messageInput.addEventListener('focus', () => {
-        // Даем время для появления клавиатуры
-        setTimeout(updateLayout, 300);
-    });
-    
-    messageInput.addEventListener('blur', () => {
-        // Восстанавливаем нормальную высоту
-        setTimeout(updateLayout, 200);
-    });
-    
-    // Обработчик изменения ориентации и размера
-    window.addEventListener('resize', updateLayout);
-    
-    // Инициализация
-    updateLayout();
-}
-
 
 // Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
@@ -3498,7 +3396,6 @@ async function initializePage() {
     }, 5000);
 
     setupKeyboardHandlers();
-     setupKeyboardHeaderFix();
     
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
