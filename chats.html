@@ -520,63 +520,61 @@ input, textarea {
         pointer-events: none;
     }
 
-@media (max-width: 767px) {
-    .chat-modal {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100vw;
-        height: 100vh;
-        max-height: 100vh;
-        border-radius: 0;
-        z-index: 100;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
+    @media (max-width: 767px) {
+    .chat-header {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        height: 60px !important;
+        min-height: 60px !important;
+        padding: 12px 16px !important;
+        border-bottom: 1px solid var(--telegram-divider) !important;
+        background: var(--telegram-bg) !important;
+        z-index: 1000 !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        transform: translateZ(0) !important; /* Улучшает производительность */
     }
 
     .chat-modal.active {
         transform: translateX(0);
     }
 
-    .messages-container {
-        flex: 1;
-        height: calc(100vh - 180px); /* Скорректировано: 100vh минус хедер (60px) + инпут (60px) + буфер (60px) */
-        max-height: calc(100vh - 180px);
-        padding: 16px;
-        overflow-y: auto;
-        margin-top: 60px; /* Добавлен отступ сверху, равный высоте хедера (60px), чтобы сообщения не скрывались */
-    }
 
+
+  .messages-container {
+        margin-top: 60px !important; /* Компенсируем высоту фиксированного хедера */
+        height: calc(100vh - 120px - 60px) !important; /* Учитываем хедер и инпут */
+        max-height: calc(100vh - 120px - 60px) !important;
+        padding-top: 0 !important;
+    }
+    
     .message-input-container {
-        height: 60px;
-        min-height: 60px;
-        padding: 12px;
-        background: var(--telegram-bg);
-        border-top: 1px solid var(--telegram-divider);
-        position: fixed; /* Изменено с sticky на fixed для надежной фиксации */
-        bottom: 0;
-        left: 0;
-        right: 0;
-        width: 100%;
-        z-index: 1000; /* Увеличен z-index для гарантии видимости */
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        background: var(--telegram-bg) !important;
+        z-index: 1000 !important;
+        padding: 12px !important;
+        border-top: 1px solid var(--telegram-divider) !important;
     }
 
     .chat-header {
-        position: fixed; /* Изменено с sticky на fixed для надежной фиксации */
+        position: sticky; /* Sticky вместо fixed */
         top: 0;
-        left: 0;
-        right: 0;
-        width: 100%;
         height: 60px;
         min-height: 60px;
         padding: 12px 16px;
         border-bottom: 1px solid var(--telegram-divider);
         background: var(--telegram-bg);
-        z-index: 1000; /* Увеличен z-index для гарантии видимости над другими элементами */
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+        z-index: 10;
+    }
+
+        .chat-modal.active {
+        padding-top: 60px !important;
+        padding-bottom: 60px !important;
     }
 
     /* Скрываем навигацию когда открыт чат */
@@ -598,7 +596,6 @@ input, textarea {
         padding-bottom: 80px; /* место для навигации */
     }
 }
-
 
     @media (min-width: 768px) {
         .chat-modal {
@@ -1833,6 +1830,72 @@ function adjustColor(hex, percent) {
         (B < 255 ? (B < 1 ? 0 : B) : 255)
     ).toString(16).slice(1)}`;
 }
+
+
+
+
+
+
+// Добавьте эту функцию в раздел с другими функциями
+function setupKeyboardHeaderFix() {
+    if (isDesktop) return;
+    
+    const { messageInput, chatHeader, messagesContainer } = getActiveElements();
+    let originalHeaderPosition = '';
+    
+    // Сохраняем оригинальное положение
+    function saveOriginalPosition() {
+        originalHeaderPosition = window.getComputedStyle(chatHeader).position;
+    }
+    
+    // Фиксируем хедер при фокусе на поле ввода
+    messageInput.addEventListener('focus', () => {
+        saveOriginalPosition();
+        chatHeader.style.position = 'fixed';
+        chatHeader.style.top = '0';
+        chatHeader.style.left = '0';
+        chatHeader.style.right = '0';
+        chatHeader.style.zIndex = '1000';
+        
+        // Плавно скроллим к низу при открытии клавиатуры
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 300);
+    });
+    
+    // Восстанавливаем при потере фокуса
+    messageInput.addEventListener('blur', () => {
+        setTimeout(() => {
+            chatHeader.style.position = originalHeaderPosition;
+            chatHeader.style.top = '';
+            chatHeader.style.left = '';
+            chatHeader.style.right = '';
+            chatHeader.style.zIndex = '';
+        }, 200);
+    });
+    
+    // Обработка изменения размера окна (клавиатура открывается/закрывается)
+    let visualViewport = window.visualViewport;
+    if (visualViewport) {
+        visualViewport.addEventListener('resize', () => {
+            if (document.activeElement === messageInput) {
+                // Подстраиваем высоту контейнера сообщений под видимую область
+                const viewportHeight = visualViewport.height;
+                const headerHeight = chatHeader.offsetHeight;
+                const inputHeight = document.querySelector('.message-input-container').offsetHeight;
+                
+                messagesContainer.style.height = `${viewportHeight - headerHeight - inputHeight}px`;
+                messagesContainer.style.maxHeight = `${viewportHeight - headerHeight - inputHeight}px`;
+                
+                // Скроллим к последнему сообщению
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
+            }
+        });
+    }
+}
+
 
 
 
@@ -3396,6 +3459,7 @@ async function initializePage() {
     }, 5000);
 
     setupKeyboardHandlers();
+     setupKeyboardHeaderFix();
     
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
