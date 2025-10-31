@@ -534,11 +534,43 @@ input, textarea {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
     .chat-modal.active {
         transform: translateX(0);
     }
+
+    .messages-container {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        background-image: url('фон.webp');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        height: calc(100vh - 120px); /* 60px header + 60px input */
+        max-height: calc(100vh - 120px);
+        margin-top: 0;
+    }
+
+    .message-input-container {
+        height: 60px;
+        min-height: 60px;
+        padding: 12px;
+        background: var(--telegram-bg);
+        border-top: 1px solid var(--telegram-divider);
+        position: sticky;
+        bottom: 0;
+        z-index: 90;
+        margin-bottom: 0;
+    }
+
 
     .chat-header {
         position: sticky; /* Sticky вместо fixed */
@@ -551,25 +583,6 @@ input, textarea {
         z-index: 10;
     }
 
-    .messages-container {
-        flex: 1;
-        height: calc(100vh - 120px); /* 60px header + 60px input */
-        max-height: calc(100vh - 120px);
-        padding: 16px;
-        overflow-y: auto;
-        margin-top: 0; /* Убираем отступ */
-    }
-
-    .message-input-container {
-        height: 60px;
-        min-height: 60px;
-        padding: 12px;
-        background: var(--telegram-bg);
-        border-top: 1px solid var(--telegram-divider);
-        position: sticky;
-        bottom: 0;
-         margin-bottom: 10px;
-    }
 
     /* Скрываем навигацию когда открыт чат */
     .chat-modal.active ~ .bottom-nav {
@@ -612,14 +625,17 @@ input, textarea {
     padding: 12px 16px;
     border-bottom: 1px solid var(--telegram-divider);
     background: var(--telegram-bg);
-    position: sticky; /* Изменяем fixed на sticky */
-    top: 0; /* Закрепляем вверху */
+    position: sticky;
+    top: 0;
     left: 0;
     right: 0;
-    z-index: 10;
+    z-index: 100;
     height: 60px;
-    backdrop-filter: blur(10px); /* Добавляем размытие для красоты */
+    min-height: 60px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
 }
+
 
 
     .chat-header .back-button {
@@ -674,6 +690,21 @@ input, textarea {
         margin-top: 2px;
         text-align: center;
     }
+
+
+
+    html, body {
+    height: 100%;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+}
+
+.chats-container.mobile-only {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+}
 
 
 @media (max-width: 767px) {
@@ -1780,6 +1811,66 @@ async function refreshOnlineStatuses() {
         }
     }
 }
+
+
+function setupKeyboardResizeHandler() {
+    if (isDesktop) return;
+    
+    let initialHeight = window.innerHeight;
+    
+    function handleResize() {
+        const currentHeight = window.innerHeight;
+        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
+        
+        if (chatModal.classList.contains('active')) {
+            const headerHeight = document.querySelector('.chat-header').offsetHeight;
+            const inputHeight = messageInputContainer.offsetHeight;
+            const availableHeight = currentHeight - headerHeight - inputHeight;
+            
+            // Устанавливаем высоту контейнера сообщений
+            messagesContainer.style.height = `${availableHeight}px`;
+            messagesContainer.style.maxHeight = `${availableHeight}px`;
+            
+            // Прокручиваем к последнему сообщению
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        }
+    }
+    
+    // Обработчик изменения размера окна (включая появление клавиатуры)
+    window.addEventListener('resize', handleResize);
+    
+    // Также обрабатываем события фокуса на поле ввода
+    const { messageInput } = getActiveElements();
+    messageInput.addEventListener('focus', () => {
+        setTimeout(handleResize, 300);
+    });
+    
+    messageInput.addEventListener('blur', () => {
+        setTimeout(handleResize, 300);
+    });
+}
+
+
+
+
+
+function setupMobileChatHeight() {
+    if (!isDesktop) {
+        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
+        
+        if (chatModal.classList.contains('active')) {
+            const headerHeight = document.querySelector('.chat-header').offsetHeight;
+            const inputHeight = messageInputContainer.offsetHeight;
+            const availableHeight = window.innerHeight - headerHeight - inputHeight;
+            
+            messagesContainer.style.height = `${availableHeight}px`;
+            messagesContainer.style.maxHeight = `${availableHeight}px`;
+        }
+    }
+}
+
 
 
 
@@ -2890,6 +2981,10 @@ if (currentChat.participants && currentChat.participants.length > 0) {
     }
 });
             window.currentChat = chatData;
+
+        setTimeout(() => {
+        setupMobileChatHeight();
+    }, 100);
     
 }
 
@@ -3446,6 +3541,16 @@ async function initializePage() {
 
     window.addEventListener('pagehide', () => {
         sendOfflineStatus();
+    });
+
+    setupKeyboardResizeHandler();
+    setupMobileChatHeight();
+    
+    // Также обновляйте высоту при открытии чата
+    window.addEventListener('resize', () => {
+        if (!isDesktop && currentChat) {
+            setupMobileChatHeight();
+        }
     });
 
     document.addEventListener('visibilitychange', () => {
