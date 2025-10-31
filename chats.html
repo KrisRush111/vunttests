@@ -520,25 +520,18 @@ input, textarea {
         pointer-events: none;
     }
 
-@media (max-width: 767px) {
-    /* ФИКСИРУЕМ ВСЕ ЭЛЕМЕНТЫ */
-    body {
-        position: fixed;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-    }
-
+    @media (max-width: 767px) {
     .chat-modal {
         position: fixed;
         top: 0;
         left: 0;
-        width: 100%;
-        height: 100%;
-        background: var(--telegram-bg);
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
         z-index: 100;
-        display: flex;
-        flex-direction: column;
         transform: translateX(100%);
         transition: transform 0.3s ease;
     }
@@ -547,32 +540,47 @@ input, textarea {
         transform: translateX(0);
     }
 
-    .chat-header {
-        flex-shrink: 0;
-        height: 60px;
-        min-height: 60px;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--telegram-divider);
-        background: var(--telegram-bg);
-        z-index: 10;
-    }
+
 
     .messages-container {
         flex: 1;
-        overflow-y: auto;
+        height: calc(100vh - 120px); /* 60px header + 60px input */
+        max-height: calc(100vh - 120px);
         padding: 16px;
-        -webkit-overflow-scrolling: touch;
+        overflow-y: auto;
+        margin-top: 0; /* Убираем отступ */
     }
 
     .message-input-container {
-        flex-shrink: 0;
+        height: 60px;
+        min-height: 60px;
         padding: 12px;
         background: var(--telegram-bg);
         border-top: 1px solid var(--telegram-divider);
+        position: sticky;
+        bottom: 0;
+         margin-bottom: 10px;
+    }
+    
+    /* Скрываем навигацию когда открыт чат */
+    .chat-modal.active ~ .bottom-nav {
+        display: none !important;
+    }
+
+    /* Убираем любые отступы у body */
+    body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    /* Гарантируем что контейнер чата занимает всю высоту */
+    .chats-container.mobile-only {
+        height: 100vh;
+        max-height: 100vh;
+        padding-bottom: 80px; /* место для навигации */
     }
 }
-
-
 
     @media (min-width: 768px) {
         .chat-modal {
@@ -590,22 +598,20 @@ input, textarea {
     }
 
 .chat-header {
-    display: flex;
-    align-items: center;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--telegram-divider);
-    background: var(--telegram-bg);
-    position: sticky;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    z-index: 100;
     height: 60px;
     min-height: 60px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--telegram-divider);
+    background: var(--telegram-bg);
+    z-index: 999;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    flex-shrink: 0; /* Важно! */
 }
+
 
 
     .chat-header .back-button {
@@ -710,7 +716,6 @@ input, textarea {
     }
 
 .messages-container {
-    flex: 1;
     padding: 16px;
     overflow-y: auto;
     display: flex;
@@ -719,8 +724,7 @@ input, textarea {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    /* Добавляем отступ сверху равный высоте хедера */
-    margin-top: 0;
+    margin-top: 60px; /* добавь это — высота хедера */
 }
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
@@ -1791,29 +1795,7 @@ function formatChatListTime(timestamp) {
 }
 
 
-function setupKeyboardScroll() {
-    const { messageInput, messagesContainer } = getActiveElements();
-    
-    if (!messageInput || !messagesContainer) return;
-    
-    messageInput.addEventListener('focus', () => {
-        // Даем время для появления клавиатуры
-        setTimeout(() => {
-            // Прокручиваем к самому низу
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 350); // Увеличьте таймаут если нужно
-    });
-    
-    // Также обрабатываем клик по отправке сообщения
-    const sendButton = getActiveElements().sendMessageButton;
-    if (sendButton) {
-        sendButton.addEventListener('click', () => {
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        });
-    }
-}
+
 
 function adjustColor(hex, percent) {
     const num = parseInt(hex.replace("#", ""), 16);
@@ -2688,18 +2670,29 @@ async function sendMessage() {
 
 
 
+// Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
-    const { messageInput, messagesContainer } = getActiveElements();
+    const { messagesContainer, messageInput } = getActiveElements();
     
-    messageInput.addEventListener('focus', () => {
-        // Скроллим к низу когда открывается клавиатура
-        setTimeout(() => {
-            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        }, 350);
+    // Закрытие клавиатуры при клике на сообщения
+    messagesContainer.addEventListener('click', (e) => {
+        if (!e.target.closest('.message-input-container')) {
+            messageInput.blur();
+        }
+    });
+    
+    // Предотвращение закрытия при клике на поле ввода
+    messageInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    // Обработка потери фокуса
+    messageInput.addEventListener('blur', () => {
+        // Не делаем ничего - клавиатура закроется сама
     });
 }
+
+
 
        
 async function openChat(chatId) {
@@ -3381,8 +3374,7 @@ async function initializePage() {
     }, 5000);
 
     setupKeyboardHandlers();
-    setupKeyboardScroll();
-
+    
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
         e.preventDefault();
