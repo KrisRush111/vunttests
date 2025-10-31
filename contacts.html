@@ -2388,7 +2388,7 @@ async function openChatWithContact(user) {
         return;
     }
     
-    // Изменение: Дополнительная проверка статуса дружбы для безопасности
+    // Проверяем статус дружбы
     const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
     if (friendshipStatus !== 'accepted') {
         showMessage('Чат доступен только для друзей', 'error');
@@ -2414,14 +2414,19 @@ async function openChatWithContact(user) {
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Сохраняем ID чата в sessionStorage
-            sessionStorage.setItem('openChatId', data.chat_id);
-            sessionStorage.setItem('openChatName', user.nickname || 'Чат');
-            
-            // Переходим на страницу чатов
-            window.location.href = 'chats.html';
+            if (!data.is_new) {
+                // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
+                sessionStorage.setItem('openChatId', data.chat_id);
+                sessionStorage.setItem('openChatName', user.nickname || 'Чат');
+                window.location.href = 'chats.html';
+            } else {
+                // ЧАТ НОВЫЙ - создаем временный и перенаправляем
+                sessionStorage.setItem('tempChatContactId', user.platform_user_id);
+                sessionStorage.setItem('tempChatName', user.nickname || 'Новый чат');
+                window.location.href = 'chats.html';
+            }
         } else {
-            throw new Error(data.error || 'Не удалось создать чат');
+            throw new Error(data.error || 'Не удалось проверить чат');
         }
     } catch (error) {
         console.error('Error opening chat:', error);
