@@ -520,6 +520,7 @@ input, textarea {
         pointer-events: none;
     }
 
+
 @media (max-width: 767px) {
     .chat-modal {
         position: fixed;
@@ -535,6 +536,7 @@ input, textarea {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
+        overflow: hidden;
     }
 
     .chat-modal.active {
@@ -558,10 +560,10 @@ input, textarea {
 
     .messages-container {
         flex: 1;
-        margin-top: 60px; /* Отступ для хедера */
-        margin-bottom: 60px; /* Отступ для поля ввода */
         padding: 16px;
         overflow-y: auto;
+        margin-top: 60px; /* Отступ для хедера */
+        margin-bottom: 60px; /* Отступ для поля ввода */
         height: calc(100vh - 120px); /* 60px хедер + 60px инпут */
         max-height: calc(100vh - 120px);
     }
@@ -579,12 +581,16 @@ input, textarea {
         z-index: 1000;
     }
 
-    /* Убедитесь, что контейнер сообщений правильно позиционирован */
-    .chat-modal.active {
-        padding: 0;
+    /* Убедимся, что контейнер сообщений правильно отображается */
+    .messages-container::-webkit-scrollbar {
+        display: none;
+    }
+    
+    .messages-container {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
     }
 }
-
     @media (min-width: 768px) {
         .chat-modal {
             position: static;
@@ -2741,6 +2747,51 @@ async function sendMessage() {
     }
 }
 
+
+function setupMobileLayout() {
+    if (isDesktop) return;
+    
+    const { chatHeader, messagesContainer, messageInputContainer, messageInput } = getActiveElements();
+    
+    // Функция для обновления высоты с учетом клавиатуры
+    function updateLayout() {
+        const headerHeight = chatHeader.offsetHeight;
+        const inputHeight = messageInputContainer.offsetHeight;
+        const windowHeight = window.innerHeight;
+        
+        // Высота контейнера сообщений = общая высота - хедер - инпут
+        const messagesHeight = windowHeight - headerHeight - inputHeight;
+        
+        messagesContainer.style.height = `${messagesHeight}px`;
+        messagesContainer.style.maxHeight = `${messagesHeight}px`;
+        messagesContainer.style.marginTop = `${headerHeight}px`;
+        messagesContainer.style.marginBottom = `${inputHeight}px`;
+        
+        // Автоскролл к последнему сообщению при фокусе
+        setTimeout(() => {
+            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }, 100);
+    }
+    
+    // Обработчики событий
+    messageInput.addEventListener('focus', () => {
+        // Даем время для появления клавиатуры
+        setTimeout(updateLayout, 300);
+    });
+    
+    messageInput.addEventListener('blur', () => {
+        // Восстанавливаем нормальную высоту
+        setTimeout(updateLayout, 200);
+    });
+    
+    // Обработчик изменения ориентации и размера
+    window.addEventListener('resize', updateLayout);
+    
+    // Инициализация
+    updateLayout();
+}
 
 
 // Функция для закрытия клавиатуры при клике вне поля ввода
