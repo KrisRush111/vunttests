@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
    <!-- Запрет масштабирования -->
 
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 
     <title>Чаты - TheVuntgram</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
@@ -520,7 +520,7 @@ input, textarea {
         pointer-events: none;
     }
 
-@media (max-width: 767px) {
+    @media (max-width: 767px) {
     .chat-modal {
         position: fixed;
         top: 0;
@@ -538,17 +538,11 @@ input, textarea {
         flex-direction: column;
     }
 
-    .chat-header {
-        position: sticky;
-        top: 0;
-        height: 60px;
-        min-height: 60px;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--telegram-divider);
-        background: var(--telegram-bg);
-        z-index: 10;
-        flex-shrink: 0; /* Важно: запрещает сжатие */
+    .chat-modal.active {
+        transform: translateX(0);
     }
+
+
 
     .messages-container {
         flex: 1;
@@ -565,6 +559,40 @@ input, textarea {
         background: var(--telegram-bg);
         border-top: 1px solid var(--telegram-divider);
         flex-shrink: 0; /* Важно: запрещает сжатие */
+    }
+
+
+   .chat-header {
+        position: sticky;
+        top: 0;
+        height: 60px;
+        min-height: 60px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--telegram-divider);
+        background: var(--telegram-bg);
+        z-index: 10;
+        flex-shrink: 0; /* Важно: запрещает сжатие */
+    }
+
+
+    
+    /* Скрываем навигацию когда открыт чат */
+    .chat-modal.active ~ .bottom-nav {
+        display: none !important;
+    }
+
+    /* Убираем любые отступы у body */
+    body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    /* Гарантируем что контейнер чата занимает всю высоту */
+    .chats-container.mobile-only {
+        height: 100vh;
+        max-height: 100vh;
+        padding-bottom: 80px; /* место для навигации */
     }
 }
 
@@ -598,8 +626,8 @@ input, textarea {
     min-height: 60px;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    flex-shrink: 0; /* Важно! */
 }
-
 
 
     .chat-header .back-button {
@@ -2660,27 +2688,36 @@ async function sendMessage() {
 
 
 
-// Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
-    const { messagesContainer, messageInput } = getActiveElements();
+    const { messageInput, messagesContainer, chatHeader } = getActiveElements();
     
-    // Закрытие клавиатуры при клике на сообщения
-    messagesContainer.addEventListener('click', (e) => {
-        if (!e.target.closest('.message-input-container')) {
-            messageInput.blur();
-        }
+    let originalScrollTop = 0;
+    
+    messageInput.addEventListener('focus', () => {
+        // Сохраняем позицию скролла
+        originalScrollTop = messagesContainer.scrollTop;
+        
+        // Даем время для появления клавиатуры
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 300);
     });
     
-    // Предотвращение закрытия при клике на поле ввода
-    messageInput.addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
-    
-    // Обработка потери фокуса
     messageInput.addEventListener('blur', () => {
-        // Не делаем ничего - клавиатура закроется сама
+        // Восстанавливаем позицию скролла
+        setTimeout(() => {
+            messagesContainer.scrollTop = originalScrollTop;
+        }, 100);
     });
+    
+    // Предотвращаем скролл body когда клавиатура открыта
+    document.addEventListener('touchmove', (e) => {
+        if (document.activeElement === messageInput) {
+            e.preventDefault();
+        }
+    }, { passive: false });
 }
+
 
 
 
