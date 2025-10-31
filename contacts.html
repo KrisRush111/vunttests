@@ -2382,48 +2382,54 @@ function updateOnlineStatusesUI(activityData) {
     }
 
     // Функция для открытия чата с контактом
-    async function openChatWithContact(user) {
-        if (!user || !user.platform_user_id) {
-            console.error('No user data to open chat with');
-            return;
-        }
-        
-        showLoading('Открытие чата...');
-        
-        try {
-            // Получаем или создаем чат с этим пользователем
-            const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    platform_user_id: userData.platform_user_id,
-                    contact_id: user.platform_user_id
-                }),
-                credentials: 'include'
-            });
-
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                // Сохраняем ID чата в sessionStorage
-                sessionStorage.setItem('openChatId', data.chat_id);
-                sessionStorage.setItem('openChatName', user.nickname || 'Чат');
-                
-                // Переходим на страницу чатов
-                window.location.href = 'chats.html';
-            } else {
-                throw new Error(data.error || 'Не удалось создать чат');
-            }
-        } catch (error) {
-            console.error('Error opening chat:', error);
-            showMessage('Ошибка открытия чата: ' + error.message, 'error');
-        } finally {
-            hideLoading();
-        }
+async function openChatWithContact(user) {
+    if (!user || !user.platform_user_id) {
+        console.error('No user data to open chat with');
+        return;
     }
+    
+    // Изменение: Дополнительная проверка статуса дружбы для безопасности
+    const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
+    if (friendshipStatus !== 'accepted') {
+        showMessage('Чат доступен только для друзей', 'error');
+        return;
+    }
+    
+    showLoading('Открытие чата...');
+    
+    try {
+        // Получаем или создаем чат с этим пользователем
+        const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                contact_id: user.platform_user_id
+            }),
+            credentials: 'include'
+        });
 
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Сохраняем ID чата в sessionStorage
+            sessionStorage.setItem('openChatId', data.chat_id);
+            sessionStorage.setItem('openChatName', user.nickname || 'Чат');
+            
+            // Переходим на страницу чатов
+            window.location.href = 'chats.html';
+        } else {
+            throw new Error(data.error || 'Не удалось создать чат');
+        }
+    } catch (error) {
+        console.error('Error opening chat:', error);
+        showMessage('Ошибка открытия чата: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
 
    if (chatButtonDesktop) {
         // Анимация при наведении
@@ -2490,51 +2496,59 @@ function updateOnlineStatusesUI(activityData) {
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
     
-        function getActiveElements() {
-            if (isDesktop) {
-                return {
-                    searchInput: searchInputDesktop,
-                    noContacts: noContactsDesktop,
-                    searchResults: searchResultsDesktop,
-                    profileModal: profileModalDesktop,
-                    profileBackButton: profileBackButtonDesktop,
-                    modalProfileAvatar: modalProfileAvatarDesktop,
-                    modalProfileNickname: modalProfileNicknameDesktop,
-                    modalProfileId: modalProfileIdDesktop,
-                    modalMainSchool: modalMainSchoolDesktop,
-                    modalUserClass: modalUserClassDesktop,
-                    modalUserRole: modalUserRoleDesktop,
-                    modalAdditionalSchool: modalAdditionalSchoolDesktop,
-                    modalUserSpecialization: modalUserSpecializationDesktop,
-                    modalUserCourse: modalUserCourseDesktop,
-                    modalAdditionalSchoolContainer: modalAdditionalSchoolContainerDesktop,
-                    modalSpecializationContainer: modalSpecializationContainerDesktop,
-                    modalCourseContainer: modalCourseContainerDesktop,
-                    modalProfileStatus: modalProfileStatusDesktop
-                };
-            } else {
-                return {
-                    searchInput: searchInputMobile,
-                    noContacts: noContactsMobile,
-                    searchResults: searchResultsMobile,
-                    profileModal: profileModalMobile,
-                    profileBackButton: profileBackButtonMobile,
-                    modalProfileAvatar: modalProfileAvatarMobile,
-                    modalProfileNickname: modalProfileNicknameMobile,
-                    modalProfileId: modalProfileIdMobile,
-                    modalMainSchool: modalMainSchoolMobile,
-                    modalUserClass: modalUserClassMobile,
-                    modalUserRole: modalUserRoleMobile,
-                    modalAdditionalSchool: modalAdditionalSchoolMobile,
-                    modalUserSpecialization: modalUserSpecializationMobile,
-                    modalUserCourse: modalUserCourseMobile,
-                    modalAdditionalSchoolContainer: modalAdditionalSchoolContainerMobile,
-                    modalSpecializationContainer: modalSpecializationContainerMobile,
-                    modalCourseContainer: modalCourseContainerMobile,
-                    modalProfileStatus: modalProfileStatusMobile
-                };
-            }
-        }
+function getActiveElements() {
+    if (isDesktop) {
+        return {
+            searchInput: searchInputDesktop,
+            noContacts: noContactsDesktop,
+            searchResults: searchResultsDesktop,
+            profileModal: profileModalDesktop,
+            profileBackButton: profileBackButtonDesktop,
+            modalProfileAvatar: modalProfileAvatarDesktop,
+            modalProfileNickname: modalProfileNicknameDesktop,
+            modalProfileId: modalProfileIdDesktop,
+            modalMainSchool: modalMainSchoolDesktop,
+            modalUserClass: modalUserClassDesktop,
+            modalUserRole: modalUserRoleDesktop,
+            modalAdditionalSchool: modalAdditionalSchoolDesktop,
+            modalUserSpecialization: modalUserSpecializationDesktop,
+            modalUserCourse: modalUserCourseDesktop,
+            modalAdditionalSchoolContainer: modalAdditionalSchoolContainerDesktop,
+            modalSpecializationContainer: modalSpecializationContainerDesktop,
+            modalCourseContainer: modalCourseContainerDesktop,
+            modalProfileStatus: modalProfileStatusDesktop,
+            // Изменение: Добавлены ссылки на кнопки чата для десктопа и мобильных
+            chatButton: chatButtonDesktop,
+            soundButton: soundButtonDesktop,
+            moreButton: moreButtonDesktop
+        };
+    } else {
+        return {
+            searchInput: searchInputMobile,
+            noContacts: noContactsMobile,
+            searchResults: searchResultsMobile,
+            profileModal: profileModalMobile,
+            profileBackButton: profileBackButtonMobile,
+            modalProfileAvatar: modalProfileAvatarMobile,
+            modalProfileNickname: modalProfileNicknameMobile,
+            modalProfileId: modalProfileIdMobile,
+            modalMainSchool: modalMainSchoolMobile,
+            modalUserClass: modalUserClassMobile,
+            modalUserRole: modalUserRoleMobile,
+            modalAdditionalSchool: modalAdditionalSchoolMobile,
+            modalUserSpecialization: modalUserSpecializationMobile,
+            modalUserCourse: modalUserCourseMobile,
+            modalAdditionalSchoolContainer: modalAdditionalSchoolContainerMobile,
+            modalSpecializationContainer: modalSpecializationContainerMobile,
+            modalCourseContainer: modalCourseContainerMobile,
+            modalProfileStatus: modalProfileStatusMobile,
+            // Изменение: Добавлены ссылки на кнопки чата для десктопа и мобильных
+            chatButton: chatButtonMobile,
+            soundButton: soundButtonMobile,
+            moreButton: moreButtonMobile
+        };
+    }
+}
 
         
         function showLoading(text = 'Загрузка...') {
@@ -2883,94 +2897,111 @@ function updateProfileModalStatus(userId) {
 
 
         // Обновите функцию updateProfileModalUI
-        async function updateProfileModalUI(user) {
-            const activeElements = getActiveElements();
-            
-            currentViewedUser = user;
-            console.log('Updating profile UI with:', user);
+async function updateProfileModalUI(user) {
+    const activeElements = getActiveElements();
+    
+    currentViewedUser = user;
+    console.log('Updating profile UI with:', user);
 
-            // Обновление аватара
-            if (user.has_avatar_photo || user.has_avatar) {
-                const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-                activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-                activeElements.modalProfileAvatar.textContent = '';
-                activeElements.modalProfileAvatar.style.backgroundColor = '';
-                activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
-                activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
-            } else {
-                const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                activeElements.modalProfileAvatar.textContent = initial;
-                activeElements.modalProfileAvatar.style.backgroundImage = 'none';
-                
-                if (user.avatar_background) {
-                    const lighterColor = adjustColor(user.avatar_background, 20);
-                    activeElements.modalProfileAvatar.style.background = 
-                        `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
-                } else {
-                    activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
-                }
-            }
-
-            // Основная информация
-            activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
-            activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
-
-            // Обновление статуса - используем кэшированные данные
-            updateProfileModalStatus(user.platform_user_id);
-
-            // Функция для проверки и отображения поля с учетом всех вариантов "не указано"
-            function updateField(fieldValue, fieldElement, containerElement, fieldName) {
-                if (!containerElement) return;
-                
-                // Все возможные варианты "не указано" которые нужно скрывать
-                const invalidValues = [
-                    'не указано', 'не указан', 'не ук', 
-                    'not specified', 'none', 'null', 'undefined'
-                ];
-                
-                const hasValidValue = fieldValue && 
-                                    !invalidValues.includes(fieldValue.toLowerCase().trim()) &&
-                                    fieldValue.trim() !== '';
-                
-                if (hasValidValue) {
-                    fieldElement.textContent = fieldValue;
-                    containerElement.style.display = 'flex';
-                    console.log(`${fieldName}: "${fieldValue}" (показано)`);
-                } else {
-                    containerElement.style.display = 'none';
-                    console.log(`${fieldName}: скрыто (значение: "${fieldValue}")`);
-                }
-            }
-
-            // Обновляем все поля - используем правильные контейнеры из activeElements
-            updateField(user.main_school_name, activeElements.modalMainSchool, 
-                       activeElements.modalMainSchool.closest('.detail-item'), 'Основная школа');
-            
-            updateField(user.class_number && user.class_letter ? 
-                       `${user.class_number}${user.class_letter}` : null, 
-                       activeElements.modalUserClass, 
-                       activeElements.modalUserClass.closest('.detail-item'), 'Класс');
-            
-            updateField(user.identity, activeElements.modalUserRole, 
-                       activeElements.modalUserRole.closest('.detail-item'), 'Роль');
-            
-            updateField(user.additional_school_name, activeElements.modalAdditionalSchool, 
-                       activeElements.modalAdditionalSchoolContainer, 'Доп. школа');
-            
-            updateField(user.specialization, activeElements.modalUserSpecialization, 
-                       activeElements.modalSpecializationContainer, 'Специализация');
-            
-            updateField(user.course, activeElements.modalUserCourse, 
-                       activeElements.modalCourseContainer, 'Курс');
-
-            // Обработчик клика на аватар
-            activeElements.modalProfileAvatar.onclick = () => {
-                if (user.has_avatar_photo || user.has_avatar) {
-                    const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-                    openPhotoViewer(avatarUrl);
-                }
-            };
+    // Обновление аватара
+    if (user.has_avatar_photo || user.has_avatar) {
+        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+        activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+        activeElements.modalProfileAvatar.textContent = '';
+        activeElements.modalProfileAvatar.style.backgroundColor = '';
+        activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
+        activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
+    } else {
+        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+        activeElements.modalProfileAvatar.textContent = initial;
+        activeElements.modalProfileAvatar.style.backgroundImage = 'none';
+        
+        if (user.avatar_background) {
+            const lighterColor = adjustColor(user.avatar_background, 20);
+            activeElements.modalProfileAvatar.style.background = 
+                `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+        } else {
+            activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
         }
+    }
+
+    // Основная информация
+    activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+    activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
+
+    // Обновление статуса - используем кэшированные данные
+    updateProfileModalStatus(user.platform_user_id);
+
+    // Функция для проверки и отображения поля с учетом всех вариантов "не указано"
+    function updateField(fieldValue, fieldElement, containerElement, fieldName) {
+        if (!containerElement) return;
+        
+        // Все возможные варианты "не указано" которые нужно скрывать
+        const invalidValues = [
+            'не указано', 'не указан', 'не ук', 
+            'not specified', 'none', 'null', 'undefined'
+        ];
+        
+        const hasValidValue = fieldValue && 
+                            !invalidValues.includes(fieldValue.toLowerCase().trim()) &&
+                            fieldValue.trim() !== '';
+        
+        if (hasValidValue) {
+            fieldElement.textContent = fieldValue;
+            containerElement.style.display = 'flex';
+            console.log(`${fieldName}: "${fieldValue}" (показано)`);
+        } else {
+            containerElement.style.display = 'none';
+            console.log(`${fieldName}: скрыто (значение: "${fieldValue}")`);
+        }
+    }
+
+    // Обновляем все поля - используем правильные контейнеры из activeElements
+    updateField(user.main_school_name, activeElements.modalMainSchool, 
+               activeElements.modalMainSchool.closest('.detail-item'), 'Основная школа');
+    
+    updateField(user.class_number && user.class_letter ? 
+               `${user.class_number}${user.class_letter}` : null, 
+               activeElements.modalUserClass, 
+               activeElements.modalUserClass.closest('.detail-item'), 'Класс');
+    
+    updateField(user.identity, activeElements.modalUserRole, 
+               activeElements.modalUserRole.closest('.detail-item'), 'Роль');
+    
+    updateField(user.additional_school_name, activeElements.modalAdditionalSchool, 
+               activeElements.modalAdditionalSchoolContainer, 'Доп. школа');
+    
+    updateField(user.specialization, activeElements.modalUserSpecialization, 
+               activeElements.modalSpecializationContainer, 'Специализация');
+    
+    updateField(user.course, activeElements.modalUserCourse, 
+               activeElements.modalCourseContainer, 'Курс');
+
+    // Обработчик клика на аватар
+    activeElements.modalProfileAvatar.onclick = () => {
+        if (user.has_avatar_photo || user.has_avatar) {
+            const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
+            openPhotoViewer(avatarUrl);
+        }
+    };
+
+    // Изменение: Проверяем статус дружбы асинхронно и управляем кнопкой чата
+    const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
+    
+    if (friendshipStatus === 'accepted') {
+        // Кнопка активна для друзей
+        activeElements.chatButton.disabled = false;
+        activeElements.chatButton.style.opacity = '1';
+        activeElements.chatButton.style.pointerEvents = 'auto';
+        activeElements.chatButton.style.cursor = 'pointer';  // Для десктопа
+    } else {
+        // Кнопка отключена для не-друзей
+        activeElements.chatButton.disabled = true;
+        activeElements.chatButton.style.opacity = '0.5';
+        activeElements.chatButton.style.pointerEvents = 'none';
+        activeElements.chatButton.style.cursor = 'not-allowed';  // Для десктопа
+    }
+}
 
   
         function adjustColor(hex, percent) {
