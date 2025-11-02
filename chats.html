@@ -2878,7 +2878,6 @@ async function openChat(chatId) {
 }
 
 
-
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
@@ -3335,60 +3334,35 @@ async function initializePage() {
             }
         });
         
-        // Умная прокрутка при фокусе: только если нужно (без приближения/смещений)
+        // Улучшенная умная прокрутка при фокусе: предотвращает смещения и приближение
         messageInput.addEventListener('focus', () => {
             setTimeout(() => {
                 const { messagesContainer } = getActiveElements();
                 if (currentMessages.length > 0) {
-                    // Проверяем, близко ли пользователь к низу (последнему сообщению)
-                    const isNearBottom = messagesContainer.scrollTop + messagesContainer.clientHeight >= messagesContainer.scrollHeight - 100; // 100px tolerance
+                    // Проверяем, близко ли пользователь к низу (последнему сообщению) с большей точностью
+                    const scrollBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
+                    const isNearBottom = scrollBottom <= 150; // Увеличил tolerance до 150px для лучшей работы
                     if (!isNearBottom) {
-                        // Если не внизу, прокручиваем к последнему сообщению (приспускаем и приподнимаем)
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        // Если не внизу, плавно прокручиваем к последнему сообщению
+                        messagesContainer.scrollTo({
+                            top: messagesContainer.scrollHeight,
+                            behavior: 'smooth' // Плавная прокрутка для лучшего UX
+                        });
                     }
-                    // Если уже внизу или близко, ничего не делаем — сообщения приподнимутся сами за счёт sticky поля ввода
+                    // Если уже внизу, ничего не делаем — сообщения приподнимутся сами за счёт sticky поля ввода
                 }
                 // Если сообщений нет, ничего не прокручиваем — клавиатура просто появляется
             }, 300); // Задержка для открытия клавиатуры
         });
     }
 
-    // Обновление статусов каждые 5 секунд
+    // Запуск опроса активности (добавлено, так как было в оригинале, но не вызывалось)
+    startActivityPolling();
+
+    // Обновление статусов каждые 5 секунд (упрощено, без дублирования)
     const statusUpdateInterval = setInterval(async () => {
-        const { chatModal } = getActiveElements();
-        
-        // Фоновое обновление статусов без блокировки UI
         try {
-            await Promise.all([
-                fetch(`${SERVER_URL}/refresh_activity`, {
-                    method: 'POST',
-                    credentials: 'include'
-                }).catch(() => {}),
-                updateChatStatuses()
-            ]);
-            
-            // Обновляем статус в открытом чате
-            if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
-                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-                    const userActivity = activityData[otherParticipant.platform_user_id];
-                    const chatStatus = getActiveElements().chatStatus;
-                    
-                    if (userActivity) {
-                        if (userActivity.is_online) {
-                            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                            chatStatus.classList.add('online');
-                        } else {
-                            chatStatus.textContent = formatLastSeen(userActivity.last_online);
-                            chatStatus.classList.remove('online');
-                        }
-                    } else {
-                        chatStatus.textContent = 'был(а) недавно';
-                        chatStatus.classList.remove('online');
-                    }
-                }
-            }
+            await updateChatStatuses();
         } catch (error) {
             console.error('Error updating statuses:', error);
         }
@@ -3490,14 +3464,11 @@ async function initializePage() {
         });
     }
 
-    // Для мобильных: добавляем resize без жёстких высот (только для пересчёта flex)
+    // Настройка высоты для мобильных устройств (вернул адаптированную функцию)
     if (!isDesktop) {
+        setupMobileChatHeight(); // Вызываем для начальной настройки
         window.addEventListener('resize', () => {
-            // Пересчитываем flex-пространство без установки height
-            const { messagesContainer } = getActiveElements();
-            if (messagesContainer) {
-                messagesContainer.style.height = 'auto'; // Гарантируем auto для flex
-            }
+            setupMobileChatHeight(); // Пересчитываем при изменении размера
         });
     }
 
