@@ -720,14 +720,18 @@ input, textarea {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    /* УБИРАЕМ все ограничения высоты */
     height: 100%;
     max-height: none;
     min-height: 0;
+    /* Гарантируем полную высоту */
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    /* Убираем любые позиционирование */
     position: relative;
-    /* УБРАТЬ все трансформации и transitions */
-    /* transition: none !important; */
-    /* transform: none !important; */
 }
+
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
 .messages-container::before {
@@ -1365,16 +1369,16 @@ input, textarea {
 
 
 .message-input-container {
-    position: fixed;
-    bottom: 12px;
+    padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
+    position: sticky;
+    bottom: 12px; /* Добавляем 4px снизу */
     left: 0;
     right: 0;
-    z-index: 1000;
-    padding: 12px;
+    z-index: 10;
+    display: flex;
+    justify-content: center;
     background: transparent;
-    /* УБРАТЬ трансформации */
-    /* transition: none !important; */
-    /* transform: none !important; */
+    margin-top: -20px;
 }
 
 .message-input-wrapper {
@@ -1431,25 +1435,20 @@ input, textarea {
 }
 
 
+
+/* Адаптация для мобильных устройств */
 @media (max-width: 767px) {
-    .messages-container {
-        padding-bottom: 80px; /* Место для поля ввода */
-    }
-    
     .message-input-container {
-        position: fixed;
-        bottom: 12px;
-        left: 0;
-        right: 0;
-        z-index: 1000;
         padding: 12px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        /* Гарантируем прозрачность на мобильных */
         background: transparent;
     }
     
     .message-input-wrapper {
         width: 95%;
         max-width: 350px;
+        /* Усиливаем эффект на мобильных */
         backdrop-filter: blur(25px);
         -webkit-backdrop-filter: blur(25px);
     }
@@ -2595,9 +2594,8 @@ async function sendMessage() {
         noMessages.style.display = 'none';
         renderMessages(currentMessages);
         
-        // ✅ ПРАВИЛЬНЫЙ БЛОК: Простой скролл к низу
         setTimeout(() => {
-            forceScrollToBottom();
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
         
         if (!currentChat.is_temp) {
@@ -2615,13 +2613,9 @@ async function sendMessage() {
             });
         }
         
-        // ✅ ПРАВИЛЬНЫЙ БЛОК: Простой фокус
+        // Фокусируемся на поле ввода после успешной отправки
         setTimeout(() => {
             messageInput.focus();
-            // Дополнительный скролл после фокуса
-            setTimeout(() => {
-                forceScrollToBottom();
-            }, 100);
         }, 100);
         
     } catch (error) {
@@ -2631,78 +2625,38 @@ async function sendMessage() {
         // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
         
-        // Восстанавливаем скролл позицию при ошибке
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
-        } else {
-            const savedScroll = sessionStorage.getItem('chatScrollPosition');
-            if (savedScroll) {
-                setTimeout(() => {
-                    messagesContainer.scrollTop = parseInt(savedScroll);
-                }, 50);
-            }
         }
     } finally {
         sendMessageButton.disabled = false;
     }
 }
 
-let isKeyboardVisible = false;
-let keyboardHeight = 0;
 
+// Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
-    const { messageInput, messagesContainer } = getActiveElements();
+    const { messagesContainer, messageInput } = getActiveElements();
     
-    // Обработчик фокуса - основной
-    messageInput.addEventListener('focus', () => {
-        isKeyboardVisible = true;
-        console.log('Input focused, scrolling to bottom');
-        
-        // Даем время клавиатуре появиться, затем скроллим
-        setTimeout(() => {
-            forceScrollToBottom();
-        }, 350);
+    // Закрытие клавиатуры при клике на сообщения
+    messagesContainer.addEventListener('click', (e) => {
+        if (!e.target.closest('.message-input-container')) {
+            messageInput.blur();
+        }
     });
     
-    // Обработчик потери фокуса
+    // Предотвращение закрытия при клике на поле ввода
+    messageInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    // Обработка потери фокуса
     messageInput.addEventListener('blur', () => {
-        isKeyboardVisible = false;
-        console.log('Input blurred');
-    });
-    
-    // Для iOS - обработчик resize
-    window.addEventListener('resize', () => {
-        setTimeout(() => {
-            if (document.activeElement === messageInput && isKeyboardVisible) {
-                forceScrollToBottom();
-            }
-        }, 300);
-    });
-    
-    // Сохраняем позицию скролла
-    messagesContainer.addEventListener('scroll', () => {
-        sessionStorage.setItem('chatScrollPosition', messagesContainer.scrollTop);
+        // Не делаем ничего - клавиатура закроется сама
     });
 }
 
-function forceScrollToBottom() {
-    const { messagesContainer } = getActiveElements();
-    
-    if (!messagesContainer) return;
-    
-    // Простой и надежный скролл к самому низу
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    
-    // Дублируем через небольшой интервал для надежности
-    setTimeout(() => {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 100);
-    
-    // И еще раз на всякий случай
-    setTimeout(() => {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 300);
-}
+
 
        
 async function openChat(chatId) {
@@ -2864,8 +2818,8 @@ if (currentChat.participants && currentChat.participants.length > 0) {
         
         if (currentMessages.length > 0) {
             setTimeout(() => {
-                forceScrollToBottom();
-            }, 200);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
         }
 
         updateChatItemInDOM(chatId, {
@@ -3404,15 +3358,6 @@ async function initializePage() {
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
     
-    // Восстановите позицию скролла если нужно
-    const savedScroll = sessionStorage.getItem('chatScrollPosition');
-    if (savedScroll && currentChat) {
-        const { messagesContainer } = getActiveElements();
-        setTimeout(() => {
-            messagesContainer.scrollTop = parseInt(savedScroll);
-        }, 100);
-    }
-    
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
         e.preventDefault();
@@ -3511,7 +3456,6 @@ async function initializePage() {
         setupMobileChatHeight();
         window.addEventListener('resize', setupMobileChatHeight);
     }
-
 
     console.log('Page initialized successfully');
 }
