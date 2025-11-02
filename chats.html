@@ -723,12 +723,10 @@ input, textarea {
     height: 100%;
     max-height: none;
     min-height: 0;
-    flex-grow: 1;
-    flex-shrink: 1;
-    flex-basis: 0;
     position: relative;
-    /* УБЕРИТЕ transition - он мешает плавному скроллу */
-    /* transition: transform 0.3s ease; */
+    /* УБРАТЬ все трансформации и transitions */
+    /* transition: none !important; */
+    /* transform: none !important; */
 }
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
@@ -1367,19 +1365,16 @@ input, textarea {
 
 
 .message-input-container {
-    padding: 8px 16px 6px 16px;
-    position: sticky;
+    position: fixed;
     bottom: 12px;
     left: 0;
     right: 0;
-    z-index: 10;
-    display: flex;
-    justify-content: center;
+    z-index: 1000;
+    padding: 12px;
     background: transparent;
-    margin-top: -20px;
-    /* Фиксированная позиция относительно viewport */
-    position: fixed;
-    bottom: 12px;
+    /* УБРАТЬ трансформации */
+    /* transition: none !important; */
+    /* transform: none !important; */
 }
 
 .message-input-wrapper {
@@ -1702,8 +1697,6 @@ input, textarea {
         // В разделе с другими глобальными переменными добавьте:
         let activityPollInterval;
         let currentActivityData = {};
-        let keyboardHeight = 0;
-        let isKeyboardVisible = false;
         
 
 
@@ -2602,27 +2595,9 @@ async function sendMessage() {
         noMessages.style.display = 'none';
         renderMessages(currentMessages);
         
-        // ОБНОВЛЕННЫЙ БЛОК: Улучшенный скролл с учетом клавиатуры
+        // ✅ ПРАВИЛЬНЫЙ БЛОК: Простой скролл к низу
         setTimeout(() => {
-            // Всегда скроллим к последнему сообщению после отправки
-            scrollToBottom();
-            
-            // Если клавиатура открыта, убедимся что все видно
-            if (isKeyboardVisible) {
-                setTimeout(() => {
-                    const { messageInput } = getActiveElements();
-                    if (document.activeElement === messageInput) {
-                        // Повторно обрабатываем фокус для корректного позиционирования
-                        handleInputFocus();
-                    } else {
-                        // Если фокус потерян, просто скроллим к низу
-                        scrollToBottom();
-                    }
-                }, 150);
-            } else {
-                // Если клавиатура закрыта, просто скроллим к низу
-                scrollToBottom();
-            }
+            forceScrollToBottom();
         }, 50);
         
         if (!currentChat.is_temp) {
@@ -2640,16 +2615,13 @@ async function sendMessage() {
             });
         }
         
-        // ОБНОВЛЕННЫЙ БЛОК: Улучшенный фокус с учетом клавиатуры
+        // ✅ ПРАВИЛЬНЫЙ БЛОК: Простой фокус
         setTimeout(() => {
             messageInput.focus();
-            
-            // После фокуса дополнительно проверяем позиционирование
-            if (isKeyboardVisible) {
-                setTimeout(() => {
-                    handleInputFocus();
-                }, 200);
-            }
+            // Дополнительный скролл после фокуса
+            setTimeout(() => {
+                forceScrollToBottom();
+            }, 100);
         }, 100);
         
     } catch (error) {
@@ -2659,11 +2631,10 @@ async function sendMessage() {
         // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
         
-        // ОБНОВЛЕННЫЙ БЛОК: Восстанавливаем скролл позицию при ошибке
+        // Восстанавливаем скролл позицию при ошибке
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
         } else {
-            // Сохраняем текущую позицию скролла чтобы не прыгало
             const savedScroll = sessionStorage.getItem('chatScrollPosition');
             if (savedScroll) {
                 setTimeout(() => {
@@ -2676,113 +2647,62 @@ async function sendMessage() {
     }
 }
 
-
+let isKeyboardVisible = false;
+let keyboardHeight = 0;
 
 function setupKeyboardHandlers() {
-    const { messagesContainer, messageInput } = getActiveElements();
+    const { messageInput, messagesContainer } = getActiveElements();
     
-    // Определяем высоту клавиатуры
-    detectKeyboardHeight();
-    
-    // Обработчик фокуса на поле ввода
-    messageInput.addEventListener('focus', handleInputFocus);
+    // Обработчик фокуса - основной
+    messageInput.addEventListener('focus', () => {
+        isKeyboardVisible = true;
+        console.log('Input focused, scrolling to bottom');
+        
+        // Даем время клавиатуре появиться, затем скроллим
+        setTimeout(() => {
+            forceScrollToBottom();
+        }, 350);
+    });
     
     // Обработчик потери фокуса
-    messageInput.addEventListener('blur', handleInputBlur);
+    messageInput.addEventListener('blur', () => {
+        isKeyboardVisible = false;
+        console.log('Input blurred');
+    });
     
-    // Обработчик изменения размера окна (для iOS)
-    window.addEventListener('resize', handleResize);
+    // Для iOS - обработчик resize
+    window.addEventListener('resize', () => {
+        setTimeout(() => {
+            if (document.activeElement === messageInput && isKeyboardVisible) {
+                forceScrollToBottom();
+            }
+        }, 300);
+    });
     
     // Сохраняем позицию скролла
-    messagesContainer.addEventListener('scroll', handleScroll);
+    messagesContainer.addEventListener('scroll', () => {
+        sessionStorage.setItem('chatScrollPosition', messagesContainer.scrollTop);
+    });
 }
 
-function detectKeyboardHeight() {
-    // Для Android - определяем высоту клавиатуры
-    const initialHeight = window.innerHeight;
+function forceScrollToBottom() {
+    const { messagesContainer } = getActiveElements();
     
+    if (!messagesContainer) return;
+    
+    // Простой и надежный скролл к самому низу
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Дублируем через небольшой интервал для надежности
     setTimeout(() => {
-        const newHeight = window.innerHeight;
-        if (newHeight < initialHeight) {
-            keyboardHeight = initialHeight - newHeight;
-            console.log('Detected keyboard height:', keyboardHeight);
-        }
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 100);
+    
+    // И еще раз на всякий случай
+    setTimeout(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }, 300);
 }
-
-function handleInputFocus() {
-    isKeyboardVisible = true;
-    
-    // Даем время клавиатуре появиться
-    setTimeout(() => {
-        const { messagesContainer, messageInput } = getActiveElements();
-        
-        // Если есть сообщения - скроллим к последнему
-        if (currentMessages.length > 0) {
-            scrollToBottom();
-        }
-        
-        // Дополнительная проверка через небольшой интервал
-        setTimeout(() => {
-            if (currentMessages.length > 0 && isUserNearBottom()) {
-                scrollToBottom();
-            }
-        }, 200);
-        
-    }, 100);
-}
-
-function handleInputBlur() {
-    isKeyboardVisible = false;
-    
-    // Плавно возвращаем скролл если нужно
-    setTimeout(() => {
-        const { messagesContainer } = getActiveElements();
-        // Убираем любые трансформации
-        messagesContainer.style.transform = 'none';
-    }, 200);
-}
-
-function handleResize() {
-    // iOS Safari использует resize для показа/скрытия клавиатуры
-    const { messagesContainer, messageInput } = getActiveElements();
-    
-    if (window.innerHeight < window.outerHeight * 0.7) {
-        // Клавиатура появилась
-        isKeyboardVisible = true;
-        
-        if (document.activeElement === messageInput && currentMessages.length > 0) {
-            setTimeout(() => {
-                scrollToBottom();
-            }, 100);
-        }
-    } else {
-        // Клавиатура скрылась
-        isKeyboardVisible = false;
-        messagesContainer.style.transform = 'none';
-    }
-}
-
-function handleScroll() {
-    const { messagesContainer } = getActiveElements();
-    sessionStorage.setItem('chatScrollPosition', messagesContainer.scrollTop);
-}
-
-function isUserNearBottom() {
-    const { messagesContainer } = getActiveElements();
-    const threshold = 150; // пикселей от нижнего края
-    
-    return messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= threshold;
-}
-
-function scrollToBottom() {
-    const { messagesContainer } = getActiveElements();
-    
-    // Простой скролл к низу без сложных трансформаций
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
-
-
 
        
 async function openChat(chatId) {
@@ -2944,8 +2864,8 @@ if (currentChat.participants && currentChat.participants.length > 0) {
         
         if (currentMessages.length > 0) {
             setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
+                forceScrollToBottom();
+            }, 200);
         }
 
         updateChatItemInDOM(chatId, {
