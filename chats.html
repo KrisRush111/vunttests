@@ -727,10 +727,9 @@ input, textarea {
     flex-shrink: 1;
     flex-basis: 0;
     position: relative;
-    /* Добавляем плавную анимацию */
-    transition: transform 0.3s ease;
+    /* УБЕРИТЕ transition - он мешает плавному скроллу */
+    /* transition: transform 0.3s ease; */
 }
-
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
 .messages-container::before {
@@ -2694,51 +2693,41 @@ function setupKeyboardHandlers() {
     // Обработчик изменения размера окна (для iOS)
     window.addEventListener('resize', handleResize);
     
-    // Обработчик скролла для автоматической подстройки
+    // Сохраняем позицию скролла
     messagesContainer.addEventListener('scroll', handleScroll);
 }
 
 function detectKeyboardHeight() {
-    // Определяем высоту клавиатуры на основе разницы высот
+    // Для Android - определяем высоту клавиатуры
     const initialHeight = window.innerHeight;
     
     setTimeout(() => {
         const newHeight = window.innerHeight;
         if (newHeight < initialHeight) {
             keyboardHeight = initialHeight - newHeight;
+            console.log('Detected keyboard height:', keyboardHeight);
         }
     }, 300);
 }
 
 function handleInputFocus() {
-    const { messagesContainer, messageInput } = getActiveElements();
-    
     isKeyboardVisible = true;
     
-    // Ждем немного чтобы клавиатура успела появиться
+    // Даем время клавиатуре появиться
     setTimeout(() => {
-        const containerRect = messagesContainer.getBoundingClientRect();
-        const inputRect = messageInput.getBoundingClientRect();
+        const { messagesContainer, messageInput } = getActiveElements();
         
-        // Если поле ввода перекрывается клавиатурой
-        if (inputRect.bottom > window.innerHeight - keyboardHeight) {
-            // Вычисляем сколько нужно проскроллить
-            const scrollAmount = inputRect.bottom - (window.innerHeight - keyboardHeight) + 20;
-            
-            // Плавно скроллим к нижней части
-            smoothScrollTo(messagesContainer, messagesContainer.scrollTop + scrollAmount, 300);
-        }
-        
-        // Если сообщений нет, просто показываем клавиатуру без изменений
-        if (currentMessages.length === 0) {
-            // Ничего не делаем - клавиатура просто появляется
-            return;
-        }
-        
-        // Автоматически скроллим к последнему сообщению при фокусе
-        if (isUserNearBottom()) {
+        // Если есть сообщения - скроллим к последнему
+        if (currentMessages.length > 0) {
             scrollToBottom();
         }
+        
+        // Дополнительная проверка через небольшой интервал
+        setTimeout(() => {
+            if (currentMessages.length > 0 && isUserNearBottom()) {
+                scrollToBottom();
+            }
+        }, 200);
         
     }, 100);
 }
@@ -2746,42 +2735,42 @@ function handleInputFocus() {
 function handleInputBlur() {
     isKeyboardVisible = false;
     
-    // Можно добавить плавное возвращение если нужно
+    // Плавно возвращаем скролл если нужно
     setTimeout(() => {
-        // Возвращаем нормальное состояние
         const { messagesContainer } = getActiveElements();
-        messagesContainer.style.transform = 'translateY(0)';
+        // Убираем любые трансформации
+        messagesContainer.style.transform = 'none';
     }, 200);
 }
 
 function handleResize() {
-    // При изменении размера окна (появление/скрытие клавиатуры в iOS)
+    // iOS Safari использует resize для показа/скрытия клавиатуры
     const { messagesContainer, messageInput } = getActiveElements();
     
-    if (window.innerHeight < window.outerHeight * 0.8) {
-        // Вероятно появилась клавиатура
+    if (window.innerHeight < window.outerHeight * 0.7) {
+        // Клавиатура появилась
         isKeyboardVisible = true;
         
-        if (document.activeElement === messageInput) {
-            handleInputFocus();
+        if (document.activeElement === messageInput && currentMessages.length > 0) {
+            setTimeout(() => {
+                scrollToBottom();
+            }, 100);
         }
     } else {
-        // Вероятно клавиатура скрылась
+        // Клавиатура скрылась
         isKeyboardVisible = false;
-        messagesContainer.style.transform = 'translateY(0)';
+        messagesContainer.style.transform = 'none';
     }
 }
 
 function handleScroll() {
     const { messagesContainer } = getActiveElements();
-    
-    // Сохраняем позицию скролла для восстановления при необходимости
     sessionStorage.setItem('chatScrollPosition', messagesContainer.scrollTop);
 }
 
 function isUserNearBottom() {
     const { messagesContainer } = getActiveElements();
-    const threshold = 100; // пикселей от нижнего края
+    const threshold = 150; // пикселей от нижнего края
     
     return messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= threshold;
 }
@@ -2789,63 +2778,38 @@ function isUserNearBottom() {
 function scrollToBottom() {
     const { messagesContainer } = getActiveElements();
     
-    smoothScrollTo(messagesContainer, messagesContainer.scrollHeight, 300);
-}
-
-function smoothScrollTo(element, target, duration) {
-    const start = element.scrollTop;
-    const change = target - start;
-    const startTime = performance.now();
-    
-    function animateScroll(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // easing function
-        const easeInOut = progress < 0.5 
-            ? 2 * progress * progress 
-            : -1 + (4 - 2 * progress) * progress;
-            
-        element.scrollTop = start + change * easeInOut;
-        
-        if (progress < 1) {
-            requestAnimationFrame(animateScroll);
-        }
-    }
-    
-    requestAnimationFrame(animateScroll);
+    // Простой скролл к низу без сложных трансформаций
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 // Специальные обработчики для iOS
 function setupIOSKeyboardHandlers() {
     const { messagesContainer, messageInput } = getActiveElements();
     
-    // iOS doesn't reliably trigger focus/blur events with virtual keyboard
+    // iOS не всегда корректно обрабатывает события фокуса с виртуальной клавиатурой
     let cachedHeight = window.innerHeight;
     
     window.addEventListener('resize', function() {
         const newHeight = window.innerHeight;
         
         if (newHeight < cachedHeight) {
-            // Keyboard appeared
+            // Клавиатура появилась
             isKeyboardVisible = true;
-            if (document.activeElement === messageInput) {
-                handleInputFocus();
+            if (document.activeElement === messageInput && currentMessages.length > 0) {
+                setTimeout(() => {
+                    scrollToBottom();
+                }, 100);
             }
         } else if (newHeight > cachedHeight) {
-            // Keyboard disappeared
+            // Клавиатура исчезла
             isKeyboardVisible = false;
-            messagesContainer.style.transform = 'translateY(0)';
+            messagesContainer.style.transform = 'none';
         }
         
         cachedHeight = newHeight;
     });
 }
 
-// В initializePage добавьте проверку для iOS
-if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) {
-    setupIOSKeyboardHandlers();
-}
 
 
        
@@ -3655,6 +3619,10 @@ async function initializePage() {
         setupMobileChatHeight();
         window.addEventListener('resize', setupMobileChatHeight);
     }
+    // В initializePage добавьте проверку для iOS
+if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) {
+    setupIOSKeyboardHandlers();
+}
 
     console.log('Page initialized successfully');
 }
