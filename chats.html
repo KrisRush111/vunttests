@@ -74,10 +74,12 @@ html, body {
     text-size-adjust: 100%;
     touch-action: manipulation;
     overscroll-behavior: none;
-    height: 100%;
+    height: 100vh; /* Изменено с 100% на 100vh для лучшей поддержки мобильных */
+    height: -webkit-fill-available; /* Для старых Safari */
     overflow: hidden;
+    position: fixed; /* Фиксируем body, чтобы предотвратить съезжание */
+    width: 100%;
 }
-
 /* Для контейнеров чатов */
 .chats-container, 
 .chat-modal, 
@@ -509,13 +511,11 @@ input, textarea {
     z-index: 100;
     display: none;
     flex-direction: column;
-    transform: translateX(100%);
+    transform: translateX(100%); /* Убираем translateX(0) по умолчанию, чтобы избежать сдвигов */
     transition: transform 0.3s ease, opacity 0.3s ease;
-    /* Гарантируем полную высоту */
-    height: 100vh;
+    height: 100vh; /* Фиксируем высоту */
     max-height: 100vh;
 }
-
     .chat-modal.active {
         transform: translateX(0);
         display: flex;
@@ -600,6 +600,7 @@ input, textarea {
     padding: 12px 16px;
     border-bottom: 1px solid var(--telegram-divider);
     background: var(--telegram-bg);
+    background: rgba(255, 255, 255, 0.9); /* Добавлено: полупрозрачный фон для лучшей видимости хедера при прокрутке и размытии */
     position: sticky;
     top: 0;
     left: 0;
@@ -610,6 +611,7 @@ input, textarea {
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
 }
+
 
 
 
@@ -720,18 +722,41 @@ input, textarea {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    /* УБИРАЕМ все ограничения высоты */
-    height: 100%;
-    max-height: none;
-    min-height: 0;
-    /* Гарантируем полную высоту */
-    flex-grow: 1;
-    flex-shrink: 1;
-    flex-basis: 0;
-    /* Убираем любые позиционирование */
+    height: calc(100vh - 120px); /* Высота минус хедер и поле ввода */
+    max-height: calc(100vh - 120px);
     position: relative;
+    /* Убираем любые transform, которые могут вызывать сдвиги */
+    transform: none;
 }
 
+
+@media (max-width: 767px) {
+    html, body {
+        height: 100vh;
+        height: -webkit-fill-available;
+        position: fixed;
+        overflow: hidden;
+    }
+    
+    .chat-modal {
+        height: 100vh;
+        max-height: 100vh;
+        transform: translateX(100%);
+    }
+    
+    .messages-container {
+        height: calc(100vh - 140px); /* Учитываем safe-area */
+        max-height: calc(100vh - 140px);
+    }
+    
+    .message-input-container {
+        position: sticky;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.9); /* Фон для видимости */
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+}
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
 .messages-container::before {
@@ -3294,23 +3319,32 @@ async function initializePage() {
     }
     
     // Обработчики для отправки сообщений
-    if (sendMessageButton && messageInput) {
-        sendMessageButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendMessage();
+// Обработчики для отправки сообщений
+if (sendMessageButton && messageInput) {
+    sendMessageButton.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+    
+    // Автофокус на поле ввода при открытии чата с улучшенной прокруткой
+    messageInput.addEventListener('focus', () => {
+        // Прокручиваем к нижней части при фокусе на поле ввода
+        setTimeout(() => {
+            const { messagesContainer } = getActiveElements();
+            // Используем плавную прокрутку для лучшего UX
+            messagesContainer.scrollTo({
+                top: messagesContainer.scrollHeight,
+                behavior: 'smooth'
+            });
+            // Дополнительно прокручиваем окно, если нужно (для мобильных)
+            if (!isDesktop) {
+                window.scrollTo(0, 0); // Предотвращает съезжание вверх
             }
-        });
-        
-        // Автофокус на поле ввода при открытии чата
-        messageInput.addEventListener('focus', () => {
-            // Прокручиваем к нижней части при фокусе на поле ввода
-            setTimeout(() => {
-                const { messagesContainer } = getActiveElements();
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        });
-    }
+        }, 100);
+    });
+}
 
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
