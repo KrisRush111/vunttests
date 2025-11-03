@@ -1371,7 +1371,7 @@ input, textarea {
 .message-input-container {
     padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
     position: sticky;
-    bottom: 12px; /* Добавляем 4px снизу */
+    bottom: 12px; 
     left: 0;
     right: 0;
     z-index: 98;
@@ -1452,6 +1452,17 @@ input, textarea {
         backdrop-filter: blur(25px);
         -webkit-backdrop-filter: blur(25px);
     }
+
+        /* Когда клавиатура открыта - уменьшаем отступ */
+    .keyboard-open .message-input-container {
+        bottom: 4px; /* Минимальное расстояние когда клавиатура открыта */
+    }
+    
+    /* Когда клавиатуры нет - нормальный отступ */
+    .keyboard-closed .message-input-container {
+        bottom: 12px; /* Большее расстояние когда клавиатуры нет */
+    }
+    
 }
 
 
@@ -2657,6 +2668,75 @@ function setupKeyboardHandlers() {
 
 
 
+
+function setupKeyboardDetection() {
+    if (isDesktop) return;
+    
+    const { messageInput, chatModal } = getActiveElements();
+    let keyboardShown = false;
+    
+    // Определяем открытие клавиатуры
+    messageInput.addEventListener('focus', () => {
+        setTimeout(() => {
+            keyboardShown = true;
+            chatModal.classList.remove('keyboard-closed');
+            chatModal.classList.add('keyboard-open');
+            adjustInputPosition(true);
+        }, 300);
+    });
+    
+    // Определяем закрытие клавиатуры
+    messageInput.addEventListener('blur', () => {
+        setTimeout(() => {
+            keyboardShown = false;
+            chatModal.classList.remove('keyboard-open');
+            chatModal.classList.add('keyboard-closed');
+            adjustInputPosition(false);
+        }, 300);
+    });
+    
+    // Альтернативный метод через resize (для iOS)
+    let initialHeight = window.innerHeight;
+    window.addEventListener('resize', () => {
+        if (!chatModal.classList.contains('active')) return;
+        
+        const currentHeight = window.innerHeight;
+        const keyboardHeight = initialHeight - currentHeight;
+        
+        if (keyboardHeight > 100) { // Клавиатура открыта
+            chatModal.classList.remove('keyboard-closed');
+            chatModal.classList.add('keyboard-open');
+            adjustInputPosition(true, keyboardHeight);
+        } else { // Клавиатура закрыта
+            chatModal.classList.remove('keyboard-open');
+            chatModal.classList.add('keyboard-closed');
+            adjustInputPosition(false);
+        }
+    });
+}
+
+function adjustInputPosition(keyboardOpen, keyboardHeight = 0) {
+    const { messageInputContainer, messagesContainer } = getActiveElements();
+    
+    if (keyboardOpen) {
+        // Когда клавиатура открыта - минимальный отступ
+        messageInputContainer.style.bottom = '4px';
+        messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 4px)';
+        
+        // Прокручиваем сообщения к низу
+        setTimeout(() => {
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }, 100);
+    } else {
+        // Когда клавиатура закрыта - нормальный отступ
+        messageInputContainer.style.bottom = '12px';
+        messageInputContainer.style.paddingBottom = 'calc(8px + env(safe-area-inset-bottom, 0px))';
+    }
+}
+
+
        
 async function openChat(chatId) {
     if (isOpeningChat) return;
@@ -3356,6 +3436,7 @@ async function initializePage() {
 
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
+    setupKeyboardDetection();
     
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
