@@ -77,6 +77,31 @@ html, body {
     overflow: hidden;
 }
 
+body {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Гарантируем, что чат занимает всю высоту */
+.chat-modal.active {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 100vh;
+    max-height: 100vh;
+}
+
+/* Убираем любые трансформации при открытии клавиатуры */
+.keyboard-open .chat-header,
+.keyboard-open .messages-container,
+.keyboard-open .desktop-content {
+    transform: none !important;
+}
+
 /* Для контейнеров чатов */
 .chats-container, 
 .chat-modal, 
@@ -539,35 +564,45 @@ input, textarea {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
+        /* Гарантируем, что модальное окно будет поверх всего */
+        overflow: hidden;
     }
-
     .chat-modal.active {
         transform: translateX(0);
     }
 
 
     .chat-header {
-        position: fixed; /* Sticky вместо fixed */
+        position: fixed; /* Делаем хедер фиксированным */
         top: 0;
+        left: 0;
+        right: 0;
         height: 60px;
         min-height: 60px;
         padding: 12px 16px;
         border-bottom: 1px solid var(--telegram-divider);
         background: var(--telegram-bg);
-        z-index: 100;
+        z-index: 101; /* Хедер выше контента */
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
     }
 
-    
+
+    .messages-container {
+        position: absolute;
+        top: 60px; /* Отступ под хедером */
+        left: 0;
+        right: 0;
+        bottom: 80px; /* Отступ над полем ввода */
+        height: auto;
+        padding: 16px;
+        padding-bottom: 0;
+        overflow-y: auto;
+        z-index: 97;
+    }
     /* Скрываем навигацию когда открыт чат */
     .chat-modal.active ~ .bottom-nav {
         display: none !important;
-    }
-
-    /* Убираем любые отступы у body */
-    body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
     }
 
     /* Гарантируем что контейнер чата занимает всю высоту */
@@ -1432,6 +1467,12 @@ input, textarea {
         width: 95%; /* Увеличиваем ширину */
         max-width: 950px; /* Увеличиваем максимальную ширину */
     }
+
+    .message-input-container {
+        position: sticky;
+        bottom: 12px;
+        margin-top: -20px;
+    }
 }
 
 
@@ -1439,14 +1480,16 @@ input, textarea {
 /* Адаптация для мобильных устройств */
 @media (max-width: 767px) {
     .message-input-container {
-        padding: 12px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom));
-        /* Гарантируем прозрачность на мобильных */
-        background: transparent;
-        z-index: 98;
-        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
-        transform: translateY(0); 
+        position: fixed;
+        bottom: 12px;
+        left: 0;
+        right: 0;
+        z-index: 102; /* Поле ввода выше всего */
+        padding: 8px 16px 6px 16px;
+        /* Учитываем безопасные зоны */
+        padding-bottom: calc(6px + env(safe-area-inset-bottom));
     }
+
     
     .message-input-wrapper {
         width: 95%;
@@ -2274,28 +2317,6 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
 
 
-
-
-
-
-
-function setupMobileChatHeight() {
-    if (!isDesktop) {
-        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
-        
-        // Устанавливаем высоту контейнера сообщений
-        const headerHeight = document.querySelector('.chat-header').offsetHeight;
-        const inputHeight = messageInputContainer.offsetHeight;
-        const availableHeight = window.innerHeight - headerHeight - inputHeight;
-        
-        messagesContainer.style.height = `${availableHeight}px`;
-        messagesContainer.style.maxHeight = `${availableHeight}px`;
-    }
-}
-
-
-
-
         // Добавьте эту функцию для отладки
 async function debugActivityStatus(userId) {
     try {
@@ -2675,7 +2696,7 @@ function setupKeyboardHandlers() {
 function setupKeyboardDetection() {
     if (isDesktop) return;
     
-    const { messageInput, chatModal } = getActiveElements();
+    const { messageInput, chatModal, messagesContainer } = getActiveElements();
     let keyboardShown = false;
     
     // Определяем открытие клавиатуры
@@ -2684,8 +2705,14 @@ function setupKeyboardDetection() {
             keyboardShown = true;
             chatModal.classList.remove('keyboard-closed');
             chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true);
-        }, 300);
+            
+            // Прокручиваем сообщения к последнему сообщению
+            setTimeout(() => {
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 300);
+        }, 100);
     });
     
     // Определяем закрытие клавиатуры
@@ -2694,8 +2721,7 @@ function setupKeyboardDetection() {
             keyboardShown = false;
             chatModal.classList.remove('keyboard-open');
             chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
-        }, 300);
+        }, 100);
     });
     
     // Альтернативный метод через resize (для iOS)
@@ -2709,14 +2735,36 @@ function setupKeyboardDetection() {
         if (keyboardHeight > 100) { // Клавиатура открыта
             chatModal.classList.remove('keyboard-closed');
             chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true, keyboardHeight);
+            
+            // Прокручиваем к последнему сообщению
+            setTimeout(() => {
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
         } else { // Клавиатура закрыта
             chatModal.classList.remove('keyboard-open');
             chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
         }
+        
+        initialHeight = currentHeight;
     });
 }
+
+function setupMobileChatHeight() {
+    if (!isDesktop) {
+        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
+        
+        // Устанавливаем высоту контейнера сообщений
+        const headerHeight = document.querySelector('.chat-header').offsetHeight;
+        const inputHeight = messageInputContainer.offsetHeight;
+        const availableHeight = window.innerHeight - headerHeight - inputHeight - 20; // небольшой запас
+        
+        messagesContainer.style.height = `${availableHeight}px`;
+        messagesContainer.style.maxHeight = `${availableHeight}px`;
+    }
+}
+
 
 function adjustInputPosition(keyboardOpen, keyboardHeight = 0) {
     const { messageInputContainer, messagesContainer } = getActiveElements();
@@ -3538,8 +3586,15 @@ async function initializePage() {
     if (!isDesktop) {
         setupMobileChatHeight();
         window.addEventListener('resize', setupMobileChatHeight);
+        
+        // Также вызываем при открытии чата
+        const originalOpenChat = window.openChat;
+        window.openChat = function(chatId) {
+            const result = originalOpenChat(chatId);
+            setTimeout(setupMobileChatHeight, 100);
+            return result;
+        };
     }
-
     console.log('Page initialized successfully');
 }
 
