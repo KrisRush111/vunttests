@@ -505,14 +505,15 @@ input, textarea {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
+    background-attachment: fixed; /* Фиксируем обои */
     z-index: 100;
     display: none;
     flex-direction: column;
     transform: translateX(100%);
     transition: transform 0.3s ease, opacity 0.3s ease;
-    /* Гарантируем полную высоту */
     height: 100vh;
     max-height: 100vh;
+    overflow: hidden; /* Предотвращаем скролл всего модального окна */
 }
 
     .chat-modal.active {
@@ -539,13 +540,21 @@ input, textarea {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
+        overflow: hidden;
     }
 
     .chat-modal.active {
         transform: translateX(0);
     }
 
-
+    .messages-container {
+        margin-top: 60px;
+        margin-bottom: 80px;
+        height: calc(100vh - 140px);
+        max-height: calc(100vh - 140px);
+        padding: 16px;
+    }
+    
     .chat-header {
         position: fixed; /* Sticky вместо fixed */
         top: 0;
@@ -599,7 +608,7 @@ input, textarea {
     padding: 12px 16px;
     border-bottom: 1px solid var(--telegram-divider);
     background: var(--telegram-bg);
-    position: sticky;
+    position: fixed; /* Меняем на fixed */
     top: 0;
     left: 0;
     right: 0;
@@ -720,17 +729,18 @@ input, textarea {
     display: flex;
     z-index: 97;
     flex-direction: column;
-    /* УБИРАЕМ все ограничения высоты */
-    height: 100%;
-    max-height: none;
+    /* Добавляем отступы для хедера и инпута */
+    margin-top: 60px; /* Высота хедера */
+    margin-bottom: 80px; /* Высота инпута + отступы */
+    height: calc(100vh - 140px); /* 60px хедер + 80px инпут */
+    max-height: calc(100vh - 140px);
     min-height: 0;
-    /* Гарантируем полную высоту */
     flex-grow: 1;
     flex-shrink: 1;
     flex-basis: 0;
-    /* Убираем любые позиционирование */
     position: relative;
 }
+
 
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
@@ -1369,16 +1379,16 @@ input, textarea {
 
 
 .message-input-container {
-    padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
-    position: sticky;
-    bottom: 12px; 
+    padding: 8px 16px 6px 16px;
+    position: fixed; /* Меняем на fixed */
+    bottom: 12px;
     left: 0;
     right: 0;
     z-index: 98;
     display: flex;
     justify-content: center;
     background: transparent;
-    margin-top: -20px;
+    margin-top: 0;
 }
 
 .message-input-wrapper {
@@ -1439,8 +1449,12 @@ input, textarea {
 /* Адаптация для мобильных устройств */
 @media (max-width: 767px) {
     .message-input-container {
-        padding: 12px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        position: fixed;
+        bottom: 12px;
+        left: 0;
+        right: 0;
+        padding: 8px 16px 6px 16px;
+        padding-bottom: calc(6px + env(safe-area-inset-bottom));
         /* Гарантируем прозрачность на мобильных */
         background: transparent;
         z-index: 98;
@@ -1461,6 +1475,16 @@ input, textarea {
         bottom: 8px; /* Минимальное расстояние когда клавиатура открыта */
     }
     
+    .keyboard-open .chat-header,
+    .keyboard-open .message-input-container,
+    .keyboard-open .messages-container {
+        transform: none !important;
+    }
+    
+    /* Гарантируем что элементы остаются на своих местах */
+    .keyboard-open .chat-modal {
+        overflow: hidden;
+    }
     /* Когда клавиатуры нет - нормальный отступ */
     .keyboard-closed .message-input-container {
         bottom: 12px; /* Большее расстояние когда клавиатуры нет */
@@ -1469,6 +1493,34 @@ input, textarea {
 }
 
 
+@media (min-width: 768px) {
+    .chat-modal {
+        position: static;
+        transform: translateX(0);
+        display: none;
+        flex: 1;
+        height: 100vh;
+        border-left: 1px solid var(--telegram-divider);
+        overflow: hidden;
+    }
+
+    .chat-header {
+        position: sticky; /* Для десктопа можно использовать sticky */
+        top: 0;
+    }
+
+    .messages-container {
+        margin-top: 0;
+        margin-bottom: 0;
+        height: calc(100vh - 120px); /* 60px хедер + 60px инпут */
+        max-height: calc(100vh - 120px);
+    }
+
+    .message-input-container {
+        position: sticky;
+        bottom: 0;
+    }
+}
 
 
 </style>
@@ -2281,18 +2333,18 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
 function setupMobileChatHeight() {
     if (!isDesktop) {
-        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
+        const { messagesContainer } = getActiveElements();
         
-        // Устанавливаем высоту контейнера сообщений
-        const headerHeight = document.querySelector('.chat-header').offsetHeight;
-        const inputHeight = messageInputContainer.offsetHeight;
+        // Высота рассчитывается автоматически через CSS
+        // Дополнительные корректировки не нужны
+        const headerHeight = 60; // фиксированная высота хедера
+        const inputHeight = 80; // фиксированная высота инпута с отступами
         const availableHeight = window.innerHeight - headerHeight - inputHeight;
         
         messagesContainer.style.height = `${availableHeight}px`;
         messagesContainer.style.maxHeight = `${availableHeight}px`;
     }
 }
-
 
 
 
@@ -2722,21 +2774,14 @@ function adjustInputPosition(keyboardOpen, keyboardHeight = 0) {
     const { messageInputContainer, messagesContainer } = getActiveElements();
     
     if (keyboardOpen) {
-        // Когда клавиатура открыта - минимальный отступ
-        messageInputContainer.style.bottom = '8px';
-        messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
-        
-        // Прокручиваем сообщения к низу
+        // При открытой клавиатуре просто прокручиваем сообщения
         setTimeout(() => {
             if (messagesContainer) {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
         }, 100);
-    } else {
-        // Когда клавиатура закрыта - нормальный отступ
-        messageInputContainer.style.bottom = '12px';
-        messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
     }
+    // Убираем все изменения позиции - элементы остаются фиксированными
 }
 
 
