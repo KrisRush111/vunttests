@@ -1336,7 +1336,7 @@ input, textarea {
 
 
 
-    .user-status {
+.user-status {
     font-size: 13px;
     color: var(--telegram-hint);
 }
@@ -1363,6 +1363,114 @@ input, textarea {
 .user-status.offline .status-text {
     color: var(--telegram-hint);
 }
+
+
+/* Добавьте в секцию стилей */
+.message-reactions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 8px;
+    align-items: center;
+}
+
+.reaction-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.1);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+}
+
+.reaction-item:hover {
+    background: rgba(0, 0, 0, 0.15);
+    transform: scale(1.05);
+}
+
+.reaction-item.my-reaction {
+    background: rgba(0, 136, 204, 0.2);
+    border-color: var(--telegram-blue);
+}
+
+.reaction-emoji {
+    font-size: 13px;
+}
+
+.reaction-count {
+    font-weight: 500;
+    color: var(--telegram-text);
+}
+
+.add-reaction-button {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--telegram-hint);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.add-reaction-button:hover {
+    background: rgba(0, 0, 0, 0.15);
+    color: var(--telegram-text);
+}
+
+.reactions-picker {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    background: var(--telegram-bg);
+    border: 1px solid var(--telegram-divider);
+    border-radius: 12px;
+    padding: 8px;
+    display: none;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 4px;
+    box-shadow: var(--telegram-shadow-large);
+    z-index: 1000;
+    animation: slideUp 0.2s ease;
+}
+
+.reactions-picker.active {
+    display: grid;
+}
+
+.reaction-option {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.reaction-option:hover {
+    background: rgba(0, 0, 0, 0.1);
+    transform: scale(1.2);
+}
+
+/* Для сообщений с реакциями добавляем отступ */
+.message.has-reactions {
+    margin-bottom: 20px;
+}
+
+
 
 
 
@@ -1710,6 +1818,324 @@ input, textarea {
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        // Добавьте в раздел с другими глобальными переменными
+let messageReactions = {};
+let reactionsPickerOpen = false;
+
+// Добавьте функцию для загрузки реакций
+async function loadMessageReactions(messageIds) {
+    if (!messageIds || messageIds.length === 0) return;
+
+    try {
+        const response = await fetch(`${SERVER_URL}/get_message_reactions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message_ids: messageIds
+            }),
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            messageReactions = { ...messageReactions, ...data.reactions };
+            updateMessageReactionsUI(messageIds);
+        }
+    } catch (error) {
+        console.error('Error loading message reactions:', error);
+    }
+}
+
+// Функция для обновления отображения реакций
+function updateMessageReactionsUI(messageIds) {
+    messageIds.forEach(messageId => {
+        const messageElement = document.querySelector(`.message[data-message-id="${messageId}"]`);
+        if (!messageElement) return;
+
+        // Удаляем старые реакции
+        const oldReactions = messageElement.querySelector('.message-reactions');
+        if (oldReactions) {
+            oldReactions.remove();
+        }
+
+        const reactions = messageReactions[messageId];
+        if (!reactions || reactions.length === 0) return;
+
+        // Добавляем контейнер для реакций
+        const reactionsContainer = document.createElement('div');
+        reactionsContainer.className = 'message-reactions';
+        
+        reactions.forEach(reactionData => {
+            const isMyReaction = reactionData.user_ids.includes(userData.platform_user_id);
+            const reactionElement = document.createElement('div');
+            reactionElement.className = `reaction-item ${isMyReaction ? 'my-reaction' : ''}`;
+            reactionElement.innerHTML = `
+                <span class="reaction-emoji">${reactionData.reaction}</span>
+                <span class="reaction-count">${reactionData.count}</span>
+            `;
+            
+            reactionElement.addEventListener('click', () => {
+                handleReactionClick(messageId, reactionData.reaction, isMyReaction);
+            });
+            
+            reactionsContainer.appendChild(reactionElement);
+        });
+
+        // Добавляем кнопку для добавления новой реакции
+        const addButton = document.createElement('button');
+        addButton.className = 'add-reaction-button';
+        addButton.innerHTML = '+';
+        addButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showReactionsPicker(messageId, addButton);
+        });
+        
+        reactionsContainer.appendChild(addButton);
+        messageElement.appendChild(reactionsContainer);
+        messageElement.classList.add('has-reactions');
+    });
+}
+
+// Функция для обработки клика по реакции
+async function handleReactionClick(messageId, reaction, isMyReaction) {
+    try {
+        if (isMyReaction) {
+            // Удаляем реакцию
+            await fetch(`${SERVER_URL}/remove_reaction`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message_id: messageId,
+                    user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+        } else {
+            // Добавляем реакцию
+            await fetch(`${SERVER_URL}/add_reaction`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message_id: messageId,
+                    user_id: userData.platform_user_id,
+                    reaction: reaction
+                }),
+                credentials: 'include'
+            });
+        }
+
+        // Перезагружаем реакции для этого сообщения
+        await loadMessageReactions([messageId]);
+        
+    } catch (error) {
+        console.error('Error handling reaction:', error);
+    }
+}
+
+// Функция для показа палитры реакций
+function showReactionsPicker(messageId, buttonElement) {
+    // Закрываем предыдущий пикер
+    closeReactionsPicker();
+
+    // Создаем пикер
+    const picker = document.createElement('div');
+    picker.className = 'reactions-picker active';
+    
+    const reactions = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '👏', '🔥', '⭐'];
+    
+    reactions.forEach(reaction => {
+        const option = document.createElement('button');
+        option.className = 'reaction-option';
+        option.textContent = reaction;
+        option.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await handleReactionClick(messageId, reaction, false);
+            closeReactionsPicker();
+        });
+        picker.appendChild(option);
+    });
+
+    // Позиционируем пикер
+    const rect = buttonElement.getBoundingClientRect();
+    picker.style.position = 'fixed';
+    picker.style.left = `${rect.left}px`;
+    picker.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    
+    document.body.appendChild(picker);
+    reactionsPickerOpen = true;
+
+    // Закрытие при клике вне пикера
+    setTimeout(() => {
+        document.addEventListener('click', closeReactionsPicker, { once: true });
+    }, 100);
+}
+
+// Функция для закрытия пикера реакций
+function closeReactionsPicker() {
+    const picker = document.querySelector('.reactions-picker');
+    if (picker) {
+        picker.remove();
+    }
+    reactionsPickerOpen = false;
+}
+
+// Обновите функцию renderMessages для загрузки реакций
+function renderMessages(messages) {
+    const { messagesContainer, noMessages } = getActiveElements();
+    
+    messagesContainer.innerHTML = '';
+    
+    if (!messages || messages.length === 0) {
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Сообщений пока нет...';
+        return;
+    }
+    
+    noMessages.style.display = 'none';
+    
+    let lastDateHeader = '';
+    const messageIds = [];
+    
+    messages.forEach((message, index) => {
+        const currentDateHeader = formatDateHeader(message.sent_at);
+        
+        if (currentDateHeader !== lastDateHeader) {
+            const dateHeader = document.createElement('div');
+            dateHeader.className = 'date-header';
+            dateHeader.textContent = currentDateHeader;
+            dateHeader.style.textAlign = 'center';
+            dateHeader.style.margin = '12px auto'; 
+            dateHeader.style.fontSize = '14px';
+            dateHeader.style.color = 'white';
+            dateHeader.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+            dateHeader.style.padding = '4px 12px';
+            dateHeader.style.borderRadius = '24px'; 
+            dateHeader.style.display = 'block'; 
+            messagesContainer.appendChild(dateHeader);
+            lastDateHeader = currentDateHeader;
+        }
+        
+        renderMessage(message);
+        messageIds.push(message.id);
+    });
+    
+    // Загружаем реакции для всех сообщений
+    loadMessageReactions(messageIds);
+    
+    setTimeout(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 50);
+}
+
+// Обновите функцию renderMessage для поддержки реакций
+function renderMessage(message) {
+    const { messagesContainer } = getActiveElements();
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+    messageElement.setAttribute('data-message-id', message.id);
+    
+    const messageTime = formatChatMessageTime(message.sent_at);
+    
+    // Create status circles for outgoing messages
+    let statusCircles = '';
+    if (message.is_me) {
+        const isRead = message.is_read;
+        statusCircles = `
+            <div class="message-status">
+                <div class="status-circles">
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                </div>
+            </div>
+        `;
+    }
+    
+    messageElement.innerHTML = `
+        <div class="message-content">${message.content}</div>
+        <div class="message-time">
+            ${messageTime}
+            ${message.is_me ? statusCircles : ''}
+        </div>
+    `;
+    
+    // Добавляем обработчик долгого нажатия для показа реакций
+    let longPressTimer;
+    messageElement.addEventListener('mousedown', (e) => {
+        longPressTimer = setTimeout(() => {
+            showReactionQuickPicker(message.id, e.clientX, e.clientY);
+        }, 500);
+    });
+    
+    messageElement.addEventListener('mouseup', () => {
+        clearTimeout(longPressTimer);
+    });
+    
+    messageElement.addEventListener('mouseleave', () => {
+        clearTimeout(longPressTimer);
+    });
+    
+    messageElement.addEventListener('touchstart', (e) => {
+        longPressTimer = setTimeout(() => {
+            const touch = e.touches[0];
+            showReactionQuickPicker(message.id, touch.clientX, touch.clientY);
+        }, 500);
+    });
+    
+    messageElement.addEventListener('touchend', () => {
+        clearTimeout(longPressTimer);
+    });
+    
+    setTimeout(() => {
+        messageElement.style.opacity = '1';
+        messageElement.style.transform = 'translateY(0)';
+    }, 10);
+    
+    messagesContainer.appendChild(messageElement);
+}
+
+// Функция для быстрого выбора реакций (по долгому нажатию)
+function showReactionQuickPicker(messageId, x, y) {
+    closeReactionsPicker();
+
+    const quickReactions = ['👍', '❤️', '😂', '😮', '😢'];
+    const picker = document.createElement('div');
+    picker.className = 'reactions-picker active';
+    
+    quickReactions.forEach(reaction => {
+        const option = document.createElement('button');
+        option.className = 'reaction-option';
+        option.textContent = reaction;
+        option.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await handleReactionClick(messageId, reaction, false);
+            closeReactionsPicker();
+        });
+        picker.appendChild(option);
+    });
+
+    picker.style.position = 'fixed';
+    picker.style.left = `${x - 80}px`;
+    picker.style.top = `${y - 60}px`;
+    
+    document.body.appendChild(picker);
+    reactionsPickerOpen = true;
+
+    setTimeout(() => {
+        document.addEventListener('click', closeReactionsPicker, { once: true });
+    }, 100);
+}
+
+
+
+
 
 
         // Добавьте эту функцию после других функций
@@ -3070,45 +3496,6 @@ function renderMessages(messages) {
 }
 
 
-// Updated renderMessage function
-function renderMessage(message) {
-    const { messagesContainer } = getActiveElements();
-    
-    const messageElement = document.createElement('div');
-    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
-    messageElement.setAttribute('data-message-id', message.id); // Add data-message-id
-    
-    const messageTime = formatChatMessageTime(message.sent_at);
-    
-    // Create status circles for outgoing messages
-    let statusCircles = '';
-    if (message.is_me) {
-        const isRead = message.is_read;
-        statusCircles = `
-            <div class="message-status">
-                <div class="status-circles">
-                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
-                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
-                </div>
-            </div>
-        `;
-    }
-    
-    messageElement.innerHTML = `
-        <div class="message-content">${message.content}</div>
-        <div class="message-time">
-            ${messageTime}
-            ${message.is_me ? statusCircles : ''}
-        </div>
-    `;
-    
-    setTimeout(() => {
-        messageElement.style.opacity = '1';
-        messageElement.style.transform = 'translateY(0)';
-    }, 10);
-    
-    messagesContainer.appendChild(messageElement);
-}
 
 // New functions for message status updates
 async function updateMessageStatus(chatId, messageId) {
@@ -3430,6 +3817,13 @@ async function initializePage() {
     
     document.addEventListener('gesturechange', function(e) {
         e.preventDefault();
+    });
+    
+        // В функцию initializePage добавьте:
+    document.addEventListener('click', (e) => {
+        if (reactionsPickerOpen && !e.target.closest('.reactions-picker')) {
+            closeReactionsPicker();
+        }
     });
     
     document.addEventListener('gestureend', function(e) {
