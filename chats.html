@@ -1946,56 +1946,38 @@ function getActiveElements() {
 }
         
      
-async function loadChats() {
-    const { chatsList, noChats } = getActiveElements();
-    
-    try {
-        // Очистка локального кэша для принудительной перезагрузки
-        currentChatsList = [];
-        
-        // Принудительно очищаем кэш пользовательских данных
-        if (window.cache_lock) {
-            with (cache_lock) {
-                user_data_cache = {};
+        async function loadChats() {
+            const { chatsList, noChats } = getActiveElements();
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/get_chats`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    currentChatsList = data.chats; // Сохраняем в кэш
+                    renderChats(data.chats);
+                } else {
+                    currentChatsList = [];
+                    renderChats([]);
+                }
+            
+            } catch (error) {
+                console.error('Error loading chats:', error);
+                currentChatsList = [];
+                renderChats([]);
             }
-        } else {
-            // Если cache_lock не определен, просто очищаем кэш
-            user_data_cache = {};
         }
         
-        console.log('Loading chats for user:', userData.platform_user_id);
-        
-        const response = await fetch(`${SERVER_URL}/get_chats`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id,
-                include_participants_data: true  // Добавлено: запрос актуальных данных участников
-            }),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        console.log('Chats response:', data);
-        
-        if (data.status === 'success') {
-            currentChatsList = data.chats; // Обновляем кэш свежими данными
-            console.log(`Loaded ${data.chats.length} chats`);
-            renderChats(data.chats);
-        } else {
-            console.error('Failed to load chats:', data.error);
-            currentChatsList = [];
-            renderChats([]);
-        }
-    
-    } catch (error) {
-        console.error('Error loading chats:', error);
-        currentChatsList = [];
-        renderChats([]);
-    }
-}
 
 
         
@@ -2011,7 +1993,7 @@ async function renderChats(chats) {
     
     noChats.style.display = 'none';
     
-    // ОЧИСТКА КЭША для принудительной перезагрузки актуальных данных
+    // Получаем статусы активности для всех пользователей в чатах
     const userIds = [];
     chats.forEach(chat => {
         if (chat.participants && chat.participants.length > 0) {
@@ -2023,83 +2005,57 @@ async function renderChats(chats) {
         }
     });
     
-    // Принудительно очищаем кэш для этих пользователей
-    with (cache_lock) {
-        userIds.forEach(userId => {
-            delete user_data_cache[userId];
-        });
-    }
-    
     const activityData = await getUsersActivityStatus(userIds);
-    // ЗАГРУЖАЕМ АКТУАЛЬНЫЕ ДАННЫЕ пользователей
-    const freshUserData = await get_user_data_from_main_db(userIds);
     
     chats.forEach(chat => {
-        let chatName = 'Новый чат';
-        let chatInitials = '?';
-        let avatarBackground = getRandomColor();
-        let hasAvatar = false;
-
-        // Для личных чатов используем данные участника
-        if (!chat.is_group && chat.participants && chat.participants.length === 2) {
-            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant) {
-                // ИСПОЛЬЗУЕМ СВЕЖИЕ ДАННЫЕ ИЗ freshUserData
-                const freshParticipantData = freshUserData[otherParticipant.platform_user_id];
-                if (freshParticipantData) {
-                    chatName = freshParticipantData.nickname || 'Без имени';
-                    chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-                    avatarBackground = freshParticipantData.avatar_background || avatarBackground;
-                    hasAvatar = freshParticipantData.avatar_url !== null;
-                } else {
-                    // Если свежих данных нет, используем старые
-                    chatName = otherParticipant.nickname || 'Без имени';
-                    chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-                    avatarBackground = otherParticipant.avatar_background || avatarBackground;
-                    hasAvatar = otherParticipant.has_avatar_photo;
-                }
-            }
-        } else {
-            // Для групповых чатов
-            chatName = chat.name || 'Групповой чат';
-            chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-            avatarBackground = chat.avatar_background || avatarBackground;
-            hasAvatar = chat.has_avatar_photo;
-        }
-
-        // Находим участника чата для статуса
-        const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        
-        let statusText = 'был(а) недавно';
-        let isOnline = false;
-
-        if (otherParticipant) {
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    statusText = 'В сети';
-                    isOnline = true;
-                } else {
-                    statusText = formatLastSeen(userActivity.last_online);
-                    isOnline = false;
-                }
-            }
-        }
-        
-        const avatarStyle = avatarBackground ?
-            `linear-gradient(135deg, ${avatarBackground}, ${adjustColor(avatarBackground, 20)})` :
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-
         const chatItem = document.createElement('div');
         chatItem.className = 'chat-item';
         chatItem.setAttribute('data-chat-id', chat.id);
         
+        const initials = chat.name 
+            ? chat.name.split(' ').map(n => n[0]).join('') 
+            : '?';
+        
+        const bgColor = chat.avatar_background || getRandomColor();
+
+        // Находим участника чата (исключая текущего пользователя)
+        const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        
+        // Статус по умолчанию
+let statusText = 'был(а) недавно';
+let isOnline = false;
+
+if (otherParticipant) {
+    const userActivity = activityData[otherParticipant.platform_user_id];
+    if (userActivity) {
+        if (userActivity.is_online) {
+            statusText = 'В сети';
+            isOnline = true;
+        } else {
+            statusText = formatLastSeen(userActivity.last_online);
+            isOnline = false;
+        }
+    } else {
+        // Если данных о активности нет, считаем что пользователь не в сети
+        statusText = 'был(а) недавно';
+        isOnline = false;
+    }
+} else {
+    // Если нет другого участника
+    statusText = '';
+    isOnline = false;
+}
+        
+        const avatarStyle = bgColor ?
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
+
         chatItem.innerHTML = `
             <div class="chat-avatar" style="background: ${avatarStyle}">
-                ${chatInitials}
+                ${initials}
             </div>
             <div class="chat-info">
-                <div class="chat-name">${chatName}</div>
+                <div class="chat-name">${chat.name || 'Новый чат'}</div>
                 <div class="last-message">${chat.last_message || ''}</div>
                 <div class="chat-status user-status ${isOnline ? 'online' : ''}">
                     ${isOnline ? 
@@ -2111,9 +2067,8 @@ async function renderChats(chats) {
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
         
-        // Загружаем аватар
-        if (hasAvatar && otherParticipant) {
-            loadChatAvatar(chatItem.querySelector('.chat-avatar'), otherParticipant.platform_user_id, chatInitials, avatarBackground);
+        if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
         }
         
         chatItem.addEventListener('click', (e) => {
@@ -2125,33 +2080,6 @@ async function renderChats(chats) {
     });
 }
 
-
-async function get_user_data_from_main_db(platform_user_ids) {
-    if (!platform_user_ids || platform_user_ids.length === 0) return {};
-    
-    try {
-        const response = await fetch(`${SERVER_URL}/get_user_data`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                platform_user_ids: platform_user_ids
-            }),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            return data.users_data || {};
-        }
-        return {};
-    } catch (error) {
-        console.error('Error getting fresh user data:', error);
-        return {};
-    }
-}
 
 
 async function updateUserActivity(isOnline = true) {
