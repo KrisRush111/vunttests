@@ -538,7 +538,7 @@ input, textarea {
         border-radius: 0;
         z-index: 100;
         transform: translateX(100%);
-        transition: transform 0.3s ease;
+       transition: height 0.3s ease;
     }
 
     .chat-modal.active {
@@ -556,6 +556,11 @@ input, textarea {
         background: var(--telegram-bg);
         z-index: 100;
     }
+
+
+    .messages-container {
+    transition: padding-bottom 0.3s ease; /* Плавное изменение отступа */
+}
 
     
     /* Скрываем навигацию когда открыт чат */
@@ -2677,70 +2682,63 @@ function setupKeyboardDetection() {
     if (isDesktop) return;
     
     const { messageInput, chatModal } = getActiveElements();
-    let keyboardShown = false;
-    
-    // Определяем открытие клавиатуры
-    messageInput.addEventListener('focus', () => {
-        setTimeout(() => {
-            keyboardShown = true;
-            chatModal.classList.remove('keyboard-closed');
-            chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true);
-        }, 300);
-    });
-    
-    // Определяем закрытие клавиатуры
-    messageInput.addEventListener('blur', () => {
-        setTimeout(() => {
-            keyboardShown = false;
-            chatModal.classList.remove('keyboard-open');
-            chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
-        }, 300);
-    });
-    
-    // Альтернативный метод через resize (для iOS)
+    let resizeTimeout;
     let initialHeight = window.innerHeight;
+    
+    // Обновляем начальную высоту при фокусе на поле ввода (для точности)
+    messageInput.addEventListener('focus', () => {
+        initialHeight = window.innerHeight;
+    });
+    
+    // Определяем открытие/закрытие клавиатуры через resize с debounce
     window.addEventListener('resize', () => {
         if (!chatModal.classList.contains('active')) return;
         
-        const currentHeight = window.innerHeight;
-        const keyboardHeight = initialHeight - currentHeight;
-        
-        if (keyboardHeight > 100) { // Клавиатура открыта
-            chatModal.classList.remove('keyboard-closed');
-            chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true, keyboardHeight);
-        } else { // Клавиатура закрыта
-            chatModal.classList.remove('keyboard-open');
-            chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
-        }
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            const currentHeight = window.innerHeight;
+            const keyboardHeight = initialHeight - currentHeight;
+            
+            // Если высота уменьшилась значительно (клавиатура открыта), добавляем буфер
+            if (keyboardHeight > 100) {
+                adjustInputPosition(true, keyboardHeight + 20); // Буфер +20px
+            } else {
+                // Клавиатура закрыта
+                adjustInputPosition(false);
+                initialHeight = window.innerHeight; // Обновляем начальную высоту
+            }
+        }, 100); // Debounce 100ms
     });
 }
 
+
 function adjustInputPosition(keyboardOpen, keyboardHeight = 0) {
-    const { messageInputContainer, messagesContainer } = getActiveElements();
+    const { messageInputContainer, messagesContainer, chatModal } = getActiveElements();
     
     if (keyboardOpen && keyboardHeight > 0) {
-        // Когда клавиатура открыта - минимальный отступ для поля ввода
+        // Увеличиваем высоту chat-modal, чтобы он покрывал область под клавиатурой
+        chatModal.style.height = `${window.innerHeight + keyboardHeight}px`;
+        
+        // Минимальный отступ для поля ввода
         messageInputContainer.style.bottom = '8px';
         messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
         
-        // Добавляем нижний отступ к контейнеру сообщений, равный высоте клавиатуры
-        // Это сместит последние сообщения вверх, чтобы они были видны над клавиатурой
+        // Добавляем нижний отступ к контейнеру сообщений для смещения последних сообщений вверх
         messagesContainer.style.paddingBottom = `${keyboardHeight}px`;
         
-        // Прокручиваем сообщения к низу после небольшого таймаута
+        // Прокручиваем к низу с задержкой для плавности
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 100);
     } else {
-        // Когда клавиатура закрыта - нормальный отступ
+        // Возвращаем высоту chat-modal к нормальной
+        chatModal.style.height = '100vh';
+        
+        // Нормальный отступ для поля ввода
         messageInputContainer.style.bottom = '12px';
         messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         
-        // Убираем нижний отступ у контейнера сообщений
+        // Убираем отступ у сообщений
         messagesContainer.style.paddingBottom = '0px';
     }
 }
