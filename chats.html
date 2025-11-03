@@ -505,6 +505,7 @@ input, textarea {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
+    background-attachment: fixed;
     z-index: 100;
     display: none;
     flex-direction: column;
@@ -525,7 +526,7 @@ input, textarea {
         pointer-events: none;
     }
 
-    @media (max-width: 767px) {
+@media (max-width: 767px) {
     .chat-modal {
         position: fixed;
         top: 0;
@@ -539,15 +540,21 @@ input, textarea {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
+        /* Убираем любые отступы */
+        margin: 0;
+        padding: 0;
+        /* Гарантируем полное покрытие */
+        overflow: hidden;
     }
 
     .chat-modal.active {
         transform: translateX(0);
+        display: flex;
+        flex-direction: column;
     }
 
-
     .chat-header {
-        position: fixed; /* Sticky вместо fixed */
+        position: relative;
         top: 0;
         height: 60px;
         min-height: 60px;
@@ -555,10 +562,32 @@ input, textarea {
         border-bottom: 1px solid var(--telegram-divider);
         background: var(--telegram-bg);
         z-index: 100;
+        /* Убираем любые скругления */
+        border-radius: 0;
+        /* Гарантируем полную ширину */
+        width: 100%;
+        margin: 0;
+    }
+    .messages-container {
+        flex: 1;
+        padding: 16px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        /* Убираем ограничения высоты */
+        height: auto;
+        max-height: none;
+        min-height: 0;
+        /* Гарантируем полную высоту */
+        flex-grow: 1;
+        flex-shrink: 1;
+        flex-basis: 0;
+        /* Убираем позиционирование */
+        position: relative;
     }
 
+
     
-    /* Скрываем навигацию когда открыт чат */
     .chat-modal.active ~ .bottom-nav {
         display: none !important;
     }
@@ -570,6 +599,15 @@ input, textarea {
         overflow: hidden;
     }
 
+    /* Гарантируем что контейнер чатов скрывается полностью */
+    .chats-container.mobile-only {
+        display: none;
+    }
+
+    /* Показываем только активный чат */
+    .chat-modal.active {
+        display: flex;
+    }
     /* Гарантируем что контейнер чата занимает всю высоту */
     .chats-container.mobile-only {
         height: 100vh;
@@ -2761,84 +2799,83 @@ async function openChat(chatId) {
         
         chatTitle.textContent = currentChat.name || 'Новый чат';
         
-  
-// Получаем статус участника чата
-const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-let statusText = 'был(а) недавно';
-let isOnline = false;
+        // Получаем статус участника чата
+        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        let statusText = 'был(а) недавно';
+        let isOnline = false;
 
-if (otherParticipant) {
-    const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-    const userActivity = activityData[otherParticipant.platform_user_id];
-    
-    if (userActivity) {
-        if (userActivity.is_online) {
-            statusText = 'В сети';
-            isOnline = true;
-        } else {
-            statusText = formatLastSeen(userActivity.last_online);
-            isOnline = false;
+        if (otherParticipant) {
+            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    statusText = 'В сети';
+                    isOnline = true;
+                } else {
+                    statusText = formatLastSeen(userActivity.last_online);
+                    isOnline = false;
+                }
+            }
         }
-    }
-}
 
-// Обновляем статус в заголовке чата
-if (isOnline) {
-    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-    chatStatus.classList.add('online');
-} else {
-    chatStatus.textContent = statusText;
-    chatStatus.classList.remove('online');
-}
+        // Обновляем статус в заголовке чата
+        if (isOnline) {
+            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+            chatStatus.classList.add('online');
+        } else {
+            chatStatus.textContent = statusText;
+            chatStatus.classList.remove('online');
+        }
         
         // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
         chatAvatar.style.backgroundImage = '';
         chatAvatar.style.backgroundColor = '';
         chatAvatar.textContent = '';
         
-// В функции openChat замените блок загрузки аватара на:
-if (currentChat.participants && currentChat.participants.length > 0) {
-    const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-    if (otherParticipant) {
-        const userId = otherParticipant.platform_user_id;
-        const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-        const bgColor = currentChat.avatar_background || getRandomColor();
-        
-        // Пробуем загрузить аватар для участника чата
-        const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
-        const img = new Image();
-        
-        img.onload = function() {
-            // Аватар успешно загружен - только картинка
-            chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-            chatAvatar.textContent = '';
-        };
-        
-        img.onerror = function() {
-            // Аватар не загрузился - только градиент
+        // Загрузка аватара
+        if (currentChat.participants && currentChat.participants.length > 0) {
+            const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                const userId = otherParticipant.platform_user_id;
+                const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                
+                // Пробуем загрузить аватар для участника чата
+                const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
+                const img = new Image();
+                
+                img.onload = function() {
+                    // Аватар успешно загружен - только картинка
+                    chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+                    chatAvatar.textContent = '';
+                };
+                
+                img.onerror = function() {
+                    // Аватар не загрузился - только градиент
+                    chatAvatar.style.background = bgColor ? 
+                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                        'linear-gradient(135deg, #0088cc, #40a7e3)';
+                    chatAvatar.textContent = initials;
+                };
+                
+                img.src = avatarUrl;
+            } else {
+                // Если нет другого участника
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                chatAvatar.style.background = bgColor ? 
+                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                    'linear-gradient(135deg, #0088cc, #40a7e3)';
+                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+            }
+        } else {
+            // Если нет участников
+            const bgColor = currentChat.avatar_background || getRandomColor();
             chatAvatar.style.background = bgColor ? 
                 `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
                 'linear-gradient(135deg, #0088cc, #40a7e3)';
-            chatAvatar.textContent = initials;
-        };
-        
-        img.src = avatarUrl;
-    } else {
-        // Если нет другого участника
-        const bgColor = currentChat.avatar_background || getRandomColor();
-        chatAvatar.style.background = bgColor ? 
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-        chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-    }
-} else {
-    // Если нет участников
-    const bgColor = currentChat.avatar_background || getRandomColor();
-    chatAvatar.style.background = bgColor ? 
-        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-        'linear-gradient(135deg, #0088cc, #40a7e3)';
-    chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-}
+            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+        }
         
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
@@ -2876,8 +2913,33 @@ if (currentChat.participants && currentChat.participants.length > 0) {
             desktopPlaceholder.style.display = 'none';
             chatModal.style.display = 'flex';
         } else {
+            // ПОЛНОЭКРАННЫЙ РЕЖИМ ДЛЯ МОБИЛЬНЫХ УСТРОЙСТВ
             chatModal.classList.add('active');
+            
+            // Полностью скрываем основной интерфейс чатов
+            const mobileChatsContainer = document.querySelector('.chats-container.mobile-only');
+            if (mobileChatsContainer) {
+                mobileChatsContainer.style.display = 'none';
+            }
+            
+            // Гарантируем что body не прокручивается
             document.body.style.overflow = 'hidden';
+            document.documentElement.style.overflow = 'hidden';
+            
+            // Принудительно устанавливаем полную высоту
+            chatModal.style.height = '100vh';
+            chatModal.style.width = '100vw';
+            chatModal.style.margin = '0';
+            chatModal.style.padding = '0';
+            chatModal.style.borderRadius = '0';
+            
+            // Гарантируем полное покрытие экрана
+            chatModal.style.position = 'fixed';
+            chatModal.style.top = '0';
+            chatModal.style.left = '0';
+            chatModal.style.right = '0';
+            chatModal.style.bottom = '0';
+            chatModal.style.zIndex = '1000';
         }
         
         if (currentMessages.length > 0) {
@@ -2901,16 +2963,14 @@ if (currentChat.participants && currentChat.participants.length > 0) {
         isOpeningChat = false;
     }
 
-
     window.addEventListener('resize', () => {
-    if (!isDesktop && currentChat) {
-        setupMobileChatHeight();
-    }
-});
-            window.currentChat = chatData;
+        if (!isDesktop && currentChat) {
+            setupMobileChatHeight();
+        }
+    });
     
+    window.currentChat = chatData;
 }
-
 
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
@@ -2935,15 +2995,37 @@ function closeChat() {
         chatModal.style.display = 'none';
         desktopPlaceholder.style.display = 'flex';
     } else {
+        // ВОССТАНАВЛИВАЕМ ОСНОВНОЙ ИНТЕРФЕЙС ДЛЯ МОБИЛЬНЫХ
         chatModal.classList.remove('active');
+        
+        // Восстанавливаем отображение основного интерфейса
+        const mobileChatsContainer = document.querySelector('.chats-container.mobile-only');
+        if (mobileChatsContainer) {
+            mobileChatsContainer.style.display = 'flex';
+        }
+        
+        // Восстанавливаем прокрутку
         document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+        
+        // Сбрасываем стили модального окна
+        chatModal.style.height = '';
+        chatModal.style.width = '';
+        chatModal.style.margin = '';
+        chatModal.style.padding = '';
+        chatModal.style.borderRadius = '';
+        chatModal.style.position = '';
+        chatModal.style.top = '';
+        chatModal.style.left = '';
+        chatModal.style.right = '';
+        chatModal.style.bottom = '';
+        chatModal.style.zIndex = '';
     }
     
     // Reload chat list
     loadChats();
 
     window.currentChat = null;
-
 }
 
 
