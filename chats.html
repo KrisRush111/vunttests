@@ -510,11 +510,12 @@ input, textarea {
     display: none;
     flex-direction: column;
     transform: translateX(100%);
-    transition: transform 0.3s ease, opacity 0.3s ease;
+    transition: transform 0.3s ease;
     height: 100vh;
     max-height: 100vh;
-    overflow: hidden; /* Предотвращаем скролл всего модального окна */
+    overflow: hidden;
 }
+
 
     .chat-modal.active {
         transform: translateX(0);
@@ -729,17 +730,14 @@ input, textarea {
     display: flex;
     z-index: 97;
     flex-direction: column;
-    /* Добавляем отступы для хедера и инпута */
+    /* Фиксированные отступы */
     margin-top: 60px; /* Высота хедера */
-    margin-bottom: 80px; /* Высота инпута + отступы */
-    height: calc(100vh - 140px); /* 60px хедер + 80px инпут */
+    margin-bottom: 80px; /* Место для поля ввода */
+    height: calc(100vh - 140px); /* 100vh - хедер - поле ввода */
     max-height: calc(100vh - 140px);
     min-height: 0;
-    flex-grow: 1;
-    flex-shrink: 1;
-    flex-basis: 0;
-    position: relative;
 }
+
 
 
 
@@ -1378,9 +1376,10 @@ input, textarea {
 
 
 
+/* Поле ввода - абсолютно фиксированное */
 .message-input-container {
     padding: 8px 16px 6px 16px;
-    position: fixed; /* Меняем на fixed */
+    position: fixed; /* Фиксируем */
     bottom: 12px;
     left: 0;
     right: 0;
@@ -1388,7 +1387,8 @@ input, textarea {
     display: flex;
     justify-content: center;
     background: transparent;
-    margin-top: 0;
+    /* Добавляем безопасные отступы для iPhone */
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
 }
 
 .message-input-wrapper {
@@ -1396,15 +1396,14 @@ input, textarea {
     align-items: center;
     gap: 8px;
     border-radius: 50px;
-    padding: 10px 14px 8px 18px; /* Уменьшил горизонтальные отступы */
-    max-width: 380px; /* Уменьшил максимальную ширину */
-    width: 85%; /* Уменьшил процент ширины */
-    /* ИЗМЕНЕНИЯ: увеличиваем прозрачность и делаем единый стиль */
-    background: rgba(255, 255, 255, 0.50); /* Более прозрачный белый */
-    backdrop-filter: blur(20px); /* Увеличиваем размытие для водянистости */
-    -webkit-backdrop-filter: blur(20px); /* Для Safari */
-    border: 1px solid rgba(255, 255, 255, 0.3); /* Полупрозрачная граница */
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Легкая тень для объема */
+    padding: 10px 14px 8px 18px;
+    max-width: 380px;
+    width: 85%;
+    background: rgba(255, 255, 255, 0.50);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
 .message-input {
@@ -1473,6 +1472,9 @@ input, textarea {
         /* Когда клавиатура открыта - уменьшаем отступ */
     .keyboard-open .message-input-container {
         bottom: 8px; /* Минимальное расстояние когда клавиатура открыта */
+        transform: translateY(0) !important;
+        position: fixed !important;
+        bottom: 0 !important;
     }
     
     .keyboard-open .chat-header,
@@ -1489,6 +1491,27 @@ input, textarea {
     .keyboard-closed .message-input-container {
         bottom: 12px; /* Большее расстояние когда клавиатуры нет */
     }
+
+        .chat-modal.active {
+        transform: translateX(0);
+        /* Гарантируем что контент не смещается */
+        overflow: hidden;
+    }
+    
+    /* Когда клавиатура открыта - уменьшаем высоту контейнера сообщений */
+    .keyboard-open .messages-container {
+        height: calc(100vh - 140px - var(--keyboard-height, 300px));
+        max-height: calc(100vh - 140px - var(--keyboard-height, 300px));
+    }
+    
+    /* Фиксируем позиции элементов */
+    .keyboard-open .chat-header {
+        transform: translateY(0) !important;
+        position: fixed !important;
+        top: 0 !important;
+    }
+    
+
     
 }
 
@@ -2335,17 +2358,17 @@ function setupMobileChatHeight() {
     if (!isDesktop) {
         const { messagesContainer } = getActiveElements();
         
-        // Высота рассчитывается автоматически через CSS
-        // Дополнительные корректировки не нужны
-        const headerHeight = 60; // фиксированная высота хедера
-        const inputHeight = 80; // фиксированная высота инпута с отступами
+        // Статическая высота - хедер и поле ввода фиксированы
+        const headerHeight = 60;
+        const inputHeight = 80;
         const availableHeight = window.innerHeight - headerHeight - inputHeight;
         
         messagesContainer.style.height = `${availableHeight}px`;
         messagesContainer.style.maxHeight = `${availableHeight}px`;
+        messagesContainer.style.marginTop = `${headerHeight}px`;
+        messagesContainer.style.marginBottom = `${inputHeight}px`;
     }
 }
-
 
 
         // Добавьте эту функцию для отладки
@@ -2727,61 +2750,95 @@ function setupKeyboardHandlers() {
 function setupKeyboardDetection() {
     if (isDesktop) return;
     
-    const { messageInput, chatModal } = getActiveElements();
-    let keyboardShown = false;
+    const { messageInput, chatModal, messagesContainer } = getActiveElements();
     
-    // Определяем открытие клавиатуры
-    messageInput.addEventListener('focus', () => {
-        setTimeout(() => {
-            keyboardShown = true;
-            chatModal.classList.remove('keyboard-closed');
-            chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true);
-        }, 300);
-    });
+    // Определяем высоту клавиатуры
+    let initialViewportHeight = window.innerHeight;
     
-    // Определяем закрытие клавиатуры
-    messageInput.addEventListener('blur', () => {
-        setTimeout(() => {
-            keyboardShown = false;
-            chatModal.classList.remove('keyboard-open');
-            chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
-        }, 300);
-    });
-    
-    // Альтернативный метод через resize (для iOS)
-    let initialHeight = window.innerHeight;
-    window.addEventListener('resize', () => {
+    function handleResize() {
         if (!chatModal.classList.contains('active')) return;
         
-        const currentHeight = window.innerHeight;
-        const keyboardHeight = initialHeight - currentHeight;
+        const currentViewportHeight = window.innerHeight;
+        const keyboardHeight = initialViewportHeight - currentViewportHeight;
         
-        if (keyboardHeight > 100) { // Клавиатура открыта
-            chatModal.classList.remove('keyboard-closed');
+        if (keyboardHeight > 100) {
+            // Клавиатура открыта
             chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true, keyboardHeight);
-        } else { // Клавиатура закрыта
+            chatModal.classList.remove('keyboard-closed');
+            
+            // Устанавливаем высоту клавиатуры в CSS переменную
+            document.documentElement.style.setProperty('--keyboard-height', keyboardHeight + 'px');
+            
+            // Корректируем высоту контейнера сообщений
+            const headerHeight = 60;
+            const inputHeight = 80;
+            const availableHeight = currentViewportHeight - headerHeight - inputHeight;
+            
+            messagesContainer.style.height = `${availableHeight}px`;
+            messagesContainer.style.maxHeight = `${availableHeight}px`;
+            
+            // Прокручиваем к последнему сообщению
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+            
+        } else {
+            // Клавиатура закрыта
             chatModal.classList.remove('keyboard-open');
             chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
+            
+            // Восстанавливаем нормальную высоту
+            const headerHeight = 60;
+            const inputHeight = 80;
+            const availableHeight = window.innerHeight - headerHeight - inputHeight;
+            
+            messagesContainer.style.height = `${availableHeight}px`;
+            messagesContainer.style.maxHeight = `${availableHeight}px`;
         }
+    }
+    
+    // Следим за изменениями размера окна (iOS клавиатура)
+    window.addEventListener('resize', handleResize);
+    
+    // Также отслеживаем фокус/блюр для Android
+    messageInput.addEventListener('focus', () => {
+        setTimeout(() => {
+            chatModal.classList.add('keyboard-open');
+            // Для Android эмулируем изменение размера
+            handleResize();
+        }, 300);
     });
+    
+    messageInput.addEventListener('blur', () => {
+        setTimeout(() => {
+            chatModal.classList.remove('keyboard-open');
+            chatModal.classList.add('keyboard-closed');
+            // Восстанавливаем размеры
+            const headerHeight = 60;
+            const inputHeight = 80;
+            const availableHeight = window.innerHeight - headerHeight - inputHeight;
+            
+            messagesContainer.style.height = `${availableHeight}px`;
+            messagesContainer.style.maxHeight = `${availableHeight}px`;
+        }, 300);
+    });
+    
+    // Инициализируем начальную высоту
+    initialViewportHeight = window.innerHeight;
 }
 
+
 function adjustInputPosition(keyboardOpen, keyboardHeight = 0) {
-    const { messageInputContainer, messagesContainer } = getActiveElements();
-    
+    // Теперь ничего не делаем - элементы фиксированы
+    // Просто прокручиваем сообщения если нужно
     if (keyboardOpen) {
-        // При открытой клавиатуре просто прокручиваем сообщения
+        const { messagesContainer } = getActiveElements();
         setTimeout(() => {
             if (messagesContainer) {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
         }, 100);
     }
-    // Убираем все изменения позиции - элементы остаются фиксированными
 }
 
 
