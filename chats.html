@@ -510,9 +510,22 @@ input, textarea {
     flex-direction: column;
     transform: translateX(100%);
     transition: transform 0.3s ease, opacity 0.3s ease;
-    /* Гарантируем полную высоту */
     height: 100vh;
     max-height: 100vh;
+    /* ДОБАВЛЯЕМ: предотвращаем смещение всего модала */
+    overflow: hidden;
+}
+
+
+@media (min-width: 768px) {
+    .chat-modal.keyboard-open .messages-container {
+        height: auto;
+        max-height: none;
+    }
+    
+    .chat-modal.keyboard-open .message-input-container {
+        bottom: 12px;
+    }
 }
 
     .chat-modal.active {
@@ -730,6 +743,8 @@ input, textarea {
     flex-basis: 0;
     /* Убираем любые позиционирование */
     position: relative;
+    /* ДОБАВЛЯЕМ: предотвращаем смещение контейнера */
+    transform: translateZ(0); /* Аппаратное ускорение */
 }
 
 
@@ -1369,9 +1384,9 @@ input, textarea {
 
 
 .message-input-container {
-    padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
+    padding: 8px 16px 6px 16px;
     position: sticky;
-    bottom: 12px; 
+    bottom: 12px;
     left: 0;
     right: 0;
     z-index: 98;
@@ -1379,7 +1394,13 @@ input, textarea {
     justify-content: center;
     background: transparent;
     margin-top: -20px;
+    /* ДОБАВЛЯЕМ: предотвращаем смещение */
+    transform: translateZ(0);
+    will-change: transform;
 }
+
+
+
 
 .message-input-wrapper {
     display: flex;
@@ -1425,6 +1446,11 @@ input, textarea {
     box-shadow: 0 2px 6px rgba(149, 1, 255, 0.3);
     flex-shrink: 0;
 }
+.chat-modal.keyboard-open .messages-container {
+    /* При открытой клавиатуре уменьшаем высоту контейнера сообщений */
+    height: calc(100vh - 60px - 70px); /* минус высота хедера и поля ввода */
+    max-height: calc(100vh - 60px - 70px);
+}
 
 /* Для десктопной версии */
 @media (min-width: 768px) {
@@ -1444,7 +1470,7 @@ input, textarea {
         /* Гарантируем прозрачность на мобильных */
         background: transparent;
         z-index: 98;
-        transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
+        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
         transform: translateY(0); 
     }
     
@@ -2276,26 +2302,6 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
 
 
-
-
-
-function setupMobileChatHeight() {
-    if (!isDesktop) {
-        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
-        
-        // Устанавливаем высоту контейнера сообщений
-        const headerHeight = document.querySelector('.chat-header').offsetHeight;
-        const inputHeight = messageInputContainer.offsetHeight;
-        const availableHeight = window.innerHeight - headerHeight - inputHeight;
-        
-        messagesContainer.style.height = `${availableHeight}px`;
-        messagesContainer.style.maxHeight = `${availableHeight}px`;
-    }
-}
-
-
-
-
         // Добавьте эту функцию для отладки
 async function debugActivityStatus(userId) {
     try {
@@ -2675,8 +2681,9 @@ function setupKeyboardHandlers() {
 function setupKeyboardDetection() {
     if (isDesktop) return;
     
-    const { messageInput, chatModal } = getActiveElements();
+    const { messageInput, chatModal, messagesContainer } = getActiveElements();
     let keyboardShown = false;
+    let originalMessagesHeight = messagesContainer.offsetHeight;
     
     // Определяем открытие клавиатуры
     messageInput.addEventListener('focus', () => {
@@ -2684,8 +2691,13 @@ function setupKeyboardDetection() {
             keyboardShown = true;
             chatModal.classList.remove('keyboard-closed');
             chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true);
-        }, 300);
+            adjustMessagesForKeyboard(true);
+            
+            // Прокручиваем к последним сообщениям
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 300);
+        }, 100);
     });
     
     // Определяем закрытие клавиатуры
@@ -2694,8 +2706,8 @@ function setupKeyboardDetection() {
             keyboardShown = false;
             chatModal.classList.remove('keyboard-open');
             chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
-        }, 300);
+            adjustMessagesForKeyboard(false);
+        }, 100);
     });
     
     // Альтернативный метод через resize (для iOS)
@@ -2709,36 +2721,61 @@ function setupKeyboardDetection() {
         if (keyboardHeight > 100) { // Клавиатура открыта
             chatModal.classList.remove('keyboard-closed');
             chatModal.classList.add('keyboard-open');
-            adjustInputPosition(true, keyboardHeight);
+            adjustMessagesForKeyboard(true);
+            
+            // Прокручиваем к последним сообщениям
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
         } else { // Клавиатура закрыта
             chatModal.classList.remove('keyboard-open');
             chatModal.classList.add('keyboard-closed');
-            adjustInputPosition(false);
+            adjustMessagesForKeyboard(false);
         }
     });
 }
 
-function adjustInputPosition(keyboardOpen, keyboardHeight = 0) {
-    const { messageInputContainer, messagesContainer } = getActiveElements();
+function adjustMessagesForKeyboard(keyboardOpen) {
+    const { messagesContainer, messageInputContainer } = getActiveElements();
     
     if (keyboardOpen) {
-        // Когда клавиатура открыта - минимальный отступ
-        messageInputContainer.style.bottom = '8px';
-        messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
+        // Когда клавиатура открыта - уменьшаем высоту контейнера сообщений
+        const headerHeight = document.querySelector('.chat-header').offsetHeight;
+        const inputHeight = messageInputContainer.offsetHeight;
+        const availableHeight = window.innerHeight - headerHeight - inputHeight - 20; // небольшой запас
         
-        // Прокручиваем сообщения к низу
-        setTimeout(() => {
-            if (messagesContainer) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        }, 100);
+        messagesContainer.style.height = `${availableHeight}px`;
+        messagesContainer.style.maxHeight = `${availableHeight}px`;
+        messagesContainer.style.overflowY = 'auto';
+        
+        // Поле ввода остается на своем месте, но может подняться выше
+        messageInputContainer.style.bottom = '8px';
+        
     } else {
-        // Когда клавиатура закрыта - нормальный отступ
+        // Когда клавиатура закрыта - восстанавливаем полную высоту
+        messagesContainer.style.height = '';
+        messagesContainer.style.maxHeight = '';
+        messagesContainer.style.overflowY = 'auto';
+        
         messageInputContainer.style.bottom = '12px';
-        messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
     }
 }
 
+// Обновите функцию setupMobileChatHeight
+function setupMobileChatHeight() {
+    if (!isDesktop) {
+        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
+        
+        if (chatModal.classList.contains('active')) {
+            const headerHeight = document.querySelector('.chat-header').offsetHeight;
+            const inputHeight = messageInputContainer.offsetHeight;
+            const availableHeight = window.innerHeight - headerHeight - inputHeight - 20;
+            
+            messagesContainer.style.height = `${availableHeight}px`;
+            messagesContainer.style.maxHeight = `${availableHeight}px`;
+        }
+    }
+}
 
        
 async function openChat(chatId) {
@@ -3437,112 +3474,121 @@ async function initializePage() {
         }
     }, 5000);
 
-    // Настройка обработчиков клавиатуры
-    setupKeyboardHandlers();
-    setupKeyboardDetection();
-    
-    // Запрет масштабирования жестами
-    document.addEventListener('gesturestart', function(e) {
-        e.preventDefault();
-    });
-    
-    document.addEventListener('gesturechange', function(e) {
-        e.preventDefault();
-    });
-    
-    document.addEventListener('gestureend', function(e) {
-        e.preventDefault();
-    });
+// Настройка обработчиков клавиатуры
+setupKeyboardHandlers();
+setupKeyboardDetection(); // Эта функция будет обновлена
 
-    // Обновление статусов при возвращении на вкладку
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            updateChatStatuses();
-            updateUserActivity(true);
-            
-            if (currentChat) {
-                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    getUsersActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
-                        const userActivity = activityData[otherParticipant.platform_user_id];
-                        const chatStatus = getActiveElements().chatStatus;
-                        
-                        if (userActivity) {
-                            if (userActivity.is_online) {
-                                chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                                chatStatus.classList.add('online');
-                            } else {
-                                chatStatus.textContent = formatLastSeen(userActivity.last_online);
-                                chatStatus.classList.remove('online');
-                            }
-                        }
-                    });
-                }
-            }
-        } else {
-            sendOfflineStatus();
+// Запрет масштабирования жестами
+document.addEventListener('gesturestart', function(e) {
+    e.preventDefault();
+});
+
+document.addEventListener('gesturechange', function(e) {
+    e.preventDefault();
+});
+
+document.addEventListener('gestureend', function(e) {
+    e.preventDefault();
+});
+
+// ДОБАВЬТЕ обработчики для ориентации и ресайза
+window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+        if (!isDesktop && currentChat) {
+            setupMobileChatHeight(); // Эта функция будет обновлена
         }
-    });
+    }, 300);
+});
 
-    // Обновление при активации окна
-    window.addEventListener('focus', () => {
+// Обновление статусов при возвращении на вкладку
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
         updateChatStatuses();
         updateUserActivity(true);
-    });
-
-    // Обновление статуса активности
-    setTimeout(() => {
-        updateUserActivity(true);
-    }, 100);
-
-    const activityInterval = setInterval(() => {
-        updateUserActivity(true);
-    }, 30000);
-    
-    // Очистка интервалов при закрытии страницы
-    window.addEventListener('beforeunload', () => {
-        clearInterval(activityInterval);
-        clearInterval(statusUpdateInterval);
+        
+        if (currentChat) {
+            const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                getUsersActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
+                    const userActivity = activityData[otherParticipant.platform_user_id];
+                    const chatStatus = getActiveElements().chatStatus;
+                    
+                    if (userActivity) {
+                        if (userActivity.is_online) {
+                            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                            chatStatus.classList.add('online');
+                        } else {
+                            chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                            chatStatus.classList.remove('online');
+                        }
+                    }
+                });
+            }
+        }
+    } else {
         sendOfflineStatus();
-    });
-
-    window.addEventListener('pagehide', () => {
-        clearInterval(activityInterval);
-        clearInterval(statusUpdateInterval);
-        sendOfflineStatus();
-    });
-
-    window.addEventListener('unload', () => {
-        clearInterval(activityInterval);
-        clearInterval(statusUpdateInterval);
-        sendOfflineStatus();
-    });
-    
-    // Обработчики для дополнительных кнопок
-    const menuButton = document.querySelector('.menu-button');
-    if (menuButton) {
-        menuButton.addEventListener('click', () => {
-            console.log('Menu button clicked');
-            // Здесь можно добавить функциональность меню
-        });
     }
+});
 
-    const contactsSearchBtn = document.querySelector('.contacts-search-btn');
-    if (contactsSearchBtn) {
-        contactsSearchBtn.addEventListener('click', () => {
-            contactsSearchInput.focus();
-        });
-    }
+// Обновление при активации окна
+window.addEventListener('focus', () => {
+    updateChatStatuses();
+    updateUserActivity(true);
+});
 
-    // Настройка высоты для мобильных устройств
-    if (!isDesktop) {
-        setupMobileChatHeight();
-        window.addEventListener('resize', setupMobileChatHeight);
-    }
+// Обновление статуса активности
+setTimeout(() => {
+    updateUserActivity(true);
+}, 100);
 
-    console.log('Page initialized successfully');
+const activityInterval = setInterval(() => {
+    updateUserActivity(true);
+}, 30000);
+
+// Очистка интервалов при закрытии страницы
+window.addEventListener('beforeunload', () => {
+    clearInterval(activityInterval);
+    clearInterval(statusUpdateInterval);
+    sendOfflineStatus();
+});
+
+window.addEventListener('pagehide', () => {
+    clearInterval(activityInterval);
+    clearInterval(statusUpdateInterval);
+    sendOfflineStatus();
+});
+
+window.addEventListener('unload', () => {
+    clearInterval(activityInterval);
+    clearInterval(statusUpdateInterval);
+    sendOfflineStatus();
+});
+
+// Обработчики для дополнительных кнопок
+const menuButton = document.querySelector('.menu-button');
+if (menuButton) {
+    menuButton.addEventListener('click', () => {
+        console.log('Menu button clicked');
+        // Здесь можно добавить функциональность меню
+    });
 }
 
+const contactsSearchBtn = document.querySelector('.contacts-search-btn');
+if (contactsSearchBtn) {
+    contactsSearchBtn.addEventListener('click', () => {
+        contactsSearchInput.focus();
+    });
+}
+
+// Настройка высоты для мобильных устройств - ОБНОВЛЕННАЯ ЧАСТЬ
+if (!isDesktop) {
+    setupMobileChatHeight(); // Эта функция теперь будет работать по-новому
+    window.addEventListener('resize', setupMobileChatHeight);
+}
+
+console.log('Page initialized successfully');
+
+}
 
 
 function filterChats(searchTerm) {
