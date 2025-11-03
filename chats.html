@@ -1950,8 +1950,10 @@ async function loadChats() {
     const { chatsList, noChats } = getActiveElements();
     
     try {
-        // Очистка локального кэша для принудительной перезагрузки
-        currentChatsList = [];
+        // ОЧИСТКА КЭША ПЕРЕД ЗАГРУЗКОЙ
+        with (cache_lock) {
+            user_data_cache = {};
+        }
         
         const response = await fetch(`${SERVER_URL}/get_chats`, {
             method: 'POST',
@@ -1960,7 +1962,7 @@ async function loadChats() {
             },
             body: JSON.stringify({
                 platform_user_id: userData.platform_user_id,
-                include_participants_data: true  // Добавлено: запрос актуальных данных участников
+                include_participants_data: true
             }),
             credentials: 'include'
         });
@@ -1968,7 +1970,7 @@ async function loadChats() {
         const data = await response.json();
         
         if (data.status === 'success') {
-            currentChatsList = data.chats; // Обновляем кэш свежими данными
+            currentChatsList = data.chats;
             renderChats(data.chats);
         } else {
             currentChatsList = [];
