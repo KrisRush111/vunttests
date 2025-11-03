@@ -719,18 +719,16 @@ input, textarea {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    /* УБИРАЕМ все ограничения высоты */
     height: 100%;
     max-height: none;
     min-height: 0;
-    /* Гарантируем полную высоту */
     flex-grow: 1;
     flex-shrink: 1;
     flex-basis: 0;
-    /* Убираем любые позиционирование */
     position: relative;
+    /* Добавьте это свойство */
+    overflow-anchor: none;
 }
-
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
 .messages-container::before {
@@ -1368,9 +1366,9 @@ input, textarea {
 
 
 .message-input-container {
-    padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
+    padding: 8px 16px 6px 16px;
     position: sticky;
-    bottom: 12px; /* Добавляем 4px снизу */
+    bottom: 12px;
     left: 0;
     right: 0;
     z-index: 10;
@@ -1378,6 +1376,26 @@ input, textarea {
     justify-content: center;
     background: transparent;
     margin-top: -20px;
+    /* Добавьте эти свойства */
+    transition: transform 0.3s ease;
+    transform: translateY(0);
+}
+
+.message-input-container.keyboard-active {
+    transform: translateY(-50vh); /* Поднимает поле ввода, но не контент */
+}
+
+/* Для мобильных устройств добавьте это */
+@media (max-width: 767px) {
+    .chat-modal.active {
+        position: fixed;
+        height: 100vh;
+        overflow: hidden;
+    }
+    
+    .messages-container {
+        padding-bottom: 80px; /* Оставляем место для поля ввода */
+    }
 }
 
 .message-input-wrapper {
@@ -2656,7 +2674,64 @@ function setupKeyboardHandlers() {
 
 
 
-       
+       // Добавьте эту функцию для обработки клавиатуры
+function setupKeyboardBehavior() {
+    const { messageInput, messagesContainer, messageInputContainer } = getActiveElements();
+    
+    let isKeyboardOpen = false;
+    
+    // Обработчик фокуса на поле ввода
+    messageInput.addEventListener('focus', () => {
+        isKeyboardOpen = true;
+        
+        // Плавно поднимаем только поле ввода
+        setTimeout(() => {
+            messageInputContainer.classList.add('keyboard-active');
+        }, 100);
+        
+        // Прокручиваем к последнему сообщению
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 300);
+    });
+    
+    // Обработчик потери фокуса
+    messageInput.addEventListener('blur', () => {
+        isKeyboardOpen = false;
+        messageInputContainer.classList.remove('keyboard-active');
+    });
+    
+    // Обработчик изменения размера окна (для детекции клавиатуры на iOS)
+    let originalHeight = window.innerHeight;
+    
+    window.addEventListener('resize', () => {
+        if (!isDesktop) {
+            const newHeight = window.innerHeight;
+            
+            if (newHeight < originalHeight) {
+                // Клавиатура открылась
+                isKeyboardOpen = true;
+                messageInputContainer.classList.add('keyboard-active');
+            } else if (newHeight === originalHeight && isKeyboardOpen) {
+                // Клавиатура закрылась
+                isKeyboardOpen = false;
+                messageInputContainer.classList.remove('keyboard-active');
+            }
+            
+            originalHeight = newHeight;
+        }
+    });
+    
+    // Обработчик клика по сообщениям (закрытие клавиатуры)
+    messagesContainer.addEventListener('click', (e) => {
+        if (!e.target.closest('.message-input-wrapper') && isKeyboardOpen) {
+            messageInput.blur();
+        }
+    });
+}
+
+
+
 async function openChat(chatId) {
     if (isOpeningChat) return;
     isOpeningChat = true;
@@ -3355,6 +3430,7 @@ async function initializePage() {
 
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
+    setupKeyboardBehavior(); 
     
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
