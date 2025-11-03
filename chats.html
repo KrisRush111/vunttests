@@ -501,19 +501,18 @@ input, textarea {
     left: 0;
     right: 0;
     bottom: 0;
-    width: 100vw;
-    height: 100vh;
     background-image: url('фон.webp');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    background-attachment: fixed; /* ФИКСИРУЕМ ФОН */
     z-index: 100;
     display: none;
     flex-direction: column;
     transform: translateX(100%);
-    transition: transform 0.3s ease;
-    overflow: hidden;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    /* Гарантируем полную высоту */
+    height: 100vh;
+    max-height: 100vh;
 }
 
     .chat-modal.active {
@@ -595,21 +594,22 @@ input, textarea {
     }
 
 .chat-header {
-    position: absolute; /* МЕНЯЕМ с sticky на absolute */
-    top: 0;
-    left: 0;
-    right: 0;
     display: flex;
     align-items: center;
     padding: 12px 16px;
     border-bottom: 1px solid var(--telegram-divider);
     background: var(--telegram-bg);
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
     z-index: 100;
     height: 60px;
     min-height: 60px;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
 }
+
 
 
     .chat-header .back-button {
@@ -714,19 +714,23 @@ input, textarea {
     }
 
 .messages-container {
-    position: absolute;
-    top: 60px; /* Высота хедера */
-    bottom: 80px; /* Высота поля ввода */
-    left: 0;
-    right: 0;
+    flex: 1;
     padding: 16px;
     overflow-y: auto;
     display: flex;
     z-index: 97;
     flex-direction: column;
-    background: transparent;
+    /* УБИРАЕМ все ограничения высоты */
+    height: 100%;
+    max-height: none;
+    min-height: 0;
+    /* Гарантируем полную высоту */
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    /* Убираем любые позиционирование */
+    position: relative;
 }
-
 
 
 /* Убедитесь, что первый элемент сообщений не перекрывается хедером */
@@ -1361,70 +1365,21 @@ input, textarea {
 }
 
 
-@media (min-width: 768px) {
-    .chat-modal {
-        position: static;
-        transform: translateX(0);
-        display: none;
-        flex: 1;
-        height: 100vh;
-        border-left: 1px solid var(--telegram-divider);
-        background-attachment: scroll;
-    }
-    
-    .chat-header {
-        position: sticky;
-    }
-    
-    .messages-container {
-        position: relative;
-        top: auto;
-        bottom: auto;
-        flex: 1;
-    }
-    
-    .message-input-container {
-        position: sticky;
-        bottom: 0;
-    }
-}
-
-/* FIX: Запрещаем скролл body когда открыт чат */
-body.chat-open {
-    overflow: hidden;
-    position: fixed;
-    width: 100%;
-    height: 100%;
-}
-
-/* FIX: Улучшаем обработку клавиатуры */
-@media (max-width: 767px) {
-    .keyboard-open .message-input-container {
-        bottom: 8px;
-        transform: translateY(0);
-    }
-    
-    .keyboard-open .messages-container {
-        bottom: 70px; /* Увеличиваем отступ когда клавиатура открыта */
-    }
-}
-
-
 
 
 
 .message-input-container {
-    position: absolute;
-    bottom: 12px;
+    padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
+    position: sticky;
+    bottom: 12px; 
     left: 0;
     right: 0;
     z-index: 98;
     display: flex;
     justify-content: center;
     background: transparent;
-    padding: 8px 16px 6px 16px;
+    margin-top: -20px;
 }
-
 
 .message-input-wrapper {
     display: flex;
@@ -2692,43 +2647,29 @@ async function sendMessage() {
 }
 
 
+// Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
-    const { chatModal, messageInput, messagesContainer } = getActiveElements();
+    const { messagesContainer, messageInput } = getActiveElements();
     
-    // Отслеживаем фокус на поле ввода
-    messageInput.addEventListener('focus', () => {
-        chatModal.classList.add('keyboard-open');
-        chatModal.classList.remove('keyboard-closed');
-        
-        // Прокручиваем к самому низу при открытии клавиатуры
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 300);
-    });
-    
-    messageInput.addEventListener('blur', () => {
-        chatModal.classList.remove('keyboard-open');
-        chatModal.classList.add('keyboard-closed');
-    });
-    
-    // Альтернативный метод для iOS
-    window.addEventListener('resize', () => {
-        if (!chatModal.classList.contains('active')) return;
-        
-        const visualViewport = window.visualViewport;
-        if (visualViewport) {
-            if (visualViewport.height < window.innerHeight * 0.7) {
-                // Клавиатура открыта
-                chatModal.classList.add('keyboard-open');
-                chatModal.classList.remove('keyboard-closed');
-            } else {
-                // Клавиатура закрыта
-                chatModal.classList.remove('keyboard-open');
-                chatModal.classList.add('keyboard-closed');
-            }
+    // Закрытие клавиатуры при клике на сообщения
+    messagesContainer.addEventListener('click', (e) => {
+        if (!e.target.closest('.message-input-container')) {
+            messageInput.blur();
         }
     });
+    
+    // Предотвращение закрытия при клике на поле ввода
+    messageInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    // Обработка потери фокуса
+    messageInput.addEventListener('blur', () => {
+        // Не делаем ничего - клавиатура закроется сама
+    });
 }
+
+
 
 
 function setupKeyboardDetection() {
@@ -2858,11 +2799,6 @@ if (otherParticipant) {
         }
     }
 }
-
-
-    if (!isDesktop) {
-        document.body.classList.add('chat-open');
-    }
 
 // Обновляем статус в заголовке чата
 if (isOnline) {
@@ -2997,7 +2933,6 @@ if (currentChat.participants && currentChat.participants.length > 0) {
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
-    document.body.classList.remove('chat-open');
     // Reset chat state
     currentChat = null;
     currentMessages = [];
