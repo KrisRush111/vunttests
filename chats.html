@@ -2662,73 +2662,162 @@ async function sendMessage() {
 function setupKeyboardHandlers() {
     if (isDesktop) return;
     
-    const { messageInput, messagesContainer } = getActiveElements();
+    const { messageInput, messagesContainer, chatModal } = getActiveElements();
     
     let isKeyboardOpen = false;
+    let keyboardHeight = 300; // Примерная высота клавиатуры
     
     // Обработчик фокуса на поле ввода
     messageInput.addEventListener('focus', () => {
         isKeyboardOpen = true;
+        chatModal.classList.add('keyboard-open');
         
         // Даем время на появление клавиатуры
         setTimeout(() => {
-            // Плавно скроллим к самому низу
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            
-            // Дополнительный скролл через небольшой интервал
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        }, 300);
+            scrollToBottom();
+        }, 350);
     });
     
     // Обработчик потери фокуса
     messageInput.addEventListener('blur', () => {
         isKeyboardOpen = false;
+        chatModal.classList.remove('keyboard-open');
+        
+        // Возвращаем скролл на место
+        setTimeout(() => {
+            scrollToBottom();
+        }, 150);
     });
     
-    // Обработчик ввода текста - поддерживаем скролл внизу
+    // Функция для скролла в самый низ
+    function scrollToBottom() {
+        if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
+    
+    // Обработчик ввода текста
     messageInput.addEventListener('input', () => {
         if (isKeyboardOpen) {
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 50);
+            setTimeout(scrollToBottom, 50);
         }
     });
     
-    // Обработчик касания контейнера сообщений - скрываем клавиатуру
+    // Обработчик отправки сообщения
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            setTimeout(scrollToBottom, 100);
+        }
+    });
+    
+    // При касании сообщений скрываем клавиатуру
     messagesContainer.addEventListener('touchstart', (e) => {
-        if (e.target === messagesContainer || !e.target.closest('.message-input-container')) {
+        if (!e.target.closest('.message-input-container') && 
+            e.target !== messageInput) {
             messageInput.blur();
         }
     });
     
-    // Предотвращаем стандартное поведение при касании поля ввода
-    messageInput.addEventListener('touchstart', (e) => {
-        e.stopPropagation();
+    // Обработчик изменения размера окна (для определения высоты клавиатуры)
+    window.addEventListener('resize', () => {
+        if (isKeyboardOpen) {
+            // Можно определить реальную высоту клавиатуры
+            const newKeyboardHeight = window.innerHeight - document.documentElement.clientHeight;
+            if (newKeyboardHeight > 50) {
+                keyboardHeight = newKeyboardHeight;
+                updateKeyboardHeight();
+            }
+            setTimeout(scrollToBottom, 100);
+        }
     });
+    
+    function updateKeyboardHeight() {
+        const style = document.createElement('style');
+        style.textContent = `
+            .keyboard-open .messages-container {
+                bottom: ${70 + keyboardHeight}px;
+            }
+            .keyboard-open .message-input-container {
+                transform: translateY(-${keyboardHeight}px);
+            }
+        `;
+        document.head.appendChild(style);
+    }
 }
 
-
-// Добавьте эту функцию
+// Обновите функцию forceScrollToBottom
 function forceScrollToBottom() {
     if (!isDesktop && currentChat) {
         const { messagesContainer } = getActiveElements();
         
-        // Несколько попыток для надежности
         setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
+            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }, 100);
         
         setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 150);
-        
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
         }, 300);
     }
 }
+
+
+
+// Добавьте эту функцию для более точного определения высоты клавиатуры
+function detectKeyboardHeight() {
+    const originalHeight = window.innerHeight;
+    
+    return new Promise((resolve) => {
+        const checkHeight = () => {
+            const newHeight = window.innerHeight;
+            if (newHeight < originalHeight - 100) { // Клавиатура открыта
+                resolve(originalHeight - newHeight);
+            } else {
+                setTimeout(checkHeight, 50);
+            }
+        };
+        
+        setTimeout(checkHeight, 100);
+    });
+}
+
+// Обновите обработчик фокуса:
+messageInput.addEventListener('focus', async () => {
+    isKeyboardOpen = true;
+    chatModal.classList.add('keyboard-open');
+    
+    // Пытаемся определить реальную высоту клавиатуры
+    try {
+        const detectedHeight = await detectKeyboardHeight();
+        if (detectedHeight > 100) {
+            // Динамически обновляем CSS
+            const style = document.createElement('style');
+            style.id = 'keyboard-height';
+            style.textContent = `
+                .keyboard-open .messages-container {
+                    bottom: ${70 + detectedHeight}px !important;
+                }
+                .keyboard-open .message-input-container {
+                    transform: translateY(-${detectedHeight}px) !important;
+                }
+            `;
+            // Удаляем старый стиль если есть
+            const oldStyle = document.getElementById('keyboard-height');
+            if (oldStyle) oldStyle.remove();
+            document.head.appendChild(style);
+        }
+    } catch (error) {
+        console.log('Could not detect keyboard height');
+    }
+    
+    setTimeout(() => {
+        scrollToBottom();
+    }, 400);
+});
+
 
 
 // Обновите функцию setupMobileChatHeight
