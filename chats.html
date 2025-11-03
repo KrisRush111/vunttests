@@ -1336,7 +1336,7 @@ input, textarea {
 
 
 
-.user-status {
+    .user-status {
     font-size: 13px;
     color: var(--telegram-hint);
 }
@@ -1363,78 +1363,6 @@ input, textarea {
 .user-status.offline .status-text {
     color: var(--telegram-hint);
 }
-
-
-/* Добавьте в CSS */
-.reaction-notification {
-    position: absolute;
-    top: -10px;
-    right: -10px;
-    background: var(--telegram-blue);
-    color: white;
-    border-radius: 12px;
-    padding: 4px 8px;
-    font-size: 12px;
-    z-index: 1000;
-    animation: fadeInOut 2s ease;
-}
-
-@keyframes fadeInOut {
-    0% { opacity: 0; transform: scale(0.8); }
-    20% { opacity: 1; transform: scale(1.1); }
-    80% { opacity: 1; transform: scale(1); }
-    100% { opacity: 0; transform: scale(0.8); }
-}
-
-/* Улучшенные стили для реакций */
-.message-reactions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 6px;
-    align-items: center;
-    min-height: 24px;
-}
-
-.reaction-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 6px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.9);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(10px);
-}
-
-.message-outgoing .reaction-item {
-    background: rgba(255, 255, 255, 0.8);
-}
-
-.reaction-item:hover {
-    background: rgba(255, 255, 255, 1);
-    transform: scale(1.05);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.reaction-item.my-reaction {
-    background: rgba(0, 136, 204, 0.15);
-    border-color: var(--telegram-blue);
-}
-
-.reaction-emoji {
-    font-size: 13px;
-}
-
-.reaction-count {
-    font-weight: 500;
-    color: var(--telegram-text);
-    font-size: 11px;
-}
-
 
 
 
@@ -1782,528 +1710,6 @@ input, textarea {
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
-        // Добавьте в раздел с другими глобальными переменными
-        let messageReactions = {};
-        let reactionsPickerOpen = false;
-
-
-
-        // Добавьте в глобальные переменные
-let socket = null;
-let isSocketConnected = false;
-let reactionUpdateInterval = null;
-
-// Функция для подключения WebSocket
-function connectWebSocket() {
-    if (!userData || !userData.platform_user_id) {
-        console.log('No user data for WebSocket connection');
-        return;
-    }
-
-    try {
-        // Если используете SocketIO
-        socket = io(SERVER_URL, {
-            query: {
-                user_id: userData.platform_user_id
-            },
-            transports: ['websocket', 'polling']
-        });
-
-        socket.on('connect', () => {
-            console.log('WebSocket connected');
-            isSocketConnected = true;
-        });
-
-        socket.on('disconnect', () => {
-            console.log('WebSocket disconnected');
-            isSocketConnected = false;
-            // Пытаемся переподключиться
-            setTimeout(connectWebSocket, 3000);
-        });
-
-        socket.on('reaction_update', (data) => {
-            console.log('Received reaction update:', data);
-            handleReactionUpdate(data);
-        });
-
-        socket.on('error', (error) => {
-            console.error('WebSocket error:', error);
-        });
-
-    } catch (error) {
-        console.error('WebSocket connection failed:', error);
-        // Fallback to polling
-        startReactionPolling();
-    }
-}
-
-// Функция для обработки обновлений реакций
-function handleReactionUpdate(data) {
-    const { message_id, reactions, type } = data;
-    
-    // Обновляем кэш реакций
-    if (reactions && reactions.length > 0) {
-        messageReactions[message_id] = reactions;
-    } else {
-        delete messageReactions[message_id];
-    }
-    
-    // Обновляем UI
-    updateMessageReactionsUI([message_id]);
-    
-    // Показываем уведомление (опционально)
-    if (type === 'reaction_added' && data.user_id !== userData.platform_user_id) {
-        showReactionNotification(data);
-    }
-}
-
-// Функция для показа уведомления о реакции
-function showReactionNotification(data) {
-    // Можно добавить краткое уведомление
-    const messageElement = document.querySelector(`[data-message-id="${data.message_id}"]`);
-    if (messageElement) {
-        const notification = document.createElement('div');
-        notification.className = 'reaction-notification';
-        notification.textContent = `👍 ${data.reaction}`;
-        notification.style.cssText = `
-            position: absolute;
-            top: -10px;
-            right: -10px;
-            background: var(--telegram-blue);
-            color: white;
-            border-radius: 12px;
-            padding: 4px 8px;
-            font-size: 12px;
-            z-index: 1000;
-            animation: fadeInOut 2s ease;
-        `;
-        
-        messageElement.style.position = 'relative';
-        messageElement.appendChild(notification);
-        
-        setTimeout(() => {
-            notification.remove();
-        }, 2000);
-    }
-}
-
-// Fallback: Polling если WebSocket не доступен
-function startReactionPolling() {
-    let lastCheck = new Date().toISOString();
-    
-    reactionUpdateInterval = setInterval(async () => {
-        if (!currentChat || !currentMessages.length) return;
-        
-        const messageIds = currentMessages.map(msg => msg.id);
-        
-        try {
-            const response = await fetch(`${SERVER_URL}/get_reaction_updates`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message_ids: messageIds,
-                    last_check: lastCheck
-                }),
-                credentials: 'include'
-            });
-
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                // Обновляем кэш
-                if (data.updated_reactions) {
-                    Object.assign(messageReactions, data.updated_reactions);
-                    
-                    // Обновляем UI для измененных сообщений
-                    const updatedMessageIds = Object.keys(data.updated_reactions);
-                    if (updatedMessageIds.length > 0) {
-                        updateMessageReactionsUI(updatedMessageIds);
-                    }
-                }
-                
-                if (data.last_check) {
-                    lastCheck = data.last_check;
-                }
-            }
-        } catch (error) {
-            console.error('Error polling reaction updates:', error);
-        }
-    }, 3000); // Проверяем каждые 3 секунды
-}
-
-// Обновите функции работы с реакциями для использования WebSocket
-async function handleReactionClick(messageId, reaction, isMyReaction) {
-    try {
-        if (isMyReaction) {
-            // Удаляем реакцию
-            const response = await fetch(`${SERVER_URL}/remove_reaction`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message_id: messageId,
-                    user_id: userData.platform_user_id
-                }),
-                credentials: 'include'
-            });
-
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                // Обновляем локальный кэш
-                messageReactions[messageId] = data.reactions || [];
-                updateMessageReactionsUI([messageId]);
-            }
-        } else {
-            // Добавляем реакцию
-            const response = await fetch(`${SERVER_URL}/add_reaction`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message_id: messageId,
-                    user_id: userData.platform_user_id,
-                    reaction: reaction
-                }),
-                credentials: 'include'
-            });
-
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                // Обновляем локальный кэш
-                messageReactions[messageId] = data.reactions || [];
-                updateMessageReactionsUI([messageId]);
-                
-                // WebSocket уведомит других пользователей автоматически
-            }
-        }
-        
-    } catch (error) {
-        console.error('Error handling reaction:', error);
-        showMessage('Ошибка при обновлении реакции', 'error');
-    }
-}
-
-
-// Добавьте функцию для загрузки реакций
-async function loadMessageReactions(messageIds) {
-    if (!messageIds || messageIds.length === 0) return;
-
-    try {
-        const response = await fetch(`${SERVER_URL}/get_message_reactions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                message_ids: messageIds
-            }),
-            credentials: 'include'
-        });
-
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            messageReactions = { ...messageReactions, ...data.reactions };
-            updateMessageReactionsUI(messageIds);
-        }
-    } catch (error) {
-        console.error('Error loading message reactions:', error);
-    }
-}
-
-// Функция для обновления отображения реакций
-function updateMessageReactionsUI(messageIds) {
-    messageIds.forEach(messageId => {
-        const messageElement = document.querySelector(`.message[data-message-id="${messageId}"]`);
-        if (!messageElement) return;
-
-        // Удаляем старые реакции
-        const oldReactions = messageElement.querySelector('.message-reactions');
-        if (oldReactions) {
-            oldReactions.remove();
-        }
-
-        const reactions = messageReactions[messageId];
-        if (!reactions || reactions.length === 0) return;
-
-        // Добавляем контейнер для реакций
-        const reactionsContainer = document.createElement('div');
-        reactionsContainer.className = 'message-reactions';
-        
-        reactions.forEach(reactionData => {
-            const isMyReaction = reactionData.user_ids.includes(userData.platform_user_id);
-            const reactionElement = document.createElement('div');
-            reactionElement.className = `reaction-item ${isMyReaction ? 'my-reaction' : ''}`;
-            reactionElement.innerHTML = `
-                <span class="reaction-emoji">${reactionData.reaction}</span>
-                <span class="reaction-count">${reactionData.count}</span>
-            `;
-            
-            reactionElement.addEventListener('click', () => {
-                handleReactionClick(messageId, reactionData.reaction, isMyReaction);
-            });
-            
-            reactionsContainer.appendChild(reactionElement);
-        });
-
-        // Добавляем кнопку для добавления новой реакции
-        const addButton = document.createElement('button');
-        addButton.className = 'add-reaction-button';
-        addButton.innerHTML = '+';
-        addButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showReactionsPicker(messageId, addButton);
-        });
-        
-        reactionsContainer.appendChild(addButton);
-        messageElement.appendChild(reactionsContainer);
-        messageElement.classList.add('has-reactions');
-    });
-}
-
-// Функция для обработки клика по реакции
-async function handleReactionClick(messageId, reaction, isMyReaction) {
-    try {
-        if (isMyReaction) {
-            // Удаляем реакцию
-            await fetch(`${SERVER_URL}/remove_reaction`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message_id: messageId,
-                    user_id: userData.platform_user_id
-                }),
-                credentials: 'include'
-            });
-        } else {
-            // Добавляем реакцию
-            await fetch(`${SERVER_URL}/add_reaction`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message_id: messageId,
-                    user_id: userData.platform_user_id,
-                    reaction: reaction
-                }),
-                credentials: 'include'
-            });
-        }
-
-        // Перезагружаем реакции для этого сообщения
-        await loadMessageReactions([messageId]);
-        
-    } catch (error) {
-        console.error('Error handling reaction:', error);
-    }
-}
-
-// Функция для показа палитры реакций
-function showReactionsPicker(messageId, buttonElement) {
-    // Закрываем предыдущий пикер
-    closeReactionsPicker();
-
-    // Создаем пикер
-    const picker = document.createElement('div');
-    picker.className = 'reactions-picker active';
-    
-    const reactions = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '👏', '🔥', '⭐'];
-    
-    reactions.forEach(reaction => {
-        const option = document.createElement('button');
-        option.className = 'reaction-option';
-        option.textContent = reaction;
-        option.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            await handleReactionClick(messageId, reaction, false);
-            closeReactionsPicker();
-        });
-        picker.appendChild(option);
-    });
-
-    // Позиционируем пикер
-    const rect = buttonElement.getBoundingClientRect();
-    picker.style.position = 'fixed';
-    picker.style.left = `${rect.left}px`;
-    picker.style.bottom = `${window.innerHeight - rect.top + 8}px`;
-    
-    document.body.appendChild(picker);
-    reactionsPickerOpen = true;
-
-    // Закрытие при клике вне пикера
-    setTimeout(() => {
-        document.addEventListener('click', closeReactionsPicker, { once: true });
-    }, 100);
-}
-
-// Функция для закрытия пикера реакций
-function closeReactionsPicker() {
-    const picker = document.querySelector('.reactions-picker');
-    if (picker) {
-        picker.remove();
-    }
-    reactionsPickerOpen = false;
-}
-
-// Обновите функцию renderMessages для загрузки реакций
-function renderMessages(messages) {
-    const { messagesContainer, noMessages } = getActiveElements();
-    
-    messagesContainer.innerHTML = '';
-    
-    if (!messages || messages.length === 0) {
-        noMessages.style.display = 'block';
-        noMessages.textContent = 'Сообщений пока нет...';
-        return;
-    }
-    
-    noMessages.style.display = 'none';
-    
-    let lastDateHeader = '';
-    const messageIds = [];
-    
-    messages.forEach((message, index) => {
-        const currentDateHeader = formatDateHeader(message.sent_at);
-        
-        if (currentDateHeader !== lastDateHeader) {
-            const dateHeader = document.createElement('div');
-            dateHeader.className = 'date-header';
-            dateHeader.textContent = currentDateHeader;
-            dateHeader.style.textAlign = 'center';
-            dateHeader.style.margin = '12px auto'; 
-            dateHeader.style.fontSize = '14px';
-            dateHeader.style.color = 'white';
-            dateHeader.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
-            dateHeader.style.padding = '4px 12px';
-            dateHeader.style.borderRadius = '24px'; 
-            dateHeader.style.display = 'block'; 
-            messagesContainer.appendChild(dateHeader);
-            lastDateHeader = currentDateHeader;
-        }
-        
-        renderMessage(message);
-        messageIds.push(message.id);
-    });
-    
-    // Загружаем реакции для всех сообщений
-    loadMessageReactions(messageIds);
-    
-    setTimeout(() => {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 50);
-}
-
-// Обновите функцию renderMessage для поддержки реакций
-function renderMessage(message) {
-    const { messagesContainer } = getActiveElements();
-    
-    const messageElement = document.createElement('div');
-    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
-    messageElement.setAttribute('data-message-id', message.id);
-    
-    const messageTime = formatChatMessageTime(message.sent_at);
-    
-    // Create status circles for outgoing messages
-    let statusCircles = '';
-    if (message.is_me) {
-        const isRead = message.is_read;
-        statusCircles = `
-            <div class="message-status">
-                <div class="status-circles">
-                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
-                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
-                </div>
-            </div>
-        `;
-    }
-    
-    messageElement.innerHTML = `
-        <div class="message-content">${message.content}</div>
-        <div class="message-time">
-            ${messageTime}
-            ${message.is_me ? statusCircles : ''}
-        </div>
-    `;
-    
-    // Добавляем обработчик долгого нажатия для показа реакций
-    let longPressTimer;
-    messageElement.addEventListener('mousedown', (e) => {
-        longPressTimer = setTimeout(() => {
-            showReactionQuickPicker(message.id, e.clientX, e.clientY);
-        }, 500);
-    });
-    
-    messageElement.addEventListener('mouseup', () => {
-        clearTimeout(longPressTimer);
-    });
-    
-    messageElement.addEventListener('mouseleave', () => {
-        clearTimeout(longPressTimer);
-    });
-    
-    messageElement.addEventListener('touchstart', (e) => {
-        longPressTimer = setTimeout(() => {
-            const touch = e.touches[0];
-            showReactionQuickPicker(message.id, touch.clientX, touch.clientY);
-        }, 500);
-    });
-    
-    messageElement.addEventListener('touchend', () => {
-        clearTimeout(longPressTimer);
-    });
-    
-    setTimeout(() => {
-        messageElement.style.opacity = '1';
-        messageElement.style.transform = 'translateY(0)';
-    }, 10);
-    
-    messagesContainer.appendChild(messageElement);
-}
-
-// Функция для быстрого выбора реакций (по долгому нажатию)
-function showReactionQuickPicker(messageId, x, y) {
-    closeReactionsPicker();
-
-    const quickReactions = ['👍', '❤️', '😂', '😮', '😢'];
-    const picker = document.createElement('div');
-    picker.className = 'reactions-picker active';
-    
-    quickReactions.forEach(reaction => {
-        const option = document.createElement('button');
-        option.className = 'reaction-option';
-        option.textContent = reaction;
-        option.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            await handleReactionClick(messageId, reaction, false);
-            closeReactionsPicker();
-        });
-        picker.appendChild(option);
-    });
-
-    picker.style.position = 'fixed';
-    picker.style.left = `${x - 80}px`;
-    picker.style.top = `${y - 60}px`;
-    
-    document.body.appendChild(picker);
-    reactionsPickerOpen = true;
-
-    setTimeout(() => {
-        document.addEventListener('click', closeReactionsPicker, { once: true });
-    }, 100);
-}
-
-
-
-
 
 
         // Добавьте эту функцию после других функций
@@ -3532,10 +2938,7 @@ function closeChat() {
         chatModal.classList.remove('active');
         document.body.style.overflow = '';
     }
-    if (reactionUpdateInterval) {
-        clearInterval(reactionUpdateInterval);
-        reactionUpdateInterval = null;
-    }
+    
     // Reload chat list
     loadChats();
 
@@ -3667,6 +3070,45 @@ function renderMessages(messages) {
 }
 
 
+// Updated renderMessage function
+function renderMessage(message) {
+    const { messagesContainer } = getActiveElements();
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+    messageElement.setAttribute('data-message-id', message.id); // Add data-message-id
+    
+    const messageTime = formatChatMessageTime(message.sent_at);
+    
+    // Create status circles for outgoing messages
+    let statusCircles = '';
+    if (message.is_me) {
+        const isRead = message.is_read;
+        statusCircles = `
+            <div class="message-status">
+                <div class="status-circles">
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                </div>
+            </div>
+        `;
+    }
+    
+    messageElement.innerHTML = `
+        <div class="message-content">${message.content}</div>
+        <div class="message-time">
+            ${messageTime}
+            ${message.is_me ? statusCircles : ''}
+        </div>
+    `;
+    
+    setTimeout(() => {
+        messageElement.style.opacity = '1';
+        messageElement.style.transform = 'translateY(0)';
+    }, 10);
+    
+    messagesContainer.appendChild(messageElement);
+}
 
 // New functions for message status updates
 async function updateMessageStatus(chatId, messageId) {
@@ -3990,13 +3432,6 @@ async function initializePage() {
         e.preventDefault();
     });
     
-        // В функцию initializePage добавьте:
-    document.addEventListener('click', (e) => {
-        if (reactionsPickerOpen && !e.target.closest('.reactions-picker')) {
-            closeReactionsPicker();
-        }
-    });
-
     document.addEventListener('gestureend', function(e) {
         e.preventDefault();
     });
@@ -4074,9 +3509,6 @@ async function initializePage() {
         });
     }
 
-    if (userData && userData.platform_user_id) {
-        connectWebSocket();
-    }
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
@@ -4135,7 +3567,6 @@ function filterContacts(searchTerm) {
             }
         });
     </script>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
      <script src="activity-tracker.js"></script>
 </body>
