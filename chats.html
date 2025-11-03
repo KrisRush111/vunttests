@@ -2011,45 +2011,34 @@ async function renderChats(chats) {
     const activityData = await getUsersActivityStatus(userIds);
     
     chats.forEach(chat => {
-        // ИСПРАВЛЕННАЯ ЛОГИКА: Всегда используем актуальные данные участников
+        // ТОЧНАЯ ЛОГИКА КАК В RENDERCONTACTS
         let chatName = 'Новый чат';
         let chatInitials = '?';
-        let avatarBackground = chat.avatar_background || getRandomColor();
-        let hasAvatar = chat.has_avatar_photo;
+        let avatarBackground = getRandomColor();
+        let hasAvatar = false;
 
-        // ВСЕГДА используем актуальные данные участников для имени чата
-        if (chat.participants && chat.participants.length > 0) {
-            if (!chat.is_group && chat.participants.length === 2) {
-                // Для личных чатов используем актуальный никнейм другого участника
-                const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    chatName = otherParticipant.nickname || otherParticipant.platform_user_id;
-                    chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-                    avatarBackground = otherParticipant.avatar_background || avatarBackground;
-                    hasAvatar = otherParticipant.has_avatar_photo;
-                }
-            } else {
-                // Для групповых чатов используем имя чата, но также обновляем данные участников
-                chatName = chat.name || 'Групповой чат';
+        // Для личных чатов используем данные участника как в контактах
+        if (!chat.is_group && chat.participants && chat.participants.length === 2) {
+            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                // ТОЧНО ТАК ЖЕ КАК В КОНТАКТАХ
+                chatName = otherParticipant.nickname || 'Без имени';
                 chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-                
-                // Обновляем аватар если есть участники с аватарами
-                if (chat.participants.length > 0) {
-                    const firstParticipant = chat.participants[0];
-                    avatarBackground = firstParticipant.avatar_background || avatarBackground;
-                    hasAvatar = firstParticipant.has_avatar_photo || hasAvatar;
-                }
+                avatarBackground = otherParticipant.avatar_background || avatarBackground;
+                hasAvatar = otherParticipant.has_avatar_photo;
             }
         } else {
-            // Если нет данных участников, используем старые данные как fallback
-            chatName = chat.name || 'Новый чат';
+            // Для групповых чатов
+            chatName = chat.name || 'Групповой чат';
             chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
+            avatarBackground = chat.avatar_background || avatarBackground;
+            hasAvatar = chat.has_avatar_photo;
         }
 
         // Находим участника чата (исключая текущего пользователя) для статуса
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         
-        // Статус по умолчанию
+        // СТАТУС ТОЧНО КАК В КОНТАКТАХ
         let statusText = 'был(а) недавно';
         let isOnline = false;
 
@@ -2064,7 +2053,7 @@ async function renderChats(chats) {
                     isOnline = false;
                 }
             } else {
-                // Если данных о активности нет, считаем что пользователь не в сети
+                // ТОЧНО КАК В КОНТАКТАХ
                 statusText = 'был(а) недавно';
                 isOnline = false;
             }
@@ -2074,6 +2063,7 @@ async function renderChats(chats) {
             isOnline = false;
         }
         
+        // АВАТАР ТОЧНО КАК В КОНТАКТАХ
         const avatarStyle = avatarBackground ?
             `linear-gradient(135deg, ${avatarBackground}, ${adjustColor(avatarBackground, 20)})` :
             'linear-gradient(135deg, #0088cc, #40a7e3)';
@@ -2099,7 +2089,7 @@ async function renderChats(chats) {
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
         
-        // Загрузка аватара для участника (если есть)
+        // ЗАГРУЗКА АВАТАРА ТОЧНО КАК В КОНТАКТАХ
         if (hasAvatar && otherParticipant) {
             loadChatAvatar(chatItem.querySelector('.chat-avatar'), otherParticipant.platform_user_id, chatInitials, avatarBackground);
         }
@@ -2112,7 +2102,6 @@ async function renderChats(chats) {
         chatsList.appendChild(chatItem);
     });
 }
-
 
 async function updateUserActivity(isOnline = true) {
     if (!userData || !userData.platform_user_id) {
