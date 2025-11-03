@@ -2011,23 +2011,38 @@ async function renderChats(chats) {
     const activityData = await getUsersActivityStatus(userIds);
     
     chats.forEach(chat => {
-        // Динамическое определение имени чата
-        let chatName = chat.name || 'Новый чат';
+        // ИСПРАВЛЕННАЯ ЛОГИКА: Всегда используем актуальные данные участников
+        let chatName = 'Новый чат';
         let chatInitials = '?';
         let avatarBackground = chat.avatar_background || getRandomColor();
         let hasAvatar = chat.has_avatar_photo;
 
-        // Для личных чатов (не групповых) используем актуальный никнейм другого участника
-        if (!chat.is_group && chat.participants && chat.participants.length === 2) {
-            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant) {
-                chatName = otherParticipant.nickname || otherParticipant.platform_user_id; // Актуальный nickname
+        // ВСЕГДА используем актуальные данные участников для имени чата
+        if (chat.participants && chat.participants.length > 0) {
+            if (!chat.is_group && chat.participants.length === 2) {
+                // Для личных чатов используем актуальный никнейм другого участника
+                const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) {
+                    chatName = otherParticipant.nickname || otherParticipant.platform_user_id;
+                    chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
+                    avatarBackground = otherParticipant.avatar_background || avatarBackground;
+                    hasAvatar = otherParticipant.has_avatar_photo;
+                }
+            } else {
+                // Для групповых чатов используем имя чата, но также обновляем данные участников
+                chatName = chat.name || 'Групповой чат';
                 chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-                avatarBackground = otherParticipant.avatar_background || avatarBackground;
-                hasAvatar = otherParticipant.has_avatar_photo;
+                
+                // Обновляем аватар если есть участники с аватарами
+                if (chat.participants.length > 0) {
+                    const firstParticipant = chat.participants[0];
+                    avatarBackground = firstParticipant.avatar_background || avatarBackground;
+                    hasAvatar = firstParticipant.has_avatar_photo || hasAvatar;
+                }
             }
         } else {
-            // Для групповых чатов оставляем как есть
+            // Если нет данных участников, используем старые данные как fallback
+            chatName = chat.name || 'Новый чат';
             chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
         }
 
@@ -3304,7 +3319,7 @@ async function initializePage() {
     // Параллельная загрузка данных без индикаторов
     await Promise.all([
         loadUserData(),
-        loadChats()  // Добавлено: принудительная перезагрузка чатов для актуальности
+        loadChats()
     ]);
     
     // Обработка открытого чата без задержек
@@ -3541,6 +3556,7 @@ async function initializePage() {
 
     console.log('Page initialized successfully');
 }
+
 
 
 function filterChats(searchTerm) {
