@@ -1996,7 +1996,7 @@ async function renderChats(chats) {
     
     noChats.style.display = 'none';
     
-    // Получаем статусы активности для всех пользователей в чатах
+    // ОЧИСТКА КЭША для принудительной перезагрузки актуальных данных
     const userIds = [];
     chats.forEach(chat => {
         if (chat.participants && chat.participants.length > 0) {
@@ -2008,24 +2008,41 @@ async function renderChats(chats) {
         }
     });
     
+    // Принудительно очищаем кэш для этих пользователей
+    with (cache_lock) {
+        userIds.forEach(userId => {
+            delete user_data_cache[userId];
+        });
+    }
+    
     const activityData = await getUsersActivityStatus(userIds);
+    // ЗАГРУЖАЕМ АКТУАЛЬНЫЕ ДАННЫЕ пользователей
+    const freshUserData = await get_user_data_from_main_db(userIds);
     
     chats.forEach(chat => {
-        // ТОЧНАЯ ЛОГИКА КАК В RENDERCONTACTS
         let chatName = 'Новый чат';
         let chatInitials = '?';
         let avatarBackground = getRandomColor();
         let hasAvatar = false;
 
-        // Для личных чатов используем данные участника как в контактах
+        // Для личных чатов используем данные участника
         if (!chat.is_group && chat.participants && chat.participants.length === 2) {
             const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
-                // ТОЧНО ТАК ЖЕ КАК В КОНТАКТАХ
-                chatName = otherParticipant.nickname || 'Без имени';
-                chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
-                avatarBackground = otherParticipant.avatar_background || avatarBackground;
-                hasAvatar = otherParticipant.has_avatar_photo;
+                // ИСПОЛЬЗУЕМ СВЕЖИЕ ДАННЫЕ ИЗ freshUserData
+                const freshParticipantData = freshUserData[otherParticipant.platform_user_id];
+                if (freshParticipantData) {
+                    chatName = freshParticipantData.nickname || 'Без имени';
+                    chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
+                    avatarBackground = freshParticipantData.avatar_background || avatarBackground;
+                    hasAvatar = freshParticipantData.avatar_url !== null;
+                } else {
+                    // Если свежих данных нет, используем старые
+                    chatName = otherParticipant.nickname || 'Без имени';
+                    chatInitials = chatName.split(' ').map(n => n[0]).join('') || '?';
+                    avatarBackground = otherParticipant.avatar_background || avatarBackground;
+                    hasAvatar = otherParticipant.has_avatar_photo;
+                }
             }
         } else {
             // Для групповых чатов
@@ -2035,10 +2052,9 @@ async function renderChats(chats) {
             hasAvatar = chat.has_avatar_photo;
         }
 
-        // Находим участника чата (исключая текущего пользователя) для статуса
+        // Находим участника чата для статуса
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         
-        // СТАТУС ТОЧНО КАК В КОНТАКТАХ
         let statusText = 'был(а) недавно';
         let isOnline = false;
 
@@ -2052,18 +2068,9 @@ async function renderChats(chats) {
                     statusText = formatLastSeen(userActivity.last_online);
                     isOnline = false;
                 }
-            } else {
-                // ТОЧНО КАК В КОНТАКТАХ
-                statusText = 'был(а) недавно';
-                isOnline = false;
             }
-        } else {
-            // Если нет другого участника
-            statusText = '';
-            isOnline = false;
         }
         
-        // АВАТАР ТОЧНО КАК В КОНТАКТАХ
         const avatarStyle = avatarBackground ?
             `linear-gradient(135deg, ${avatarBackground}, ${adjustColor(avatarBackground, 20)})` :
             'linear-gradient(135deg, #0088cc, #40a7e3)';
@@ -2089,7 +2096,7 @@ async function renderChats(chats) {
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
         
-        // ЗАГРУЗКА АВАТАРА ТОЧНО КАК В КОНТАКТАХ
+        // Загружаем аватар
         if (hasAvatar && otherParticipant) {
             loadChatAvatar(chatItem.querySelector('.chat-avatar'), otherParticipant.platform_user_id, chatInitials, avatarBackground);
         }
@@ -2102,6 +2109,35 @@ async function renderChats(chats) {
         chatsList.appendChild(chatItem);
     });
 }
+
+
+async function get_user_data_from_main_db(platform_user_ids) {
+    if (!platform_user_ids || platform_user_ids.length === 0) return {};
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_user_data`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_ids: platform_user_ids
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            return data.users_data || {};
+        }
+        return {};
+    } catch (error) {
+        console.error('Error getting fresh user data:', error);
+        return {};
+    }
+}
+
 
 async function updateUserActivity(isOnline = true) {
     if (!userData || !userData.platform_user_id) {
