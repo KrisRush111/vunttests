@@ -1365,13 +1365,35 @@ input, textarea {
 }
 
 
-/* Добавьте в секцию стилей */
+/* Добавьте в CSS */
+.reaction-notification {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    background: var(--telegram-blue);
+    color: white;
+    border-radius: 12px;
+    padding: 4px 8px;
+    font-size: 12px;
+    z-index: 1000;
+    animation: fadeInOut 2s ease;
+}
+
+@keyframes fadeInOut {
+    0% { opacity: 0; transform: scale(0.8); }
+    20% { opacity: 1; transform: scale(1.1); }
+    80% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(0.8); }
+}
+
+/* Улучшенные стили для реакций */
 .message-reactions {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    margin-top: 8px;
+    margin-top: 6px;
     align-items: center;
+    min-height: 24px;
 }
 
 .reaction-item {
@@ -1380,20 +1402,26 @@ input, textarea {
     gap: 4px;
     padding: 2px 6px;
     border-radius: 12px;
-    background: rgba(0, 0, 0, 0.1);
+    background: rgba(255, 255, 255, 0.9);
     font-size: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
-    border: 1px solid transparent;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.message-outgoing .reaction-item {
+    background: rgba(255, 255, 255, 0.8);
 }
 
 .reaction-item:hover {
-    background: rgba(0, 0, 0, 0.15);
+    background: rgba(255, 255, 255, 1);
     transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .reaction-item.my-reaction {
-    background: rgba(0, 136, 204, 0.2);
+    background: rgba(0, 136, 204, 0.15);
     border-color: var(--telegram-blue);
 }
 
@@ -1404,72 +1432,8 @@ input, textarea {
 .reaction-count {
     font-weight: 500;
     color: var(--telegram-text);
+    font-size: 11px;
 }
-
-.add-reaction-button {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(0, 0, 0, 0.1);
-    color: var(--telegram-hint);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.2s ease;
-}
-
-.add-reaction-button:hover {
-    background: rgba(0, 0, 0, 0.15);
-    color: var(--telegram-text);
-}
-
-.reactions-picker {
-    position: absolute;
-    bottom: 100%;
-    left: 0;
-    background: var(--telegram-bg);
-    border: 1px solid var(--telegram-divider);
-    border-radius: 12px;
-    padding: 8px;
-    display: none;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 4px;
-    box-shadow: var(--telegram-shadow-large);
-    z-index: 1000;
-    animation: slideUp 0.2s ease;
-}
-
-.reactions-picker.active {
-    display: grid;
-}
-
-.reaction-option {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: none;
-    background: transparent;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-}
-
-.reaction-option:hover {
-    background: rgba(0, 0, 0, 0.1);
-    transform: scale(1.2);
-}
-
-/* Для сообщений с реакциями добавляем отступ */
-.message.has-reactions {
-    margin-bottom: 20px;
-}
-
 
 
 
@@ -1819,8 +1783,212 @@ input, textarea {
         let currentActivityData = {};
         let isSendingMessage = false;
         // Добавьте в раздел с другими глобальными переменными
-let messageReactions = {};
-let reactionsPickerOpen = false;
+        let messageReactions = {};
+        let reactionsPickerOpen = false;
+
+
+
+        // Добавьте в глобальные переменные
+let socket = null;
+let isSocketConnected = false;
+let reactionUpdateInterval = null;
+
+// Функция для подключения WebSocket
+function connectWebSocket() {
+    if (!userData || !userData.platform_user_id) {
+        console.log('No user data for WebSocket connection');
+        return;
+    }
+
+    try {
+        // Если используете SocketIO
+        socket = io(SERVER_URL, {
+            query: {
+                user_id: userData.platform_user_id
+            },
+            transports: ['websocket', 'polling']
+        });
+
+        socket.on('connect', () => {
+            console.log('WebSocket connected');
+            isSocketConnected = true;
+        });
+
+        socket.on('disconnect', () => {
+            console.log('WebSocket disconnected');
+            isSocketConnected = false;
+            // Пытаемся переподключиться
+            setTimeout(connectWebSocket, 3000);
+        });
+
+        socket.on('reaction_update', (data) => {
+            console.log('Received reaction update:', data);
+            handleReactionUpdate(data);
+        });
+
+        socket.on('error', (error) => {
+            console.error('WebSocket error:', error);
+        });
+
+    } catch (error) {
+        console.error('WebSocket connection failed:', error);
+        // Fallback to polling
+        startReactionPolling();
+    }
+}
+
+// Функция для обработки обновлений реакций
+function handleReactionUpdate(data) {
+    const { message_id, reactions, type } = data;
+    
+    // Обновляем кэш реакций
+    if (reactions && reactions.length > 0) {
+        messageReactions[message_id] = reactions;
+    } else {
+        delete messageReactions[message_id];
+    }
+    
+    // Обновляем UI
+    updateMessageReactionsUI([message_id]);
+    
+    // Показываем уведомление (опционально)
+    if (type === 'reaction_added' && data.user_id !== userData.platform_user_id) {
+        showReactionNotification(data);
+    }
+}
+
+// Функция для показа уведомления о реакции
+function showReactionNotification(data) {
+    // Можно добавить краткое уведомление
+    const messageElement = document.querySelector(`[data-message-id="${data.message_id}"]`);
+    if (messageElement) {
+        const notification = document.createElement('div');
+        notification.className = 'reaction-notification';
+        notification.textContent = `👍 ${data.reaction}`;
+        notification.style.cssText = `
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: var(--telegram-blue);
+            color: white;
+            border-radius: 12px;
+            padding: 4px 8px;
+            font-size: 12px;
+            z-index: 1000;
+            animation: fadeInOut 2s ease;
+        `;
+        
+        messageElement.style.position = 'relative';
+        messageElement.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 2000);
+    }
+}
+
+// Fallback: Polling если WebSocket не доступен
+function startReactionPolling() {
+    let lastCheck = new Date().toISOString();
+    
+    reactionUpdateInterval = setInterval(async () => {
+        if (!currentChat || !currentMessages.length) return;
+        
+        const messageIds = currentMessages.map(msg => msg.id);
+        
+        try {
+            const response = await fetch(`${SERVER_URL}/get_reaction_updates`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message_ids: messageIds,
+                    last_check: lastCheck
+                }),
+                credentials: 'include'
+            });
+
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                // Обновляем кэш
+                if (data.updated_reactions) {
+                    Object.assign(messageReactions, data.updated_reactions);
+                    
+                    // Обновляем UI для измененных сообщений
+                    const updatedMessageIds = Object.keys(data.updated_reactions);
+                    if (updatedMessageIds.length > 0) {
+                        updateMessageReactionsUI(updatedMessageIds);
+                    }
+                }
+                
+                if (data.last_check) {
+                    lastCheck = data.last_check;
+                }
+            }
+        } catch (error) {
+            console.error('Error polling reaction updates:', error);
+        }
+    }, 3000); // Проверяем каждые 3 секунды
+}
+
+// Обновите функции работы с реакциями для использования WebSocket
+async function handleReactionClick(messageId, reaction, isMyReaction) {
+    try {
+        if (isMyReaction) {
+            // Удаляем реакцию
+            const response = await fetch(`${SERVER_URL}/remove_reaction`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message_id: messageId,
+                    user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                // Обновляем локальный кэш
+                messageReactions[messageId] = data.reactions || [];
+                updateMessageReactionsUI([messageId]);
+            }
+        } else {
+            // Добавляем реакцию
+            const response = await fetch(`${SERVER_URL}/add_reaction`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message_id: messageId,
+                    user_id: userData.platform_user_id,
+                    reaction: reaction
+                }),
+                credentials: 'include'
+            });
+
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                // Обновляем локальный кэш
+                messageReactions[messageId] = data.reactions || [];
+                updateMessageReactionsUI([messageId]);
+                
+                // WebSocket уведомит других пользователей автоматически
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error handling reaction:', error);
+        showMessage('Ошибка при обновлении реакции', 'error');
+    }
+}
+
 
 // Добавьте функцию для загрузки реакций
 async function loadMessageReactions(messageIds) {
@@ -3364,7 +3532,10 @@ function closeChat() {
         chatModal.classList.remove('active');
         document.body.style.overflow = '';
     }
-    
+    if (reactionUpdateInterval) {
+        clearInterval(reactionUpdateInterval);
+        reactionUpdateInterval = null;
+    }
     // Reload chat list
     loadChats();
 
@@ -3825,7 +3996,7 @@ async function initializePage() {
             closeReactionsPicker();
         }
     });
-    
+
     document.addEventListener('gestureend', function(e) {
         e.preventDefault();
     });
@@ -3903,6 +4074,9 @@ async function initializePage() {
         });
     }
 
+    if (userData && userData.platform_user_id) {
+        connectWebSocket();
+    }
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
@@ -3961,6 +4135,7 @@ function filterContacts(searchTerm) {
             }
         });
     </script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
      <script src="activity-tracker.js"></script>
 </body>
