@@ -1709,7 +1709,7 @@ input, textarea {
         // В разделе с другими глобальными переменными добавьте:
         let activityPollInterval;
         let currentActivityData = {};
-        
+        let isSendingMessage = false;
 
 
         // Добавьте эту функцию после других функций
@@ -2634,6 +2634,7 @@ async function sendMessage() {
         // Фокусируемся на поле ввода после успешной отправки
         setTimeout(() => {
             messageInput.focus();
+            isSendingMessage = false; // Сбрасываем флаг после фокусировки
         }, 100);
         
     } catch (error) {
@@ -2642,6 +2643,7 @@ async function sendMessage() {
         
         // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
+        isSendingMessage = false; // Сбрасываем флаг при ошибке
         
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
@@ -2676,19 +2678,18 @@ function setupKeyboardHandlers() {
 
 
 
-
 function setupKeyboardDetection() {
     if (isDesktop) return;
 
     const { messageInput, chatModal } = getActiveElements();
-    let keyboardShown = false; // Теперь используется для отслеживания состояния
+    let keyboardShown = false;
+    let isSendingMessage = false; // Добавляем флаг отправки сообщения
 
-    // Вспомогательная функция (перемещена наружу для читаемости)
     function adjustInputPosition(keyboardOpen) {
         const { messageInputContainer, messagesContainer } = getActiveElements();
-        if (!messageInputContainer) return; // Проверка на существование
+        if (!messageInputContainer) return;
 
-        if (keyboardOpen) {
+        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
             messageInputContainer.style.bottom = '8px';
             messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
             setTimeout(() => {
@@ -2704,18 +2705,21 @@ function setupKeyboardDetection() {
 
     // Обработка открытия клавиатуры
     messageInput.addEventListener('focus', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
         keyboardShown = true;
         setTimeout(() => {
-            adjustInputPosition(true); // Вызов функции
-        }, 100); // Небольшая задержка для корректного определения
+            adjustInputPosition(true);
+        }, 100);
     });
 
     // Обработка закрытия клавиатуры
     messageInput.addEventListener('blur', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
         keyboardShown = false;
         adjustInputPosition(false);
     });
 }
+
 
 
        
