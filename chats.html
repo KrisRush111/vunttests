@@ -1953,6 +1953,18 @@ async function loadChats() {
         // Очистка локального кэша для принудительной перезагрузки
         currentChatsList = [];
         
+        // Принудительно очищаем кэш пользовательских данных
+        if (window.cache_lock) {
+            with (cache_lock) {
+                user_data_cache = {};
+            }
+        } else {
+            // Если cache_lock не определен, просто очищаем кэш
+            user_data_cache = {};
+        }
+        
+        console.log('Loading chats for user:', userData.platform_user_id);
+        
         const response = await fetch(`${SERVER_URL}/get_chats`, {
             method: 'POST',
             headers: {
@@ -1966,11 +1978,14 @@ async function loadChats() {
         });
         
         const data = await response.json();
+        console.log('Chats response:', data);
         
         if (data.status === 'success') {
             currentChatsList = data.chats; // Обновляем кэш свежими данными
+            console.log(`Loaded ${data.chats.length} chats`);
             renderChats(data.chats);
         } else {
+            console.error('Failed to load chats:', data.error);
             currentChatsList = [];
             renderChats([]);
         }
