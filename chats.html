@@ -509,10 +509,7 @@ input, textarea {
     display: none;
     flex-direction: column;
     transform: translateX(100%);
-    transition: transform 0.3s ease, opacity 0.3s ease;
-    /* Гарантируем полную высоту */
-    height: 100vh;
-    max-height: 100vh;
+    transition: transform 0.3s ease;
 }
 
     .chat-modal.active {
@@ -532,9 +529,6 @@ input, textarea {
         left: 0;
         right: 0;
         bottom: 0;
-        width: 100vw;
-        height: 100vh;
-        max-height: 100vh;
         border-radius: 0;
         z-index: 100;
         transform: translateX(100%);
@@ -720,15 +714,6 @@ input, textarea {
     display: flex;
     z-index: 97;
     flex-direction: column;
-    /* УБИРАЕМ все ограничения высоты */
-    height: 100%;
-    max-height: none;
-    min-height: 0;
-    /* Гарантируем полную высоту */
-    flex-grow: 1;
-    flex-shrink: 1;
-    flex-basis: 0;
-    /* Убираем любые позиционирование */
     position: relative;
 }
 
@@ -2281,24 +2266,18 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
 function setupMobileChatHeight() {
     if (!isDesktop) {
-        const { chatModal, messagesContainer, messageInputContainer } = getActiveElements();
-
-        // Фиксируем высоту чата при открытии, чтобы фон не менялся при клавиатуре
-        if (chatModal.classList.contains('active') && !chatModal.style.height) {
-            chatModal.style.height = window.innerHeight + 'px';
-        }
-
-        // Устанавливаем высоту контейнера сообщений
-        const headerHeight = document.querySelector('.chat-header').offsetHeight;
-        const inputHeight = messageInputContainer.offsetHeight;
-        const availableHeight = window.innerHeight - headerHeight - inputHeight;
-
-        messagesContainer.style.height = `${availableHeight}px`;
-        messagesContainer.style.maxHeight = `${availableHeight}px`;
+        const { messagesContainer } = getActiveElements();
+        
+        // УБЕРИТЕ все фиксированные высоты - пусть браузер сам рассчитывает
+        messagesContainer.style.height = '';
+        messagesContainer.style.maxHeight = '';
+        messagesContainer.style.minHeight = '';
+        
+        // Просто гарантируем flex-растяжение
+        messagesContainer.style.flex = '1 1 auto';
+        messagesContainer.style.overflowY = 'auto';
     }
 }
-
-
 
 
         // Добавьте эту функцию для отладки
@@ -3548,30 +3527,26 @@ function filterChats(searchTerm) {
 
 // И саму функцию handleOrientationChange:
 function handleOrientationChange() {
-    console.log('Orientation changed, reinitializing layout...');
+    console.log('Orientation changed');
     
-    // Обновляем флаг isDesktop
+    // Только обновляем флаг, без перезагрузки данных
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
-    // Перезагружаем чаты для обновления интерфейса
+    // Даем браузеру время на перерасчет layout
     setTimeout(() => {
-        loadChats();
-        
-        // Если чат открыт, перерисовываем сообщения
-        if (currentChat) {
-            const { messagesContainer } = getActiveElements();
-            renderMessages(currentMessages);
-            
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        }
-        
-        // Настраиваем высоту для мобильных
-        if (!isDesktop) {
+        // Только пересчитываем высоту для мобильных
+        if (!isDesktop && currentChat) {
             setupMobileChatHeight();
+            
+            // Прокручиваем к последнему сообщению
+            const { messagesContainer } = getActiveElements();
+            if (messagesContainer && currentMessages.length > 0) {
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
+            }
         }
-    }, 300);
+    }, 100);
 }
 
 function filterContacts(searchTerm) {
