@@ -3293,6 +3293,8 @@ async function initializePage() {
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
     const openChatName = sessionStorage.getItem('openChatName');
+    window.addEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener('resize', handleOrientationChange);
     
     if (openChatId && openChatName) {
         const tempChat = {
@@ -3543,6 +3545,34 @@ function filterChats(searchTerm) {
     });
 }
 
+
+// И саму функцию handleOrientationChange:
+function handleOrientationChange() {
+    console.log('Orientation changed, reinitializing layout...');
+    
+    // Обновляем флаг isDesktop
+    isDesktop = window.matchMedia("(min-width: 768px)").matches;
+    
+    // Перезагружаем чаты для обновления интерфейса
+    setTimeout(() => {
+        loadChats();
+        
+        // Если чат открыт, перерисовываем сообщения
+        if (currentChat) {
+            const { messagesContainer } = getActiveElements();
+            renderMessages(currentMessages);
+            
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        }
+        
+        // Настраиваем высоту для мобильных
+        if (!isDesktop) {
+            setupMobileChatHeight();
+        }
+    }, 300);
+}
 
 function filterContacts(searchTerm) {
     const contactItems = contactsList.querySelectorAll('.contact-item');
