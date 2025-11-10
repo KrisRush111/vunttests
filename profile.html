@@ -2069,24 +2069,19 @@
         }
 
      
+// Функция для проверки, является ли значение "не указано" (с учётом вариантов)
+function isNotSpecified(value) {
+    if (!value || typeof value !== 'string') return true; // Пустое или не строка — считаем не указано
+    const lower = value.toLowerCase().trim();
+    return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук';
+}
+
 function updateProfileUI() {
     const nickname = userData.nickname || '';
     const firstLetter = nickname.charAt(0).toUpperCase() || '?';
     const bgColor = userData.avatar_background;
     const platformId = userData.platform_user_id || 'Не указано';
     
-    // Функция для проверки пустых значений (более точная)
-    const isEmptyValue = (value) => {
-        if (value === null || value === undefined || value === '') return true;
-        const strValue = String(value).toLowerCase().trim();
-        return strValue === 'не указано' || 
-               strValue === 'не ук' || 
-               strValue === 'не указан' ||
-               strValue === 'не укне ук' ||
-               strValue === 'null' ||
-               strValue === 'undefined';
-    };
-
     // Update mobile profile elements (used in profileModalMobile)
     if (userData.has_avatar) {
         loadAvatar(profileAvatarMobile, userData.platform_user_id);
@@ -2096,62 +2091,48 @@ function updateProfileUI() {
     profileNicknameMobile.textContent = nickname || 'Не указано';
     profileIdMobile.textContent = `ID: ${platformId}`;
     
-    // Проверяем и обновляем роль
-    if (userData.identity && !isEmptyValue(userData.identity)) {
-        userRoleMobile.textContent = userData.identity;
-        userRoleMobile.parentElement.style.display = 'flex';
-    } else {
-        userRoleMobile.parentElement.style.display = 'none';
-        userRoleMobile.textContent = 'Не указано';
-    }
-    
-    // Проверяем и обновляем школу
-    if (userData.main_school_name && !isEmptyValue(userData.main_school_name)) {
-        mainSchoolMobile.textContent = userData.main_school_name;
-        mainSchoolMobile.parentElement.style.display = 'flex';
-    } else {
+    // Проверка и отображение полей в "О себе" для мобильной версии
+    // Школа
+    if (isNotSpecified(userData.main_school_name)) {
         mainSchoolMobile.parentElement.style.display = 'none';
-        mainSchoolMobile.textContent = 'Не указано';
-    }
-    
-    // Проверяем и обновляем класс
-    if (userData.class_number && userData.class_letter && 
-        !isEmptyValue(userData.class_number) && !isEmptyValue(userData.class_letter)) {
-        userClassMobile.textContent = `${userData.class_number}${userData.class_letter}`;
-        userClassMobile.parentElement.style.display = 'flex';
     } else {
-        userClassMobile.parentElement.style.display = 'none';
-        userClassMobile.textContent = 'Не указано';
+        mainSchoolMobile.parentElement.style.display = 'flex';
+        mainSchoolMobile.textContent = userData.main_school_name;
     }
-
-    const additionalSchoolValueMobile = userData.additional_school_name;
-    const hasAdditionalSchoolMobile = additionalSchoolValueMobile && !isEmptyValue(additionalSchoolValueMobile);
     
+    // Класс (проверяем комбинацию class_number и class_letter)
+    const classValue = (userData.class_number && userData.class_letter && !isNotSpecified(userData.class_number) && !isNotSpecified(userData.class_letter))
+        ? `${userData.class_number}${userData.class_letter}`
+        : null;
+    if (!classValue) {
+        userClassMobile.parentElement.style.display = 'none';
+    } else {
+        userClassMobile.parentElement.style.display = 'flex';
+        userClassMobile.textContent = classValue;
+    }
+    
+    // Роль
+    if (isNotSpecified(userData.identity)) {
+        userRoleMobile.parentElement.style.display = 'none';
+    } else {
+        userRoleMobile.parentElement.style.display = 'flex';
+        userRoleMobile.textContent = userData.identity;
+    }
+    
+    // Доп. школа, Направление, Курс (адаптируем под isNotSpecified)
+    const additionalSchoolValueMobile = userData.additional_school_name;
+    const hasAdditionalSchoolMobile = additionalSchoolValueMobile && !isNotSpecified(additionalSchoolValueMobile);
     if (!hasAdditionalSchoolMobile) {
         additionalSchoolContainerMobile.style.display = 'none';
         specializationContainerMobile.style.display = 'none';
         courseContainerMobile.style.display = 'none';
     } else {
         additionalSchoolContainerMobile.style.display = 'flex';
+        specializationContainerMobile.style.display = 'flex';
+        courseContainerMobile.style.display = 'flex';
         additionalSchoolMobile.textContent = additionalSchoolValueMobile;
-        
-        // Проверяем и обновляем направление
-        if (userData.specialization && !isEmptyValue(userData.specialization)) {
-            userSpecializationMobile.textContent = userData.specialization;
-            specializationContainerMobile.style.display = 'flex';
-        } else {
-            specializationContainerMobile.style.display = 'none';
-            userSpecializationMobile.textContent = 'Не указано';
-        }
-        
-        // Проверяем и обновляем курс
-        if (userData.course && !isEmptyValue(userData.course)) {
-            userCourseMobile.textContent = userData.course;
-            courseContainerMobile.style.display = 'flex';
-        } else {
-            courseContainerMobile.style.display = 'none';
-            userCourseMobile.textContent = 'Не указано';
-        }
+        userSpecializationMobile.textContent = isNotSpecified(userData.specialization) ? '' : userData.specialization;
+        userCourseMobile.textContent = isNotSpecified(userData.course) ? '' : userData.course;
     }
 
     // Update desktop sidebar elements
@@ -2172,6 +2153,7 @@ function updateProfileUI() {
     mobileSidebarProfileNickname.textContent = nickname || 'Не указано';
     mobileSidebarProfileId.textContent = `id: ${platformId}`; 
 
+   
     // Update desktop profile modal elements
     if (userData.has_avatar) {
         loadAvatar(desktopProfileAvatar, userData.platform_user_id);
@@ -2181,64 +2163,51 @@ function updateProfileUI() {
     desktopProfileNickname.textContent = nickname || 'Не указано';
     desktopProfileId.textContent = `ID: ${platformId}`;
     
-    // Проверяем и обновляем роль для десктопной версии
-    if (userData.identity && !isEmptyValue(userData.identity)) {
-        desktopUserRole.textContent = userData.identity;
-        desktopUserRole.parentElement.style.display = 'flex';
-    } else {
-        desktopUserRole.parentElement.style.display = 'none';
-        desktopUserRole.textContent = 'Не указано';
-    }
-    
-    // Проверяем и обновляем школу для десктопной версии
-    if (userData.main_school_name && !isEmptyValue(userData.main_school_name)) {
-        desktopMainSchool.textContent = userData.main_school_name;
-        desktopMainSchool.parentElement.style.display = 'flex';
-    } else {
+    // Проверка и отображение полей в "О себе" для десктопной версии
+    // Школа
+    if (isNotSpecified(userData.main_school_name)) {
         desktopMainSchool.parentElement.style.display = 'none';
-        desktopMainSchool.textContent = 'Не указано';
-    }
-    
-    // Проверяем и обновляем класс для десктопной версии
-    if (userData.class_number && userData.class_letter && 
-        !isEmptyValue(userData.class_number) && !isEmptyValue(userData.class_letter)) {
-        desktopUserClass.textContent = `${userData.class_number}${userData.class_letter}`;
-        desktopUserClass.parentElement.style.display = 'flex';
     } else {
-        desktopUserClass.parentElement.style.display = 'none';
-        desktopUserClass.textContent = 'Не указано';
+        desktopMainSchool.parentElement.style.display = 'flex';
+        desktopMainSchool.textContent = userData.main_school_name;
     }
-
-    const additionalSchoolValueDesktop = userData.additional_school_name;
-    const hasAdditionalSchoolDesktop = additionalSchoolValueDesktop && !isEmptyValue(additionalSchoolValueDesktop);
     
+    // Класс
+    const desktopClassValue = (userData.class_number && userData.class_letter && !isNotSpecified(userData.class_number) && !isNotSpecified(userData.class_letter))
+        ? `${userData.class_number}${userData.class_letter}`
+        : null;
+    if (!desktopClassValue) {
+        desktopUserClass.parentElement.style.display = 'none';
+    } else {
+        desktopUserClass.parentElement.style.display = 'flex';
+        desktopUserClass.textContent = desktopClassValue;
+    }
+    
+    // Роль
+    if (isNotSpecified(userData.identity)) {
+        desktopUserRole.parentElement.style.display = 'none';
+    } else {
+        desktopUserRole.parentElement.style.display = 'flex';
+        desktopUserRole.textContent = userData.identity;
+    }
+    
+    // Доп. школа, Направление, Курс
+    const additionalSchoolValueDesktop = userData.additional_school_name;
+    const hasAdditionalSchoolDesktop = additionalSchoolValueDesktop && !isNotSpecified(additionalSchoolValueDesktop);
     if (!hasAdditionalSchoolDesktop) {
         desktopAdditionalSchoolContainer.style.display = 'none';
         desktopSpecializationContainer.style.display = 'none';
         desktopCourseContainer.style.display = 'none';
     } else {
         desktopAdditionalSchoolContainer.style.display = 'flex';
+        desktopSpecializationContainer.style.display = 'flex';
+        desktopCourseContainer.style.display = 'flex';
         desktopAdditionalSchool.textContent = additionalSchoolValueDesktop;
-        
-        // Проверяем и обновляем направление для десктопной версии
-        if (userData.specialization && !isEmptyValue(userData.specialization)) {
-            desktopUserSpecialization.textContent = userData.specialization;
-            desktopSpecializationContainer.style.display = 'flex';
-        } else {
-            desktopSpecializationContainer.style.display = 'none';
-            desktopUserSpecialization.textContent = 'Не указано';
-        }
-        
-        // Проверяем и обновляем курс для десктопной версии
-        if (userData.course && !isEmptyValue(userData.course)) {
-            desktopUserCourse.textContent = userData.course;
-            desktopCourseContainer.style.display = 'flex';
-        } else {
-            desktopCourseContainer.style.display = 'none';
-            desktopUserCourse.textContent = 'Не указано';
-        }
+        desktopUserSpecialization.textContent = isNotSpecified(userData.specialization) ? '' : userData.specialization;
+        desktopUserCourse.textContent = isNotSpecified(userData.course) ? '' : userData.course;
     }
 }
+
 
    
         function openAvatarModal(targetAvatarElement) {
