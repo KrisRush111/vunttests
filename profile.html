@@ -1541,7 +1541,7 @@
 
  <script>
      
-        const SERVER_URL = 'https://vuntserver-479v.onrender.com';
+        const SERVER_URL = 'https://vuntserver.onrender.com';
         
         let userData = null; // Initialize userData as null
 
@@ -2069,97 +2069,140 @@
         }
 
      
-        function updateProfileUI() {
-            const nickname = userData.nickname || '';
-            const firstLetter = nickname.charAt(0).toUpperCase() || '?';
-            const bgColor = userData.avatar_background;
-            const platformId = userData.platform_user_id || 'Не указано';
-            
-            // Update mobile profile elements (used in profileModalMobile)
-            if (userData.has_avatar) {
-                loadAvatar(profileAvatarMobile, userData.platform_user_id);
-            } else {
-                setAvatarBackground(profileAvatarMobile, bgColor, firstLetter);
-            }
-            profileNicknameMobile.textContent = nickname || 'Не указано';
-            profileIdMobile.textContent = `ID: ${platformId}`;
-            userRoleMobile.textContent = userData.identity || 'Не указано';
-            mainSchoolMobile.textContent = userData.main_school_name || 'Не указано';
-            if (userData.class_number && userData.class_letter) {
-                userClassMobile.textContent = `${userData.class_number}${userData.class_letter}`;
-            } else {
-                userClassMobile.textContent = 'Не указано';
-            }
-            const additionalSchoolValueMobile = userData.additional_school_name;
-            const hasAdditionalSchoolMobile = additionalSchoolValueMobile && 
-                                            additionalSchoolValueMobile !== 'Не указано' && 
-                                            additionalSchoolValueMobile !== 'не указано' && 
-                                            additionalSchoolValueMobile.trim() !== '';
-            if (!hasAdditionalSchoolMobile) {
-                additionalSchoolContainerMobile.style.display = 'none';
-                specializationContainerMobile.style.display = 'none';
-                courseContainerMobile.style.display = 'none';
-            } else {
-                additionalSchoolContainerMobile.style.display = 'flex';
-                specializationContainerMobile.style.display = 'flex';
-                courseContainerMobile.style.display = 'flex';
-                additionalSchoolMobile.textContent = additionalSchoolValueMobile;
-                userSpecializationMobile.textContent = userData.specialization || 'Не указано';
-                userCourseMobile.textContent = userData.course || 'Не указано';
-            }
+function updateProfileUI() {
+    const nickname = userData.nickname || '';
+    const firstLetter = nickname.charAt(0).toUpperCase() || '?';
+    const bgColor = userData.avatar_background;
+    const platformId = userData.platform_user_id || 'Не указано';
+    
+    // Функция для проверки, является ли значение пустым или "не указано"
+    const isEmptyValue = (value) => {
+        if (!value) return true;
+        const lowerValue = String(value).toLowerCase().trim();
+        return lowerValue === '' || 
+               lowerValue === 'не указано' || 
+               lowerValue === 'не ук' || 
+               lowerValue === 'не указан' ||
+               lowerValue === 'не укне ук';
+    };
 
-            // Update desktop sidebar elements
-            if (userData.has_avatar) {
-                loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
-            } else {
-                setAvatarBackground(sidebarProfileAvatar, bgColor, firstLetter);
-            }
-            sidebarProfileNickname.textContent = nickname || 'Не указано';
-            sidebarProfileId.textContent = `id: ${platformId}`; 
+    // Update mobile profile elements (used in profileModalMobile)
+    if (userData.has_avatar) {
+        loadAvatar(profileAvatarMobile, userData.platform_user_id);
+    } else {
+        setAvatarBackground(profileAvatarMobile, bgColor, firstLetter);
+    }
+    profileNicknameMobile.textContent = nickname || 'Не указано';
+    profileIdMobile.textContent = `ID: ${platformId}`;
+    
+    // Обновляем данные с проверкой на пустые значения
+    updateDetailElement(userRoleMobile, userData.identity, 'Роль');
+    updateDetailElement(mainSchoolMobile, userData.main_school_name, 'Школа');
+    
+    // Обработка класса - объединяем номер и букву
+    if (userData.class_number && userData.class_letter && 
+        !isEmptyValue(userData.class_number) && !isEmptyValue(userData.class_letter)) {
+        userClassMobile.textContent = `${userData.class_number}${userData.class_letter}`;
+        userClassMobile.parentElement.style.display = 'flex';
+    } else {
+        userClassMobile.parentElement.style.display = 'none';
+    }
 
-            // Update mobile sidebar elements (new)
-            if (userData.has_avatar) {
-                loadAvatar(mobileSidebarProfileAvatar, userData.platform_user_id);
-            } else {
-                setAvatarBackground(mobileSidebarProfileAvatar, bgColor, firstLetter);
-            }
-            mobileSidebarProfileNickname.textContent = nickname || 'Не указано';
-            mobileSidebarProfileId.textContent = `id: ${platformId}`; 
+    // Обработка дополнительной школы и связанных полей
+    const additionalSchoolValueMobile = userData.additional_school_name;
+    const hasAdditionalSchoolMobile = !isEmptyValue(additionalSchoolValueMobile);
+    
+    if (!hasAdditionalSchoolMobile) {
+        additionalSchoolContainerMobile.style.display = 'none';
+        specializationContainerMobile.style.display = 'none';
+        courseContainerMobile.style.display = 'none';
+    } else {
+        additionalSchoolContainerMobile.style.display = 'flex';
+        additionalSchoolMobile.textContent = additionalSchoolValueMobile;
+        
+        // Показываем/скрываем направление и курс в зависимости от их значений
+        updateDetailElement(userSpecializationMobile, userData.specialization, 'Направление');
+        updateDetailElement(userCourseMobile, userData.course, 'Курс');
+    }
 
-           
-            // Update desktop profile modal elements
-            if (userData.has_avatar) {
-                loadAvatar(desktopProfileAvatar, userData.platform_user_id);
-            } else {
-                setAvatarBackground(desktopProfileAvatar, bgColor, firstLetter);
-            }
-            desktopProfileNickname.textContent = nickname || 'Не указано';
-            desktopProfileId.textContent = `ID: ${platformId}`;
-            desktopUserRole.textContent = userData.identity || 'Не указано';
-            desktopMainSchool.textContent = userData.main_school_name || 'Не указано';
-            if (userData.class_number && userData.class_letter) {
-                desktopUserClass.textContent = `${userData.class_number}${userData.class_letter}`;
-            } else {
-                desktopUserClass.textContent = 'Не указано';
-            }
-            const additionalSchoolValueDesktop = userData.additional_school_name;
-            const hasAdditionalSchoolDesktop = additionalSchoolValueDesktop && 
-                                            additionalSchoolValueDesktop !== 'Не указано' && 
-                                            additionalSchoolValueDesktop !== 'не указано' && 
-                                            additionalSchoolValueDesktop.trim() !== '';
-            if (!hasAdditionalSchoolDesktop) {
-                desktopAdditionalSchoolContainer.style.display = 'none';
-                desktopSpecializationContainer.style.display = 'none';
-                desktopCourseContainer.style.display = 'none';
-            } else {
-                desktopAdditionalSchoolContainer.style.display = 'flex';
-                desktopSpecializationContainer.style.display = 'flex';
-                desktopCourseContainer.style.display = 'flex';
-                desktopAdditionalSchool.textContent = additionalSchoolValueDesktop;
-                desktopUserSpecialization.textContent = userData.specialization || 'Не указано';
-                desktopUserCourse.textContent = userData.course || 'Не указано';
-            }
-        }
+    // Update desktop sidebar elements
+    if (userData.has_avatar) {
+        loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
+    } else {
+        setAvatarBackground(sidebarProfileAvatar, bgColor, firstLetter);
+    }
+    sidebarProfileNickname.textContent = nickname || 'Не указано';
+    sidebarProfileId.textContent = `id: ${platformId}`; 
+
+    // Update mobile sidebar elements (new)
+    if (userData.has_avatar) {
+        loadAvatar(mobileSidebarProfileAvatar, userData.platform_user_id);
+    } else {
+        setAvatarBackground(mobileSidebarProfileAvatar, bgColor, firstLetter);
+    }
+    mobileSidebarProfileNickname.textContent = nickname || 'Не указано';
+    mobileSidebarProfileId.textContent = `id: ${platformId}`; 
+
+    // Update desktop profile modal elements
+    if (userData.has_avatar) {
+        loadAvatar(desktopProfileAvatar, userData.platform_user_id);
+    } else {
+        setAvatarBackground(desktopProfileAvatar, bgColor, firstLetter);
+    }
+    desktopProfileNickname.textContent = nickname || 'Не указано';
+    desktopProfileId.textContent = `ID: ${platformId}`;
+    
+    // Обновляем данные для десктопной версии с проверкой на пустые значения
+    updateDetailElement(desktopUserRole, userData.identity, 'Роль');
+    updateDetailElement(desktopMainSchool, userData.main_school_name, 'Школа');
+    
+    // Обработка класса для десктопной версии
+    if (userData.class_number && userData.class_letter && 
+        !isEmptyValue(userData.class_number) && !isEmptyValue(userData.class_letter)) {
+        desktopUserClass.textContent = `${userData.class_number}${userData.class_letter}`;
+        desktopUserClass.parentElement.style.display = 'flex';
+    } else {
+        desktopUserClass.parentElement.style.display = 'none';
+    }
+
+    // Обработка дополнительной школы для десктопной версии
+    const additionalSchoolValueDesktop = userData.additional_school_name;
+    const hasAdditionalSchoolDesktop = !isEmptyValue(additionalSchoolValueDesktop);
+    
+    if (!hasAdditionalSchoolDesktop) {
+        desktopAdditionalSchoolContainer.style.display = 'none';
+        desktopSpecializationContainer.style.display = 'none';
+        desktopCourseContainer.style.display = 'none';
+    } else {
+        desktopAdditionalSchoolContainer.style.display = 'flex';
+        desktopAdditionalSchool.textContent = additionalSchoolValueDesktop;
+        
+        // Показываем/скрываем направление и курс в зависимости от их значений
+        updateDetailElement(desktopUserSpecialization, userData.specialization, 'Направление');
+        updateDetailElement(desktopUserCourse, userData.course, 'Курс');
+    }
+}
+
+// Вспомогательная функция для обновления элементов с проверкой на пустые значения
+function updateDetailElement(element, value, defaultValue = 'Не указано') {
+    const parentContainer = element.parentElement;
+    const isEmptyValue = (val) => {
+        if (!val) return true;
+        const lowerVal = String(val).toLowerCase().trim();
+        return lowerVal === '' || 
+               lowerVal === 'не указано' || 
+               lowerVal === 'не ук' || 
+               lowerVal === 'не указан' ||
+               lowerVal === 'не укне ук';
+    };
+
+    if (!isEmptyValue(value)) {
+        element.textContent = value;
+        parentContainer.style.display = 'flex';
+    } else {
+        parentContainer.style.display = 'none';
+    }
+}
 
    
         function openAvatarModal(targetAvatarElement) {
@@ -2450,4 +2493,3 @@ window.addEventListener('beforeunload', function() {
      <script src="activity-tracker.js"></script>
 </body>
 </html>
-
