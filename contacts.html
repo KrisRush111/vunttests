@@ -1848,9 +1848,9 @@
                         <div class="detail-label">Роль</div>
                         <div id="modal-user-role-desktop" class="detail-value">Загрузка...</div>
                     </div>
-                    <div id="modal-subjects-container-desktop" class="detail-item">
+                    <div id="modal-subject-container-desktop" class="detail-item">
                         <div class="detail-label">Предметы</div>
-                        <div id="modal-user-subjects-desktop" class="detail-value">Загрузка...</div>
+                        <div id="modal-user-subject-desktop" class="detail-value">Загрузка...</div>
                     </div>
                     <div id="modal-additional-school-container-desktop" class="detail-item">
                         <div class="detail-label">Доп. школа</div>
@@ -1948,9 +1948,9 @@
                     <div class="detail-label">Роль</div>
                     <div id="modal-user-role-mobile" class="detail-value">Загрузка...</div>
                 </div>
-                <div id="modal-subjects-container-mobile" class="detail-item">
+                <div id="modal-subject-container-mobile" class="detail-item">
                     <div class="detail-label">Предметы</div>
-                    <div id="modal-user-subjects-mobile" class="detail-value">Загрузка...</div>
+                    <div id="modal-user-subject-mobile" class="detail-value">Загрузка...</div>
                 </div>
                 <div id="modal-additional-school-container-mobile" class="detail-item">
                     <div class="detail-label">Доп. школа</div>
@@ -2061,6 +2061,11 @@
         const chatButtonDesktop = document.getElementById('chatButtonDesktop');
         const chatButtonMobile = document.getElementById('chatButtonMobile');
         const modalProfileStatusMobile = document.getElementById('modal-profile-status-mobile');
+
+        const modalSubjectContainerDesktop = document.getElementById('modal-subject-container-desktop');
+        const modalUserSubjectDesktop = document.getElementById('modal-user-subject-desktop');
+        const modalSubjectContainerMobile = document.getElementById('modal-subject-container-mobile');
+        const modalUserSubjectMobile = document.getElementById('modal-user-subject-mobile');
 
 
 let currentViewedUser = null;
@@ -2521,6 +2526,8 @@ function getActiveElements() {
             modalProfileAvatar: modalProfileAvatarDesktop,
             modalProfileNickname: modalProfileNicknameDesktop,
             modalProfileId: modalProfileIdDesktop,
+            modalSubjectContainer: modalSubjectContainerDesktop,
+            modalUserSubject: modalUserSubjectDesktop,
             modalMainSchool: modalMainSchoolDesktop,
             modalUserClass: modalUserClassDesktop,
             modalUserRole: modalUserRoleDesktop,
@@ -2534,9 +2541,7 @@ function getActiveElements() {
             // Изменение: Добавлены ссылки на кнопки чата для десктопа и мобильных
             chatButton: chatButtonDesktop,
             soundButton: soundButtonDesktop,
-            moreButton: moreButtonDesktop, 
-            modalSubjectsContainer: modalSubjectsContainerDesktop,
-            modalUserSubjects: modalUserSubjectsDesktop
+            moreButton: moreButtonDesktop
         };
     } else {
         return {
@@ -2548,6 +2553,8 @@ function getActiveElements() {
             modalProfileAvatar: modalProfileAvatarMobile,
             modalProfileNickname: modalProfileNicknameMobile,
             modalProfileId: modalProfileIdMobile,
+            modalSubjectContainer: modalSubjectContainerMobile,
+            modalUserSubject: modalUserSubjectMobile,
             modalMainSchool: modalMainSchoolMobile,
             modalUserClass: modalUserClassMobile,
             modalUserRole: modalUserRoleMobile,
@@ -2561,9 +2568,7 @@ function getActiveElements() {
             // Изменение: Добавлены ссылки на кнопки чата для десктопа и мобильных
             chatButton: chatButtonMobile,
             soundButton: soundButtonMobile,
-            moreButton: moreButtonMobile,
-            modalSubjectsContainer: modalSubjectsContainerMobile,
-            modalUserSubjects: modalUserSubjectsMobile
+            moreButton: moreButtonMobile
         };
     }
 }
@@ -2916,14 +2921,11 @@ function updateProfileModalStatus(userId) {
 
 
 
-// Функция для проверки, является ли значение "не указано" (с учётом вариантов)
 function isNotSpecified(value) {
-    if (!value || typeof value !== 'string') return true; // Пустое или не строка — считаем не указано
+    if (!value || typeof value !== 'string') return true; // Покрывает NULL и не-строки
     const lower = value.toLowerCase().trim();
     return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук' || lower === 'NULL';
 }
-
-
 // Обновите функцию updateProfileModalUI
 async function updateProfileModalUI(user) {
     const activeElements = getActiveElements();
@@ -2967,7 +2969,7 @@ async function updateProfileModalUI(user) {
         // Все возможные варианты "не указано" которые нужно скрывать
         const invalidValues = [
             'не указано', 'не указан', 'не ук', 'не укне ук', 
-            'not specified', 'none', 'NULL', 'undefined'
+            'not specified', 'none', 'NULL', ''
         ];
         
         const hasValidValue = fieldValue && 
@@ -2981,48 +2983,6 @@ async function updateProfileModalUI(user) {
         } else {
             containerElement.style.display = 'none';
             console.log(`${fieldName}: скрыто (значение: "${fieldValue}")`);
-        }
-    }
-
-    // Функция для проверки и отображения предметов (только для учителей)
-    function updateSubjects(subject1, subject2, subjectsElement, containerElement) {
-        if (!containerElement) return;
-        
-        // Проверяем, является ли пользователь учителем
-        const isTeacher = user.identity && 
-                         user.identity.toLowerCase().includes('учитель');
-        
-        if (!isTeacher) {
-            containerElement.style.display = 'none';
-            console.log('Предметы: скрыто (пользователь не учитель)');
-            return;
-        }
-        
-        // Собираем валидные предметы
-        const validSubjects = [];
-        
-        // Проверяем subject1
-        if (subject1 && 
-            !isNotSpecified(subject1) && 
-            subject1.toLowerCase() !== 'null') {
-            validSubjects.push(subject1);
-        }
-        
-        // Проверяем subject2
-        if (subject2 && 
-            !isNotSpecified(subject2) && 
-            subject2.toLowerCase() !== 'null') {
-            validSubjects.push(subject2);
-        }
-        
-        // Если есть валидные предметы - показываем
-        if (validSubjects.length > 0) {
-            subjectsElement.textContent = validSubjects.join(', ');
-            containerElement.style.display = 'flex';
-            console.log(`Предметы: "${validSubjects.join(', ')}" (показано)`);
-        } else {
-            containerElement.style.display = 'none';
-            console.log('Предметы: скрыто (нет валидных предметов)');
         }
     }
 
@@ -3047,10 +3007,27 @@ async function updateProfileModalUI(user) {
     updateField(user.course, activeElements.modalUserCourse, 
                activeElements.modalCourseContainer, 'Курс');
 
-    // Обновляем поле предметов (только для учителей)
-    updateSubjects(user.subject1, user.subject2, 
-                  activeElements.modalUserSubjects, 
-                  activeElements.modalSubjectsContainer);
+    // ДОБАВИТЬ: Логика для отображения предмета только для роли "учитель"
+    if (user.identity && user.identity.toLowerCase() === 'учитель') {
+        let subjects = [];
+        if (user.subject1 && !['не указано', 'не указан', 'не ук', 'не укне ук', 'not specified', 'none', 'NULL', ''].includes(user.subject1.toLowerCase().trim()) && user.subject1.trim() !== '') {
+            subjects.push(user.subject1);
+        }
+        if (user.subject2 && !['не указано', 'не указан', 'не ук', 'не укне ук', 'not specified', 'none', 'NULL', ''].includes(user.subject2.toLowerCase().trim()) && user.subject2.trim() !== '') {
+            subjects.push(user.subject2);
+        }
+        if (subjects.length > 0) {
+            activeElements.modalUserSubject.textContent = subjects.join(', ');
+            activeElements.modalSubjectContainer.style.display = 'flex';
+            console.log(`Предмет: "${subjects.join(', ')}" (показано для учителя)`);
+        } else {
+            activeElements.modalSubjectContainer.style.display = 'none';
+            console.log('Предмет: скрыто (нет указанных предметов)');
+        }
+    } else {
+        activeElements.modalSubjectContainer.style.display = 'none';
+        console.log('Предмет: скрыто (роль не учитель)');
+    }
 
     // Обработчик клика на аватар
     activeElements.modalProfileAvatar.onclick = () => {
@@ -3077,6 +3054,7 @@ async function updateProfileModalUI(user) {
         activeElements.chatButton.style.cursor = 'not-allowed';  // Для десктопа
     }
 }
+
 
   
         function adjustColor(hex, percent) {
