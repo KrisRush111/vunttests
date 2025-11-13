@@ -1340,6 +1340,10 @@
                         <div class="detail-label">Роль</div>
                         <div id="desktop-user-role" class="detail-value"></div>
                     </div>
+                    <div id="desktop-subject-container" class="detail-item">
+                        <div class="detail-label">Предмет</div>
+                        <div id="desktop-user-subject" class="detail-value"></div>
+                    </div>
                     <div id="desktop-additional-school-container" class="detail-item">
                         <div class="detail-label">Доп. школа</div>
                         <div id="desktop-additional-school" class="detail-value"></div>
@@ -1464,6 +1468,10 @@
                 <div class="detail-item">
                     <div class="detail-label">Роль</div>
                     <div id="user-role" class="detail-value"></div>
+                </div>
+                <div id="subject-container" class="detail-item">
+                    <div class="detail-label">Предмет</div>
+                    <div id="user-subject" class="detail-value"></div>
                 </div>
                 <div id="additional-school-container" class="detail-item">
                     <div class="detail-label">Доп. школа</div>
@@ -2073,7 +2081,7 @@
 function isNotSpecified(value) {
     if (!value || typeof value !== 'string') return true; // Пустое или не строка — считаем не указано
     const lower = value.toLowerCase().trim();
-    return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук';
+    return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук' || lower === 'NULL';
 }
 
 function updateProfileUI() {
@@ -2082,6 +2090,29 @@ function updateProfileUI() {
     const bgColor = userData.avatar_background;
     const platformId = userData.platform_user_id || 'Не указано';
     
+    // Определяем, является ли пользователь учителем
+    const isTeacher = userData.identity && 
+                     userData.identity.toLowerCase().includes('учитель');
+    
+    // Получаем предметы для учителя
+    const subject1 = userData.subject1;
+    const subject2 = userData.subject2;
+    
+    // Формируем строку с предметами (только для учителей)
+    let subjects = [];
+    if (isTeacher) {
+        // Добавляем subject1, если он указан и не пустой
+        if (subject1 && !isNotSpecified(subject1)) {
+            subjects.push(subject1);
+        }
+        
+        // Добавляем subject2, если он указан и не пустой
+        if (subject2 && !isNotSpecified(subject2)) {
+            subjects.push(subject2);
+        }
+    }
+    const subjectText = subjects.join(', ');
+
     // Update mobile profile elements (used in profileModalMobile)
     if (userData.has_avatar) {
         loadAvatar(profileAvatarMobile, userData.platform_user_id);
@@ -2145,6 +2176,36 @@ function updateProfileUI() {
         userCourseMobile.textContent = userData.course;
     }
 
+    // Предметы (только для учителей)
+    if (isTeacher && subjectText) {
+        // Проверяем, существует ли уже блок с предметами, если нет - создаем
+        let subjectContainerMobile = document.getElementById('subject-container');
+        let userSubjectMobile = document.getElementById('user-subject');
+        
+        if (!subjectContainerMobile) {
+            // Создаем HTML-структуру для предметов в мобильной версии
+            const courseContainer = document.getElementById('course-container');
+            const subjectHTML = `
+                <div id="subject-container" class="detail-item">
+                    <div class="detail-label">Предмет</div>
+                    <div id="user-subject" class="detail-value"></div>
+                </div>
+            `;
+            courseContainer.insertAdjacentHTML('afterend', subjectHTML);
+            subjectContainerMobile = document.getElementById('subject-container');
+            userSubjectMobile = document.getElementById('user-subject');
+        }
+        
+        userSubjectMobile.textContent = subjectText;
+        subjectContainerMobile.style.display = 'flex';
+    } else {
+        // Скрываем блок с предметами для не-учителей или если нет предметов
+        const subjectContainerMobile = document.getElementById('subject-container');
+        if (subjectContainerMobile) {
+            subjectContainerMobile.style.display = 'none';
+        }
+    }
+
     // Update desktop sidebar elements
     if (userData.has_avatar) {
         loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
@@ -2163,7 +2224,6 @@ function updateProfileUI() {
     mobileSidebarProfileNickname.textContent = nickname || 'Не указано';
     mobileSidebarProfileId.textContent = `id: ${platformId}`; 
 
-   
     // Update desktop profile modal elements
     if (userData.has_avatar) {
         loadAvatar(desktopProfileAvatar, userData.platform_user_id);
@@ -2226,8 +2286,37 @@ function updateProfileUI() {
         desktopCourseContainer.style.display = 'flex';
         desktopUserCourse.textContent = userData.course;
     }
-}
 
+    // Предметы для десктопной версии (только для учителей)
+    if (isTeacher && subjectText) {
+        // Проверяем, существует ли уже блок с предметами, если нет - создаем
+        let desktopSubjectContainer = document.getElementById('desktop-subject-container');
+        let desktopUserSubject = document.getElementById('desktop-user-subject');
+        
+        if (!desktopSubjectContainer) {
+            // Создаем HTML-структуру для предметов в десктопной версии
+            const desktopCourseContainer = document.getElementById('desktop-course-container');
+            const subjectHTML = `
+                <div id="desktop-subject-container" class="detail-item">
+                    <div class="detail-label">Предмет</div>
+                    <div id="desktop-user-subject" class="detail-value"></div>
+                </div>
+            `;
+            desktopCourseContainer.insertAdjacentHTML('afterend', subjectHTML);
+            desktopSubjectContainer = document.getElementById('desktop-subject-container');
+            desktopUserSubject = document.getElementById('desktop-user-subject');
+        }
+        
+        desktopUserSubject.textContent = subjectText;
+        desktopSubjectContainer.style.display = 'flex';
+    } else {
+        // Скрываем блок с предметами для не-учителей или если нет предметов
+        const desktopSubjectContainer = document.getElementById('desktop-subject-container');
+        if (desktopSubjectContainer) {
+            desktopSubjectContainer.style.display = 'none';
+        }
+    }
+}
 
    
         function openAvatarModal(targetAvatarElement) {
