@@ -1848,6 +1848,10 @@
                         <div class="detail-label">Роль</div>
                         <div id="modal-user-role-desktop" class="detail-value">Загрузка...</div>
                     </div>
+                    <div id="modal-subjects-container-desktop" class="detail-item">
+                        <div class="detail-label">Предметы</div>
+                        <div id="modal-user-subjects-desktop" class="detail-value">Загрузка...</div>
+                    </div>
                     <div id="modal-additional-school-container-desktop" class="detail-item">
                         <div class="detail-label">Доп. школа</div>
                         <div id="modal-additional-school-desktop" class="detail-value">Загрузка...</div>
@@ -1943,6 +1947,10 @@
                 <div class="detail-item">
                     <div class="detail-label">Роль</div>
                     <div id="modal-user-role-mobile" class="detail-value">Загрузка...</div>
+                </div>
+                <div id="modal-subjects-container-mobile" class="detail-item">
+                    <div class="detail-label">Предметы</div>
+                    <div id="modal-user-subjects-mobile" class="detail-value">Загрузка...</div>
                 </div>
                 <div id="modal-additional-school-container-mobile" class="detail-item">
                     <div class="detail-label">Доп. школа</div>
@@ -2526,7 +2534,9 @@ function getActiveElements() {
             // Изменение: Добавлены ссылки на кнопки чата для десктопа и мобильных
             chatButton: chatButtonDesktop,
             soundButton: soundButtonDesktop,
-            moreButton: moreButtonDesktop
+            moreButton: moreButtonDesktop, 
+            modalSubjectsContainer: modalSubjectsContainerDesktop,
+            modalUserSubjects: modalUserSubjectsDesktop
         };
     } else {
         return {
@@ -2551,7 +2561,9 @@ function getActiveElements() {
             // Изменение: Добавлены ссылки на кнопки чата для десктопа и мобильных
             chatButton: chatButtonMobile,
             soundButton: soundButtonMobile,
-            moreButton: moreButtonMobile
+            moreButton: moreButtonMobile,
+            modalSubjectsContainer: modalSubjectsContainerMobile,
+            modalUserSubjects: modalUserSubjectsMobile
         };
     }
 }
@@ -2908,11 +2920,11 @@ function updateProfileModalStatus(userId) {
 function isNotSpecified(value) {
     if (!value || typeof value !== 'string') return true; // Пустое или не строка — считаем не указано
     const lower = value.toLowerCase().trim();
-    return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук';
+    return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук' || lower === 'NULL';
 }
 
 
-        // Обновите функцию updateProfileModalUI
+// Обновите функцию updateProfileModalUI
 async function updateProfileModalUI(user) {
     const activeElements = getActiveElements();
     
@@ -2955,7 +2967,7 @@ async function updateProfileModalUI(user) {
         // Все возможные варианты "не указано" которые нужно скрывать
         const invalidValues = [
             'не указано', 'не указан', 'не ук', 'не укне ук', 
-            'not specified', 'none', 'null', 'undefined'
+            'not specified', 'none', 'NULL', 'undefined'
         ];
         
         const hasValidValue = fieldValue && 
@@ -2969,6 +2981,48 @@ async function updateProfileModalUI(user) {
         } else {
             containerElement.style.display = 'none';
             console.log(`${fieldName}: скрыто (значение: "${fieldValue}")`);
+        }
+    }
+
+    // Функция для проверки и отображения предметов (только для учителей)
+    function updateSubjects(subject1, subject2, subjectsElement, containerElement) {
+        if (!containerElement) return;
+        
+        // Проверяем, является ли пользователь учителем
+        const isTeacher = user.identity && 
+                         user.identity.toLowerCase().includes('учитель');
+        
+        if (!isTeacher) {
+            containerElement.style.display = 'none';
+            console.log('Предметы: скрыто (пользователь не учитель)');
+            return;
+        }
+        
+        // Собираем валидные предметы
+        const validSubjects = [];
+        
+        // Проверяем subject1
+        if (subject1 && 
+            !isNotSpecified(subject1) && 
+            subject1.toLowerCase() !== 'null') {
+            validSubjects.push(subject1);
+        }
+        
+        // Проверяем subject2
+        if (subject2 && 
+            !isNotSpecified(subject2) && 
+            subject2.toLowerCase() !== 'null') {
+            validSubjects.push(subject2);
+        }
+        
+        // Если есть валидные предметы - показываем
+        if (validSubjects.length > 0) {
+            subjectsElement.textContent = validSubjects.join(', ');
+            containerElement.style.display = 'flex';
+            console.log(`Предметы: "${validSubjects.join(', ')}" (показано)`);
+        } else {
+            containerElement.style.display = 'none';
+            console.log('Предметы: скрыто (нет валидных предметов)');
         }
     }
 
@@ -2992,6 +3046,11 @@ async function updateProfileModalUI(user) {
     
     updateField(user.course, activeElements.modalUserCourse, 
                activeElements.modalCourseContainer, 'Курс');
+
+    // Обновляем поле предметов (только для учителей)
+    updateSubjects(user.subject1, user.subject2, 
+                  activeElements.modalUserSubjects, 
+                  activeElements.modalSubjectsContainer);
 
     // Обработчик клика на аватар
     activeElements.modalProfileAvatar.onclick = () => {
