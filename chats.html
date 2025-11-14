@@ -153,7 +153,6 @@ input, textarea {
             display: flex;
             flex-direction: column;
         }
-
         
         .desktop-content {
             margin-left: var(--desktop-sidebar-width);
@@ -335,8 +334,6 @@ input, textarea {
         cursor: pointer;
         transition: all 0.2s ease;
     }
-
-    .chat-modal.active .messages-container
     
     .add-chat-button:hover {
         background-color: transparent;
@@ -1048,7 +1045,11 @@ input, textarea {
             flex-direction: column;
         }
 
-
+ 
+        .chat-header {
+            padding: 12px 16px; /* Original size */
+            height: 60px; /* Original size */
+        }
         
         .chat-header .chat-title {
             font-size: 16px; /* Original size */
@@ -1069,6 +1070,18 @@ input, textarea {
             font-size: 16px; /* Original size */
         }
         
+        .message-time {
+            font-size: 11px; /* Original size */
+        }
+        
+        .message-input-container {
+            padding: 12px; /* Original size */
+        }
+        
+        .message-input {
+            padding: 12px 16px; /* Original size */
+            font-size: 16px; /* Original size */
+        }
         
         .send-button {
             width: 40px; /* Original size */
@@ -1076,12 +1089,25 @@ input, textarea {
             font-size: 16px; /* Original size */
         }
         
+       
+        
+        .chat-header .back-button i.fa-arrow-left {
+            display: inline; /* Original size */
+        }
+        
+        .chat-header .back-button::before {
+            content: none; /* Original size */
+        }
+        
   
         .chat-header .chat-title-container {
             margin-left: 0; /* Original size */
         }
         
-
+       
+        .chat-item {
+            padding: 12px 16px; /* Original size */
+        }
         
         .chat-avatar {
             width: 50px; /* Original size */
@@ -1324,7 +1350,53 @@ input, textarea {
 }
 
 
+.attach-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.3);
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+    flex-shrink: 0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
 
+.attach-button:hover {
+    background: rgba(255, 255, 255, 0.4);
+    transform: scale(1.05);
+}
+
+.attach-button:active {
+    transform: scale(0.95);
+}
+
+/* Стили для сообщений с изображениями */
+.message-image {
+    max-width: 200px;
+    max-height: 300px;
+    border-radius: 12px;
+    margin-top: 5px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.message-image:hover {
+    transform: scale(1.02);
+}
+
+.image-caption {
+    font-size: 14px;
+    color: inherit;
+    margin-top: 8px;
+    opacity: 0.9;
+}
 
 
 .message-input-container {
@@ -1503,6 +1575,10 @@ input, textarea {
     
 <div class="message-input-container">
     <div class="message-input-wrapper">
+        <!-- Добавьте эту кнопку -->
+        <button id="attachButtonDesktop" class="attach-button">
+            <i class="fas fa-paperclip"></i>
+        </button>
         <input type="text" id="messageInputDesktop" class="message-input" placeholder="Сообщение">
         <button id="sendMessageButtonDesktop" class="send-button">
             <i class="fas fa-paper-plane"></i>
@@ -1560,6 +1636,9 @@ input, textarea {
     
 <div class="message-input-container">
     <div class="message-input-wrapper">
+        <button id="attachButtonMobile" class="attach-button">
+            <i class="fas fa-paperclip"></i>
+        </button>
         <input type="text" id="messageInputMobile" class="message-input" placeholder="Сообщение">
         <button id="sendMessageButtonMobile" class="send-button">
             <i class="fas fa-paper-plane"></i>
@@ -1567,6 +1646,11 @@ input, textarea {
     </div>
 </div>
 </div>
+
+
+
+<input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
+
 
     <div id="contactsModal" class="contacts-modal">
         <div class="contacts-header">
@@ -1658,6 +1742,12 @@ input, textarea {
         const sendMessageButtonMobile = document.getElementById('sendMessageButtonMobile');
         const mobileOnlyNav = document.querySelector('.mobile-only-nav');
         
+
+        const imageInput = document.getElementById('imageInput');
+        const attachButtonDesktop = document.getElementById('attachButtonDesktop');
+        const attachButtonMobile = document.getElementById('attachButtonMobile');
+
+
 
         let userData = {};
         let currentChat = null;
@@ -1869,6 +1959,243 @@ function getActiveElements() {
             }, 5000);
         }
         
+
+
+
+
+
+        // Функция обработки выбора изображений
+function handleImageSelection(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type.startsWith('image/')) {
+            sendImageMessage(file);
+        }
+    }
+    
+    // Сбрасываем input для возможности выбора тех же файлов снова
+    event.target.value = '';
+}
+
+// Функция отправки изображения
+async function sendImageMessage(file) {
+    if (!currentChat || isSendingMessage) return;
+    
+    isSendingMessage = true;
+    const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
+    
+    try {
+        // Создаем временное сообщение для отображения загрузки
+        const tempMessageId = `temp_${Date.now()}`;
+        const tempMessage = {
+            id: tempMessageId,
+            sender_id: userData.platform_user_id,
+            content: 'Загрузка изображения...',
+            sent_at: new Date().toISOString(),
+            is_read: false,
+            is_me: true,
+            is_image: true,
+            is_uploading: true
+        };
+        
+        currentMessages = [...currentMessages, tempMessage];
+        noMessages.style.display = 'none';
+        renderMessages(currentMessages);
+        
+        // Подготавливаем форму для отправки
+        const formData = new FormData();
+        formData.append('chat_id', currentChat.id);
+        formData.append('sender_id', userData.platform_user_id);
+        formData.append('image', file);
+        
+        // Если это временный чат, сначала создаем его
+        if (currentChat.is_temp) {
+            const response = await fetch(`${SERVER_URL}/create_chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id,
+                    contact_id: currentChat.participants[0].platform_user_id
+                }),
+                credentials: 'include'
+            });
+            
+            const data = await response.json();
+            
+            if (data.status !== 'success') {
+                throw new Error(data.error || 'Не удалось создать чат');
+            }
+            
+            currentChat.id = data.chat_id;
+            currentChat.is_temp = false;
+            await loadChats();
+        }
+        
+        // Отправляем изображение
+        const messageResponse = await fetch(`${SERVER_URL}/send_image_message`, {
+            method: 'POST',
+            body: formData,
+            credentials: 'include'
+        });
+        
+        const messageData = await messageResponse.json();
+        
+        if (messageData.status !== 'success') {
+            throw new Error(messageData.error || 'Не удалось отправить изображение');
+        }
+        
+        // Удаляем временное сообщение и добавляем настоящее
+        currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
+        
+        const newMessage = {
+            id: messageData.message_id,
+            sender_id: userData.platform_user_id,
+            content: messageData.image_url,
+            sent_at: new Date().toISOString(),
+            is_read: false,
+            is_me: true,
+            is_image: true,
+            caption: ''
+        };
+        
+        currentMessages = [...currentMessages, newMessage];
+        renderMessages(currentMessages);
+        
+        // Обновляем список чатов
+        if (!currentChat.is_temp) {
+            updateChatItemInDOM(currentChat.id, {
+                last_message: '📷 Изображение',
+                last_message_time: newMessage.sent_at,
+                unread_count: 0
+            });
+            
+            updateChatInList(currentChat.id, {
+                last_message: '📷 Изображение',
+                last_message_time: newMessage.sent_at
+            });
+        }
+        
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 50);
+        
+    } catch (error) {
+        console.error('Error sending image:', error);
+        showMessage('Ошибка отправки изображения: ' + error.message, 'error');
+        
+        // Удаляем временное сообщение об ошибке
+        currentMessages = currentMessages.filter(msg => !msg.is_uploading);
+        renderMessages(currentMessages);
+    } finally {
+        isSendingMessage = false;
+        sendMessageButton.disabled = false;
+    }
+}
+
+// Обновите функцию renderMessage для поддержки изображений
+function renderMessage(message) {
+    const { messagesContainer } = getActiveElements();
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+    messageElement.setAttribute('data-message-id', message.id);
+    
+    const messageTime = formatChatMessageTime(message.sent_at);
+    
+    let statusCircles = '';
+    if (message.is_me) {
+        const isRead = message.is_read;
+        statusCircles = `
+            <div class="message-status">
+                <div class="status-circles">
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                </div>
+            </div>
+        `;
+    }
+    
+    let messageContent = '';
+    if (message.is_image) {
+        if (message.is_uploading) {
+            messageContent = `
+                <div class="message-content">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span>${message.content}</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            messageContent = `
+                <div class="message-content">
+                    <img src="${message.content}" alt="Изображение" class="message-image" 
+                         onclick="openImageModal('${message.content}')">
+                    ${message.caption ? `<div class="image-caption">${message.caption}</div>` : ''}
+                </div>
+            `;
+        }
+    } else {
+        messageContent = `<div class="message-content">${message.content}</div>`;
+    }
+    
+    messageElement.innerHTML = `
+        ${messageContent}
+        <div class="message-time">
+            ${messageTime}
+            ${message.is_me ? statusCircles : ''}
+        </div>
+    `;
+    
+    setTimeout(() => {
+        messageElement.style.opacity = '1';
+        messageElement.style.transform = 'translateY(0)';
+    }, 10);
+    
+    messagesContainer.appendChild(messageElement);
+}
+
+// Функция для открытия модального окна с изображением
+function openImageModal(imageUrl) {
+    // Создаем модальное окно для просмотра изображения
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        cursor: pointer;
+    `;
+    
+    const img = document.createElement('img');
+    img.src = imageUrl;
+    img.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+        object-fit: contain;
+        border-radius: 8px;
+    `;
+    
+    modal.appendChild(img);
+    document.body.appendChild(modal);
+    
+    modal.addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+}
+
+
+
+
        
         async function loadUserData() {
             
@@ -3332,6 +3659,20 @@ async function initializePage() {
             }, 100);
         });
     }
+
+
+// Обработчики для кнопки прикрепления
+const { attachButton } = getActiveElements();
+if (attachButton) {
+    attachButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        imageInput.click();
+    });
+}
+
+// Обработчик выбора изображений
+imageInput.addEventListener('change', handleImageSelection);
+
 
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
