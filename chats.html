@@ -1379,16 +1379,25 @@ input, textarea {
 
 /* Стили для сообщений с изображениями */
 .message-image {
-    max-width: 200px;
+    max-width: 250px;
     max-height: 300px;
     border-radius: 12px;
-    margin-top: 5px;
+    margin: 0;
     cursor: pointer;
     transition: transform 0.2s ease;
+    display: block;
 }
 
 .message-image:hover {
     transform: scale(1.02);
+}
+
+.message-outgoing .message-image {
+    border-bottom-right-radius: 4px;
+}
+
+.message-incoming .message-image {
+    border-bottom-left-radius: 4px;
 }
 
 .image-caption {
@@ -1396,6 +1405,7 @@ input, textarea {
     color: inherit;
     margin-top: 8px;
     opacity: 0.9;
+    line-height: 1.4;
 }
 
 
@@ -1982,7 +1992,6 @@ function handleImageSelection(event) {
     event.target.value = '';
 }
 
-// Функция отправки изображения
 async function sendImageMessage(file) {
     if (!currentChat || isSendingMessage) return;
     
@@ -2014,6 +2023,7 @@ async function sendImageMessage(file) {
         formData.append('image', file);
         
         // Если это временный чат, сначала создаем его
+        let actualChatId = currentChat.id;
         if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
                 method: 'POST',
@@ -2031,12 +2041,13 @@ async function sendImageMessage(file) {
                 throw new Error(data.error || 'Не удалось создать чат');
             }
             
+            actualChatId = data.chat_id;
             currentChat.id = data.chat_id;
             currentChat.is_temp = false;
             await loadChats();
         }
         
-        // Отправляем изображение
+        // Отправляем изображение с правильным chat_id
         const messageResponse = await fetch(`${SERVER_URL}/send_image_message`, {
             method: 'POST',
             body: formData,
@@ -2056,11 +2067,10 @@ async function sendImageMessage(file) {
             id: messageData.message_id,
             sender_id: userData.platform_user_id,
             content: messageData.image_url,
-            sent_at: new Date().toISOString(),
+            sent_at: messageData.sent_at || new Date().toISOString(),
             is_read: false,
             is_me: true,
-            is_image: true,
-            caption: ''
+            is_image: true // ВАЖНО: помечаем как изображение
         };
         
         currentMessages = [...currentMessages, newMessage];
@@ -2121,27 +2131,73 @@ function renderMessage(message) {
     }
     
     let messageContent = '';
+    
+    // Обработка изображений
     if (message.is_image) {
         if (message.is_uploading) {
+            // Сообщение о загрузке
             messageContent = `
                 <div class="message-content">
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px; color: inherit;">
                         <i class="fas fa-spinner fa-spin"></i>
                         <span>${message.content}</span>
                     </div>
                 </div>
             `;
         } else {
+            // Загруженное изображение
+            const imageUrl = message.content;
+            
+            // Создаем оптимизированный URL для Cloudinary
+            let optimizedUrl = imageUrl;
+            if (imageUrl.includes('res.cloudinary.com')) {
+                // Добавляем параметры оптимизации для Cloudinary
+                optimizedUrl = imageUrl.replace(
+                    '/upload/',
+                    '/upload/w_600,h_600,c_fill,q_auto,f_auto/'
+                );
+            }
+            
             messageContent = `
-                <div class="message-content">
-                    <img src="${message.content}" alt="Изображение" class="message-image" 
-                         onclick="openImageModal('${message.content}')">
+                <div class="message-content" style="padding: 0; background: transparent;">
+                    <img src="${optimizedUrl}" 
+                         alt="Изображение" 
+                         class="message-image"
+                         onclick="openImageModal('${imageUrl}')"
+                         onerror="this.onerror=null; this.src='${imageUrl}';">
                     ${message.caption ? `<div class="image-caption">${message.caption}</div>` : ''}
                 </div>
             `;
         }
-    } else {
-        messageContent = `<div class="message-content">${message.content}</div>`;
+    } 
+    // Обработка текстовых сообщений с URL (если это ссылка на изображение, но не помечено как is_image)
+    else if (isImageUrl(message.content)) {
+        const imageUrl = message.content;
+        let optimizedUrl = imageUrl;
+        
+        if (imageUrl.includes('res.cloudinary.com')) {
+            optimizedUrl = imageUrl.replace(
+                '/upload/',
+                '/upload/w_400,h_300,c_fill,q_auto,f_auto/'
+            );
+        }
+        
+        messageContent = `
+            <div class="message-content" style="padding: 0; background: transparent;">
+                <img src="${optimizedUrl}" 
+                     alt="Изображение" 
+                     class="message-image"
+                     onclick="openImageModal('${imageUrl}')"
+                     onerror="this.onerror=null; this.src='${imageUrl}'; this.classList.add('failed-image');">
+                <div class="image-caption" style="display: none;">${message.content}</div>
+            </div>
+        `;
+    }
+    // Обычное текстовое сообщение
+    else {
+        messageContent = `
+            <div class="message-content">${escapeHtml(message.content)}</div>
+        `;
     }
     
     messageElement.innerHTML = `
@@ -2152,6 +2208,18 @@ function renderMessage(message) {
         </div>
     `;
     
+    // Добавляем специальные стили для сообщений с изображениями
+    if (message.is_image || isImageUrl(message.content)) {
+        messageElement.classList.add('message-with-image');
+        
+        // Убираем стандартные стили градиента для изображений
+        if (message.is_me) {
+            messageElement.style.background = 'transparent';
+        } else {
+            messageElement.style.background = 'transparent';
+        }
+    }
+    
     setTimeout(() => {
         messageElement.style.opacity = '1';
         messageElement.style.transform = 'translateY(0)';
@@ -2159,6 +2227,199 @@ function renderMessage(message) {
     
     messagesContainer.appendChild(messageElement);
 }
+
+// Вспомогательная функция для проверки URL изображения
+function isImageUrl(url) {
+    if (typeof url !== 'string') return false;
+    
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+    const imagePatterns = [
+        'res.cloudinary.com',
+        'cloudinary.com',
+        '/upload/',
+        'data:image/'
+    ];
+    
+    const lowerUrl = url.toLowerCase();
+    
+    // Проверяем расширения файлов
+    if (imageExtensions.some(ext => lowerUrl.includes(ext))) {
+        return true;
+    }
+    
+    // Проверяем паттерны Cloudinary и data URLs
+    if (imagePatterns.some(pattern => lowerUrl.includes(pattern))) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Функция для экранирования HTML (безопасность)
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Функция для открытия модального окна с изображением (обновленная)
+function openImageModal(imageUrl) {
+    // Создаем модальное окно для просмотра изображения
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.95);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        cursor: pointer;
+    `;
+    
+    const imgContainer = document.createElement('div');
+    imgContainer.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        position: relative;
+    `;
+    
+    const img = document.createElement('img');
+    img.src = imageUrl;
+    img.style.cssText = `
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    `;
+    
+    // Кнопка закрытия
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '×';
+    closeBtn.style.cssText = `
+        position: absolute;
+        top: -40px;
+        right: 0;
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        color: white;
+        font-size: 24px;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(10px);
+    `;
+    
+    imgContainer.appendChild(img);
+    imgContainer.appendChild(closeBtn);
+    modal.appendChild(imgContainer);
+    document.body.appendChild(modal);
+    
+    // Обработчики закрытия
+    const closeModal = () => {
+        document.body.removeChild(modal);
+    };
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeModal();
+        }
+    });
+    
+    closeBtn.addEventListener('click', closeModal);
+    
+    // Закрытие по ESC
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', handleKeydown);
+        }
+    };
+    
+    document.addEventListener('keydown', handleKeydown);
+}
+
+// Добавьте эти CSS стили в ваш файл стилей
+const additionalStyles = `
+    .message-with-image {
+        padding: 8px !important;
+        background: transparent !important;
+    }
+    
+    .message-with-image .message-content {
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    .message-image {
+        max-width: 280px;
+        max-height: 320px;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: block;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+    
+    .message-outgoing .message-image {
+        border-bottom-right-radius: 4px;
+        margin-left: auto;
+    }
+    
+    .message-incoming .message-image {
+        border-bottom-left-radius: 4px;
+        margin-right: auto;
+    }
+    
+    .message-image:hover {
+        transform: scale(1.02);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    
+    .message-image.failed-image {
+        display: none;
+    }
+    
+    .image-caption {
+        font-size: 14px;
+        color: inherit;
+        margin-top: 8px;
+        opacity: 0.9;
+        line-height: 1.4;
+        padding: 4px 8px;
+    }
+    
+    .message-outgoing .image-caption {
+        text-align: right;
+        color: rgba(255, 255, 255, 0.9);
+    }
+    
+    .message-incoming .image-caption {
+        text-align: left;
+        color: rgba(0, 0, 0, 0.8);
+    }
+`;
+
+// Добавление стилей в документ
+if (!document.querySelector('#image-message-styles')) {
+    const styleElement = document.createElement('style');
+    styleElement.id = 'image-message-styles';
+    styleElement.textContent = additionalStyles;
+    document.head.appendChild(styleElement);
+}
+
 
 // Функция для открытия модального окна с изображением
 function openImageModal(imageUrl) {
