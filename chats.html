@@ -2107,7 +2107,6 @@ async function sendImageMessage(file) {
     }
 }
 
-// Обновите функцию renderMessage для поддержки изображений
 function renderMessage(message) {
     const { messagesContainer } = getActiveElements();
     
@@ -2145,7 +2144,7 @@ function renderMessage(message) {
                 </div>
             `;
         } else {
-            // Загруженное изображение
+            // Загруженное изображение - ОТОБРАЖАЕМ КАРТИНКУ
             const imageUrl = message.content;
             
             // Создаем оптимизированный URL для Cloudinary
@@ -2154,7 +2153,7 @@ function renderMessage(message) {
                 // Добавляем параметры оптимизации для Cloudinary
                 optimizedUrl = imageUrl.replace(
                     '/upload/',
-                    '/upload/w_600,h_600,c_fill,q_auto,f_auto/'
+                    '/upload/w_400,h_400,c_fill,q_auto,f_auto/'
                 );
             }
             
@@ -2164,35 +2163,12 @@ function renderMessage(message) {
                          alt="Изображение" 
                          class="message-image"
                          onclick="openImageModal('${imageUrl}')"
+                         loading="lazy"
                          onerror="this.onerror=null; this.src='${imageUrl}';">
-                    ${message.caption ? `<div class="image-caption">${message.caption}</div>` : ''}
                 </div>
             `;
         }
     } 
-    // Обработка текстовых сообщений с URL (если это ссылка на изображение, но не помечено как is_image)
-    else if (isImageUrl(message.content)) {
-        const imageUrl = message.content;
-        let optimizedUrl = imageUrl;
-        
-        if (imageUrl.includes('res.cloudinary.com')) {
-            optimizedUrl = imageUrl.replace(
-                '/upload/',
-                '/upload/w_400,h_300,c_fill,q_auto,f_auto/'
-            );
-        }
-        
-        messageContent = `
-            <div class="message-content" style="padding: 0; background: transparent;">
-                <img src="${optimizedUrl}" 
-                     alt="Изображение" 
-                     class="message-image"
-                     onclick="openImageModal('${imageUrl}')"
-                     onerror="this.onerror=null; this.src='${imageUrl}'; this.classList.add('failed-image');">
-                <div class="image-caption" style="display: none;">${message.content}</div>
-            </div>
-        `;
-    }
     // Обычное текстовое сообщение
     else {
         messageContent = `
@@ -2209,15 +2185,12 @@ function renderMessage(message) {
     `;
     
     // Добавляем специальные стили для сообщений с изображениями
-    if (message.is_image || isImageUrl(message.content)) {
+    if (message.is_image) {
         messageElement.classList.add('message-with-image');
         
         // Убираем стандартные стили градиента для изображений
-        if (message.is_me) {
-            messageElement.style.background = 'transparent';
-        } else {
-            messageElement.style.background = 'transparent';
-        }
+        messageElement.style.background = 'transparent';
+        messageElement.style.padding = '8px';
     }
     
     setTimeout(() => {
@@ -2262,7 +2235,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Функция для открытия модального окна с изображением (обновленная)
+// Функция для открытия модального окна с изображением
 function openImageModal(imageUrl) {
     // Создаем модальное окно для просмотра изображения
     const modal = document.createElement('div');
@@ -2280,24 +2253,14 @@ function openImageModal(imageUrl) {
         cursor: pointer;
     `;
     
-    const imgContainer = document.createElement('div');
-    imgContainer.style.cssText = `
-        max-width: 90%;
-        max-height: 90%;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        position: relative;
-    `;
-    
     const img = document.createElement('img');
     img.src = imageUrl;
     img.style.cssText = `
-        max-width: 100%;
-        max-height: 100%;
+        max-width: 90%;
+        max-height: 90%;
         object-fit: contain;
         border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        cursor: default;
     `;
     
     // Кнопка закрытия
@@ -2305,155 +2268,47 @@ function openImageModal(imageUrl) {
     closeBtn.innerHTML = '×';
     closeBtn.style.cssText = `
         position: absolute;
-        top: -40px;
-        right: 0;
+        top: 20px;
+        right: 20px;
         background: rgba(255, 255, 255, 0.2);
         border: none;
         color: white;
-        font-size: 24px;
-        width: 30px;
-        height: 30px;
+        font-size: 30px;
+        width: 50px;
+        height: 50px;
         border-radius: 50%;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
         backdrop-filter: blur(10px);
+        z-index: 10001;
     `;
     
-    imgContainer.appendChild(img);
-    imgContainer.appendChild(closeBtn);
-    modal.appendChild(imgContainer);
+    modal.appendChild(img);
+    modal.appendChild(closeBtn);
     document.body.appendChild(modal);
     
     // Обработчики закрытия
     const closeModal = () => {
         document.body.removeChild(modal);
+        document.removeEventListener('keydown', handleKeydown);
     };
     
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
+        if (e.target === modal || e.target === closeBtn) {
             closeModal();
         }
     });
-    
-    closeBtn.addEventListener('click', closeModal);
     
     // Закрытие по ESC
     const handleKeydown = (e) => {
         if (e.key === 'Escape') {
             closeModal();
-            document.removeEventListener('keydown', handleKeydown);
         }
     };
     
     document.addEventListener('keydown', handleKeydown);
-}
-
-// Добавьте эти CSS стили в ваш файл стилей
-const additionalStyles = `
-    .message-with-image {
-        padding: 8px !important;
-        background: transparent !important;
-    }
-    
-    .message-with-image .message-content {
-        background: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-    
-    .message-image {
-        max-width: 280px;
-        max-height: 320px;
-        border-radius: 12px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        display: block;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    }
-    
-    .message-outgoing .message-image {
-        border-bottom-right-radius: 4px;
-        margin-left: auto;
-    }
-    
-    .message-incoming .message-image {
-        border-bottom-left-radius: 4px;
-        margin-right: auto;
-    }
-    
-    .message-image:hover {
-        transform: scale(1.02);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-    
-    .message-image.failed-image {
-        display: none;
-    }
-    
-    .image-caption {
-        font-size: 14px;
-        color: inherit;
-        margin-top: 8px;
-        opacity: 0.9;
-        line-height: 1.4;
-        padding: 4px 8px;
-    }
-    
-    .message-outgoing .image-caption {
-        text-align: right;
-        color: rgba(255, 255, 255, 0.9);
-    }
-    
-    .message-incoming .image-caption {
-        text-align: left;
-        color: rgba(0, 0, 0, 0.8);
-    }
-`;
-
-// Добавление стилей в документ
-if (!document.querySelector('#image-message-styles')) {
-    const styleElement = document.createElement('style');
-    styleElement.id = 'image-message-styles';
-    styleElement.textContent = additionalStyles;
-    document.head.appendChild(styleElement);
-}
-
-
-// Функция для открытия модального окна с изображением
-function openImageModal(imageUrl) {
-    // Создаем модальное окно для просмотра изображения
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.9);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 1000;
-        cursor: pointer;
-    `;
-    
-    const img = document.createElement('img');
-    img.src = imageUrl;
-    img.style.cssText = `
-        max-width: 90%;
-        max-height: 90%;
-        object-fit: contain;
-        border-radius: 8px;
-    `;
-    
-    modal.appendChild(img);
-    document.body.appendChild(modal);
-    
-    modal.addEventListener('click', () => {
-        document.body.removeChild(modal);
-    });
 }
 
 
