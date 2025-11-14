@@ -2131,46 +2131,33 @@ function renderMessage(message) {
     
     let messageContent = '';
     
-    // Обработка изображений
-    if (message.is_image) {
-        if (message.is_uploading) {
-            // Сообщение о загрузке
-            messageContent = `
-                <div class="message-content">
-                    <div style="display: flex; align-items: center; gap: 8px; color: inherit;">
-                        <i class="fas fa-spinner fa-spin"></i>
-                        <span>${message.content}</span>
-                    </div>
-                </div>
-            `;
-        } else {
-            // Загруженное изображение - ОТОБРАЖАЕМ КАРТИНКУ
-            const imageUrl = message.content;
-            
-            // Создаем оптимизированный URL для Cloudinary
-            let optimizedUrl = imageUrl;
-            if (imageUrl.includes('res.cloudinary.com')) {
-                // Добавляем параметры оптимизации для Cloudinary
-                optimizedUrl = imageUrl.replace(
-                    '/upload/',
-                    '/upload/w_400,h_400,c_fill,q_auto,f_auto/'
-                );
-            }
-            
-            messageContent = `
-                <div class="message-content" style="padding: 0; background: transparent;">
-                    <img src="${optimizedUrl}" 
-                         alt="Изображение" 
-                         class="message-image"
-                         onclick="openImageModal('${imageUrl}')"
-                         loading="lazy"
-                         onerror="this.onerror=null; this.src='${imageUrl}';">
-                </div>
-            `;
+    // Проверяем, является ли сообщение изображением (по флагу или по URL)
+    if (message.is_image || isImageUrl(message.content)) {
+        // Это изображение — показываем как <img>
+        const imageUrl = message.content;
+        
+        // Создаем оптимизированный URL для Cloudinary
+        let optimizedUrl = imageUrl;
+        if (imageUrl.includes('res.cloudinary.com')) {
+            optimizedUrl = imageUrl.replace(
+                '/upload/',
+                '/upload/w_400,h_400,c_fill,q_auto,f_auto/'
+            );
         }
-    } 
-    // Обычное текстовое сообщение
-    else {
+        
+        messageContent = `
+            <div class="message-content" style="padding: 0; background: transparent;">
+                <img src="${optimizedUrl}" 
+                     alt="Изображение" 
+                     class="message-image"
+                     onclick="openImageModal('${imageUrl}')"
+                     loading="lazy"
+                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.maxWidth='200px'; this.style.opacity='0.5';">
+                ${message.caption ? `<div class="image-caption">${escapeHtml(message.caption)}</div>` : ''}
+            </div>
+        `;
+    } else {
+        // Обычное текстовое сообщение
         messageContent = `
             <div class="message-content">${escapeHtml(message.content)}</div>
         `;
@@ -2185,7 +2172,7 @@ function renderMessage(message) {
     `;
     
     // Добавляем специальные стили для сообщений с изображениями
-    if (message.is_image) {
+    if (message.is_image || isImageUrl(message.content)) {
         messageElement.classList.add('message-with-image');
         
         // Убираем стандартные стили градиента для изображений
@@ -2200,6 +2187,7 @@ function renderMessage(message) {
     
     messagesContainer.appendChild(messageElement);
 }
+
 
 // Вспомогательная функция для проверки URL изображения
 function isImageUrl(url) {
