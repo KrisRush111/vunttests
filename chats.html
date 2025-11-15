@@ -2237,12 +2237,74 @@ function openImageModal(imageUrl) {
     const img = document.createElement('img');
     img.src = imageUrl;
     img.style.cssText = `
-        max-width: 90%;
-        max-height: 90%;
+        max-width: 95%;
+        max-height: 95%;
         object-fit: contain;
         border-radius: 8px;
         cursor: default;
+        transition: transform 0.3s ease;
     `;
+    
+    // Добавляем возможность масштабирования жестами
+    let currentScale = 1;
+    let isDragging = false;
+    let startX, startY, translateX = 0, translateY = 0;
+    
+    // Обработчик для масштабирования колесиком мыши
+    img.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = -e.deltaY / 100;
+        const newScale = Math.max(0.5, Math.min(3, currentScale + delta * 0.2));
+        
+        if (newScale !== currentScale) {
+            const rect = img.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            const scaleChange = newScale / currentScale;
+            
+            translateX = mouseX - (mouseX - translateX) * scaleChange;
+            translateY = mouseY - (mouseY - translateY) * scaleChange;
+            
+            currentScale = newScale;
+            updateImageTransform();
+        }
+    });
+    
+    // Обработчики для перетаскивания при увеличенном масштабе
+    img.addEventListener('mousedown', (e) => {
+        if (currentScale > 1) {
+            isDragging = true;
+            startX = e.clientX - translateX;
+            startY = e.clientY - translateY;
+            img.style.cursor = 'grabbing';
+        }
+    });
+    
+    modal.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            translateX = e.clientX - startX;
+            translateY = e.clientY - startY;
+            updateImageTransform();
+        }
+    });
+    
+    modal.addEventListener('mouseup', () => {
+        isDragging = false;
+        img.style.cursor = currentScale > 1 ? 'grab' : 'default';
+    });
+    
+    // Сброс трансформации при двойном клике
+    img.addEventListener('dblclick', () => {
+        currentScale = 1;
+        translateX = 0;
+        translateY = 0;
+        updateImageTransform();
+    });
+    
+    function updateImageTransform() {
+        img.style.transform = `scale(${currentScale}) translate(${translateX}px, ${translateY}px)`;
+    }
     
     // Кнопка закрытия
     const closeBtn = document.createElement('button');
@@ -2264,9 +2326,30 @@ function openImageModal(imageUrl) {
         justify-content: center;
         backdrop-filter: blur(10px);
         z-index: 10001;
+        transition: background 0.2s ease;
     `;
     
-    modal.appendChild(img);
+    closeBtn.addEventListener('mouseover', () => {
+        closeBtn.style.background = 'rgba(255, 255, 255, 0.3)';
+    });
+    
+    closeBtn.addEventListener('mouseout', () => {
+        closeBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    // Контейнер для изображения (для лучшего управления)
+    const imageContainer = document.createElement('div');
+    imageContainer.style.cssText = `
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+    `;
+    
+    imageContainer.appendChild(img);
+    modal.appendChild(imageContainer);
     modal.appendChild(closeBtn);
     document.body.appendChild(modal);
     
@@ -2290,6 +2373,26 @@ function openImageModal(imageUrl) {
     };
     
     document.addEventListener('keydown', handleKeydown);
+    
+    // Предзагрузка изображения для получения реальных размеров
+    const preloadImg = new Image();
+    preloadImg.onload = function() {
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const imgWidth = preloadImg.width;
+        const imgHeight = preloadImg.height;
+        
+        // Автоматическое масштабирование если изображение больше экрана
+        if (imgWidth > screenWidth * 0.9 || imgHeight > screenHeight * 0.9) {
+            const widthRatio = (screenWidth * 0.9) / imgWidth;
+            const heightRatio = (screenHeight * 0.9) / imgHeight;
+            const scale = Math.min(widthRatio, heightRatio);
+            
+            img.style.transform = `scale(${scale})`;
+            currentScale = scale;
+        }
+    };
+    preloadImg.src = imageUrl;
 }
 
 
