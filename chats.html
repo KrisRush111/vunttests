@@ -1409,6 +1409,37 @@ input, textarea {
 }
 
 
+/* Стили для модального окна просмотра изображений */
+.image-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    display: flex;
+    flex-direction: column;
+    z-index: 10000;
+}
+
+.image-modal-overlay button:hover {
+    background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.image-modal-overlay img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transition: transform 0.3s ease;
+}
+
+/* Адаптация для мобильных */
+@media (max-width: 767px) {
+    .image-modal-overlay {
+        padding: 0;
+    }
+}
+
 .message-input-container {
     padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
     position: sticky;
@@ -2131,9 +2162,11 @@ function renderMessage(message) {
     
     let messageContent = '';
     
-    // ВАЖНОЕ ИСПРАВЛЕНИЕ: Проверяем, является ли сообщение изображением
     if (message.is_image || (message.content && isImageUrl(message.content))) {
-        // Это изображение — показываем как <img>
+        // Находим индекс этого изображения среди всех изображений чата
+        const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+        const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
+        
         const imageUrl = message.content;
         
         // Создаем оптимизированный URL для Cloudinary
@@ -2150,18 +2183,16 @@ function renderMessage(message) {
                 <img src="${optimizedUrl}" 
                      alt="Изображение" 
                      class="message-image"
-                     onclick="openImageModal('${imageUrl}')"
+                     onclick="openImageModal('${imageUrl}', ${imageIndex})"
                      loading="lazy"
                      onerror="this.onerror=null; this.src='${imageUrl}'; this.style.maxWidth='200px'; this.style.opacity='0.5';">
             </div>
         `;
         
-        // Добавляем специальные стили для сообщений с изображениями
         messageElement.classList.add('message-with-image');
         messageElement.style.background = 'transparent';
         messageElement.style.padding = '8px';
     } else {
-        // Обычное текстовое сообщение
         messageContent = `
             <div class="message-content">${escapeHtml(message.content)}</div>
         `;
@@ -2217,9 +2248,15 @@ function escapeHtml(text) {
 }
 
 // Функция для открытия модального окна с изображением
-function openImageModal(imageUrl) {
+function openImageModal(imageUrl, messageIndex = 0) {
+    // Находим все изображения в текущем чате для навигации
+    const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+    const currentIndex = messageIndex;
+    const totalImages = imageMessages.length;
+
     // Создаем модальное окно для просмотра изображения
     const modal = document.createElement('div');
+    modal.className = 'image-modal-overlay';
     modal.style.cssText = `
         position: fixed;
         top: 0;
@@ -2228,169 +2265,230 @@ function openImageModal(imageUrl) {
         height: 100%;
         background: rgba(0, 0, 0, 0.95);
         display: flex;
-        justify-content: center;
-        align-items: center;
+        flex-direction: column;
         z-index: 10000;
         cursor: pointer;
     `;
-    
+
+    // Шапка модального окна
+    const header = document.createElement('div');
+    header.style.cssText = `
+        display: flex;
+        align-items: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+    `;
+
+    // Кнопка назад
+    const backButton = document.createElement('button');
+    backButton.innerHTML = '←';
+    backButton.style.cssText = `
+        background: none;
+        border: none;
+        color: white;
+        font-size: 20px;
+        margin-right: 16px;
+        cursor: pointer;
+        padding: 8px;
+    `;
+
+    // Заголовок с навигацией
+    const title = document.createElement('div');
+    title.style.cssText = `
+        flex: 1;
+        font-size: 17px;
+        font-weight: 500;
+    `;
+    title.textContent = `${currentIndex + 1} из ${totalImages}`;
+
+    header.appendChild(backButton);
+    header.appendChild(title);
+
+    // Контейнер для изображения
+    const imageContainer = document.createElement('div');
+    imageContainer.style.cssText = `
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+        position: relative;
+    `;
+
     const img = document.createElement('img');
     img.src = imageUrl;
     img.style.cssText = `
-        max-width: 95%;
-        max-height: 95%;
+        max-width: 100%;
+        max-height: 100%;
         object-fit: contain;
-        border-radius: 8px;
         cursor: default;
         transition: transform 0.3s ease;
     `;
-    
-    // Добавляем возможность масштабирования жестами
-    let currentScale = 1;
-    let isDragging = false;
-    let startX, startY, translateX = 0, translateY = 0;
-    
-    // Обработчик для масштабирования колесиком мыши
-    img.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const delta = -e.deltaY / 100;
-        const newScale = Math.max(0.5, Math.min(3, currentScale + delta * 0.2));
-        
-        if (newScale !== currentScale) {
-            const rect = img.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            
-            const scaleChange = newScale / currentScale;
-            
-            translateX = mouseX - (mouseX - translateX) * scaleChange;
-            translateY = mouseY - (mouseY - translateY) * scaleChange;
-            
-            currentScale = newScale;
-            updateImageTransform();
-        }
-    });
-    
-    // Обработчики для перетаскивания при увеличенном масштабе
-    img.addEventListener('mousedown', (e) => {
-        if (currentScale > 1) {
-            isDragging = true;
-            startX = e.clientX - translateX;
-            startY = e.clientY - translateY;
-            img.style.cursor = 'grabbing';
-        }
-    });
-    
-    modal.addEventListener('mousemove', (e) => {
-        if (isDragging) {
-            translateX = e.clientX - startX;
-            translateY = e.clientY - startY;
-            updateImageTransform();
-        }
-    });
-    
-    modal.addEventListener('mouseup', () => {
-        isDragging = false;
-        img.style.cursor = currentScale > 1 ? 'grab' : 'default';
-    });
-    
-    // Сброс трансформации при двойном клике
-    img.addEventListener('dblclick', () => {
-        currentScale = 1;
-        translateX = 0;
-        translateY = 0;
-        updateImageTransform();
-    });
-    
-    function updateImageTransform() {
-        img.style.transform = `scale(${currentScale}) translate(${translateX}px, ${translateY}px)`;
-    }
-    
-    // Кнопка закрытия
-    const closeBtn = document.createElement('button');
-    closeBtn.innerHTML = '×';
-    closeBtn.style.cssText = `
+
+    // Кнопки навигации
+    const prevButton = document.createElement('button');
+    prevButton.innerHTML = '←';
+    prevButton.style.cssText = `
         position: absolute;
-        top: 20px;
-        right: 20px;
+        left: 20px;
+        top: 50%;
+        transform: translateY(-50%);
         background: rgba(255, 255, 255, 0.2);
         border: none;
         color: white;
-        font-size: 30px;
-        width: 50px;
-        height: 50px;
+        width: 44px;
+        height: 44px;
         border-radius: 50%;
         cursor: pointer;
-        display: flex;
+        display: ${currentIndex > 0 ? 'flex' : 'none'};
         align-items: center;
         justify-content: center;
+        font-size: 20px;
         backdrop-filter: blur(10px);
-        z-index: 10001;
         transition: background 0.2s ease;
     `;
-    
-    closeBtn.addEventListener('mouseover', () => {
-        closeBtn.style.background = 'rgba(255, 255, 255, 0.3)';
-    });
-    
-    closeBtn.addEventListener('mouseout', () => {
-        closeBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-    });
-    
-    // Контейнер для изображения (для лучшего управления)
-    const imageContainer = document.createElement('div');
-    imageContainer.style.cssText = `
-        display: flex;
-        justify-content: center;
+
+    const nextButton = document.createElement('button');
+    nextButton.innerHTML = '→';
+    nextButton.style.cssText = `
+        position: absolute;
+        right: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        color: white;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: ${currentIndex < totalImages - 1 ? 'flex' : 'none'};
         align-items: center;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
+        justify-content: center;
+        font-size: 20px;
+        backdrop-filter: blur(10px);
+        transition: background 0.2s ease;
     `;
-    
+
+    // Футер с информацией
+    const footer = document.createElement('div');
+    footer.style.cssText = `
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.8);
+        color: rgba(255, 255, 255, 0.7);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        font-size: 14px;
+    `;
+
+    // Получаем информацию о текущем сообщении
+    const currentMessage = imageMessages[currentIndex];
+    if (currentMessage) {
+        const time = formatChatMessageTime(currentMessage.sent_at);
+        footer.textContent = `${time}`;
+    }
+
+    // Добавляем элементы в контейнеры
     imageContainer.appendChild(img);
+    imageContainer.appendChild(prevButton);
+    imageContainer.appendChild(nextButton);
+    
+    modal.appendChild(header);
     modal.appendChild(imageContainer);
-    modal.appendChild(closeBtn);
+    modal.appendChild(footer);
     document.body.appendChild(modal);
-    
-    // Обработчики закрытия
-    const closeModal = () => {
-        document.body.removeChild(modal);
-        document.removeEventListener('keydown', handleKeydown);
-    };
-    
+
+    // Функция для обновления навигации
+    function updateNavigation(newIndex) {
+        const newMessage = imageMessages[newIndex];
+        if (newMessage) {
+            title.textContent = `${newIndex + 1} из ${totalImages}`;
+            img.src = newMessage.content;
+            
+            // Обновляем футер
+            const time = formatChatMessageTime(newMessage.sent_at);
+            footer.textContent = `${time}`;
+            
+            // Обновляем видимость кнопок навигации
+            prevButton.style.display = newIndex > 0 ? 'flex' : 'none';
+            nextButton.style.display = newIndex < totalImages - 1 ? 'flex' : 'none';
+            
+            return newIndex;
+        }
+        return currentIndex;
+    }
+
+    // Обработчики событий
+    let currentImageIndex = currentIndex;
+
+    backButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeModal();
+    });
+
+    prevButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (currentImageIndex > 0) {
+            currentImageIndex = updateNavigation(currentImageIndex - 1);
+        }
+    });
+
+    nextButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (currentImageIndex < totalImages - 1) {
+            currentImageIndex = updateNavigation(currentImageIndex + 1);
+        }
+    });
+
+    // Навигация свайпами
+    let startX = 0;
+    imageContainer.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+    });
+
+    imageContainer.addEventListener('touchend', (e) => {
+        const endX = e.changedTouches[0].clientX;
+        const diffX = startX - endX;
+
+        if (Math.abs(diffX) > 50) { // Минимальная дистанция свайпа
+            if (diffX > 0 && currentImageIndex < totalImages - 1) {
+                // Свайп влево - следующее изображение
+                currentImageIndex = updateNavigation(currentImageIndex + 1);
+            } else if (diffX < 0 && currentImageIndex > 0) {
+                // Свайп вправо - предыдущее изображение
+                currentImageIndex = updateNavigation(currentImageIndex - 1);
+            }
+        }
+    });
+
+    // Закрытие по клику на оверлей
     modal.addEventListener('click', (e) => {
-        if (e.target === modal || e.target === closeBtn) {
+        if (e.target === modal) {
             closeModal();
         }
     });
-    
+
     // Закрытие по ESC
     const handleKeydown = (e) => {
         if (e.key === 'Escape') {
             closeModal();
         }
     };
-    
+
+    function closeModal() {
+        document.body.removeChild(modal);
+        document.removeEventListener('keydown', handleKeydown);
+    }
+
     document.addEventListener('keydown', handleKeydown);
-    
-    // Предзагрузка изображения для получения реальных размеров
+
+    // Предзагрузка изображения для правильного отображения
     const preloadImg = new Image();
     preloadImg.onload = function() {
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
-        const imgWidth = preloadImg.width;
-        const imgHeight = preloadImg.height;
-        
-        // Автоматическое масштабирование если изображение больше экрана
-        if (imgWidth > screenWidth * 0.9 || imgHeight > screenHeight * 0.9) {
-            const widthRatio = (screenWidth * 0.9) / imgWidth;
-            const heightRatio = (screenHeight * 0.9) / imgHeight;
-            const scale = Math.min(widthRatio, heightRatio);
-            
-            img.style.transform = `scale(${scale})`;
-            currentScale = scale;
-        }
+        // Изображение автоматически масштабируется через CSS (object-fit: contain)
     };
     preloadImg.src = imageUrl;
 }
