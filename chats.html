@@ -1409,7 +1409,60 @@ input, textarea {
 }
 
 
-/* Стили для модального окна просмотра изображений */
+/* Стили для сообщений с изображениями в чате */
+.message-with-image {
+    background: transparent !important;
+    padding: 8px !important;
+    max-width: 85% !important;
+    min-width: 120px !important; /* Минимальная ширина для маленьких изображений */
+}
+
+.message-image {
+    max-width: 100%;
+    max-height: 400px; /* Максимальная высота в чате */
+    min-height: 120px; /* Минимальная высота */
+    border-radius: 12px;
+    margin: 0;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    display: block;
+    object-fit: contain; /* Сохраняем пропорции */
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+/* Для вертикальных изображений */
+.message-image[height] {
+    max-height: 400px;
+    width: auto;
+}
+
+/* Для горизонтальных изображений */
+.message-image[width] {
+    max-width: 100%;
+    height: auto;
+}
+
+.message-outgoing .message-image {
+    border-bottom-right-radius: 4px;
+}
+
+.message-incoming .message-image {
+    border-bottom-left-radius: 4px;
+}
+
+/* Адаптация для маленьких экранов */
+@media (max-width: 480px) {
+    .message-with-image {
+        max-width: 90% !important;
+    }
+    
+    .message-image {
+        max-height: 350px;
+    }
+}
+
+/* Стили для модального окна просмотра изображений (оставляем как было) */
 .image-modal-overlay {
     position: fixed;
     top: 0;
@@ -1422,14 +1475,11 @@ input, textarea {
     z-index: 10000;
 }
 
-.image-modal-overlay button:hover {
-    background: rgba(255, 255, 255, 0.3) !important;
-}
-
 .image-modal-overlay img {
     max-width: 100%;
     max-height: 100%;
-    object-fit: contain;
+    object-fit: contain; /* В модальном окне всегда показываем полностью */
+    cursor: default;
     transition: transform 0.3s ease;
 }
 
@@ -2007,6 +2057,41 @@ function getActiveElements() {
 
 
 
+// Функция для загрузки и установки реальных размеров изображения
+function loadImageWithNaturalSize(imgElement, imageUrl) {
+    const tempImg = new Image();
+    tempImg.onload = function() {
+        const naturalWidth = this.naturalWidth;
+        const naturalHeight = this.naturalHeight;
+        
+        // Устанавливаем атрибуты для CSS
+        imgElement.setAttribute('width', naturalWidth);
+        imgElement.setAttribute('height', naturalHeight);
+        
+        // Автоматически определяем ориентацию и применяем соответствующие стили
+        if (naturalWidth > naturalHeight) {
+            // Горизонтальное изображение
+            imgElement.style.maxWidth = '100%';
+            imgElement.style.height = 'auto';
+        } else {
+            // Вертикальное изображение
+            imgElement.style.maxHeight = '400px';
+            imgElement.style.width = 'auto';
+        }
+        
+        imgElement.style.opacity = '1';
+    };
+    tempImg.onerror = function() {
+        // При ошибке используем стандартные стили
+        imgElement.style.maxWidth = '100%';
+        imgElement.style.maxHeight = '400px';
+        imgElement.style.opacity = '1';
+    };
+    tempImg.src = imageUrl;
+}
+
+
+
         // Функция обработки выбора изображений
 function handleImageSelection(event) {
     const files = event.target.files;
@@ -2169,29 +2254,23 @@ function renderMessage(message) {
         
         const imageUrl = message.content;
         
-        // Создаем оптимизированный URL для Cloudinary
-        let optimizedUrl = imageUrl;
-        if (imageUrl.includes('res.cloudinary.com')) {
-            optimizedUrl = imageUrl.replace(
-                '/upload/',
-                '/upload/w_400,h_400,c_fill,q_auto,f_auto/'
-            );
-        }
-        
         messageContent = `
             <div class="message-content" style="padding: 0; background: transparent;">
-                <img src="${optimizedUrl}" 
+                <img src="${imageUrl}" 
                      alt="Изображение" 
                      class="message-image"
                      onclick="openImageModal('${imageUrl}', ${imageIndex})"
                      loading="lazy"
-                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.maxWidth='200px'; this.style.opacity='0.5';">
+                     onload="loadImageWithNaturalSize(this, '${imageUrl}')"
+                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.opacity='0.5'; this.style.maxWidth='100%'; this.style.maxHeight='400px';">
             </div>
         `;
         
         messageElement.classList.add('message-with-image');
         messageElement.style.background = 'transparent';
         messageElement.style.padding = '8px';
+        messageElement.style.maxWidth = '85%'; // Ограничиваем максимальную ширину в чате
+        messageElement.style.minWidth = '120px'; // Минимальная ширина для маленьких изображений
     } else {
         messageContent = `
             <div class="message-content">${escapeHtml(message.content)}</div>
