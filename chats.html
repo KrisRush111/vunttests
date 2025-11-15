@@ -1838,7 +1838,7 @@ input, textarea {
         const attachButtonDesktop = document.getElementById('attachButtonDesktop');
         const attachButtonMobile = document.getElementById('attachButtonMobile');
 
-
+        const imageSizesCache = {};
 
         let userData = {};
         let currentChat = null;
@@ -2055,43 +2055,6 @@ function getActiveElements() {
 
 
 
-
-
-// Функция для загрузки и установки реальных размеров изображения
-function loadImageWithNaturalSize(imgElement, imageUrl) {
-    const tempImg = new Image();
-    tempImg.onload = function() {
-        const naturalWidth = this.naturalWidth;
-        const naturalHeight = this.naturalHeight;
-        
-        // Устанавливаем атрибуты для CSS
-        imgElement.setAttribute('width', naturalWidth);
-        imgElement.setAttribute('height', naturalHeight);
-        
-        // Автоматически определяем ориентацию и применяем соответствующие стили
-        if (naturalWidth > naturalHeight) {
-            // Горизонтальное изображение
-            imgElement.style.maxWidth = '100%';
-            imgElement.style.height = 'auto';
-        } else {
-            // Вертикальное изображение
-            imgElement.style.maxHeight = '400px';
-            imgElement.style.width = 'auto';
-        }
-        
-        imgElement.style.opacity = '1';
-    };
-    tempImg.onerror = function() {
-        // При ошибке используем стандартные стили
-        imgElement.style.maxWidth = '100%';
-        imgElement.style.maxHeight = '400px';
-        imgElement.style.opacity = '1';
-    };
-    tempImg.src = imageUrl;
-}
-
-
-
         // Функция обработки выбора изображений
 function handleImageSelection(event) {
     const files = event.target.files;
@@ -2254,6 +2217,9 @@ function renderMessage(message) {
         
         const imageUrl = message.content;
         
+        // Проверяем, есть ли сохраненные размеры для этого изображения
+        const cachedSize = imageSizesCache[imageUrl];
+        
         messageContent = `
             <div class="message-content" style="padding: 0; background: transparent;">
                 <img src="${imageUrl}" 
@@ -2262,15 +2228,28 @@ function renderMessage(message) {
                      onclick="openImageModal('${imageUrl}', ${imageIndex})"
                      loading="lazy"
                      onload="loadImageWithNaturalSize(this, '${imageUrl}')"
-                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.opacity='0.5'; this.style.maxWidth='100%'; this.style.maxHeight='400px';">
+                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.opacity='0.5'; this.style.maxWidth='100%'; this.style.maxHeight='400px';"
+                     ${cachedSize ? `style="opacity:1; ${cachedSize.style}"` : ''}>
             </div>
         `;
         
         messageElement.classList.add('message-with-image');
         messageElement.style.background = 'transparent';
         messageElement.style.padding = '8px';
-        messageElement.style.maxWidth = '85%'; // Ограничиваем максимальную ширину в чате
-        messageElement.style.minWidth = '120px'; // Минимальная ширина для маленьких изображений
+        messageElement.style.maxWidth = '85%';
+        messageElement.style.minWidth = '120px';
+        
+        // Если есть кэшированные размеры, сразу применяем их
+        if (cachedSize) {
+            setTimeout(() => {
+                const img = messageElement.querySelector('.message-image');
+                if (img) {
+                    img.setAttribute('width', cachedSize.width);
+                    img.setAttribute('height', cachedSize.height);
+                    img.style.cssText += cachedSize.style;
+                }
+            }, 10);
+        }
     } else {
         messageContent = `
             <div class="message-content">${escapeHtml(message.content)}</div>
@@ -2292,6 +2271,84 @@ function renderMessage(message) {
     
     messagesContainer.appendChild(messageElement);
 }
+
+// Функция для загрузки и установки реальных размеров изображения
+function loadImageWithNaturalSize(imgElement, imageUrl) {
+    // Если размеры уже есть в кэше, используем их
+    if (imageSizesCache[imageUrl]) {
+        const cached = imageSizesCache[imageUrl];
+        imgElement.setAttribute('width', cached.width);
+        imgElement.setAttribute('height', cached.height);
+        imgElement.style.cssText += cached.style;
+        imgElement.style.opacity = '1';
+        return;
+    }
+    
+    const tempImg = new Image();
+    tempImg.onload = function() {
+        const naturalWidth = this.naturalWidth;
+        const naturalHeight = this.naturalHeight;
+        
+        // Сохраняем размеры в кэш
+        let style = '';
+        if (naturalWidth > naturalHeight) {
+            // Горизонтальное изображение
+            style = 'max-width: 100%; height: auto;';
+        } else {
+            // Вертикальное изображение
+            style = 'max-height: 400px; width: auto;';
+        }
+        
+        imageSizesCache[imageUrl] = {
+            width: naturalWidth,
+            height: naturalHeight,
+            style: style
+        };
+        
+        // Применяем стили к элементу
+        imgElement.setAttribute('width', naturalWidth);
+        imgElement.setAttribute('height', naturalHeight);
+        imgElement.style.cssText += style;
+        imgElement.style.opacity = '1';
+    };
+    tempImg.onerror = function() {
+        // При ошибке используем стандартные стили и сохраняем в кэш
+        const errorStyle = 'max-width: 100%; max-height: 400px; object-fit: contain;';
+        imageSizesCache[imageUrl] = {
+            width: 400,
+            height: 400,
+            style: errorStyle
+        };
+        
+        imgElement.style.cssText += errorStyle;
+        imgElement.style.opacity = '1';
+    };
+    tempImg.src = imageUrl;
+}
+
+// Функция для сохранения кэша в sessionStorage
+function saveImageSizesCache() {
+    try {
+        sessionStorage.setItem('imageSizesCache', JSON.stringify(imageSizesCache));
+    } catch (e) {
+        console.warn('Cannot save image sizes cache:', e);
+    }
+}
+
+// Функция для загрузки кэша из sessionStorage
+function loadImageSizesCache() {
+    try {
+        const cached = sessionStorage.getItem('imageSizesCache');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            Object.assign(imageSizesCache, parsed);
+        }
+    } catch (e) {
+        console.warn('Cannot load image sizes cache:', e);
+    }
+}
+
+
 
 function isImageUrl(url) {
     if (typeof url !== 'string') return false;
@@ -4055,6 +4112,7 @@ imageInput.addEventListener('change', handleImageSelection);
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
     setupKeyboardDetection();
+    loadImageSizesCache();
     
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
@@ -4158,6 +4216,8 @@ imageInput.addEventListener('change', handleImageSelection);
     console.log('Page initialized successfully');
 }
 
+window.addEventListener('beforeunload', saveImageSizesCache);
+window.addEventListener('pagehide', saveImageSizesCache);
 
 
 function filterChats(searchTerm) {
