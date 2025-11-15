@@ -2131,8 +2131,8 @@ function renderMessage(message) {
     
     let messageContent = '';
     
-    // Проверяем, является ли сообщение изображением (по флагу или по URL)
-    if (message.is_image || isImageUrl(message.content)) {
+    // ВАЖНОЕ ИСПРАВЛЕНИЕ: Проверяем, является ли сообщение изображением
+    if (message.is_image || (message.content && isImageUrl(message.content))) {
         // Это изображение — показываем как <img>
         const imageUrl = message.content;
         
@@ -2153,9 +2153,13 @@ function renderMessage(message) {
                      onclick="openImageModal('${imageUrl}')"
                      loading="lazy"
                      onerror="this.onerror=null; this.src='${imageUrl}'; this.style.maxWidth='200px'; this.style.opacity='0.5';">
-                ${message.caption ? `<div class="image-caption">${escapeHtml(message.caption)}</div>` : ''}
             </div>
         `;
+        
+        // Добавляем специальные стили для сообщений с изображениями
+        messageElement.classList.add('message-with-image');
+        messageElement.style.background = 'transparent';
+        messageElement.style.padding = '8px';
     } else {
         // Обычное текстовое сообщение
         messageContent = `
@@ -2171,15 +2175,6 @@ function renderMessage(message) {
         </div>
     `;
     
-    // Добавляем специальные стили для сообщений с изображениями
-    if (message.is_image || isImageUrl(message.content)) {
-        messageElement.classList.add('message-with-image');
-        
-        // Убираем стандартные стили градиента для изображений
-        messageElement.style.background = 'transparent';
-        messageElement.style.padding = '8px';
-    }
-    
     setTimeout(() => {
         messageElement.style.opacity = '1';
         messageElement.style.transform = 'translateY(0)';
@@ -2189,7 +2184,6 @@ function renderMessage(message) {
 }
 
 
-// Вспомогательная функция для проверки URL изображения
 function isImageUrl(url) {
     if (typeof url !== 'string') return false;
     
