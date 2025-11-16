@@ -1838,8 +1838,6 @@ input, textarea {
         const attachButtonDesktop = document.getElementById('attachButtonDesktop');
         const attachButtonMobile = document.getElementById('attachButtonMobile');
 
-        const imageSizesCache = {};
-
         let userData = {};
         let currentChat = null;
         let currentMessages = [];
@@ -2000,6 +1998,7 @@ function formatDateHeader(timestamp) {
 }
 
       
+
 function getActiveElements() {
     if (isDesktop) {
         return {
@@ -2217,9 +2216,7 @@ function renderMessage(message) {
         
         const imageUrl = message.content;
         
-        // Проверяем, есть ли сохраненные размеры для этого изображения
-        const cachedSize = imageSizesCache[imageUrl];
-        
+        // Убираем кэширование: изображение всегда загружается с базовым стилем и корректируется в loadImageWithNaturalSize
         messageContent = `
             <div class="message-content" style="padding: 0; background: transparent;">
                 <img src="${imageUrl}" 
@@ -2228,8 +2225,8 @@ function renderMessage(message) {
                      onclick="openImageModal('${imageUrl}', ${imageIndex})"
                      loading="lazy"
                      onload="loadImageWithNaturalSize(this, '${imageUrl}')"
-                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.opacity='0.5'; this.style.maxWidth='100%'; this.style.maxHeight='400px';"
-                     ${cachedSize ? `style="opacity:1; ${cachedSize.style}"` : ''}>
+                     onerror="this.onerror=null; this.src='${imageUrl}'; this.style.opacity='0.5'; this.style.maxWidth='100%'; this.style.height='auto';"
+                     style="opacity: 0; max-width: 100%; height: auto;">
             </div>
         `;
         
@@ -2239,17 +2236,7 @@ function renderMessage(message) {
         messageElement.style.maxWidth = '85%';
         messageElement.style.minWidth = '120px';
         
-        // Если есть кэшированные размеры, сразу применяем их
-        if (cachedSize) {
-            setTimeout(() => {
-                const img = messageElement.querySelector('.message-image');
-                if (img) {
-                    img.setAttribute('width', cachedSize.width);
-                    img.setAttribute('height', cachedSize.height);
-                    img.style.cssText += cachedSize.style;
-                }
-            }, 10);
-        }
+        // Убираем применение кэшированных размеров: изображение отображается в оригинальном размере (пропорционально масштабированном)
     } else {
         messageContent = `
             <div class="message-content">${escapeHtml(message.content)}</div>
@@ -2272,82 +2259,39 @@ function renderMessage(message) {
     messagesContainer.appendChild(messageElement);
 }
 
-// Функция для загрузки и установки реальных размеров изображения
+
 function loadImageWithNaturalSize(imgElement, imageUrl) {
-    // Если размеры уже есть в кэше, используем их
-    if (imageSizesCache[imageUrl]) {
-        const cached = imageSizesCache[imageUrl];
-        imgElement.setAttribute('width', cached.width);
-        imgElement.setAttribute('height', cached.height);
-        imgElement.style.cssText += cached.style;
-        imgElement.style.opacity = '1';
-        return;
-    }
+    // Убираем кэширование размеров, чтобы изображение всегда отображалось в оригинальном размере (пропорционально масштабированном, если выходит за границы)
+    // и не укорачивалось после перезагрузки страницы.
     
     const tempImg = new Image();
     tempImg.onload = function() {
-        const naturalWidth = this.naturalWidth;
-        const naturalHeight = this.naturalHeight;
-        
-        // Сохраняем размеры в кэш
-        let style = '';
-        if (naturalWidth > naturalHeight) {
-            // Горизонтальное изображение
-            style = 'max-width: 100%; height: auto;';
-        } else {
-            // Вертикальное изображение
-            style = 'max-height: 400px; width: auto;';
-        }
-        
-        imageSizesCache[imageUrl] = {
-            width: naturalWidth,
-            height: naturalHeight,
-            style: style
-        };
-        
-        // Применяем стили к элементу
-        imgElement.setAttribute('width', naturalWidth);
-        imgElement.setAttribute('height', naturalHeight);
-        imgElement.style.cssText += style;
-        imgElement.style.opacity = '1';
+        // После загрузки устанавливаем стиль: max-width 100% для предотвращения выхода за границы контейнера,
+        // height auto для сохранения пропорций. Это работает для всех изображений без фиксированных размеров.
+        const style = 'max-width: 100%; height: auto;';
+        applyImageStyles(imgElement, style);
     };
+    
     tempImg.onerror = function() {
-        // При ошибке используем стандартные стили и сохраняем в кэш
-        const errorStyle = 'max-width: 100%; max-height: 400px; object-fit: contain;';
-        imageSizesCache[imageUrl] = {
-            width: 400,
-            height: 400,
-            style: errorStyle
-        };
-        
-        imgElement.style.cssText += errorStyle;
-        imgElement.style.opacity = '1';
+        // При ошибке используем тот же стиль для консистентности
+        const style = 'max-width: 100%; height: auto;';
+        applyImageStyles(imgElement, style);
     };
     tempImg.src = imageUrl;
 }
 
-// Функция для сохранения кэша в sessionStorage
-function saveImageSizesCache() {
-    try {
-        sessionStorage.setItem('imageSizesCache', JSON.stringify(imageSizesCache));
-    } catch (e) {
-        console.warn('Cannot save image sizes cache:', e);
-    }
+
+function calculateImageStyle(width, height) {
+    // Устанавливаем универсальный стиль: максимальная ширина 100% (чтобы не выходить за границы контейнера),
+    // высота авто (сохраняет пропорции). Это работает для всех изображений.
+    return 'max-width: 100%; height: auto;';
 }
 
-// Функция для загрузки кэша из sessionStorage
-function loadImageSizesCache() {
-    try {
-        const cached = sessionStorage.getItem('imageSizesCache');
-        if (cached) {
-            const parsed = JSON.parse(cached);
-            Object.assign(imageSizesCache, parsed);
-        }
-    } catch (e) {
-        console.warn('Cannot load image sizes cache:', e);
-    }
+function applyImageStyles(imgElement, style) {
+    // Применяем стиль напрямую, без фиксированных размеров
+    imgElement.style.cssText += style;
+    imgElement.style.opacity = '1';
 }
-
 
 
 function isImageUrl(url) {
@@ -2459,7 +2403,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
     img.style.cssText = `
         max-width: 100%;
         max-height: 100%;
-        object-fit: contain;
+        object-fit: contain; /* Масштабирует пропорционально, сохраняя оригинальные пропорции, без обрезки */
         cursor: default;
         transition: transform 0.3s ease;
     `;
@@ -2537,18 +2481,17 @@ function openImageModal(imageUrl, messageIndex = 0) {
     modal.appendChild(footer);
     document.body.appendChild(modal);
 
-    // Функция для обновления навигации
+    let currentImageIndex = currentIndex;
+
     function updateNavigation(newIndex) {
         const newMessage = imageMessages[newIndex];
         if (newMessage) {
             title.textContent = `${newIndex + 1} из ${totalImages}`;
             img.src = newMessage.content;
             
-            // Обновляем футер
             const time = formatChatMessageTime(newMessage.sent_at);
             footer.textContent = `${time}`;
             
-            // Обновляем видимость кнопок навигации
             prevButton.style.display = newIndex > 0 ? 'flex' : 'none';
             nextButton.style.display = newIndex < totalImages - 1 ? 'flex' : 'none';
             
@@ -2557,12 +2500,9 @@ function openImageModal(imageUrl, messageIndex = 0) {
         return currentIndex;
     }
 
-    // Обработчики событий
-    let currentImageIndex = currentIndex;
-
     backButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        closeModal();
+        document.body.removeChild(modal);
     });
 
     prevButton.addEventListener('click', (e) => {
@@ -2579,54 +2519,35 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }
     });
 
-    // Навигация свайпами
-    let startX = 0;
     imageContainer.addEventListener('touchstart', (e) => {
-        startX = e.touches[0].clientX;
-    });
+        const startX = e.touches[0].clientX;
+        imageContainer.addEventListener('touchend', function touchEnd(e) {
+            const endX = e.changedTouches[0].clientX;
+            const diffX = startX - endX;
 
-    imageContainer.addEventListener('touchend', (e) => {
-        const endX = e.changedTouches[0].clientX;
-        const diffX = startX - endX;
-
-        if (Math.abs(diffX) > 50) { // Минимальная дистанция свайпа
-            if (diffX > 0 && currentImageIndex < totalImages - 1) {
-                // Свайп влево - следующее изображение
-                currentImageIndex = updateNavigation(currentImageIndex + 1);
-            } else if (diffX < 0 && currentImageIndex > 0) {
-                // Свайп вправо - предыдущее изображение
-                currentImageIndex = updateNavigation(currentImageIndex - 1);
+            if (Math.abs(diffX) > 50) {
+                if (diffX > 0 && currentImageIndex < totalImages - 1) {
+                    currentImageIndex = updateNavigation(currentImageIndex + 1);
+                } else if (diffX < 0 && currentImageIndex > 0) {
+                    currentImageIndex = updateNavigation(currentImageIndex - 1);
+                }
             }
-        }
+            imageContainer.removeEventListener('touchend', touchEnd);
+        });
     });
 
-    // Закрытие по клику на оверлей
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
-            closeModal();
+            document.body.removeChild(modal);
         }
     });
 
-    // Закрытие по ESC
-    const handleKeydown = (e) => {
+    document.addEventListener('keydown', function handleKeydown(e) {
         if (e.key === 'Escape') {
-            closeModal();
+            document.body.removeChild(modal);
+            document.removeEventListener('keydown', handleKeydown);
         }
-    };
-
-    function closeModal() {
-        document.body.removeChild(modal);
-        document.removeEventListener('keydown', handleKeydown);
-    }
-
-    document.addEventListener('keydown', handleKeydown);
-
-    // Предзагрузка изображения для правильного отображения
-    const preloadImg = new Image();
-    preloadImg.onload = function() {
-        // Изображение автоматически масштабируется через CSS (object-fit: contain)
-    };
-    preloadImg.src = imageUrl;
+    });
 }
 
 
@@ -4112,7 +4033,7 @@ imageInput.addEventListener('change', handleImageSelection);
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
     setupKeyboardDetection();
-    loadImageSizesCache();
+  
     
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
@@ -4200,6 +4121,7 @@ imageInput.addEventListener('change', handleImageSelection);
         });
     }
 
+
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
@@ -4216,8 +4138,6 @@ imageInput.addEventListener('change', handleImageSelection);
     console.log('Page initialized successfully');
 }
 
-window.addEventListener('beforeunload', saveImageSizesCache);
-window.addEventListener('pagehide', saveImageSizesCache);
 
 
 function filterChats(searchTerm) {
