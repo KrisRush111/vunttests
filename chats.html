@@ -1251,44 +1251,40 @@ input, textarea {
         line-height: 1.4;
     }
 
-    /* New styles for message status circles */
-    .message-status {
-        display: flex;
-        justify-content: flex-end;
-        margin-top: 4px;
-        height: 16px;
-    }
+/* Стили для статусных иконок (галочек) */
+.message-status {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 2px;
+    height: 16px;
+}
 
-    .status-circles {
-        display: flex;
-        gap: 2px;
-    }
+.status-icons {
+    display: flex;
+    align-items: center;
+}
 
-    .status-circle {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        font-size: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
+.status-icon {
+    font-size: 12px;
+    margin-left: 2px;
+}
 
-    .status-circle.gray {
-        background-color: var(--telegram-hint);
-    }
+.status-icon.sent {
+    color: var(--telegram-hint); /* Серый цвет для отправленных */
+}
 
-    .status-circle.green {
-        background-color: var(--telegram-success);
-    }
+.status-icon.read {
+    color: var(--online-green); /* Зеленый цвет для прочитанных */
+}
 
-    .message-outgoing .message-time {
-        color: rgba(255, 255, 255, 0.7);
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 4px;
-    }
+/* Для исходящих сообщений размещаем время и статус в одной строке */
+.message-outgoing .message-time {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    color: rgba(255, 255, 255, 0.7);
+}
 
     /* Custom styles for mobile chat header */
     @media (max-width: 767px) {
@@ -2213,14 +2209,13 @@ function renderMessage(message) {
     
     const messageTime = formatChatMessageTime(message.sent_at);
     
-    let statusCircles = '';
+    let statusIcons = '';
     if (message.is_me) {
         const isRead = message.is_read;
-        statusCircles = `
+        statusIcons = `
             <div class="message-status">
-                <div class="status-circles">
-                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
-                    <div class="status-circle ${isRead ? 'green' : 'gray'}"></div>
+                <div class="status-icons">
+                    <i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i>
                 </div>
             </div>
         `;
@@ -2235,7 +2230,6 @@ function renderMessage(message) {
         
         const imageUrl = message.content;
         
-        // Убираем кэширование: изображение всегда загружается с базовым стилем и корректируется в loadImageWithNaturalSize
         messageContent = `
             <div class="message-content">
                 <img src="${imageUrl}" 
@@ -2249,16 +2243,9 @@ function renderMessage(message) {
             </div>
         `;
         
-        // Добавляем класс для сообщений с изображениями (стили применяются через CSS)
+        // Добавляем класс для сообщений с изображениями
         messageElement.classList.add('message-with-image');
         
-        // УБИРАЕМ перезапись стилей, чтобы работали CSS-классы:
-        // messageElement.style.background = 'transparent'; // УДАЛИТЬ
-        // messageElement.style.padding = '8px'; // УДАЛИТЬ
-        // messageElement.style.maxWidth = '85%'; // УДАЛИТЬ
-        // messageElement.style.minWidth = '120px'; // УДАЛИТЬ
-        
-        // Убираем применение кэшированных размеров: изображение отображается в оригинальном размере (пропорционально масштабированном)
     } else {
         messageContent = `
             <div class="message-content">${escapeHtml(message.content)}</div>
@@ -2269,7 +2256,7 @@ function renderMessage(message) {
         ${messageContent}
         <div class="message-time">
             ${messageTime}
-            ${message.is_me ? statusCircles : ''}
+            ${message.is_me ? statusIcons : ''}
         </div>
     `;
     
@@ -3759,11 +3746,11 @@ function updateMessageStatusInUI(messageId) {
     const messageElement = messagesContainer.querySelector(`[data-message-id="${messageId}"]`);
     
     if (messageElement) {
-        const circles = messageElement.querySelectorAll('.status-circle');
-        circles.forEach(circle => {
-            circle.classList.remove('gray');
-            circle.classList.add('green');
-        });
+        const statusIcon = messageElement.querySelector('.status-icon');
+        if (statusIcon) {
+            statusIcon.classList.remove('fa-check', 'sent');
+            statusIcon.classList.add('fa-check-double', 'read');
+        }
     }
 }
 
@@ -3807,15 +3794,16 @@ function updateAllMessageStatusesInUI() {
         const messageId = element.getAttribute('data-message-id');
         const message = currentMessages.find(m => m.id === messageId);
         
-        if (message && message.is_me && message.is_read) { // Only update outgoing messages that are marked as read
-            const circles = element.querySelectorAll('.status-circle');
-            circles.forEach(circle => {
-                circle.classList.remove('gray');
-                circle.classList.add('green');
-            });
+        if (message && message.is_me && message.is_read) {
+            const statusIcon = element.querySelector('.status-icon');
+            if (statusIcon) {
+                statusIcon.classList.remove('fa-check', 'sent');
+                statusIcon.classList.add('fa-check-double', 'read');
+            }
         }
     });
 }
+
 
 async function updateChatStatuses() {
     if (!currentChatsList || currentChatsList.length === 0) {
