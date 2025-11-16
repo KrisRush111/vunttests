@@ -1477,7 +1477,7 @@ input, textarea {
     }
 }
 
-/* Стили для модального окна с возможностью зума */
+/* Стили для модального окна с жестами как в Telegram */
 .image-modal-overlay {
     position: fixed;
     top: 0;
@@ -1490,7 +1490,9 @@ input, textarea {
     z-index: 10000;
     cursor: default;
     overflow: hidden;
-    touch-action: none; /* Важно для кастомных жестов */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .image-modal-content {
@@ -1508,19 +1510,49 @@ input, textarea {
     max-height: 100%;
     object-fit: contain;
     cursor: grab;
-    transition: transform 0.3s ease;
+    transition: transform 0.1s ease-out;
     transform-origin: center center;
+    will-change: transform;
 }
 
 .zoomable-image:active {
     cursor: grabbing;
 }
 
-.zoomable-image.zoomed {
-    cursor: grab;
+/* Индикатор зума (только для десктопа) */
+.zoom-indicator {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    backdrop-filter: blur(10px);
+    z-index: 10001;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
 }
 
-/* Контролы зума */
+.zoom-indicator.show {
+    opacity: 1;
+}
+
+/* Скрываем кнопки на мобильных */
+@media (max-width: 767px) {
+    .zoom-controls {
+        display: none !important;
+    }
+    
+    .zoom-indicator {
+        display: none !important;
+    }
+}
+
+/* Контролы зума (только для десктопа) */
 .zoom-controls {
     position: absolute;
     right: 20px;
@@ -1545,50 +1577,18 @@ input, textarea {
     align-items: center;
     justify-content: center;
     backdrop-filter: blur(10px);
-    transition: background 0.2s ease;
+    transition: all 0.2s ease;
 }
 
 .zoom-control:hover {
     background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.1);
 }
 
 .zoom-control:active {
     transform: scale(0.95);
 }
 
-/* Индикатор зума */
-.zoom-indicator {
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 14px;
-    backdrop-filter: blur(10px);
-    z-index: 10001;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.zoom-indicator.show {
-    opacity: 1;
-}
-
-/* Адаптация для мобильных */
-@media (max-width: 767px) {
-    .zoom-controls {
-        right: 10px;
-    }
-    
-    .zoom-control {
-        width: 40px;
-        height: 40px;
-        font-size: 16px;
-    }
-}
 
 .message-input-container {
     padding: 8px 16px 6px 16px; /* Уменьшил верхний и нижний отступы */
@@ -2421,20 +2421,25 @@ function escapeHtml(text) {
 }
 
 function openImageModal(imageUrl, messageIndex = 0) {
-    // Находим все изображения в текущем чате для навигации
     const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
     const currentIndex = messageIndex;
     const totalImages = imageMessages.length;
+    const isMobile = window.innerWidth <= 767;
 
-    // Создаем модальное окно для просмотра изображения
     const modal = document.createElement('div');
     modal.className = 'image-modal-overlay';
-    
-    // Переменные для управления зумом
+
+    // Переменные для управления трансформацией
     let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let rotation = 0;
     let isDragging = false;
-    let startX, startY, translateX = 0, translateY = 0;
+    let startX, startY;
     let lastTouchDistance = null;
+    let lastTouchAngle = null;
+    let initialScale = 1;
+    let initialRotation = 0;
 
     // Шапка модального окна
     const header = document.createElement('div');
@@ -2450,7 +2455,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         position: relative;
     `;
 
-    // Кнопка назад
     const backButton = document.createElement('button');
     backButton.innerHTML = '←';
     backButton.style.cssText = `
@@ -2463,16 +2467,16 @@ function openImageModal(imageUrl, messageIndex = 0) {
         padding: 8px;
     `;
 
-    // Заголовок с навигацией
     const title = document.createElement('div');
     title.style.cssText = `
         flex: 1;
         font-size: 17px;
         font-weight: 500;
+        text-align: center;
     `;
     title.textContent = `${currentIndex + 1} из ${totalImages}`;
 
-    // Кнопка сброса зума
+    // Кнопка сброса (только для десктопа)
     const resetZoomButton = document.createElement('button');
     resetZoomButton.innerHTML = '↺';
     resetZoomButton.style.cssText = `
@@ -2485,16 +2489,9 @@ function openImageModal(imageUrl, messageIndex = 0) {
         margin-left: 8px;
         opacity: 0.7;
         transition: opacity 0.2s ease;
+        display: ${isMobile ? 'none' : 'block'};
     `;
     resetZoomButton.title = 'Сбросить масштаб';
-
-    resetZoomButton.addEventListener('mouseenter', () => {
-        resetZoomButton.style.opacity = '1';
-    });
-    
-    resetZoomButton.addEventListener('mouseleave', () => {
-        resetZoomButton.style.opacity = '0.7';
-    });
 
     header.appendChild(backButton);
     header.appendChild(title);
@@ -2507,16 +2504,18 @@ function openImageModal(imageUrl, messageIndex = 0) {
     const img = document.createElement('img');
     img.src = imageUrl;
     img.className = 'zoomable-image';
-    img.draggable = false; // Отключаем стандартный drag
+    img.draggable = false;
 
-    // Индикатор зума
+    // Индикатор зума (только для десктопа)
     const zoomIndicator = document.createElement('div');
     zoomIndicator.className = 'zoom-indicator';
     zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
+    zoomIndicator.style.display = isMobile ? 'none' : 'block';
 
-    // Элементы управления зумом
+    // Элементы управления зумом (только для десктопа)
     const zoomControls = document.createElement('div');
     zoomControls.className = 'zoom-controls';
+    zoomControls.style.display = isMobile ? 'none' : 'flex';
 
     const zoomInButton = document.createElement('button');
     zoomInButton.className = 'zoom-control';
@@ -2559,7 +2558,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
     nextButton.innerHTML = '→';
     nextButton.style.cssText = `
         position: absolute;
-        right: 80px; /* Сдвигаем чтобы не перекрывать кнопки зума */
+        right: 20px;
         top: 50%;
         transform: translateY(-50%);
         background: rgba(255, 255, 255, 0.2);
@@ -2578,7 +2577,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
         z-index: 10001;
     `;
 
-    // Футер с информацией
+    // Футер
     const footer = document.createElement('div');
     footer.style.cssText = `
         padding: 16px;
@@ -2587,54 +2586,65 @@ function openImageModal(imageUrl, messageIndex = 0) {
         border-top: 1px solid rgba(255, 255, 255, 0.1);
         backdrop-filter: blur(10px);
         font-size: 14px;
+        text-align: center;
     `;
 
-    // Получаем информацию о текущем сообщении
     const currentMessage = imageMessages[currentIndex];
     if (currentMessage) {
         const time = formatChatMessageTime(currentMessage.sent_at);
         footer.textContent = `${time}`;
-    }
-
-    // Функции для управления зумом
-    function updateTransform() {
-        img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
-        zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
         
-        // Показываем индикатор при зуме
-        if (scale > 1) {
-            zoomIndicator.classList.add('show');
-            resetZoomButton.style.display = 'block';
-        } else {
-            zoomIndicator.classList.remove('show');
-            resetZoomButton.style.display = 'none';
+        if (!isMobile) {
+            footer.innerHTML += `<div style="font-size: 12px; margin-top: 4px; opacity: 0.6;">
+                Колесико мыши - зум • Двойной клик - сброс
+            </div>`;
         }
     }
 
-    function zoomIn() {
-        scale = Math.min(scale * 1.5, 5);
-        updateTransform();
-        showTemporarily(zoomIndicator);
-    }
-
-    function zoomOut() {
-        scale = Math.max(scale / 1.5, 1);
-        if (scale === 1) {
-            translateX = 0;
-            translateY = 0;
+    // Функции трансформации
+    function updateTransform() {
+        const transform = `translate(${translateX}px, ${translateY}px) scale(${scale}) rotate(${rotation}deg)`;
+        img.style.transform = transform;
+        
+        if (!isMobile) {
+            zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
+            if (scale > 1 || rotation !== 0) {
+                zoomIndicator.classList.add('show');
+                resetZoomButton.style.opacity = '1';
+            } else {
+                zoomIndicator.classList.remove('show');
+                resetZoomButton.style.opacity = '0.7';
+            }
         }
-        updateTransform();
-        showTemporarily(zoomIndicator);
     }
 
-    function resetZoom() {
+    function applyZoom(newScale, centerX, centerY) {
+        const oldScale = scale;
+        scale = Math.max(1, Math.min(newScale, 5));
+        
+        // Корректируем позицию для сохранения точки под пальцами/курсором
+        if (centerX && centerY) {
+            const containerRect = imageContainer.getBoundingClientRect();
+            const relativeX = centerX - containerRect.left - containerRect.width / 2;
+            const relativeY = centerY - containerRect.top - containerRect.height / 2;
+            
+            translateX += relativeX * (1 - scale / oldScale);
+            translateY += relativeY * (1 - scale / oldScale);
+        }
+        
+        updateTransform();
+    }
+
+    function resetTransform() {
         scale = 1;
         translateX = 0;
         translateY = 0;
+        rotation = 0;
         updateTransform();
     }
 
     function showTemporarily(element) {
+        if (isMobile) return;
         element.classList.add('show');
         clearTimeout(element.hideTimeout);
         element.hideTimeout = setTimeout(() => {
@@ -2642,38 +2652,53 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }, 1000);
     }
 
-    // Обработчики для кнопок зума
-    zoomInButton.addEventListener('click', zoomIn);
-    zoomOutButton.addEventListener('click', zoomOut);
-    resetZoomButton.addEventListener('click', resetZoom);
+    // Обработчики для десктопа
+    if (!isMobile) {
+        zoomInButton.addEventListener('click', () => {
+            applyZoom(scale * 1.5);
+            showTemporarily(zoomIndicator);
+        });
 
-    // Обработчики для колесика мыши
-    imageContainer.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        if (e.deltaY < 0) {
-            zoomIn();
-        } else {
-            zoomOut();
-        }
-    });
+        zoomOutButton.addEventListener('click', () => {
+            applyZoom(scale / 1.5);
+            showTemporarily(zoomIndicator);
+        });
 
-    // Обработчики для drag (перетаскивания)
+        resetZoomButton.addEventListener('click', resetTransform);
+
+        imageContainer.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = imageContainer.getBoundingClientRect();
+            const centerX = e.clientX - rect.left;
+            const centerY = e.clientY - rect.top;
+            
+            if (e.deltaY < 0) {
+                applyZoom(scale * 1.2, centerX, centerY);
+            } else {
+                applyZoom(scale / 1.2, centerX, centerY);
+            }
+            showTemporarily(zoomIndicator);
+        });
+    }
+
+    // Обработчики для мыши (десктоп)
     imageContainer.addEventListener('mousedown', (e) => {
-        if (scale <= 1) return;
+        if (scale <= 1 && !isMobile) return;
         
         isDragging = true;
         startX = e.clientX - translateX;
         startY = e.clientY - translateY;
         img.style.cursor = 'grabbing';
+        e.preventDefault();
     });
 
     document.addEventListener('mousemove', (e) => {
-        if (!isDragging || scale <= 1) return;
+        if (!isDragging || (!isMobile && scale <= 1)) return;
         
-        e.preventDefault();
         translateX = e.clientX - startX;
         translateY = e.clientY - startY;
         updateTransform();
+        e.preventDefault();
     });
 
     document.addEventListener('mouseup', () => {
@@ -2681,60 +2706,109 @@ function openImageModal(imageUrl, messageIndex = 0) {
         img.style.cursor = scale > 1 ? 'grab' : 'default';
     });
 
-    // Обработчики для мультитач (зум пальцами)
-    imageContainer.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 2) {
-            e.preventDefault();
+    // Обработчики для тач-устройств (мобильные)
+    function handleTouchStart(e) {
+        if (e.touches.length === 1) {
+            // Одиночное касание - начало drag
+            isDragging = true;
+            startX = e.touches[0].clientX - translateX;
+            startY = e.touches[0].clientY - translateY;
+        } else if (e.touches.length === 2) {
+            // Два касания - начало жеста zoom/rotate
             const touch1 = e.touches[0];
             const touch2 = e.touches[1];
+            
             lastTouchDistance = Math.hypot(
                 touch2.clientX - touch1.clientX,
                 touch2.clientY - touch1.clientY
             );
-        } else if (e.touches.length === 1 && scale > 1) {
-            const touch = e.touches[0];
-            startX = touch.clientX - translateX;
-            startY = touch.clientY - translateY;
+            
+            lastTouchAngle = Math.atan2(
+                touch2.clientY - touch1.clientY,
+                touch2.clientX - touch1.clientX
+            ) * 180 / Math.PI;
+            
+            initialScale = scale;
+            initialRotation = rotation;
         }
-    });
+    }
 
-    imageContainer.addEventListener('touchmove', (e) => {
-        if (e.touches.length === 2) {
+    function handleTouchMove(e) {
+        if (e.touches.length === 1 && isDragging) {
+            // Перетаскивание
             e.preventDefault();
+            translateX = e.touches[0].clientX - startX;
+            translateY = e.touches[0].clientY - startY;
+            updateTransform();
+        } else if (e.touches.length === 2) {
+            // Zoom и rotate жесты
+            e.preventDefault();
+            
             const touch1 = e.touches[0];
             const touch2 = e.touches[1];
+            
+            // Вычисляем изменение масштаба
             const currentDistance = Math.hypot(
                 touch2.clientX - touch1.clientX,
                 touch2.clientY - touch1.clientY
             );
-
+            
             if (lastTouchDistance !== null) {
                 const scaleChange = currentDistance / lastTouchDistance;
-                scale = Math.max(1, Math.min(scale * scaleChange, 5));
-                updateTransform();
-                showTemporarily(zoomIndicator);
+                scale = Math.max(1, Math.min(initialScale * scaleChange, 5));
             }
             
-            lastTouchDistance = currentDistance;
-        } else if (e.touches.length === 1 && scale > 1) {
-            e.preventDefault();
-            const touch = e.touches[0];
-            translateX = touch.clientX - startX;
-            translateY = touch.clientY - startY;
+            // Вычисляем изменение поворота
+            const currentAngle = Math.atan2(
+                touch2.clientY - touch1.clientY,
+                touch2.clientX - touch1.clientX
+            ) * 180 / Math.PI;
+            
+            if (lastTouchAngle !== null) {
+                const angleChange = currentAngle - lastTouchAngle;
+                rotation = initialRotation + angleChange;
+            }
+            
             updateTransform();
+            lastTouchDistance = currentDistance;
+            lastTouchAngle = currentAngle;
         }
-    });
+    }
 
-    imageContainer.addEventListener('touchend', (e) => {
+    function handleTouchEnd(e) {
         if (e.touches.length < 2) {
             lastTouchDistance = null;
+            lastTouchAngle = null;
         }
+        if (e.touches.length === 0) {
+            isDragging = false;
+        }
+    }
+
+    // Двойной тап для сброса на мобильных
+    let lastTap = 0;
+    imageContainer.addEventListener('touchend', (e) => {
+        if (e.touches.length > 0) return;
+        
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+        
+        if (tapLength < 300 && tapLength > 0) {
+            // Двойной тап
+            resetTransform();
+        }
+        lastTap = currentTime;
     });
 
-    // Двойной клик для сброса зума
-    img.addEventListener('dblclick', resetZoom);
+    // Двойной клик для сброса на десктопе
+    img.addEventListener('dblclick', resetTransform);
 
-    // Добавляем элементы в контейнеры
+    // Добавляем обработчики тач-событий
+    imageContainer.addEventListener('touchstart', handleTouchStart, { passive: false });
+    imageContainer.addEventListener('touchmove', handleTouchMove, { passive: false });
+    imageContainer.addEventListener('touchend', handleTouchEnd);
+
+    // Добавляем элементы
     imageContainer.appendChild(img);
     imageContainer.appendChild(zoomIndicator);
     imageContainer.appendChild(zoomControls);
@@ -2754,11 +2828,11 @@ function openImageModal(imageUrl, messageIndex = 0) {
             title.textContent = `${newIndex + 1} из ${totalImages}`;
             img.src = newMessage.content;
             
-            // Сбрасываем зум при смене изображения
-            resetZoom();
+            // Сбрасываем трансформацию при смене изображения
+            resetTransform();
             
             const time = formatChatMessageTime(newMessage.sent_at);
-            footer.textContent = `${time}`;
+            footer.textContent = time;
             
             prevButton.style.display = newIndex > 0 ? 'flex' : 'none';
             nextButton.style.display = newIndex < totalImages - 1 ? 'flex' : 'none';
@@ -2768,6 +2842,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
         return currentIndex;
     }
 
+    // Навигация
     backButton.addEventListener('click', (e) => {
         e.stopPropagation();
         document.body.removeChild(modal);
@@ -2787,19 +2862,17 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }
     });
 
-    // Свайпы для навигации
-    imageContainer.addEventListener('touchstart', handleTouchStart);
-    
+    // Свайпы для навигации (только когда не увеличен)
     let touchStartX = 0;
     
-    function handleTouchStart(e) {
-        if (e.touches.length === 1) {
+    imageContainer.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1 && scale === 1 && rotation === 0) {
             touchStartX = e.touches[0].clientX;
         }
-    }
+    });
     
-    imageContainer.addEventListener('touchend', function touchEnd(e) {
-        if (scale > 1) return; // Не навигируем если увеличен
+    imageContainer.addEventListener('touchend', (e) => {
+        if (scale > 1 || rotation !== 0) return;
         
         const endX = e.changedTouches[0].clientX;
         const diffX = touchStartX - endX;
@@ -2814,7 +2887,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
     });
 
     modal.addEventListener('click', (e) => {
-        if (e.target === modal && scale === 1) {
+        if (e.target === modal && scale === 1 && rotation === 0) {
             document.body.removeChild(modal);
         }
     });
@@ -2827,17 +2900,12 @@ function openImageModal(imageUrl, messageIndex = 0) {
             currentImageIndex = updateNavigation(currentImageIndex - 1);
         } else if (e.key === 'ArrowRight' && currentImageIndex < totalImages - 1) {
             currentImageIndex = updateNavigation(currentImageIndex + 1);
-        } else if (e.key === '0' || e.key === 'Numpad0') {
-            resetZoom();
-        } else if (e.key === '+' || e.key === '=') {
-            zoomIn();
-        } else if (e.key === '-') {
-            zoomOut();
+        } else if (!isMobile && (e.key === '0' || e.key === 'Numpad0')) {
+            resetTransform();
         }
     });
 
     // Инициализация
-    resetZoomButton.style.display = 'none';
     updateTransform();
 }
 
