@@ -2172,13 +2172,13 @@ async function sendImageMessage(file) {
         // Обновляем список чатов
         if (!currentChat.is_temp) {
             updateChatItemInDOM(currentChat.id, {
-                last_message: '📷 Изображение',
+                last_message: '📷 Фото',
                 last_message_time: newMessage.sent_at,
                 unread_count: 0
             });
             
             updateChatInList(currentChat.id, {
-                last_message: '📷 Изображение',
+                last_message: '📷 Фото',
                 last_message_time: newMessage.sent_at
             });
         }
@@ -2632,6 +2632,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
 
         
        
+// Найдите функцию renderChats и внутри неё измените строку с last_message
 async function renderChats(chats) {
     const { chatsList, noChats } = getActiveElements();
     chatsList.innerHTML = '';
@@ -2672,33 +2673,41 @@ async function renderChats(chats) {
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         
         // Статус по умолчанию
-let statusText = 'был(а) недавно';
-let isOnline = false;
+        let statusText = 'был(а) недавно';
+        let isOnline = false;
 
-if (otherParticipant) {
-    const userActivity = activityData[otherParticipant.platform_user_id];
-    if (userActivity) {
-        if (userActivity.is_online) {
-            statusText = 'В сети';
-            isOnline = true;
+        if (otherParticipant) {
+            const userActivity = activityData[otherParticipant.platform_user_id];
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    statusText = 'В сети';
+                    isOnline = true;
+                } else {
+                    statusText = formatLastSeen(userActivity.last_online);
+                    isOnline = false;
+                }
+            } else {
+                // Если данных о активности нет, считаем что пользователь не в сети
+                statusText = 'был(а) недавно';
+                isOnline = false;
+            }
         } else {
-            statusText = formatLastSeen(userActivity.last_online);
+            // Если нет другого участника
+            statusText = '';
             isOnline = false;
         }
-    } else {
-        // Если данных о активности нет, считаем что пользователь не в сети
-        statusText = 'был(а) недавно';
-        isOnline = false;
-    }
-} else {
-    // Если нет другого участника
-    statusText = '';
-    isOnline = false;
-}
         
         const avatarStyle = bgColor ?
             `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
             'linear-gradient(135deg, #0088cc, #40a7e3)';
+
+        // ИЗМЕНЕНИЕ: Проверяем, является ли последнее сообщение изображением
+        let lastMessageText = chat.last_message || '';
+        
+        // Если сообщение содержит URL изображения или помечено как изображение
+        if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') {
+            lastMessageText = '📷 Фото';
+        }
 
         chatItem.innerHTML = `
             <div class="chat-avatar" style="background: ${avatarStyle}">
@@ -2706,7 +2715,7 @@ if (otherParticipant) {
             </div>
             <div class="chat-info">
                 <div class="chat-name">${chat.name || 'Новый чат'}</div>
-                <div class="last-message">${chat.last_message || ''}</div>
+                <div class="last-message">${lastMessageText}</div>
                 <div class="chat-status user-status ${isOnline ? 'online' : ''}">
                     ${isOnline ? 
                         '<span class="status-indicator"></span><span class="status-text">В сети</span>' : 
@@ -2729,7 +2738,6 @@ if (otherParticipant) {
         chatsList.appendChild(chatItem);
     });
 }
-
 
 
 async function updateUserActivity(isOnline = true) {
@@ -3644,7 +3652,12 @@ function updateChatItemInDOM(chatId, chatData) {
             const chatTimeEl = chatItem.querySelector('.chat-time');
             
             if (lastMessageEl && chatData.last_message) {
-                lastMessageEl.textContent = chatData.last_message;
+                // ИЗМЕНЕНИЕ: Проверяем, является ли сообщение изображением
+                let lastMessageText = chatData.last_message;
+                if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') {
+                    lastMessageText = '📷 Фото';
+                }
+                lastMessageEl.textContent = lastMessageText;
             }
             
             if (chatTimeEl && chatData.last_message_time) {
@@ -3670,6 +3683,7 @@ function updateChatItemInDOM(chatId, chatData) {
         }
     });
 }
+
 
 function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
