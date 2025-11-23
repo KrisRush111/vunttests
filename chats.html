@@ -1693,8 +1693,8 @@ input, textarea {
 
 
 /* Стили когда системная клавиатура открыта */
+/* Стили для системной клавиатуры */
 .system-keyboard-open .chat-modal {
-    /* Фиксируем позицию но не смещаем */
     position: fixed;
     top: 0;
     left: 0;
@@ -1703,16 +1703,24 @@ input, textarea {
 }
 
 .system-keyboard-open .messages-container {
-    /* Уменьшаем высоту чтобы контент был виден над клавиатурой */
-    max-height: calc(100vh - 200px); /* Подбирайте значение под вашу клавиатуру */
+    max-height: 50vh; /* Сообщения занимают только верхнюю половину */
     overflow-y: auto;
 }
 
 .system-keyboard-open .chat-header {
-    /* Хедер остается на месте */
     position: sticky;
     top: 0;
     z-index: 100;
+    background: var(--telegram-bg);
+}
+
+.system-keyboard-open .message-input-container {
+    position: fixed;
+    bottom: 50%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    transition: bottom 0.3s ease;
 }
 
 /* Для iOS Safari */
@@ -1721,8 +1729,34 @@ input, textarea {
         height: 100vh;
         height: -webkit-fill-available;
     }
+    
+    .system-keyboard-open .message-input-wrapper {
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(25px);
+        background: rgba(255, 255, 255, 0.7);
+    }
 }
 
+/* Адаптация для разных размеров экранов */
+@media (max-height: 700px) {
+    .system-keyboard-open .messages-container {
+        max-height: 45vh;
+    }
+    
+    .system-keyboard-open .message-input-container {
+        bottom: 55%;
+    }
+}
+
+@media (max-height: 600px) {
+    .system-keyboard-open .messages-container {
+        max-height: 40vh;
+    }
+    
+    .system-keyboard-open .message-input-container {
+        bottom: 60%;
+    }
+}
 
 
 </style>
@@ -1984,10 +2018,9 @@ input, textarea {
 
 
 
-// Добавьте эту функцию для обработки системной клавиатуры
 function setupSystemKeyboardHandling() {
     if (!isDesktop && window.visualViewport) {
-        const { chatModal, messagesContainer, messageInput } = getActiveElements();
+        const { messagesContainer, messageInput } = getActiveElements();
         
         let cachedViewportHeight = window.visualViewport.height;
         
@@ -2013,20 +2046,22 @@ function setupSystemKeyboardHandling() {
             const scrollPosition = messagesContainer.scrollTop;
             const scrollHeight = messagesContainer.scrollHeight;
             
-            // Плавно прокручиваем к активной области (поле ввода или последние сообщения)
-            setTimeout(() => {
-                messagesContainer.scrollTop = scrollHeight;
-            }, 100);
-            
             // Добавляем класс для стилизации
             document.body.classList.add('system-keyboard-open');
+            
+            // Плавно прокручиваем к последним сообщениям
+            setTimeout(() => {
+                if (currentMessages.length > 0) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 300);
         }
         
         function handleKeyboardClose() {
             // Возвращаем нормальное состояние
             document.body.classList.remove('system-keyboard-open');
             
-            // Восстанавливаем скролл
+            // Восстанавливаем скролл к последним сообщениям
             setTimeout(() => {
                 if (currentMessages.length > 0) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -2040,8 +2075,27 @@ function setupSystemKeyboardHandling() {
                 if (currentMessages.length > 0) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
-            }, 300);
+            }, 500); // Увеличиваем задержку для iOS
         });
+
+        // Дополнительная обработка для iOS
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+            messageInput.addEventListener('focus', () => {
+                // Даем больше времени для появления клавиатуры на iOS
+                setTimeout(() => {
+                    handleKeyboardOpen();
+                    if (currentMessages.length > 0) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                }, 600);
+            });
+
+            messageInput.addEventListener('blur', () => {
+                setTimeout(() => {
+                    handleKeyboardClose();
+                }, 200);
+            });
+        }
     }
 }
 
@@ -3843,29 +3897,40 @@ function setupKeyboardDetection() {
 
     const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+    let isSendingMessage = false;
 
     function adjustInputPosition(keyboardOpen) {
         const { messageInputContainer, messagesContainer } = getActiveElements();
         if (!messageInputContainer) return;
 
-        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
-            messageInputContainer.style.bottom = '8px';
+        if (keyboardOpen && !isSendingMessage) {
+            // Когда клавиатура открыта - поднимаем контейнер ввода выше
+            messageInputContainer.style.bottom = '50%'; // Появляется над половиной фона
             messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
+            messageInputContainer.style.zIndex = '1000'; // Поверх всего
+            
+            // Добавляем класс для глобальных стилей
+            document.body.classList.add('system-keyboard-open');
+            
             setTimeout(() => {
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
             }, 100);
         } else {
+            // Когда клавиатура закрыта - возвращаем в нормальное положение
             messageInputContainer.style.bottom = '12px';
             messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
+            messageInputContainer.style.zIndex = '98';
+            
+            // Убираем класс
+            document.body.classList.remove('system-keyboard-open');
         }
     }
 
     // Обработка открытия клавиатуры
     messageInput.addEventListener('focus', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
+        if (isSendingMessage) return;
         keyboardShown = true;
         setTimeout(() => {
             adjustInputPosition(true);
@@ -3874,12 +3939,30 @@ function setupKeyboardDetection() {
 
     // Обработка закрытия клавиатуры
     messageInput.addEventListener('blur', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
+        if (isSendingMessage) return;
         keyboardShown = false;
-        adjustInputPosition(false);
+        setTimeout(() => {
+            adjustInputPosition(false);
+        }, 300); // Небольшая задержка для плавности
     });
-}
 
+    // Обработка отправки сообщения
+    const originalSendMessage = window.sendMessage;
+    window.sendMessage = async function() {
+        isSendingMessage = true;
+        try {
+            await originalSendMessage.apply(this, arguments);
+        } finally {
+            // После отправки возвращаем нормальное состояние
+            setTimeout(() => {
+                isSendingMessage = false;
+                if (!keyboardShown) {
+                    adjustInputPosition(false);
+                }
+            }, 100);
+        }
+    };
+}
 
 
        
