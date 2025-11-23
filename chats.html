@@ -1692,46 +1692,6 @@ input, textarea {
 
 
 
-/* Стили когда системная клавиатура открыта */
-.system-keyboard-open .messages-container {
-    max-height: 60vh;
-    overflow-y: auto;
-}
-
-.system-keyboard-open .message-input-wrapper {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.6);
-}
-
-/* Для iOS Safari */
-@supports (-webkit-touch-callout: none) {
-    .system-keyboard-open .message-input-wrapper {
-        background: rgba(255, 255, 255, 0.98);
-        backdrop-filter: blur(25px);
-        -webkit-backdrop-filter: blur(25px);
-    }
-}
-
-/* Адаптация для разных размеров экранов */
-@media (max-height: 700px) {
-    .system-keyboard-open .messages-container {
-        max-height: 55vh;
-    }
-}
-
-@media (max-height: 600px) {
-    .system-keyboard-open .messages-container {
-        max-height: 50vh;
-    }
-}
-
-@media (max-height: 500px) {
-    .system-keyboard-open .messages-container {
-        max-height: 45vh;
-    }
-}
 
 </style>
 </head>
@@ -1989,69 +1949,6 @@ input, textarea {
         let currentActivityData = {};
         let isSendingMessage = false;
 
-
-
-
-function setupSystemKeyboardHandling() {
-    if (isDesktop) return;
-
-    const { messageInput, messageInputContainer, messagesContainer } = getActiveElements();
-    
-    let isKeyboardOpen = false;
-
-    // Используем ResizeObserver для отслеживания изменений высоты viewport
-    if (window.visualViewport) {
-        const viewport = window.visualViewport;
-        
-        viewport.addEventListener('resize', () => {
-            const viewportHeight = viewport.height;
-            const windowHeight = window.innerHeight;
-            
-            // Если высота viewport значительно меньше высоты окна - клавиатура открыта
-            if (viewportHeight < windowHeight * 0.7) {
-                if (!isKeyboardOpen) {
-                    handleKeyboardOpen();
-                }
-            } else {
-                if (isKeyboardOpen) {
-                    handleKeyboardClose();
-                }
-            }
-        });
-    }
-
-    function handleKeyboardOpen() {
-        isKeyboardOpen = true;
-        
-        // Только добавляем класс, не меняем z-index вручную
-        document.body.classList.add('system-keyboard-open');
-        
-        // Прокручиваем к последнему сообщению
-        setTimeout(() => {
-            if (messagesContainer && currentMessages.length > 0) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        }, 300);
-    }
-
-    function handleKeyboardClose() {
-        isKeyboardOpen = false;
-        document.body.classList.remove('system-keyboard-open');
-    }
-
-    // Фокус/блюр как fallback
-    messageInput.addEventListener('focus', () => {
-        setTimeout(() => {
-            handleKeyboardOpen();
-        }, 100);
-    });
-
-    messageInput.addEventListener('blur', () => {
-        setTimeout(() => {
-            handleKeyboardClose();
-        }, 100);
-    });
-}
 
         // Добавьте эту функцию после других функций
 function startActivityPolling() {
@@ -3844,6 +3741,48 @@ function setupKeyboardHandlers() {
 
 
 
+function setupKeyboardDetection() {
+    if (isDesktop) return;
+
+    const { messageInput, chatModal } = getActiveElements();
+    let keyboardShown = false;
+    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+
+    function adjustInputPosition(keyboardOpen) {
+        const { messageInputContainer, messagesContainer } = getActiveElements();
+        if (!messageInputContainer) return;
+
+        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
+            messageInputContainer.style.bottom = '8px';
+            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
+            setTimeout(() => {
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
+        } else {
+            messageInputContainer.style.bottom = '12px';
+            messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
+        }
+    }
+
+    // Обработка открытия клавиатуры
+    messageInput.addEventListener('focus', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
+        keyboardShown = true;
+        setTimeout(() => {
+            adjustInputPosition(true);
+        }, 100);
+    });
+
+    // Обработка закрытия клавиатуры
+    messageInput.addEventListener('blur', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
+        keyboardShown = false;
+        adjustInputPosition(false);
+    });
+}
+
 
 
        
@@ -4536,7 +4475,7 @@ imageInput.addEventListener('change', handleImageSelection);
 
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
-    setupSystemKeyboardHandling();
+    setupKeyboardDetection();
   
     
     // Запрет масштабирования жестами
