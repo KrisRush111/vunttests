@@ -1692,69 +1692,89 @@ input, textarea {
 
 
 
-/* Стили когда системная клавиатура открыта */
-/* Стили для системной клавиатуры */
+/* Убедитесь что эти стили добавлены в конец CSS */
+
+/* Основные стили для системной клавиатуры */
+.system-keyboard-open {
+    overflow: hidden;
+}
+
 .system-keyboard-open .chat-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 10000 !important;
+    background-image: url('фон.webp') !important;
+    background-size: cover !important;
+    background-position: center !important;
 }
 
 .system-keyboard-open .messages-container {
-    max-height: 50vh; /* Сообщения занимают только верхнюю половину */
+    max-height: 45vh !important;
+    height: 45vh !important;
     overflow-y: auto;
+    position: relative;
+    z-index: 10001;
 }
 
 .system-keyboard-open .chat-header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: var(--telegram-bg);
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 10002 !important;
+    background: var(--telegram-bg) !important;
 }
 
 .system-keyboard-open .message-input-container {
-    position: fixed;
-    bottom: 50%;
-    left: 0;
-    right: 0;
-    z-index: 1000;
-    transition: bottom 0.3s ease;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 10003 !important;
+    background: transparent !important;
 }
 
-/* Для iOS Safari */
+.system-keyboard-open .message-input-wrapper {
+    background: rgba(255, 255, 255, 0.9) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    margin: 0 16px 16px 16px !important;
+}
+
+/* Принудительно поднимаем клавиатуру поверх всего */
+.system-keyboard-open body {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+}
+
+/* Для iOS - особые стили */
 @supports (-webkit-touch-callout: none) {
     .system-keyboard-open .chat-modal {
-        height: 100vh;
-        height: -webkit-fill-available;
+        height: 100vh !important;
+        height: -webkit-fill-available !important;
     }
     
-    .system-keyboard-open .message-input-wrapper {
-        backdrop-filter: blur(25px);
-        -webkit-backdrop-filter: blur(25px);
-        background: rgba(255, 255, 255, 0.7);
+    .system-keyboard-open .messages-container {
+        max-height: 40vh !important;
+        height: 40vh !important;
     }
 }
 
-/* Адаптация для разных размеров экранов */
+/* Адаптация для маленьких экранов */
 @media (max-height: 700px) {
     .system-keyboard-open .messages-container {
-        max-height: 45vh;
-    }
-    
-    .system-keyboard-open .message-input-container {
-        bottom: 55%;
+        max-height: 40vh !important;
+        height: 40vh !important;
     }
 }
 
 @media (max-height: 600px) {
     .system-keyboard-open .messages-container {
-        max-height: 40vh;
-    }
-    
-    .system-keyboard-open .message-input-container {
-        bottom: 60%;
+        max-height: 35vh !important;
+        height: 35vh !important;
     }
 }
 
@@ -2020,9 +2040,10 @@ input, textarea {
 
 function setupSystemKeyboardHandling() {
     if (!isDesktop && window.visualViewport) {
-        const { messagesContainer, messageInput } = getActiveElements();
+        const { messagesContainer, messageInput, chatModal } = getActiveElements();
         
         let cachedViewportHeight = window.visualViewport.height;
+        let isKeyboardOpen = false;
         
         window.visualViewport.addEventListener('resize', function() {
             const currentViewportHeight = window.visualViewport.height;
@@ -2030,38 +2051,65 @@ function setupSystemKeyboardHandling() {
             
             // Если высота изменилась значительно - скорее всего открылась/закрылась клавиатура
             if (Math.abs(viewportDiff) > 100) {
-                if (currentViewportHeight < cachedViewportHeight) {
+                if (currentViewportHeight < cachedViewportHeight && !isKeyboardOpen) {
                     // Клавиатура открылась
                     handleKeyboardOpen();
-                } else {
+                    isKeyboardOpen = true;
+                } else if (currentViewportHeight > cachedViewportHeight && isKeyboardOpen) {
                     // Клавиатура закрылась
                     handleKeyboardClose();
+                    isKeyboardOpen = false;
                 }
                 cachedViewportHeight = currentViewportHeight;
             }
         });
         
         function handleKeyboardOpen() {
-            // Сохраняем текущую позицию скролла
-            const scrollPosition = messagesContainer.scrollTop;
-            const scrollHeight = messagesContainer.scrollHeight;
+            console.log('Keyboard opening...');
             
-            // Добавляем класс для стилизации
+            // Принудительно применяем стили
             document.body.classList.add('system-keyboard-open');
+            chatModal.classList.add('system-keyboard-open');
             
-            // Плавно прокручиваем к последним сообщениям
+            // Гарантируем что модальное окно фиксированное
+            chatModal.style.position = 'fixed';
+            chatModal.style.top = '0';
+            chatModal.style.left = '0';
+            chatModal.style.right = '0';
+            chatModal.style.bottom = '0';
+            chatModal.style.zIndex = '10000';
+            
+            // Прокручиваем к последним сообщениям
             setTimeout(() => {
                 if (currentMessages.length > 0) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
-            }, 300);
+                
+                // Дополнительная прокрутка через небольшое время
+                setTimeout(() => {
+                    if (currentMessages.length > 0) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                }, 200);
+            }, 100);
         }
         
         function handleKeyboardClose() {
-            // Возвращаем нормальное состояние
-            document.body.classList.remove('system-keyboard-open');
+            console.log('Keyboard closing...');
             
-            // Восстанавливаем скролл к последним сообщениям
+            // Убираем стили
+            document.body.classList.remove('system-keyboard-open');
+            chatModal.classList.remove('system-keyboard-open');
+            
+            // Возвращаем нормальные стили
+            chatModal.style.position = '';
+            chatModal.style.top = '';
+            chatModal.style.left = '';
+            chatModal.style.right = '';
+            chatModal.style.bottom = '';
+            chatModal.style.zIndex = '';
+            
+            // Восстанавливаем скролл
             setTimeout(() => {
                 if (currentMessages.length > 0) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -2069,31 +2117,48 @@ function setupSystemKeyboardHandling() {
             }, 100);
         }
         
-        // Обработчик для ручного фокуса
+        // Обработчик для ручного фокуса - принудительно открываем
         messageInput.addEventListener('focus', () => {
             setTimeout(() => {
-                if (currentMessages.length > 0) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }
-            }, 500); // Увеличиваем задержку для iOS
-        });
-
-        // Дополнительная обработка для iOS
-        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-            messageInput.addEventListener('focus', () => {
-                // Даем больше времени для появления клавиатуры на iOS
-                setTimeout(() => {
+                if (!isKeyboardOpen) {
                     handleKeyboardOpen();
+                    isKeyboardOpen = true;
+                }
+                
+                // Многократная прокрутка для надежности
+                setTimeout(() => {
+                    if (currentMessages.length > 0) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                }, 300);
+                
+                setTimeout(() => {
                     if (currentMessages.length > 0) {
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     }
                 }, 600);
-            });
+            }, 100);
+        });
 
-            messageInput.addEventListener('blur', () => {
-                setTimeout(() => {
+        // Обработчик потери фокуса
+        messageInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                if (isKeyboardOpen) {
                     handleKeyboardClose();
-                }, 200);
+                    isKeyboardOpen = false;
+                }
+            }, 300);
+        });
+
+        // Дополнительная обработка для iOS
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+            // Принудительная прокрутка при тапе на поле ввода
+            messageInput.addEventListener('touchstart', () => {
+                setTimeout(() => {
+                    if (currentMessages.length > 0) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                }, 500);
             });
         }
     }
@@ -3909,22 +3974,59 @@ function setupKeyboardDetection() {
             messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
             messageInputContainer.style.zIndex = '1000'; // Поверх всего
             
+            // Принудительно поднимаем весь чат поверх клавиатуры
+            chatModal.style.position = 'fixed';
+            chatModal.style.top = '0';
+            chatModal.style.left = '0';
+            chatModal.style.right = '0';
+            chatModal.style.bottom = '0';
+            chatModal.style.zIndex = '10000';
+            chatModal.style.backgroundImage = 'url("фон.webp")';
+            chatModal.style.backgroundSize = 'cover';
+            chatModal.style.backgroundPosition = 'center';
+            
             // Добавляем класс для глобальных стилей
             document.body.classList.add('system-keyboard-open');
             
+            // Многократная прокрутка для надежности
             setTimeout(() => {
-                if (messagesContainer) {
+                if (messagesContainer && currentMessages.length > 0) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
             }, 100);
+            
+            setTimeout(() => {
+                if (messagesContainer && currentMessages.length > 0) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 300);
+            
         } else {
             // Когда клавиатура закрыта - возвращаем в нормальное положение
             messageInputContainer.style.bottom = '12px';
             messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
             messageInputContainer.style.zIndex = '98';
             
+            // Возвращаем нормальные стили чата
+            chatModal.style.position = '';
+            chatModal.style.top = '';
+            chatModal.style.left = '';
+            chatModal.style.right = '';
+            chatModal.style.bottom = '';
+            chatModal.style.zIndex = '';
+            chatModal.style.backgroundImage = '';
+            chatModal.style.backgroundSize = '';
+            chatModal.style.backgroundPosition = '';
+            
             // Убираем класс
             document.body.classList.remove('system-keyboard-open');
+            
+            // Прокручиваем к последним сообщениям
+            setTimeout(() => {
+                if (messagesContainer && currentMessages.length > 0) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
         }
     }
 
@@ -3932,18 +4034,39 @@ function setupKeyboardDetection() {
     messageInput.addEventListener('focus', () => {
         if (isSendingMessage) return;
         keyboardShown = true;
+        
+        // Принудительное открытие с несколькими попытками
         setTimeout(() => {
             adjustInputPosition(true);
         }, 100);
+        
+        // Дополнительная попытка для iOS
+        setTimeout(() => {
+            if (keyboardShown) {
+                adjustInputPosition(true);
+            }
+        }, 500);
     });
 
     // Обработка закрытия клавиатуры
     messageInput.addEventListener('blur', () => {
         if (isSendingMessage) return;
         keyboardShown = false;
+        
         setTimeout(() => {
             adjustInputPosition(false);
         }, 300); // Небольшая задержка для плавности
+    });
+
+    // Дополнительная обработка для touch устройств
+    messageInput.addEventListener('touchstart', () => {
+        if (isSendingMessage) return;
+        keyboardShown = true;
+        
+        // Быстрая реакция на тап
+        setTimeout(() => {
+            adjustInputPosition(true);
+        }, 50);
     });
 
     // Обработка отправки сообщения
@@ -3962,8 +4085,16 @@ function setupKeyboardDetection() {
             }, 100);
         }
     };
-}
 
+    // Обработка изменения ориентации
+    window.addEventListener('orientationchange', () => {
+        setTimeout(() => {
+            if (keyboardShown) {
+                adjustInputPosition(true);
+            }
+        }, 500);
+    });
+}
 
        
 async function openChat(chatId) {
