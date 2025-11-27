@@ -1995,6 +1995,310 @@ async function refreshOnlineStatuses() {
 
 
 
+
+// Глобальные переменные для управления кэшированием
+let SESSION_MANAGER = {
+    isActiveSession: false,
+    lastCacheUpdate: 0,
+    cacheLifetime: 2 * 60 * 1000, // 2 минуты
+    sessionCheckInterval: null,
+    
+    // Инициализация менеджера сессии
+    async init() {
+        await this.checkServerSession();
+        this.startSessionTracking();
+        this.setupPageUnloadHandler();
+    },
+    
+    // Проверяем активную сессию на сервере
+    async checkServerSession() {
+        try {
+            const response = await fetch(`${SERVER_URL}/check_active_session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+            
+            const data = await response.json();
+            if (data.status === 'success') {
+                this.isActiveSession = data.has_active_session;
+                console.log('Active session:', this.isActiveSession, 'Page:', data.current_page);
+                
+                // Если есть активная сессия, восстанавливаем из кэша
+                if (this.isActiveSession && this.shouldUseCache()) {
+                    await this.restoreFromCache();
+                }
+            }
+        } catch (error) {
+            console.error('Error checking session:', error);
+            this.isActiveSession = false;
+        }
+    },
+    
+    // Запускаем отслеживание сессии
+    startSessionTracking() {
+        // Отправляем начальный статус
+        this.trackPageActivity();
+        
+        // Периодически обновляем статус активности
+        this.sessionCheckInterval = setInterval(() => {
+            this.trackPageActivity();
+        }, 30000); // Каждые 30 секунд
+        
+        // Отслеживаем активность пользователя
+        this.setupActivityListeners();
+    },
+    
+    // Отслеживаем активность на странице
+    setupActivityListeners() {
+        const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+        events.forEach(event => {
+            document.addEventListener(event, () => {
+                this.trackPageActivity();
+            }, { passive: true });
+        });
+        
+        // Отслеживаем видимость страницы
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                this.trackPageActivity();
+            }
+        });
+    },
+    
+    // Отправляем информацию об активности на сервер
+    async trackPageActivity() {
+        try {
+            await fetch(`${SERVER_URL}/track_session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id,
+                    page: 'chats'
+                }),
+                credentials: 'include'
+            });
+            
+            this.isActiveSession = true;
+        } catch (error) {
+            console.error('Error tracking activity:', error);
+        }
+    },
+    
+    // Проверяем, можно ли использовать кэш
+    shouldUseCache() {
+        const now = Date.now();
+        const cacheAge = now - this.lastCacheUpdate;
+        return cacheAge < this.cacheLifetime;
+    },
+    
+    // Восстанавливаем данные из кэша
+    async restoreFromCache() {
+        console.log('Restoring from cache...');
+        
+        // Восстанавливаем список чатов
+        const cachedChats = this.getCachedChats();
+        if (cachedChats && cachedChats.length > 0) {
+            currentChatsList = cachedChats;
+            renderChats(currentChatsList);
+        }
+        
+        // Восстанавливаем открытый чат если есть
+        const cachedCurrentChat = this.getCachedCurrentChat();
+        if (cachedCurrentChat) {
+            currentChat = cachedCurrentChat;
+            
+            const cachedMessages = this.getCachedMessages();
+            if (cachedMessages && cachedMessages.length > 0) {
+                currentMessages = cachedMessages;
+                
+                // Показываем чат с восстановленными сообщениями
+                this.restoreChatUI();
+            }
+        }
+        
+        // Обновляем статусы онлайн
+        await updateChatStatuses();
+    },
+    
+    // Восстанавливаем UI чата
+    restoreChatUI() {
+        const { chatModal, chatAvatar, chatTitle, messagesContainer, noMessages } = getActiveElements();
+        
+        if (currentChat) {
+            chatTitle.textContent = currentChat.name || 'Новый чат';
+            
+            // Восстанавливаем аватар
+            if (currentChat.participants && currentChat.participants.length > 0) {
+                const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) {
+                    const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                    const bgColor = currentChat.avatar_background || getRandomColor();
+                    
+                    chatAvatar.style.background = bgColor ? 
+                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                        'linear-gradient(135deg, #0088cc, #40a7e3)';
+                    chatAvatar.textContent = initials;
+                    
+                    // Пробуем загрузить аватар
+                    const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}?t=${Date.now()}`;
+                    const img = new Image();
+                    img.onload = function() {
+                        chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+                        chatAvatar.textContent = '';
+                    };
+                    img.src = avatarUrl;
+                }
+            }
+            
+            // Восстанавливаем сообщения
+            if (currentMessages.length > 0) {
+                noMessages.style.display = 'none';
+                renderMessages(currentMessages);
+                
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
+            } else {
+                noMessages.style.display = 'block';
+                noMessages.textContent = 'Сообщений пока нет...';
+            }
+            
+            // Показываем чат
+            if (isDesktop) {
+                desktopPlaceholder.style.display = 'none';
+                chatModal.style.display = 'flex';
+            } else {
+                chatModal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+    },
+    
+    // Сохраняем данные в кэш
+    saveToCache() {
+        try {
+            // Сохраняем список чатов
+            if (currentChatsList && currentChatsList.length > 0) {
+                localStorage.setItem('cachedChats', JSON.stringify({
+                    data: currentChatsList,
+                    timestamp: Date.now()
+                }));
+            }
+            
+            // Сохраняем текущий чат
+            if (currentChat) {
+                localStorage.setItem('cachedCurrentChat', JSON.stringify({
+                    data: currentChat,
+                    timestamp: Date.now()
+                }));
+            }
+            
+            // Сохраняем сообщения
+            if (currentMessages && currentMessages.length > 0) {
+                localStorage.setItem('cachedMessages', JSON.stringify({
+                    data: currentMessages,
+                    timestamp: Date.now()
+                }));
+            }
+            
+            this.lastCacheUpdate = Date.now();
+        } catch (error) {
+            console.error('Error saving cache:', error);
+        }
+    },
+    
+    // Получаем кэшированные чаты
+    getCachedChats() {
+        try {
+            const cached = localStorage.getItem('cachedChats');
+            if (cached) {
+                const { data, timestamp } = JSON.parse(cached);
+                const cacheAge = Date.now() - timestamp;
+                
+                if (cacheAge < this.cacheLifetime) {
+                    return data;
+                }
+            }
+        } catch (error) {
+            console.error('Error reading cached chats:', error);
+        }
+        return null;
+    },
+    
+    // Получаем кэшированный текущий чат
+    getCachedCurrentChat() {
+        try {
+            const cached = localStorage.getItem('cachedCurrentChat');
+            if (cached) {
+                const { data, timestamp } = JSON.parse(cached);
+                const cacheAge = Date.now() - timestamp;
+                
+                if (cacheAge < this.cacheLifetime) {
+                    return data;
+                }
+            }
+        } catch (error) {
+            console.error('Error reading cached current chat:', error);
+        }
+        return null;
+    },
+    
+    // Получаем кэшированные сообщения
+    getCachedMessages() {
+        try {
+            const cached = localStorage.getItem('cachedMessages');
+            if (cached) {
+                const { data, timestamp } = JSON.parse(cached);
+                const cacheAge = Date.now() - timestamp;
+                
+                if (cacheAge < this.cacheLifetime) {
+                    return data;
+                }
+            }
+        } catch (error) {
+            console.error('Error reading cached messages:', error);
+        }
+        return null;
+    },
+    
+    // Обработчик закрытия страницы
+    setupPageUnloadHandler() {
+        window.addEventListener('beforeunload', () => {
+            this.saveToCache();
+        });
+        
+        window.addEventListener('pagehide', () => {
+            this.saveToCache();
+        });
+    },
+    
+    // Очистка кэша
+    clearCache() {
+        try {
+            localStorage.removeItem('cachedChats');
+            localStorage.removeItem('cachedCurrentChat');
+            localStorage.removeItem('cachedMessages');
+            this.lastCacheUpdate = 0;
+        } catch (error) {
+            console.error('Error clearing cache:', error);
+        }
+    },
+    
+    // Остановка отслеживания
+    destroy() {
+        if (this.sessionCheckInterval) {
+            clearInterval(this.sessionCheckInterval);
+        }
+    }
+};
+
+
+
+
 function adjustTimeToMoscow(timestamp) {
     if (!timestamp) return null;
     const date = new Date(timestamp);
@@ -2017,6 +2321,20 @@ function formatChatListTime(timestamp) {
 }
 
 
+
+
+function logout() {
+    // Очищаем кэш при выходе
+    SESSION_MANAGER.clearCache();
+    
+    // Остальной код выхода
+    sessionStorage.clear();
+    localStorage.removeItem('cachedChats');
+    localStorage.removeItem('cachedCurrentChat');
+    localStorage.removeItem('cachedMessages');
+    
+    window.location.href = 'index.html';
+}
 
 
 function adjustColor(hex, percent) {
@@ -3802,29 +4120,78 @@ async function openChat(chatId) {
             chatModal.classList.remove('changing');
         }, 300);
         
-        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
+        // ПРОВЕРЯЕМ КЭШ ПЕРЕД ЗАГРУЗКОЙ С СЕРВЕРА
+        let useCachedData = false;
+        let cachedChat = null;
+        let cachedMessages = null;
         
-        const chatData = await response.json();
-        
-        if (chatData.status !== 'success') {
-            throw new Error(chatData.error || 'Не удалось загрузить чат');
+        if (SESSION_MANAGER.isActiveSession && SESSION_MANAGER.shouldUseCache()) {
+            // Проверяем, есть ли этот чат в кэше
+            cachedChat = SESSION_MANAGER.getCachedCurrentChat();
+            cachedMessages = SESSION_MANAGER.getCachedMessages();
+            
+            if (cachedChat && cachedChat.id === chatId) {
+                useCachedData = true;
+                console.log('Using cached chat data for chat:', chatId);
+            }
         }
         
-        currentChat = chatData.chat;
+        if (useCachedData && cachedChat) {
+            // ИСПОЛЬЗУЕМ ДАННЫЕ ИЗ КЭША
+            currentChat = cachedChat;
+            currentMessages = cachedMessages || [];
+            
+            console.log('Restored from cache - Chat:', currentChat.name, 'Messages:', currentMessages.length);
+        } else {
+            // ЗАГРУЖАЕМ ДАННЫЕ С СЕРВЕРА
+            const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    platform_user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+            
+            const chatData = await response.json();
+            
+            if (chatData.status !== 'success') {
+                throw new Error(chatData.error || 'Не удалось загрузить чат');
+            }
+            
+            currentChat = chatData.chat;
+            
+            // Загружаем сообщения с сервера
+            const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    platform_user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+            
+            const messagesData = await messagesResponse.json();
+            
+            if (messagesData.status === 'success') {
+                currentMessages = messagesData.messages;
+            } else {
+                currentMessages = [];
+            }
+            
+            console.log('Loaded from server - Chat:', currentChat.name, 'Messages:', currentMessages.length);
+        }
         
+        // ОБНОВЛЯЕМ UI ДЛЯ ЧАТА
         chatTitle.textContent = currentChat.name || 'Новый чат';
         
-        // Получаем статус участника чата
+        // Получаем актуальный статус участника чата (всегда с сервера)
         const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         let statusText = 'был(а) недавно';
         let isOnline = false;
@@ -3858,7 +4225,7 @@ async function openChat(chatId) {
         chatAvatar.style.backgroundColor = '';
         chatAvatar.textContent = '';
         
-        // Загрузка аватара
+        // Загрузка аватара (всегда актуальная)
         if (currentChat.participants && currentChat.participants.length > 0) {
             const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
@@ -3902,38 +4269,22 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
-        const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
+        // ОТОБРАЖАЕМ СООБЩЕНИЯ
+        renderMessages(currentMessages);
         
-        const messagesData = await messagesResponse.json();
-        
-        if (messagesData.status === 'success') {
-            currentMessages = messagesData.messages;
-            renderMessages(currentMessages);
-            
+        // Помечаем сообщения как прочитанные (только если загружали с сервера)
+        if (!useCachedData) {
             markAllMessagesAsRead(chatId);
-        
-            if (currentMessages.length === 0) {
-                noMessages.style.display = 'block';
-                noMessages.textContent = 'Сообщений пока нет...';
-            } else {
-                noMessages.style.display = 'none';
-            }
-        } else {
-            currentMessages = [];
-            noMessages.style.display = 'block';
-            noMessages.textContent = 'Сообщений пока нет...';
         }
         
+        if (currentMessages.length === 0) {
+            noMessages.style.display = 'block';
+            noMessages.textContent = 'Сообщений пока нет...';
+        } else {
+            noMessages.style.display = 'none';
+        }
+        
+        // ПОКАЗЫВАЕМ ЧАТ
         if (isDesktop) {
             desktopPlaceholder.style.display = 'none';
             chatModal.style.display = 'flex';
@@ -3942,12 +4293,14 @@ async function openChat(chatId) {
             document.body.style.overflow = 'hidden';
         }
         
+        // ПРОКРУЧИВАЕМ К ПОСЛЕДНЕМУ СООБЩЕНИЮ
         if (currentMessages.length > 0) {
             setTimeout(() => {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }, 100);
         }
 
+        // ОБНОВЛЯЕМ СПИСОК ЧАТОВ
         // ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем только счетчик непрочитанных сообщений
         // НЕ обновляем last_message и last_message_time, чтобы чат не поднимался вверх
         updateChatItemInDOM(chatId, {
@@ -3964,6 +4317,10 @@ async function openChat(chatId) {
             // НЕ перемещаем чат в начало списка
         }
         
+        // СОХРАНЯЕМ В КЭШ ПОСЛЕ УСПЕШНОГО ОТКРЫТИЯ ЧАТА
+        SESSION_MANAGER.saveToCache();
+        console.log('Chat opened and saved to cache:', chatId);
+        
     } catch (error) {
         console.error('Error opening chat:', error);
         showMessage('Ошибка загрузки чата', 'error');
@@ -3978,9 +4335,8 @@ async function openChat(chatId) {
         }
     });
     
-    window.currentChat = chatData;
+    window.currentChat = currentChat;
 }
-
 
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
@@ -4303,6 +4659,9 @@ async function initializePage() {
     
     userData = JSON.parse(userDataFromStorage);
     
+    // Инициализируем менеджер сессии ДО загрузки данных
+    await SESSION_MANAGER.init();
+    
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
     // Мгновенная настройка UI без задержек
@@ -4323,11 +4682,20 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    // Параллельная загрузка данных без индикаторов
-    await Promise.all([
-        loadUserData(),
-        loadChats()
-    ]);
+    // Загружаем данные только если нет активной сессии или кэш устарел
+    if (!SESSION_MANAGER.isActiveSession || !SESSION_MANAGER.shouldUseCache()) {
+        console.log('Loading fresh data from server...');
+        await Promise.all([
+            loadUserData(),
+            loadChats()
+        ]);
+        
+        // Сохраняем в кэш после загрузки
+        SESSION_MANAGER.saveToCache();
+    } else {
+        console.log('Using cached data, skipping full reload');
+        // Данные уже восстановлены из кэша в SESSION_MANAGER.init()
+    }
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
@@ -4402,10 +4770,19 @@ async function initializePage() {
     
     // Обработчики для отправки сообщений
     if (sendMessageButton && messageInput) {
-        sendMessageButton.addEventListener('click', sendMessage);
+        sendMessageButton.addEventListener('click', () => {
+            sendMessage().then(() => {
+                // Сохраняем в кэш после отправки сообщения
+                SESSION_MANAGER.saveToCache();
+            });
+        });
+        
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                sendMessage();
+                sendMessage().then(() => {
+                    // Сохраняем в кэш после отправки сообщения
+                    SESSION_MANAGER.saveToCache();
+                });
             }
         });
         
@@ -4419,18 +4796,22 @@ async function initializePage() {
         });
     }
 
-// Обработчики для кнопки прикрепления
-const { attachButton } = getActiveElements();
-if (attachButton) {
-    attachButton.addEventListener('click', (e) => {
-        e.preventDefault();
-        imageInput.click();
+    // Обработчики для кнопки прикрепления
+    const { attachButton } = getActiveElements();
+    if (attachButton) {
+        attachButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            imageInput.click();
+        });
+    }
+
+    // Обработчик выбора изображений
+    imageInput.addEventListener('change', (e) => {
+        handleImageSelection(e).then(() => {
+            // Сохраняем в кэш после отправки изображения
+            SESSION_MANAGER.saveToCache();
+        });
     });
-}
-
-// Обработчик выбора изображений
-imageInput.addEventListener('change', handleImageSelection);
-
 
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
@@ -4494,6 +4875,9 @@ imageInput.addEventListener('change', handleImageSelection);
     // Обновление статусов при возвращении на вкладку
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
+            // Обновляем активность сессии при возвращении на вкладку
+            SESSION_MANAGER.trackPageActivity();
+            
             updateChatStatuses();
             updateUserActivity(true);
             
@@ -4523,6 +4907,8 @@ imageInput.addEventListener('change', handleImageSelection);
 
     // Обновление при активации окна
     window.addEventListener('focus', () => {
+        // Обновляем активность сессии при фокусе на окне
+        SESSION_MANAGER.trackPageActivity();
         updateChatStatuses();
         updateUserActivity(true);
     });
@@ -4538,18 +4924,24 @@ imageInput.addEventListener('change', handleImageSelection);
     
     // Очистка интервалов при закрытии страницы
     window.addEventListener('beforeunload', () => {
+        // Сохраняем в кэш перед закрытием
+        SESSION_MANAGER.saveToCache();
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
     });
 
     window.addEventListener('pagehide', () => {
+        // Сохраняем в кэш при скрытии страницы
+        SESSION_MANAGER.saveToCache();
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
     });
 
     window.addEventListener('unload', () => {
+        // Сохраняем в кэш при выгрузке страницы
+        SESSION_MANAGER.saveToCache();
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
@@ -4564,7 +4956,6 @@ imageInput.addEventListener('change', handleImageSelection);
         });
     }
 
-
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
@@ -4578,7 +4969,7 @@ imageInput.addEventListener('change', handleImageSelection);
         window.addEventListener('resize', setupMobileChatHeight);
     }
 
-    console.log('Page initialized successfully');
+    console.log('Page initialized successfully with session management');
 }
 
 
