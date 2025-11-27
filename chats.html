@@ -1954,72 +1954,78 @@ input, textarea {
 
 
 
-        // --- настройка страниц, между которыми нельзя сбрасывать данные ---
 const internalPages = ["chats.html", "profile.html", "contacts.html"];
 
-// --- Проверка: находится ли пользователь ВНУТРИ сайта ---
-function markUserInside() {
-    localStorage.setItem("inside_site", "yes");
-}
+// Помечаем, что пользователь находится НА сайте (не покинул домен)
+localStorage.setItem("inside_site", "yes");
 
-// --- Проверка: покинул ли пользователь сайт полностью ---
+// Следим за закрытием вкладки или уходом с домена
 window.addEventListener("beforeunload", () => {
-    // Удаляем флаг посещения, чтобы при следующем входе сайт знал что это "новая сессия"
     localStorage.removeItem("inside_site");
 });
 
-// --- Функция инициализации ---
-function initPage() {
-    markUserInside();
-    
-    // Определяем текущую страницу
-    const currentPage = location.pathname.split("/").pop();
-
-    // Если это chats.html — решаем загружать ли данные
-    if (currentPage === "chats.html") {
-
-        const wasInside = localStorage.getItem("inside_site");
-
-        if (wasInside === "yes") {
-            // ВОЗВРАЩЕНИЕ внутри сайта — НЕ перезагружаем чаты
-            console.log("🔵 Возвращение на chats.html внутри сайта — данные НЕ обновляются");
-
-            // Грузим чаты из sessionStorage
-            const saved = sessionStorage.getItem("chat_cache");
-            if (saved) {
-                restoreChats(JSON.parse(saved));
-            }
-        } else {
-            // ПОЛНЫЙ повторный вход — перезагружаем чаты
-            console.log("🔴 Пользователь вошёл заново — чаты обновляются с сервера");
-
-            loadChatsFromServer();
+function restoreChatsFromCache() {
+    const saved = sessionStorage.getItem("chat_cache");
+    if (saved) {
+        try {
+            const chats = JSON.parse(saved);
+            currentChatsList = chats;
+            renderChats(chats);
+            console.log("♻ Чаты восстановлены из sessionStorage, запрос к серверу не делаем");
+            return true;
+        } catch (e) {
+            console.error("Ошибка восстановления чатов:", e);
         }
+    }
+    return false;
+}
+
+function saveChatsToCache(chats) {
+    sessionStorage.setItem("chat_cache", JSON.stringify(chats));
+}
+
+
+
+async function loadChatsFromServer() {
+    console.log("🔄 Полная загрузка чатов с сервера...");
+
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chats`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+            credentials: "include"
+        });
+
+        const data = await response.json();
+        if (data.status === "success") {
+            currentChatsList = data.chats;
+            renderChats(data.chats);
+            saveChatsToCache(data.chats); // сохраняем
+            console.log("✅ Чаты загружены и сохранены в sessionStorage");
+        }
+    } catch (error) {
+        console.error("Ошибка загрузки чатов:", error);
     }
 }
 
-// --- Функция: сохраняем чаты в sessionStorage ---
-function saveChats(data) {
-    sessionStorage.setItem("chat_cache", JSON.stringify(data));
+
+
+async function smartLoadChats() {
+    const inside = localStorage.getItem("inside_site");
+
+    if (inside === "yes") {
+        // Пользователь был на сайте → восстанавливаем из кэша
+        if (restoreChatsFromCache()) {
+            return; // НЕ грузим заново
+        }
+    }
+
+    // Если пользователь заново зашёл → грузим сервера
+    await loadChatsFromServer();
 }
 
-// --- Функция: восстановить чаты в DOM ---
-function restoreChats(data) {
-    // ТУТ ты вставляешь свой код отрисовки чатов
-    renderChats(data);
-}
 
-// --- Функция: загрузка с сервера (твой текущий метод) ---
-function loadChatsFromServer() {
-    fetch("/get_chats")
-        .then(r => r.json())
-        .then(data => {
-            saveChats(data);
-            renderChats(data);
-        });
-}
-
-document.addEventListener("DOMContentLoaded", initPage);
 
 
 
@@ -4399,7 +4405,7 @@ async function initializePage() {
     // Параллельная загрузка данных без индикаторов
     await Promise.all([
         loadUserData(),
-        loadChatsFromServer()
+        smartLoadChats()
     ]);
     
     // Обработка открытого чата без задержек
