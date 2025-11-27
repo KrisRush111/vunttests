@@ -2081,6 +2081,61 @@ let activityPollInterval;
 // Глобальные переменные для рекомендаций
 let friendsRecommendations = [];
 
+
+
+
+async function trackPageActivity() {
+    try {
+        const userData = JSON.parse(sessionStorage.getItem('userData'));
+        if (!userData || !userData.platform_user_id) return;
+        
+        await fetch(`${SERVER_URL}/track_session`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                page: 'contacts'
+            }),
+            credentials: 'include'
+        });
+        
+        console.log('Contacts page activity tracked');
+    } catch (error) {
+        console.error('Error tracking contacts activity:', error);
+    }
+}
+
+// Отслеживаем активность на странице
+function setupActivityTracking() {
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    events.forEach(event => {
+        document.addEventListener(event, trackPageActivity, { passive: true });
+    });
+    
+    // Отслеживаем видимость страницы
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            trackPageActivity();
+        }
+    });
+}
+
+// Запускаем при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    // Ждем немного чтобы userData успел загрузиться
+    setTimeout(() => {
+        trackPageActivity();
+        setupActivityTracking();
+        
+        // Периодическое обновление активности
+        setInterval(trackPageActivity, 30000);
+    }, 1000);
+});
+
+// Также отслеживаем когда страница становится видимой
+window.addEventListener('focus', trackPageActivity);
+
+
 // Функция для загрузки рекомендаций
 async function loadFriendsRecommendations() {
     if (!userData || !userData.platform_user_id) return;
