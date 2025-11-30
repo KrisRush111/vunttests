@@ -1691,6 +1691,26 @@ input, textarea {
 }
 
 
+/* Гарантированное мгновенное отображение при повторном открытии */
+body.no-animations .chats-content,
+body.no-animations .chat-item,
+body.no-animations .search-container,
+body.no-animations .no-chats {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+}
+
+/* Убираем все возможные задержки */
+body.no-animations * {
+    animation-delay: 0s !important;
+    transition-delay: 0s !important;
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+}
+
+
 
 
 </style>
@@ -2063,11 +2083,18 @@ async function smartLoadChats() {
     if (inside === "yes") {
         // Пользователь был на сайте → восстанавливаем из кэша
         if (restoreChatsFromCache()) {
+            // Сразу показываем чаты без задержки
+            const { noChats, chatsList } = getActiveElements();
+            if (currentChatsList && currentChatsList.length > 0) {
+                noChats.style.display = 'none';
+                // Принудительно отключаем анимации для мгновенного отображения
+                applyAnimationSettings(true);
+            }
             return; // НЕ грузим заново
         }
     }
 
-    // Если пользователь заново зашёл → грузим сервера
+    // Если пользователь заново зашёл → грузим с сервера
     await loadChatsFromServer();
 }
 
@@ -4392,6 +4419,8 @@ async function markAllMessagesAsRead(chatId) {
         console.error('Error marking all messages as read:', error);
     }
 }
+
+
 
 function updateAllMessageStatusesInUI() {
     const { messagesContainer } = getActiveElements();
