@@ -3612,25 +3612,79 @@ function getRussianNoun(number, forms) {
         
         
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-    // Добавляем случайные параметры для обхода кеша
-    const randomParam = Math.random().toString(36).substring(7);
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${randomParam}`;
-    const img = new Image();
+    const cacheKey = `avatar_${userId}`;
     
+    // Очищаем элемент перед загрузкой
+    avatarElement.style.backgroundImage = '';
+    avatarElement.style.backgroundColor = '';
+    avatarElement.textContent = '';
+    
+    // Пробуем восстановить из кэша
+    const cachedAvatar = getCachedAvatar(userId);
+    if (cachedAvatar && cachedAvatar.url) {
+        applyAvatarToElement(avatarElement, cachedAvatar.url, initials, bgColor);
+        
+        // Фоновая проверка обновления
+        checkAvatarUpdateInBackground(userId, avatarElement, initials, bgColor);
+        return;
+    }
+    
+    // Загружаем новый аватар (БЕЗ параметров кэш-баста)
+    loadNewAvatar(avatarElement, userId, initials, bgColor);
+}
+
+function getCachedAvatar(userId) {
+    try {
+        const cacheKey = `avatar_${userId}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+            const avatarData = JSON.parse(cached);
+            // Проверяем что кэш не старше 24 часов
+            if (Date.now() - avatarData.timestamp < 86400000) {
+                return avatarData;
+            }
+        }
+    } catch (error) {
+        console.warn('Ошибка чтения кэша аватара:', error);
+    }
+    return null;
+}
+
+function applyAvatarToElement(element, avatarUrl, initials, bgColor) {
+    // Создаем изображение для проверки что аватар все еще доступен
+    const img = new Image();
     img.onload = function() {
-        // При успешной загрузке - только картинка, без фона
-        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-        avatarElement.style.backgroundSize = 'cover';
-        avatarElement.style.backgroundPosition = 'center';
-        avatarElement.style.backgroundColor = 'transparent'; // Прозрачный фон
-        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`; // Явно перезаписываем все background свойства
+        element.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+        element.textContent = '';
+    };
+    img.onerror = function() {
+        // Если аватар недоступен - используем градиент
+        element.style.background = bgColor ? 
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
+        element.textContent = initials;
+        
+        // Удаляем невалидный кэш
+        removeCachedAvatar(userId);
+    };
+    img.src = avatarUrl;
+}
+
+function loadNewAvatar(avatarElement, userId, initials, bgColor) {
+    // URL БЕЗ параметров кэш-баста - позволит браузеру кэшировать
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+    
+    const img = new Image();
+    img.onload = function() {
+        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
         avatarElement.textContent = '';
+        
+        // Сохраняем в кэш
+        cacheAvatar(userId, avatarUrl);
     };
     
     img.onerror = function() {
-        console.log('Failed to load avatar, using initials');
-        // При ошибке - только градиентный фон и инициалы
-        avatarElement.style.backgroundImage = 'none';
+        console.log('Аватар не загружен, используем градиент');
         avatarElement.style.background = bgColor ? 
             `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
             'linear-gradient(135deg, #0088cc, #40a7e3)';
@@ -3639,6 +3693,104 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
     
     img.src = avatarUrl;
 }
+
+function cacheAvatar(userId, avatarUrl) {
+    try {
+        const cacheKey = `avatar_${userId}`;
+        const avatarData = {
+            url: avatarUrl,
+            timestamp: Date.now(),
+            version: '1.0'
+        };
+        localStorage.setItem(cacheKey, JSON.stringify(avatarData));
+    } catch (error) {
+        console.warn('Не удалось кэшировать аватар:', error);
+    }
+}
+
+function removeCachedAvatar(userId) {
+    try {
+        const cacheKey = `avatar_${userId}`;
+        localStorage.removeItem(cacheKey);
+    } catch (error) {
+        console.warn('Не удалось удалить кэш аватара:', error);
+    }
+}
+
+function checkAvatarUpdateInBackground(userId, avatarElement, initials, bgColor) {
+    // Фоновая проверка обновления аватара (раз в 5 минут)
+    const lastCheckKey = `avatar_check_${userId}`;
+    const lastCheck = localStorage.getItem(lastCheckKey);
+    const now = Date.now();
+    
+    if (lastCheck && (now - parseInt(lastCheck)) < 300000) {
+        return; // Проверяли недавно
+    }
+    
+    // Проверяем заголовки аватара
+    fetch(`${SERVER_URL}/avatar/${userId}`, { method: 'HEAD' })
+        .then(response => {
+            if (response.ok) {
+                localStorage.setItem(lastCheckKey, now.toString());
+                
+                // Если ETag или Last-Modified изменились - обновляем аватар
+                const etag = response.headers.get('ETag');
+                const lastModified = response.headers.get('Last-Modified');
+                
+                if (hasAvatarChanged(userId, etag, lastModified)) {
+                    console.log('🔄 Обнаружено обновление аватара');
+                    loadNewAvatar(avatarElement, userId, initials, bgColor);
+                }
+            }
+        })
+        .catch(() => {
+            // Игнорируем ошибки фоновой проверки
+        });
+}
+
+function hasAvatarChanged(userId, newEtag, newLastModified) {
+    const cacheKey = `avatar_meta_${userId}`;
+    try {
+        const cachedMeta = localStorage.getItem(cacheKey);
+        const currentMeta = cachedMeta ? JSON.parse(cachedMeta) : {};
+        
+        const changed = currentMeta.etag !== newEtag || currentMeta.lastModified !== newLastModified;
+        
+        if (changed && newEtag) {
+            // Сохраняем новую мета-информацию
+            localStorage.setItem(cacheKey, JSON.stringify({
+                etag: newEtag,
+                lastModified: newLastModified,
+                timestamp: Date.now()
+            }));
+        }
+        
+        return changed;
+    } catch (error) {
+        return true; // При ошибке считаем что аватар изменился
+    }
+}
+
+async function loadChatAvatarWithCache(avatarElement, chat) {
+    // Очищаем элемент
+    avatarElement.style.backgroundImage = '';
+    avatarElement.style.backgroundColor = '';
+    avatarElement.textContent = '';
+    
+    if (chat.participants && chat.participants.length > 0) {
+        const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const userId = otherParticipant.platform_user_id;
+            const initials = chat.name ? chat.name[0].toUpperCase() : '?';
+            const bgColor = chat.avatar_background || getRandomColor();
+            
+            // Используем улучшенную функцию загрузки
+            loadChatAvatar(avatarElement, userId, initials, bgColor);
+        }
+    }
+}
+
+
 
 
     
