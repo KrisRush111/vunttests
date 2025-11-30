@@ -1948,9 +1948,55 @@ input, textarea {
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        // В разделе с другими глобальными переменными добавьте:
+        let isFirstSiteVisit = true;
+        let siteVisitFlag = 'siteFirstVisit';
 
 
 
+function applyAnimationSettings(disableAnimations) {
+    if (disableAnimations) {
+        // Создаем стиль для отключения анимаций
+        const styleId = 'no-animations-style';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+                .chats-container,
+                .search-container,
+                .chats-content,
+                .chat-item,
+                .message,
+                .no-chats,
+                .date-header {
+                    animation: none !important;
+                    transition: none !important;
+                }
+                
+                .chat-item {
+                    opacity: 1 !important;
+                    transform: none !important;
+                }
+                
+                .message {
+                    opacity: 1 !important;
+                    transform: none !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Также добавляем класс к body для дополнительного контроля
+        document.body.classList.add('no-animations');
+    } else {
+        // Включаем анимации - удаляем стиль
+        const style = document.getElementById('no-animations-style');
+        if (style) {
+            style.remove();
+        }
+        document.body.classList.remove('no-animations');
+    }
+}
 
 
 
@@ -2392,12 +2438,20 @@ async function sendImageMessage(file) {
     }
 }
 
-function renderMessage(message) {
+function renderMessage(message, withAnimations = true) {
     const { messagesContainer } = getActiveElements();
     
     const messageElement = document.createElement('div');
     messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
     messageElement.setAttribute('data-message-id', message.id);
+    
+    // Применяем настройки анимаций
+    if (!withAnimations) {
+        messageElement.style.animation = 'none';
+        messageElement.style.transition = 'none';
+        messageElement.style.opacity = '1';
+        messageElement.style.transform = 'none';
+    }
     
     const messageTime = formatChatMessageTime(message.sent_at);
     
@@ -2416,7 +2470,6 @@ function renderMessage(message) {
     let messageContent = '';
     
     if (message.is_image || (message.content && isImageUrl(message.content))) {
-        // Находим индекс этого изображения среди всех изображений чата
         const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
         const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
         
@@ -2435,7 +2488,6 @@ function renderMessage(message) {
             </div>
         `;
         
-        // Добавляем класс для сообщений с изображениями
         messageElement.classList.add('message-with-image');
         
     } else {
@@ -2452,10 +2504,16 @@ function renderMessage(message) {
         </div>
     `;
     
-    setTimeout(() => {
+    // Применяем настройки анимаций для появления
+    if (withAnimations) {
+        setTimeout(() => {
+            messageElement.style.opacity = '1';
+            messageElement.style.transform = 'translateY(0)';
+        }, 10);
+    } else {
         messageElement.style.opacity = '1';
-        messageElement.style.transform = 'translateY(0)';
-    }, 10);
+        messageElement.style.transform = 'none';
+    }
     
     messagesContainer.appendChild(messageElement);
 }
@@ -3076,13 +3134,17 @@ async function performSmartChatsUpdate() {
     }
 }
 
-// Найдите функцию renderChats и внутри неё измените строку с last_message
 async function renderChats(chats) {
     const { chatsList, noChats } = getActiveElements();
     chatsList.innerHTML = '';
 
     if (!chats || chats.length === 0) {
         noChats.style.display = 'block';
+        // Применяем настройки анимаций к сообщению "нет чатов"
+        if (!isFirstSiteVisit) {
+            noChats.style.animation = 'none';
+            noChats.style.opacity = '1';
+        }
         return;
     }
     
@@ -3102,10 +3164,17 @@ async function renderChats(chats) {
     
     const activityData = await getUsersActivityStatus(userIds);
     
-    chats.forEach(chat => {
+    chats.forEach((chat, index) => {
         const chatItem = document.createElement('div');
         chatItem.className = 'chat-item';
         chatItem.setAttribute('data-chat-id', chat.id);
+        
+        // Применяем настройки анимаций - если не первое посещение сайта, отключаем анимации
+        if (!isFirstSiteVisit) {
+            chatItem.style.animation = 'none';
+            chatItem.style.opacity = '1';
+            chatItem.style.transform = 'none';
+        }
         
         const initials = chat.name 
             ? chat.name.split(' ').map(n => n[0]).join('') 
@@ -3176,7 +3245,8 @@ async function renderChats(chats) {
         
         chatItem.addEventListener('click', (e) => {
             e.preventDefault();
-            openChat(chat.id);
+            // Передаем флаг анимаций в openChat - если не первое посещение сайта, отключаем анимации
+            openChat(chat.id, !isFirstSiteVisit);
         });
         
         chatsList.appendChild(chatItem);
@@ -3596,26 +3666,28 @@ async function createChatWithContact(contact) {
 
 
 
-function openTempChat(tempChat) {
+function openTempChat(tempChat, withoutAnimations = false) {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
     currentChat = tempChat;
     
-    // Apply changing class for animation
-    chatModal.classList.add('changing');
-    setTimeout(() => {
-        chatModal.classList.remove('changing');
-    }, 300);
+    // Применяем анимацию перехода только если не отключены анимации
+    if (!withoutAnimations) {
+        chatModal.classList.add('changing');
+        setTimeout(() => {
+            chatModal.classList.remove('changing');
+        }, 300);
+    }
 
     chatTitle.textContent = tempChat.name;
     chatStatus.textContent = 'был(а) недавно';
     
- 
+    // Очищаем аватар перед загрузкой
     chatAvatar.style.backgroundImage = '';
     chatAvatar.style.backgroundColor = tempChat.avatar_background;
     chatAvatar.textContent = tempChat.initials;
     
-   
+    // Загружаем аватар если есть
     if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
         const userId = tempChat.participants[0].platform_user_id;
         const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
@@ -3629,7 +3701,6 @@ function openTempChat(tempChat) {
         };
         
         img.onerror = function() {
-          
             chatAvatar.style.backgroundImage = '';
             chatAvatar.textContent = tempChat.initials;
             chatAvatar.style.backgroundColor = tempChat.avatar_background;
@@ -3638,12 +3709,18 @@ function openTempChat(tempChat) {
         img.src = avatarUrl;
     }
     
-  
+    // Очищаем сообщения и показываем placeholder
     messagesContainer.innerHTML = '';
     noMessages.style.display = 'block';
     noMessages.textContent = 'Напишите сообщение, чтобы начать чат';
     
+    // Применяем настройки анимаций к сообщению "нет сообщений"
+    if (withoutAnimations) {
+        noMessages.style.animation = 'none';
+        noMessages.style.opacity = '1';
+    }
 
+    // Показываем чат в зависимости от платформы
     if (isDesktop) {
         desktopPlaceholder.style.display = 'none';
         chatModal.style.display = 'flex';
@@ -3652,7 +3729,6 @@ function openTempChat(tempChat) {
         document.body.style.overflow = 'hidden';
     }
 }
-
 
 async function sendMessage() {
     const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
@@ -3865,7 +3941,7 @@ function setupKeyboardDetection() {
 
 
        
-async function openChat(chatId) {
+async function openChat(chatId, withoutAnimations = false) {
     if (isOpeningChat) return;
     isOpeningChat = true;
 
@@ -3876,10 +3952,13 @@ async function openChat(chatId) {
         noMessages.style.display = 'block';
         noMessages.textContent = 'Загрузка...';
 
-        chatModal.classList.add('changing');
-        setTimeout(() => {
-            chatModal.classList.remove('changing');
-        }, 300);
+        // Убираем анимацию перехода если нужно
+        if (!withoutAnimations) {
+            chatModal.classList.add('changing');
+            setTimeout(() => {
+                chatModal.classList.remove('changing');
+            }, 300);
+        }
         
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
@@ -3997,13 +4076,19 @@ async function openChat(chatId) {
         
         if (messagesData.status === 'success') {
             currentMessages = messagesData.messages;
-            renderMessages(currentMessages);
+            // Передаем флаг анимаций в renderMessages
+            renderMessages(currentMessages, !withoutAnimations);
             
             markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
                 noMessages.style.display = 'block';
                 noMessages.textContent = 'Сообщений пока нет...';
+                // Применяем настройки анимаций к сообщению "нет сообщений"
+                if (withoutAnimations) {
+                    noMessages.style.animation = 'none';
+                    noMessages.style.opacity = '1';
+                }
             } else {
                 noMessages.style.display = 'none';
             }
@@ -4011,6 +4096,11 @@ async function openChat(chatId) {
             currentMessages = [];
             noMessages.style.display = 'block';
             noMessages.textContent = 'Сообщений пока нет...';
+            // Применяем настройки анимаций к сообщению "нет сообщений"
+            if (withoutAnimations) {
+                noMessages.style.animation = 'none';
+                noMessages.style.opacity = '1';
+            }
         }
         
         if (isDesktop) {
@@ -4184,10 +4274,9 @@ function updateChatItemInDOM(chatId, chatData) {
 }
 
 
-function renderMessages(messages) {
+function renderMessages(messages, withAnimations = true) {
     const { messagesContainer, noMessages } = getActiveElements();
     
- 
     messagesContainer.innerHTML = '';
     
     if (!messages || messages.length === 0) {
@@ -4214,18 +4303,23 @@ function renderMessages(messages) {
             dateHeader.style.padding = '4px 12px';
             dateHeader.style.borderRadius = '24px'; 
             dateHeader.style.display = 'block'; 
+            
+            // Применяем настройки анимаций
+            if (!withAnimations) {
+                dateHeader.style.animation = 'none';
+            }
+            
             messagesContainer.appendChild(dateHeader);
             lastDateHeader = currentDateHeader;
         }
         
-        renderMessage(message);
+        renderMessage(message, withAnimations);
     });
     
     setTimeout(() => {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }, 50);
 }
-
 
 // New functions for message status updates
 async function updateMessageStatus(chatId, messageId) {
@@ -4384,6 +4478,23 @@ async function initializePage() {
     
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
+    // Проверяем, является ли это ПЕРВЫМ посещением сайта в этой вкладке
+    const isFirstVisit = sessionStorage.getItem('siteFirstVisit') === null;
+    
+    if (isFirstVisit) {
+        // Первый заход на сайт - включаем все анимации
+        isFirstSiteVisit = true;
+        sessionStorage.setItem('siteFirstVisit', 'visited');
+        console.log('🎬 Первый заход на сайт - анимации включены');
+    } else {
+        // Повторное открытие страницы во время той же сессии - выключаем анимации
+        isFirstSiteVisit = false;
+        console.log('🔁 Повторное открытие страницы - анимации выключены');
+    }
+
+    // Применяем настройки анимаций
+    applyAnimationSettings(!isFirstSiteVisit);
+
     // Мгновенная настройка UI без задержек
     if (isDesktop) {
         mobileChatsContainer.style.display = 'none';
@@ -4424,8 +4535,8 @@ async function initializePage() {
         sessionStorage.removeItem('openChatId');
         sessionStorage.removeItem('openChatName');
         
-        // Открываем чат сразу без задержки
-        openChat(openChatId);
+        // Открываем чат с учетом настроек анимаций
+        openChat(openChatId, !isFirstSiteVisit);
     } else {
         // Проверяем, есть ли временный чат для открытия (для новых чатов из contacts.html)
         const tempChatContactId = sessionStorage.getItem('tempChatContactId');
@@ -4445,8 +4556,8 @@ async function initializePage() {
                 avatar_background: '#0088cc'
             };
             
-            // Открываем временный чат
-            openTempChat(tempChat);
+            // Открываем временный чат с учетом настроек анимаций
+            openTempChat(tempChat, !isFirstSiteVisit);
         }
     }
 
@@ -4498,18 +4609,17 @@ async function initializePage() {
         });
     }
 
-// Обработчики для кнопки прикрепления
-const { attachButton } = getActiveElements();
-if (attachButton) {
-    attachButton.addEventListener('click', (e) => {
-        e.preventDefault();
-        imageInput.click();
-    });
-}
+    // Обработчики для кнопки прикрепления
+    const { attachButton } = getActiveElements();
+    if (attachButton) {
+        attachButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            imageInput.click();
+        });
+    }
 
-// Обработчик выбора изображений
-imageInput.addEventListener('change', handleImageSelection);
-
+    // Обработчик выбора изображений
+    imageInput.addEventListener('change', handleImageSelection);
 
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
@@ -4620,6 +4730,8 @@ imageInput.addEventListener('change', handleImageSelection);
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
+        // Если пользователь полностью закрывает вкладку - сбрасываем флаг первого посещения
+        sessionStorage.removeItem('siteFirstVisit');
     });
 
     window.addEventListener('pagehide', () => {
@@ -4632,6 +4744,7 @@ imageInput.addEventListener('change', handleImageSelection);
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
+        sessionStorage.removeItem('siteFirstVisit');
     });
     
     // Обработчики для дополнительных кнопок
@@ -4642,7 +4755,6 @@ imageInput.addEventListener('change', handleImageSelection);
             // Здесь можно добавить функциональность меню
         });
     }
-
 
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
@@ -4659,7 +4771,6 @@ imageInput.addEventListener('change', handleImageSelection);
 
     console.log('Page initialized successfully');
 }
-
 
 
 function filterChats(searchTerm) {
