@@ -1,13 +1,14 @@
 // service-worker.js
-const CACHE_NAME = 'vuntgram-v1.2.0';
-const API_CACHE_NAME = 'vuntgram-api-v1.2.0';
+const CACHE_NAME = 'vuntgram-v2.1.0';
+const API_CACHE_NAME = 'vuntgram-api-v2.1.0';
 
-// Ресурсы для кэширования при установке
+// Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
 const STATIC_RESOURCES = [
   '/',
   '/chats.html',
   '/contacts.html', 
   '/profile.html',
+  '/offline.html',
   '/icon-192x192.png',
   '/icon-512x512.png',
   '/фон.webp',
@@ -19,57 +20,45 @@ const STATIC_RESOURCES = [
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
 ];
 
-// API endpoints для кэширования
-const API_ENDPOINTS = [
-  '/get_chats',
-  '/get_chat_info',
-  '/get_messages',
-  '/get_friends',
-  '/get_user_data',
-  '/get_activity_status',
-  '/avatar/'
-];
-
 // Установка Service Worker
 self.addEventListener('install', (event) => {
-  console.log('Service Worker: Installing...');
+  console.log('🔄 TheVuntgram Service Worker: Installing...');
   
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('Service Worker: Caching static resources');
+        console.log('📦 TheVuntgram: Caching static resources');
         return cache.addAll(STATIC_RESOURCES);
       })
       .then(() => {
-        console.log('Service Worker: Installed');
+        console.log('✅ TheVuntgram Service Worker: Installed');
         return self.skipWaiting();
       })
   );
 });
 
-// Активация Service Worker
+// Активация
 self.addEventListener('activate', (event) => {
-  console.log('Service Worker: Activating...');
+  console.log('🔄 TheVuntgram Service Worker: Activating...');
   
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          // Удаляем старые кэши
-          if (cacheName !== CACHE_NAME && cacheName !== API_CACHE_NAME) {
-            console.log('Service Worker: Deleting old cache', cacheName);
+          if (cacheName !== CACHE_NAME) { // УДАЛЯЕМ API_CACHE_NAME
+            console.log('🗑️ TheVuntgram: Deleting old cache', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
     }).then(() => {
-      console.log('Service Worker: Activated');
+      console.log('✅ TheVuntgram Service Worker: Activated');
       return self.clients.claim();
     })
   );
 });
 
-// Перехват запросов
+// Обработка запросов - УПРОЩЕННАЯ ВЕРСИЯ
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
@@ -78,97 +67,94 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    handleFetch(event.request).catch((error) => {
-      console.error('Service Worker: Fetch failed:', error);
-      // Можно показать fallback страницу
-      return caches.match('/offline.html');
-    })
-  );
-});
+  // НЕ кэшируем API запросы - всегда идем в сеть
+  if (isApiRequest(event.request)) {
+    event.respondWith(handleApiRequest(event.request));
+    return;
+  }
 
-async function handleFetch(request) {
-  const url = new URL(request.url);
-  
-  // Для API запросов - стратегия "Network First" с fallback на кэш
-  if (isApiRequest(request)) {
-    return handleApiRequest(request);
+  // Для статических ресурсов - Cache First
+  if (isStaticResource(event.request)) {
+    event.respondWith(handleStaticRequest(event.request));
+    return;
   }
-  
-  // Для статических ресурсов - стратегия "Cache First" 
-  if (isStaticResource(request)) {
-    return handleStaticRequest(request);
+
+  // Для HTML страниц - Network First
+  if (event.request.destination === 'document') {
+    event.respondWith(handleHtmlRequest(event.request));
+    return;
   }
-  
-  // Для аватаров - стратегия "Cache First" с обновлением
-  if (isAvatarRequest(request)) {
-    return handleAvatarRequest(request);
-  }
-  
-  // По умолчанию - "Network First"
-  return fetch(request)
-    .then((response) => {
-      // Кэшируем успешные ответы
-      if (response.ok) {
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(request, responseClone);
-        });
-      }
-      return response;
-    })
-    .catch(() => {
-      // Fallback на кэш
-      return caches.match(request);
-    });
-}
+
+  // По умолчанию - Network Only (не кэшируем)
+  event.respondWith(fetch(event.request));
+});
 
 function isApiRequest(request) {
   const url = new URL(request.url);
-  return API_ENDPOINTS.some(endpoint => 
-    url.pathname.includes(endpoint) && request.method === 'POST'
-  );
+  const apiEndpoints = [
+    '/get_chats', 
+    '/get_chat_info', 
+    '/get_messages', 
+    '/get_friends', 
+    '/get_user_data', 
+    '/get_activity_status',
+    '/send_message',
+    '/send_image_message',
+    '/create_chat',
+    '/get_or_create_chat',
+    '/mark_as_read',
+    '/mark_all_as_read',
+    '/update_activity',
+    '/refresh_activity'
+  ];
+  
+  return apiEndpoints.some(endpoint => url.pathname.includes(endpoint));
 }
 
 function isStaticResource(request) {
   const url = new URL(request.url);
-  return STATIC_RESOURCES.some(resource => 
-    url.href.includes(resource) || 
-    request.destination === 'style' ||
-    request.destination === 'script' ||
-    request.destination === 'font'
-  );
-}
-
-function isAvatarRequest(request) {
-  const url = new URL(request.url);
-  return url.pathname.includes('/avatar/');
+  
+  // Только действительно статические ресурсы
+  return request.destination === 'style' || 
+         request.destination === 'script' || 
+         request.destination === 'font' ||
+         (request.destination === 'image' && !url.pathname.includes('/avatar/'));
 }
 
 async function handleApiRequest(request) {
-  const cache = await caches.open(API_CACHE_NAME);
-  
+  // ВСЕГДА идем в сеть для API, не кэшируем
   try {
-    // Пробуем сеть сначала
     const networkResponse = await fetch(request);
     
-    if (networkResponse.ok) {
-      // Кэшируем успешный ответ
-      cache.put(request, networkResponse.clone());
-      return networkResponse;
+    if (!networkResponse.ok) {
+      throw new Error(`API response status: ${networkResponse.status}`);
     }
     
-    throw new Error('Network response not ok');
+    return networkResponse;
   } catch (error) {
-    // Fallback на кэш
-    const cachedResponse = await cache.match(request);
-    if (cachedResponse) {
-      console.log('Service Worker: Serving API from cache', request.url);
-      return cachedResponse;
+    console.error('❌ TheVuntgram: API request failed:', error);
+    
+    // Для GET запросов можно попробовать вернуть старые данные из localStorage
+    if (request.method === 'GET') {
+      return tryFallbackFromLocalStorage(request);
     }
     
     throw error;
   }
+}
+
+async function tryFallbackFromLocalStorage(request) {
+  // Эта функция будет вызвана из основного кода, не здесь
+  return new Response(
+    JSON.stringify({ 
+      status: 'error', 
+      error: 'No connection and no cached data' 
+    }),
+    { 
+      status: 503,
+      headers: { 'Content-Type': 'application/json' }
+    }
+  );
 }
 
 async function handleStaticRequest(request) {
@@ -176,63 +162,70 @@ async function handleStaticRequest(request) {
   const cachedResponse = await cache.match(request);
   
   if (cachedResponse) {
-    // Фоновая проверка обновления
-    fetch(request)
-      .then((networkResponse) => {
-        if (networkResponse.ok) {
-          cache.put(request, networkResponse);
-        }
-      })
-      .catch(() => {
-        // Игнорируем ошибки фонового обновления
-      });
-    
+    // Фоновая проверка обновления (только для статики)
+    updateStaticCacheInBackground(request, cache);
     return cachedResponse;
   }
   
-  // Если нет в кэше - загружаем из сети
-  return fetch(request);
-}
-
-async function handleAvatarRequest(request) {
-  const cache = await caches.open(CACHE_NAME);
-  const cachedResponse = await cache.match(request);
-  
-  // Всегда пробуем сеть для аватаров
+  // Загружаем и кэшируем статический ресурс
   try {
     const networkResponse = await fetch(request);
     
     if (networkResponse.ok) {
-      // Обновляем кэш
+      cache.put(request, networkResponse.clone());
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function handleHtmlRequest(request) {
+  const cache = await caches.open(CACHE_NAME);
+  
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (networkResponse.ok) {
+      // Обновляем кэш HTML страниц
       cache.put(request, networkResponse.clone());
       return networkResponse;
     }
     
-    throw new Error('Avatar network request failed');
+    throw new Error('HTML response not ok');
   } catch (error) {
-    // Fallback на кэш если есть
+    // Fallback на кэшированную версию
+    const cachedResponse = await cache.match(request);
+    
     if (cachedResponse) {
-      console.log('Service Worker: Serving avatar from cache');
       return cachedResponse;
     }
     
-    // Можно вернуть дефолтный аватар
-    return new Response('', { 
-      status: 200,
-      headers: { 'Content-Type': 'image/svg+xml' }
-    });
+    throw error;
   }
 }
 
-// Фоновая синхронизация
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'background-sync') {
-    console.log('Service Worker: Background sync');
-    event.waitUntil(doBackgroundSync());
+async function updateStaticCacheInBackground(request, cache) {
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (networkResponse.ok) {
+      cache.put(request, networkResponse);
+    }
+  } catch (error) {
+    // Игнорируем ошибки фонового обновления
   }
-});
+}
 
-async function doBackgroundSync() {
-  // Здесь можно реализовать фоновую синхронизацию данных
-  console.log('Service Worker: Performing background sync');
+// Офлайн страница
+async function showOfflinePage() {
+  const cache = await caches.open(CACHE_NAME);
+  const offlinePage = await cache.match('/offline.html');
+  
+  if (offlinePage) {
+    return offlinePage;
+  }
+  
+  return new Response('Offline', { status: 503 });
 }
