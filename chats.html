@@ -2081,6 +2081,208 @@ function applyAnimationSettings(disableAnimations) {
 
 
 
+// Улучшенное кэширование в основном коде
+let chatsCache = {
+  data: null,
+  timestamp: null,
+  version: '2.0'
+};
+
+// Сохраняем чаты в localStorage с версионированием
+function saveChatsToCache(chats) {
+  if (!chats || !Array.isArray(chats)) return;
+  
+  chatsCache = {
+    data: chats,
+    timestamp: Date.now(),
+    version: '2.0'
+  };
+  
+  // Сохраняем в оба хранилища
+  try {
+    sessionStorage.setItem('chat_cache', JSON.stringify(chatsCache));
+    localStorage.setItem('chat_cache_persistent', JSON.stringify(chatsCache));
+    console.log('💾 Чаты сохранены в кэш');
+  } catch (error) {
+    console.warn('Не удалось сохранить в кэш:', error);
+  }
+}
+
+// Восстанавливаем чаты из кэша
+function restoreChatsFromCache() {
+  const CACHE_DURATION = 5 * 60 * 1000; // 5 минут
+  
+  try {
+    // Сначала пробуем sessionStorage (более актуальные данные)
+    const sessionData = sessionStorage.getItem('chat_cache');
+    if (sessionData) {
+      const cache = JSON.parse(sessionData);
+      if (Date.now() - cache.timestamp < CACHE_DURATION) {
+        chatsCache = cache;
+        currentChatsList = cache.data;
+        renderChats(cache.data);
+        console.log('♻ Чаты восстановлены из sessionStorage');
+        return true;
+      }
+    }
+    
+    // Затем пробуем localStorage (резервная копия)
+    const localData = localStorage.getItem('chat_cache_persistent');
+    if (localData) {
+      const cache = JSON.parse(localData);
+      if (Date.now() - cache.timestamp < CACHE_DURATION * 2) { // 10 минут для localStorage
+        chatsCache = cache;
+        currentChatsList = cache.data;
+        renderChats(cache.data);
+        console.log('💾 Чаты восстановлены из localStorage');
+        return true;
+      }
+    }
+  } catch (error) {
+    console.error('Ошибка восстановления чатов:', error);
+  }
+  
+  return false;
+}
+
+// Умная загрузка чатов
+async function smartLoadChats() {
+  // Если есть актуальный кэш - используем его
+  if (restoreChatsFromCache()) {
+    // Фоновая синхронизация с сервером
+    setTimeout(() => {
+      performBackgroundChatsSync();
+    }, 1000);
+    return;
+  }
+  
+  // Иначе загружаем с сервера
+  await loadChatsFromServer();
+}
+
+// Фоновая синхронизация
+async function performBackgroundChatsSync() {
+  if (!userData?.platform_user_id) return;
+  
+  try {
+    console.log('🔄 Фоновая синхронизация чатов...');
+    
+    const response = await fetch(`${SERVER_URL}/get_chats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+      credentials: "include"
+    });
+
+    const data = await response.json();
+    
+    if (data.status === "success") {
+      const hasChanges = checkForSignificantChanges(currentChatsList, data.chats);
+      
+      if (hasChanges) {
+        console.log("🔄 Обнаружены изменения в чатах, обновляем");
+        currentChatsList = data.chats;
+        saveChatsToCache(data.chats);
+        renderChats(data.chats);
+        
+        // Если открыт чат, который обновился - обновляем и его
+        if (currentChat) {
+          const updatedChat = data.chats.find(chat => chat.id === currentChat.id);
+          if (updatedChat) {
+            currentChat = updatedChat;
+            updateChatHeader(updatedChat);
+          }
+        }
+      } else {
+        // Просто обновляем timestamp кэша
+        saveChatsToCache(currentChatsList);
+      }
+    }
+  } catch (error) {
+    console.error("Фоновая синхронизация не удалась:", error);
+  }
+}
+
+
+
+// Кэширование сообщений в основном коде
+let messagesCache = {};
+
+function saveMessagesToCache(chatId, messages) {
+  if (!chatId || !messages) return;
+  
+  messagesCache[chatId] = {
+    messages: messages,
+    timestamp: Date.now()
+  };
+  
+  // Сохраняем в sessionStorage
+  try {
+    const cacheKey = `messages_${chatId}`;
+    sessionStorage.setItem(cacheKey, JSON.stringify(messagesCache[chatId]));
+  } catch (error) {
+    console.warn('Не удалось сохранить сообщения в кэш:', error);
+  }
+}
+
+function restoreMessagesFromCache(chatId) {
+  try {
+    // Сначала memory cache
+    if (messagesCache[chatId] && (Date.now() - messagesCache[chatId].timestamp) < 300000) { // 5 минут
+      return messagesCache[chatId].messages;
+    }
+    
+    // Затем sessionStorage
+    const cacheKey = `messages_${chatId}`;
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      const data = JSON.parse(cached);
+      if ((Date.now() - data.timestamp) < 300000) {
+        messagesCache[chatId] = data;
+        return data.messages;
+      }
+    }
+  } catch (error) {
+    console.warn('Ошибка восстановления сообщений:', error);
+  }
+  
+  return null;
+}
+
+
+// Проверка значительных изменений
+function checkForSignificantChanges(oldChats, newChats) {
+  if (!oldChats || !newChats) return true;
+  if (oldChats.length !== newChats.length) return true;
+  
+  // Проверяем последние сообщения и непрочитанные счетчики
+  for (let i = 0; i < oldChats.length; i++) {
+    const oldChat = oldChats[i];
+    const newChat = newChats.find(chat => chat.id === oldChat.id);
+    
+    if (!newChat) return true;
+    if (oldChat.last_message !== newChat.last_message) return true;
+    if (oldChat.unread_count !== newChat.unread_count) return true;
+    if (oldChat.last_message_time !== newChat.last_message_time) return true;
+  }
+  
+  return false;
+}
+
+// Обновление заголовка чата
+function updateChatHeader(chat) {
+  const { chatTitle, chatStatus } = getActiveElements();
+  
+  if (chatTitle) {
+    chatTitle.textContent = chat.name || 'Новый чат';
+  }
+}
+
+
+
+
+
+
 const internalPages = ["chats.html", "profile.html", "contacts.html"];
 
 // Помечаем, что пользователь находится НА сайте (не покинул домен)
@@ -2090,27 +2292,6 @@ localStorage.setItem("inside_site", "yes");
 window.addEventListener("beforeunload", () => {
     localStorage.removeItem("inside_site");
 });
-
-function restoreChatsFromCache() {
-    const saved = sessionStorage.getItem("chat_cache");
-    if (saved) {
-        try {
-            const chats = JSON.parse(saved);
-            currentChatsList = chats;
-            renderChats(chats);
-            console.log("♻ Чаты восстановлены из sessionStorage, запрос к серверу не делаем");
-            return true;
-        } catch (e) {
-            console.error("Ошибка восстановления чатов:", e);
-        }
-    }
-    return false;
-}
-
-function saveChatsToCache(chats) {
-    sessionStorage.setItem("chat_cache", JSON.stringify(chats));
-}
-
 
 
 async function loadChatsFromServer() {
@@ -2136,28 +2317,6 @@ async function loadChatsFromServer() {
     }
 }
 
-
-
-async function smartLoadChats() {
-    const inside = localStorage.getItem("inside_site");
-
-    if (inside === "yes") {
-        // Пользователь был на сайте → восстанавливаем из кэша
-        if (restoreChatsFromCache()) {
-            // Сразу показываем чаты без задержки
-            const { noChats, chatsList } = getActiveElements();
-            if (currentChatsList && currentChatsList.length > 0) {
-                noChats.style.display = 'none';
-                // Принудительно отключаем анимации для мгновенного отображения
-                applyAnimationSettings(true);
-            }
-            return; // НЕ грузим заново
-        }
-    }
-
-    // Если пользователь заново зашёл → грузим с сервера
-    await loadChatsFromServer();
-}
 
 
 
@@ -4563,6 +4722,11 @@ async function initializePage() {
         window.location.href = 'profile.html';
         return;
     }
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+        type: 'SKIP_WAITING'
+        });
+    }
     
     userData = JSON.parse(userDataFromStorage);
     
@@ -4853,6 +5017,7 @@ async function initializePage() {
         updateUserActivity(true);
     }, 30000);
     
+    
     // Очистка интервалов при закрытии страницы
     window.addEventListener('beforeunload', () => {
         clearInterval(activityInterval);
@@ -4884,6 +5049,7 @@ async function initializePage() {
         });
     }
 
+    
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
