@@ -218,6 +218,118 @@ async function updateStaticCacheInBackground(request, cache) {
   }
 }
 
+
+// В функции handleFetch добавьте:
+async function handleFetch(request) {
+  const url = new URL(request.url);
+  
+  // Для аватаров - Cache First с сетевой проверкой
+  if (isAvatarRequest(request)) {
+    return handleAvatarRequest(request);
+  }
+  
+  // Остальная логика...
+}
+
+function isAvatarRequest(request) {
+  const url = new URL(request.url);
+  return url.pathname.includes('/avatar/');
+}
+
+async function handleAvatarRequest(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cachedResponse = await cache.match(request);
+  
+  // Всегда пробуем сеть для аватаров, но возвращаем из кэша мгновенно
+  if (cachedResponse) {
+    // Фоновая проверка обновления
+    updateAvatarInBackground(request, cache);
+    return cachedResponse;
+  }
+  
+  // Если нет в кэше - загружаем
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (networkResponse.ok) {
+      // Кэшируем аватар
+      cache.put(request, networkResponse.clone());
+      return networkResponse;
+    }
+    
+    throw new Error('Avatar network request failed');
+  } catch (error) {
+    // Можно вернуть дефолтный аватар
+    return createDefaultAvatarResponse();
+  }
+}
+
+async function updateAvatarInBackground(request, cache) {
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (networkResponse.ok) {
+      // Проверяем изменился ли аватар
+      const cachedResponse = await cache.match(request);
+      
+      if (!cachedResponse || hasAvatarChanged(cachedResponse, networkResponse)) {
+        // Обновляем кэш если аватар изменился
+        cache.put(request, networkResponse);
+        console.log('🔄 Service Worker: Avatar updated');
+        
+        // Уведомляем клиент об обновлении аватара
+        notifyClientsAboutAvatarUpdate(request.url);
+      }
+    }
+  } catch (error) {
+    // Игнорируем ошибки фонового обновления
+  }
+}
+
+function hasAvatarChanged(cachedResponse, networkResponse) {
+  // Сравниваем ETag или Last-Modified
+  const cachedETag = cachedResponse.headers.get('ETag');
+  const networkETag = networkResponse.headers.get('ETag');
+  
+  const cachedLastModified = cachedResponse.headers.get('Last-Modified');
+  const networkLastModified = networkResponse.headers.get('Last-Modified');
+  
+  return cachedETag !== networkETag || cachedLastModified !== networkLastModified;
+}
+
+async function notifyClientsAboutAvatarUpdate(avatarUrl) {
+  const clients = await self.clients.matchAll();
+  clients.forEach(client => {
+    client.postMessage({
+      type: 'AVATAR_UPDATED',
+      url: avatarUrl
+    });
+  });
+}
+
+function createDefaultAvatarResponse() {
+  // SVG градиент как fallback
+  const svg = `
+    <svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#0088cc;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#40a7e3;stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      <circle cx="50" cy="50" r="45" fill="url(#grad)" stroke="#ffffff" stroke-width="2"/>
+    </svg>
+  `;
+  
+  return new Response(svg, {
+    headers: {
+      'Content-Type': 'image/svg+xml',
+      'Cache-Control': 'public, max-age=86400'
+    }
+  });
+}
+
+
 // Офлайн страница
 async function showOfflinePage() {
   const cache = await caches.open(CACHE_NAME);
