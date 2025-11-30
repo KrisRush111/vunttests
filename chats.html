@@ -4490,10 +4490,39 @@ async function initializePage() {
         // Повторное открытие страницы во время той же сессии - выключаем анимации
         isFirstSiteVisit = false;
         console.log('🔁 Повторное открытие страницы - анимации выключены');
+        
+        // НЕМЕДЛЕННО применяем стили для отключения ВСЕХ анимаций
+        const style = document.createElement('style');
+        style.id = 'no-animations-instant';
+        style.textContent = `
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+            .chats-container,
+            .search-container,
+            .chats-content,
+            .chat-item,
+            .message,
+            .no-chats,
+            .date-header,
+            .message-box {
+                animation: none !important;
+                transition: none !important;
+                opacity: 1 !important;
+                transform: none !important;
+            }
+            .chat-item {
+                opacity: 1 !important;
+                transform: none !important;
+            }
+            .message {
+                opacity: 1 !important;
+                transform: none !important;
+            }
+        `;
+        document.head.appendChild(style);
     }
-
-    // Применяем настройки анимаций
-    applyAnimationSettings(!isFirstSiteVisit);
 
     // Мгновенная настройка UI без задержек
     if (isDesktop) {
@@ -4518,6 +4547,15 @@ async function initializePage() {
         loadUserData(),
         smartLoadChats()
     ]);
+    
+    // При повторном открытии сразу показываем контент без анимаций
+    if (!isFirstSiteVisit) {
+        const { chatsList, noChats } = getActiveElements();
+        // Гарантируем что контент виден сразу
+        if (chatsList.children.length > 0) {
+            noChats.style.display = 'none';
+        }
+    }
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
