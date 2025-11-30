@@ -1971,7 +1971,6 @@ body.no-animations * {
         // В разделе с другими глобальными переменными добавьте:
         let isFirstSiteVisit = true;
         let siteVisitFlag = 'siteFirstVisit';
-        let currentMessagesCache = {};
 
 
 
@@ -2050,6 +2049,54 @@ function restoreChatsFromCache() {
 function saveChatsToCache(chats) {
     sessionStorage.setItem("chat_cache", JSON.stringify(chats));
     sessionStorage.setItem("chats_cache_timestamp", Date.now().toString());
+}
+
+
+let currentMessagesCache = {};
+
+function saveMessagesToCache(chatId, messages) {
+    if (!currentMessagesCache[chatId]) {
+        currentMessagesCache[chatId] = {};
+    }
+    currentMessagesCache[chatId].messages = messages;
+    currentMessagesCache[chatId].timestamp = Date.now();
+    
+    // Сохраняем в sessionStorage для persistence
+    try {
+        const cacheKey = `messages_cache_${chatId}`;
+        sessionStorage.setItem(cacheKey, JSON.stringify({
+            messages: messages,
+            timestamp: Date.now()
+        }));
+    } catch (e) {
+        console.warn("Не удалось сохранить сообщения в sessionStorage:", e);
+    }
+}
+
+function restoreMessagesFromCache(chatId) {
+    // Сначала пробуем из memory cache
+    if (currentMessagesCache[chatId] && 
+        (Date.now() - currentMessagesCache[chatId].timestamp) < 60000) { // 1 минута
+        return currentMessagesCache[chatId].messages;
+    }
+    
+    // Затем из sessionStorage
+    try {
+        const cacheKey = `messages_cache_${chatId}`;
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+            const data = JSON.parse(cached);
+            if ((Date.now() - data.timestamp) < 60000) { // 1 минута
+                // Сохраняем в memory cache для быстрого доступа
+                currentMessagesCache[chatId] = data;
+                return data.messages;
+            }
+        }
+    } catch (e) {
+        console.warn("Не удалось восстановить сообщения из sessionStorage:", e);
+    }
+    
+    return null;
 }
 
 
@@ -2154,154 +2201,6 @@ function checkForSignificantChanges(oldChats, newChats) {
 }
 
 
-
-async function loadChatAvatarWithCache(avatarElement, chat) {
-    const avatarCacheKey = `avatar_${chat.id}`;
-    const cachedAvatar = sessionStorage.getItem(avatarCacheKey);
-    
-    // Очищаем аватар перед загрузкой
-    avatarElement.style.backgroundImage = '';
-    avatarElement.style.backgroundColor = '';
-    avatarElement.textContent = '';
-    
-    if (chat.participants && chat.participants.length > 0) {
-        const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-        if (otherParticipant) {
-            const userId = otherParticipant.platform_user_id;
-            const initials = chat.name ? chat.name[0].toUpperCase() : '?';
-            const bgColor = chat.avatar_background || getRandomColor();
-            
-            // Если есть кэшированный аватар и он не старше 5 минут
-            if (cachedAvatar) {
-                const avatarData = JSON.parse(cachedAvatar);
-                if (Date.now() - avatarData.timestamp < 300000) { // 5 минут
-                    if (avatarData.type === 'image') {
-                        avatarElement.style.background = `url(${avatarData.url}) center/cover no-repeat`;
-                    } else {
-                        avatarElement.style.background = bgColor ? 
-                            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                            'linear-gradient(135deg, #0088cc, #40a7e3)';
-                        avatarElement.textContent = initials;
-                    }
-                    
-                    // Фоновая проверка обновления
-                    setTimeout(() => checkAvatarUpdate(userId, avatarElement, initials, bgColor, avatarCacheKey), 1000);
-                    return;
-                }
-            }
-            
-            // Загружаем новый аватар
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
-            const img = new Image();
-            
-            img.onload = function() {
-                avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                avatarElement.textContent = '';
-                
-                // Кэшируем успешную загрузку
-                sessionStorage.setItem(avatarCacheKey, JSON.stringify({
-                    type: 'image',
-                    url: avatarUrl,
-                    timestamp: Date.now()
-                }));
-            };
-            
-            img.onerror = function() {
-                avatarElement.style.background = bgColor ? 
-                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                    'linear-gradient(135deg, #0088cc, #40a7e3)';
-                avatarElement.textContent = initials;
-                
-                // Кэшируем градиент
-                sessionStorage.setItem(avatarCacheKey, JSON.stringify({
-                    type: 'gradient',
-                    timestamp: Date.now()
-                }));
-            };
-            
-            img.src = avatarUrl;
-        }
-    }
-}
-
-async function checkAvatarUpdate(userId, avatarElement, initials, bgColor, cacheKey) {
-    // Фоновая проверка обновления аватара
-    const checkUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&check=1`;
-    
-    try {
-        const response = await fetch(checkUrl, { method: 'HEAD' });
-        if (response.ok) {
-            // Если аватар обновился, загружаем его
-            const newAvatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-            const img = new Image();
-            
-            img.onload = function() {
-                avatarElement.style.background = `url(${newAvatarUrl}) center/cover no-repeat`;
-                avatarElement.textContent = '';
-                
-                // Обновляем кэш
-                sessionStorage.setItem(cacheKey, JSON.stringify({
-                    type: 'image',
-                    url: newAvatarUrl,
-                    timestamp: Date.now()
-                }));
-            };
-            
-            img.src = newAvatarUrl;
-        }
-    } catch (error) {
-        // Игнорируем ошибки фоновой проверки
-    }
-}
-
-
-
-
-
-function saveMessagesToCache(chatId, messages) {
-    if (!currentMessagesCache[chatId]) {
-        currentMessagesCache[chatId] = {};
-    }
-    currentMessagesCache[chatId].messages = messages;
-    currentMessagesCache[chatId].timestamp = Date.now();
-    
-    // Сохраняем в sessionStorage для persistence
-    try {
-        const cacheKey = `messages_cache_${chatId}`;
-        sessionStorage.setItem(cacheKey, JSON.stringify({
-            messages: messages,
-            timestamp: Date.now()
-        }));
-    } catch (e) {
-        console.warn("Не удалось сохранить сообщения в sessionStorage:", e);
-    }
-}
-
-function restoreMessagesFromCache(chatId) {
-    // Сначала пробуем из memory cache
-    if (currentMessagesCache[chatId] && 
-        (Date.now() - currentMessagesCache[chatId].timestamp) < 60000) { // 1 минута
-        return currentMessagesCache[chatId].messages;
-    }
-    
-    // Затем из sessionStorage
-    try {
-        const cacheKey = `messages_cache_${chatId}`;
-        const cached = sessionStorage.getItem(cacheKey);
-        if (cached) {
-            const data = JSON.parse(cached);
-            if ((Date.now() - data.timestamp) < 60000) { // 1 минута
-                // Сохраняем в memory cache для быстрого доступа
-                currentMessagesCache[chatId] = data;
-                return data.messages;
-            }
-        }
-    } catch (e) {
-        console.warn("Не удалось восстановить сообщения из sessionStorage:", e);
-    }
-    
-    return null;
-}
 
 
         // Добавьте эту функцию после других функций
@@ -4340,6 +4239,131 @@ async function openChat(chatId, withoutAnimations = false) {
 }
 
 
+
+async function loadChatAvatarWithCache(avatarElement, chat) {
+    const avatarCacheKey = `avatar_${chat.id}`;
+    const cachedAvatar = sessionStorage.getItem(avatarCacheKey);
+    
+    // Очищаем аватар перед загрузкой
+    avatarElement.style.backgroundImage = '';
+    avatarElement.style.backgroundColor = '';
+    avatarElement.textContent = '';
+    
+    if (chat.participants && chat.participants.length > 0) {
+        const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const userId = otherParticipant.platform_user_id;
+            const initials = chat.name ? chat.name[0].toUpperCase() : '?';
+            const bgColor = chat.avatar_background || getRandomColor();
+            
+            // Если есть кэшированный аватар и он не старше 5 минут
+            if (cachedAvatar) {
+                const avatarData = JSON.parse(cachedAvatar);
+                if (Date.now() - avatarData.timestamp < 300000) { // 5 минут
+                    if (avatarData.type === 'image') {
+                        avatarElement.style.background = `url(${avatarData.url}) center/cover no-repeat`;
+                    } else {
+                        avatarElement.style.background = bgColor ? 
+                            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                            'linear-gradient(135deg, #0088cc, #40a7e3)';
+                        avatarElement.textContent = initials;
+                    }
+                    
+                    // Фоновая проверка обновления
+                    setTimeout(() => checkAvatarUpdate(userId, avatarElement, initials, bgColor, avatarCacheKey), 1000);
+                    return;
+                }
+            }
+            
+            // Загружаем новый аватар
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
+            const img = new Image();
+            
+            img.onload = function() {
+                avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+                avatarElement.textContent = '';
+                
+                // Кэшируем успешную загрузку
+                sessionStorage.setItem(avatarCacheKey, JSON.stringify({
+                    type: 'image',
+                    url: avatarUrl,
+                    timestamp: Date.now()
+                }));
+            };
+            
+            img.onerror = function() {
+                avatarElement.style.background = bgColor ? 
+                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                    'linear-gradient(135deg, #0088cc, #40a7e3)';
+                avatarElement.textContent = initials;
+                
+                // Кэшируем градиент
+                sessionStorage.setItem(avatarCacheKey, JSON.stringify({
+                    type: 'gradient',
+                    timestamp: Date.now()
+                }));
+            };
+            
+            img.src = avatarUrl;
+        }
+    }
+}
+
+async function checkAvatarUpdate(userId, avatarElement, initials, bgColor, cacheKey) {
+    // Фоновая проверка обновления аватара
+    const checkUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&check=1`;
+    
+    try {
+        const response = await fetch(checkUrl, { method: 'HEAD' });
+        if (response.ok) {
+            // Если аватар обновился, загружаем его
+            const newAvatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+            const img = new Image();
+            
+            img.onload = function() {
+                avatarElement.style.background = `url(${newAvatarUrl}) center/cover no-repeat`;
+                avatarElement.textContent = '';
+                
+                // Обновляем кэш
+                sessionStorage.setItem(cacheKey, JSON.stringify({
+                    type: 'image',
+                    url: newAvatarUrl,
+                    timestamp: Date.now()
+                }));
+            };
+            
+            img.src = newAvatarUrl;
+        }
+    } catch (error) {
+        // Игнорируем ошибки фоновой проверки
+    }
+}
+
+
+
+// В функции initializePage добавьте очистку старых кэшей
+function clearOldCaches() {
+    const now = Date.now();
+    const keysToRemove = [];
+    
+    for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key.startsWith('messages_cache_') || key.startsWith('avatar_')) {
+            try {
+                const data = JSON.parse(sessionStorage.getItem(key));
+                if (now - data.timestamp > 3600000) { // 1 час
+                    keysToRemove.push(key);
+                }
+            } catch (e) {
+                keysToRemove.push(key);
+            }
+        }
+    }
+    
+    keysToRemove.forEach(key => sessionStorage.removeItem(key));
+}
+
+
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
@@ -4659,6 +4683,9 @@ async function updateChatStatuses() {
 }
      
 async function initializePage() {
+    // Очищаем старые кэши при запуске
+    clearOldCaches();
+    
     const userDataFromStorage = sessionStorage.getItem('userData');
     if (!userDataFromStorage) {
         window.location.href = 'profile.html';
@@ -4733,7 +4760,7 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    // Параллельная загрузка данных без индикаторов
+    // Параллельная загрузка данных без индикаторов с кэшированием
     await Promise.all([
         loadUserData(),
         smartLoadChats()
@@ -4748,9 +4775,11 @@ async function initializePage() {
         }
     }
     
-    // Обработка открытого чата без задержек
+    // Обработка открытого чата без задержек с кэшированием
     const openChatId = sessionStorage.getItem('openChatId');
     const openChatName = sessionStorage.getItem('openChatName');
+    
+    // Добавляем обработчики ориентации
     window.addEventListener('orientationchange', handleOrientationChange);
     window.addEventListener('resize', handleOrientationChange);
     
@@ -4764,8 +4793,10 @@ async function initializePage() {
         sessionStorage.removeItem('openChatId');
         sessionStorage.removeItem('openChatName');
         
-        // Открываем чат с учетом настроек анимаций
-        openChat(openChatId, !isFirstSiteVisit);
+        // Открываем чат с учетом настроек анимаций и кэшированием
+        setTimeout(() => {
+            openChat(openChatId, !isFirstSiteVisit);
+        }, 100);
     } else {
         // Проверяем, есть ли временный чат для открытия (для новых чатов из contacts.html)
         const tempChatContactId = sessionStorage.getItem('tempChatContactId');
@@ -4786,12 +4817,25 @@ async function initializePage() {
             };
             
             // Открываем временный чат с учетом настроек анимаций
-            openTempChat(tempChat, !isFirstSiteVisit);
+            setTimeout(() => {
+                openTempChat(tempChat, !isFirstSiteVisit);
+            }, 100);
         }
     }
 
     // Настройка обработчиков событий
+    setupEventHandlers();
+
+    // Запускаем фоновые процессы
+    startBackgroundProcesses();
+
+    console.log('✅ Page initialized successfully with caching');
+}
+
+// Новые вспомогательные функции для initializePage
+function setupEventHandlers() {
     const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
+    const { attachButton } = getActiveElements();
 
     // Обработчики для модального окна контактов
     addChatButton.addEventListener('click', (e) => {
@@ -4833,13 +4877,14 @@ async function initializePage() {
             // Прокручиваем к нижней части при фокусе на поле ввода
             setTimeout(() => {
                 const { messagesContainer } = getActiveElements();
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                if (messagesContainer && currentMessages.length > 0) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
             }, 100);
         });
     }
 
     // Обработчики для кнопки прикрепления
-    const { attachButton } = getActiveElements();
     if (attachButton) {
         attachButton.addEventListener('click', (e) => {
             e.preventDefault();
@@ -4850,53 +4895,6 @@ async function initializePage() {
     // Обработчик выбора изображений
     imageInput.addEventListener('change', handleImageSelection);
 
-    // Обновление статусов каждые 5 секунд
-    const statusUpdateInterval = setInterval(async () => {
-        const { chatModal } = getActiveElements();
-        
-        // Фоновое обновление статусов без блокировки UI
-        try {
-            await Promise.all([
-                fetch(`${SERVER_URL}/refresh_activity`, {
-                    method: 'POST',
-                    credentials: 'include'
-                }).catch(() => {}),
-                updateChatStatuses()
-            ]);
-            
-            // Обновляем статус в открытом чате
-            if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
-                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-                    const userActivity = activityData[otherParticipant.platform_user_id];
-                    const chatStatus = getActiveElements().chatStatus;
-                    
-                    if (userActivity) {
-                        if (userActivity.is_online) {
-                            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                            chatStatus.classList.add('online');
-                        } else {
-                            chatStatus.textContent = formatLastSeen(userActivity.last_online);
-                            chatStatus.classList.remove('online');
-                        }
-                    } else {
-                        chatStatus.textContent = 'был(а) недавно';
-                        chatStatus.classList.remove('online');
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Error updating statuses:', error);
-        }
-    }, 5000);
-
-    // Настройка обработчиков клавиатуры
-    setupKeyboardHandlers();
-    setupKeyboardDetection();
-    clearOldCaches();
-  
-    
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
         e.preventDefault();
@@ -4909,6 +4907,46 @@ async function initializePage() {
     document.addEventListener('gestureend', function(e) {
         e.preventDefault();
     });
+
+    // Обработчики для дополнительных кнопок
+    const menuButton = document.querySelector('.menu-button');
+    if (menuButton) {
+        menuButton.addEventListener('click', () => {
+            console.log('Menu button clicked');
+            // Здесь можно добавить функциональность меню
+        });
+    }
+
+    const contactsSearchBtn = document.querySelector('.contacts-search-btn');
+    if (contactsSearchBtn) {
+        contactsSearchBtn.addEventListener('click', () => {
+            contactsSearchInput.focus();
+        });
+    }
+}
+
+function startBackgroundProcesses() {
+    // Обновление статусов каждые 5 секунд с кэшированием
+    const statusUpdateInterval = setInterval(async () => {
+        await performBackgroundStatusUpdate();
+    }, 5000);
+
+    // Фоновая синхронизация чатов каждые 30 секунд
+    const chatsSyncInterval = setInterval(async () => {
+        if (currentChatsList.length > 0) {
+            await performBackgroundChatsSync();
+        }
+    }, 30000);
+
+    // Настройка обработчиков клавиатуры
+    setupKeyboardHandlers();
+    setupKeyboardDetection();
+
+    // Настройка высоты для мобильных устройств
+    if (!isDesktop) {
+        setupMobileChatHeight();
+        window.addEventListener('resize', setupMobileChatHeight);
+    }
 
     // Обновление статусов при возвращении на вкладку
     document.addEventListener('visibilitychange', () => {
@@ -4956,74 +4994,109 @@ async function initializePage() {
     }, 30000);
     
     // Очистка интервалов при закрытии страницы
-    window.addEventListener('beforeunload', () => {
+    const cleanupIntervals = () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
+        clearInterval(chatsSyncInterval);
         sendOfflineStatus();
+        
         // Если пользователь полностью закрывает вкладку - сбрасываем флаг первого посещения
-        sessionStorage.removeItem('siteFirstVisit');
-    });
-
-    window.addEventListener('pagehide', () => {
-        clearInterval(activityInterval);
-        clearInterval(statusUpdateInterval);
-        sendOfflineStatus();
-    });
-
-    window.addEventListener('unload', () => {
-        clearInterval(activityInterval);
-        clearInterval(statusUpdateInterval);
-        sendOfflineStatus();
-        sessionStorage.removeItem('siteFirstVisit');
-    });
+        if (!sessionStorage.getItem('inside_site')) {
+            sessionStorage.removeItem('siteFirstVisit');
+        }
+    };
     
-    // Обработчики для дополнительных кнопок
-    const menuButton = document.querySelector('.menu-button');
-    if (menuButton) {
-        menuButton.addEventListener('click', () => {
-            console.log('Menu button clicked');
-            // Здесь можно добавить функциональность меню
-        });
-    }
-
-    const contactsSearchBtn = document.querySelector('.contacts-search-btn');
-    if (contactsSearchBtn) {
-        contactsSearchBtn.addEventListener('click', () => {
-            contactsSearchInput.focus();
-        });
-    }
-
-    // Настройка высоты для мобильных устройств
-    if (!isDesktop) {
-        setupMobileChatHeight();
-        window.addEventListener('resize', setupMobileChatHeight);
-    }
-
-    console.log('Page initialized successfully');
+    window.addEventListener('beforeunload', cleanupIntervals);
+    window.addEventListener('pagehide', cleanupIntervals);
+    window.addEventListener('unload', cleanupIntervals);
 }
 
-
-// В функции initializePage добавьте очистку старых кэшей
-function clearOldCaches() {
-    const now = Date.now();
-    const keysToRemove = [];
+async function performBackgroundStatusUpdate() {
+    const { chatModal } = getActiveElements();
     
-    for (let i = 0; i < sessionStorage.length; i++) {
-        const key = sessionStorage.key(i);
-        if (key.startsWith('messages_cache_') || key.startsWith('avatar_')) {
-            try {
-                const data = JSON.parse(sessionStorage.getItem(key));
-                if (now - data.timestamp > 3600000) { // 1 час
-                    keysToRemove.push(key);
+    try {
+        await Promise.all([
+            fetch(`${SERVER_URL}/refresh_activity`, {
+                method: 'POST',
+                credentials: 'include'
+            }).catch(() => {}),
+            updateChatStatuses()
+        ]);
+        
+        // Обновляем статус в открытом чате
+        if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+            const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+                const userActivity = activityData[otherParticipant.platform_user_id];
+                const chatStatus = getActiveElements().chatStatus;
+                
+                if (userActivity) {
+                    if (userActivity.is_online) {
+                        chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        chatStatus.classList.add('online');
+                    } else {
+                        chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                        chatStatus.classList.remove('online');
+                    }
+                } else {
+                    chatStatus.textContent = 'был(а) недавно';
+                    chatStatus.classList.remove('online');
                 }
-            } catch (e) {
-                keysToRemove.push(key);
             }
         }
+    } catch (error) {
+        console.error('Error in background status update:', error);
+    }
+}
+
+async function performBackgroundChatsSync() {
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chats`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+            credentials: "include"
+        });
+
+        const data = await response.json();
+        if (data.status === "success") {
+            // Проверяем есть ли значительные изменения
+            const hasSignificantChanges = checkForSignificantChanges(currentChatsList, data.chats);
+            
+            if (hasSignificantChanges) {
+                console.log("🔄 Обнаружены изменения в чатах, обновляем список");
+                currentChatsList = data.chats;
+                saveChatsToCache(data.chats);
+                renderChats(data.chats);
+            } else {
+                // Просто обновляем кэш без перерисовки
+                currentChatsList = data.chats;
+                saveChatsToCache(data.chats);
+            }
+        }
+    } catch (error) {
+        console.error("Фоновая синхронизация чатов не удалась:", error);
+    }
+}
+
+function checkForSignificantChanges(oldChats, newChats) {
+    if (!oldChats || !newChats) return true;
+    if (oldChats.length !== newChats.length) return true;
+    
+    for (let i = 0; i < oldChats.length; i++) {
+        const oldChat = oldChats[i];
+        const newChat = newChats.find(chat => chat.id === oldChat.id);
+        
+        if (!newChat) return true;
+        if (oldChat.last_message !== newChat.last_message) return true;
+        if (oldChat.unread_count !== newChat.unread_count) return true;
+        if (oldChat.last_message_time !== newChat.last_message_time) return true;
     }
     
-    keysToRemove.forEach(key => sessionStorage.removeItem(key));
+    return false;
 }
+
 
 function filterChats(searchTerm) {
     const { chatsList } = getActiveElements();
