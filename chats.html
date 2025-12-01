@@ -1690,11 +1690,12 @@ input, textarea {
     
 }
 
+
 /* Гарантированное мгновенное отображение при повторном открытии */
 body.no-animations .chats-content,
 body.no-animations .chat-item,
 body.no-animations .search-container,
-body.no-chats {
+body.no-animations .no-chats {
     animation: none !important;
     transition: none !important;
     opacity: 1 !important;
@@ -1709,51 +1710,61 @@ body.no-animations * {
     transition-duration: 0s !important;
 }
 
-/* Отключаем анимации для всех элементов */
-body.no-animations .animate__animated,
-body.no-animations .fadeIn,
-body.no-animations .fadeInUp,
-body.no-animations .slideDown,
-body.no-animations .slideUp,
-body.no-animations .bounce {
-    animation: none !important;
-    opacity: 1 !important;
-    transform: none !important;
-}
 
-/* Для элементов с индивидуальными анимациями */
-body.no-animations .message {
-    opacity: 1 !important;
-    transform: none !important;
-    animation: none !important;
-}
 
-body.no-animations .chat-item {
-    opacity: 1 !important;
-    transform: none !important;
-    animation: none !important;
-}
-
-body.no-animations .date-header {
-    opacity: 1 !important;
-    animation: none !important;
-}
-
-body.no-animations .message-with-image {
-    opacity: 1 !important;
-    transform: none !important;
-    animation: none !important;
-}
-
-/* Убираем градиентные анимации для сообщений */
-body.no-animations .message-outgoing,
-body.no-animations .message-incoming {
-    animation: none !important;
-    background-position: 0% 50% !important;
-}
 
 
 </style>
+
+
+// В начале <head> вашего chats.html добавьте этот стиль ПЕРВЫМ
+<style id="disable-all-animations">
+/* СТРОГО ОТКЛЮЧАЕМ ВСЕ АНИМАЦИИ И ПЕРЕХОДЫ НА ВСЕЙ СТРАНИЦЕ */
+*, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-delay: 0s !important;
+}
+
+/* ГАРАНТИРУЕМ МГНОВЕННОЕ ОТОБРАЖЕНИЕ ВСЕГО */
+body, 
+.chats-container,
+.search-container,
+.chats-content,
+.chat-item,
+.message,
+.date-header,
+.message-box,
+.contact-item,
+.contacts-modal,
+.chat-modal,
+.no-chats,
+.no-messages,
+.message-with-image {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    visibility: visible !important;
+}
+
+/* Убираем любые задержки */
+.fadeIn, .fadeInUp, .slideDown, .slideUp, .bounce,
+.animate__animated, .animate__fadeIn, .animate__fadeInUp {
+    animation: none !important;
+    opacity: 1 !important;
+}
+
+/* Отключаем градиентные анимации в сообщениях */
+.message-outgoing,
+.message-incoming {
+    animation: none !important;
+}
+</style>
+
 </head>
 <body>
   
@@ -2008,9 +2019,6 @@ body.no-animations .message-incoming {
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
-        // В разделе с другими глобальными переменными добавьте:
-        let isFirstSiteVisit = true;
-        let siteVisitFlag = 'siteFirstVisit';
 
 
 
@@ -2039,6 +2047,15 @@ if ('serviceWorker' in navigator) {
       });
   });
 
+  // Обработка обновлений
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) {
+      refreshing = true;
+      console.log('Controller changed, reloading page...');
+      window.location.reload();
+    }
+  });
 }
 
 
@@ -4380,215 +4397,92 @@ function setupKeyboardDetection() {
 
 
        
-async function openChat(chatId, withoutAnimations = false) {
-    if (isOpeningChat) return;
-    isOpeningChat = true;
-
+async function openChat(chatId, instant = true) {
+    console.log('⚡ Opening chat INSTANTLY:', chatId);
+    
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
+    // Очищаем мгновенно
+    messagesContainer.innerHTML = '';
+    noMessages.style.display = 'block';
+    noMessages.textContent = 'Загрузка...';
+    noMessages.style.opacity = '1';
+    noMessages.style.animation = 'none';
+    
+    // Сразу показываем чат
+    if (isDesktop) {
+        desktopPlaceholder.style.display = 'none';
+        chatModal.style.display = 'flex';
+        chatModal.style.opacity = '1';
+    } else {
+        chatModal.classList.add('active');
+        chatModal.style.transform = 'translateX(0)';
+        chatModal.style.opacity = '1';
+        document.body.style.overflow = 'hidden';
+    }
+    
     try {
-        messagesContainer.innerHTML = '';
-        noMessages.style.display = 'block';
-        noMessages.textContent = 'Загрузка...';
-
-        // Убираем анимацию перехода если нужно
-        if (!withoutAnimations) {
-            chatModal.classList.add('changing');
-            setTimeout(() => {
-                chatModal.classList.remove('changing');
-            }, 300);
-        }
-        
-        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
+        // Параллельно загружаем данные
+        const [chatResponse, messagesResponse] = await Promise.all([
+            fetch(`${SERVER_URL}/get_chat_info`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                credentials: 'include'
             }),
-            credentials: 'include'
-        });
+            fetch(`${SERVER_URL}/get_messages`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                credentials: 'include'
+            })
+        ]);
         
-        const chatData = await response.json();
-        
-        if (chatData.status !== 'success') {
-            throw new Error(chatData.error || 'Не удалось загрузить чат');
-        }
-        
-        currentChat = chatData.chat;
-        
-        chatTitle.textContent = currentChat.name || 'Новый чат';
-        
-        // Получаем статус участника чата
-        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        let statusText = 'был(а) недавно';
-        let isOnline = false;
-
-        if (otherParticipant) {
-            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-            const userActivity = activityData[otherParticipant.platform_user_id];
-            
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    statusText = 'В сети';
-                    isOnline = true;
-                } else {
-                    statusText = formatLastSeen(userActivity.last_online);
-                    isOnline = false;
-                }
-            }
-        }
-
-        // Обновляем статус в заголовке чата
-        if (isOnline) {
-            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-            chatStatus.classList.add('online');
-        } else {
-            chatStatus.textContent = statusText;
-            chatStatus.classList.remove('online');
-        }
-        
-        // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
-        chatAvatar.style.backgroundImage = '';
-        chatAvatar.style.backgroundColor = '';
-        chatAvatar.textContent = '';
-        
-        // Загрузка аватара
-        if (currentChat.participants && currentChat.participants.length > 0) {
-            const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant) {
-                const userId = otherParticipant.platform_user_id;
-                const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-                const bgColor = currentChat.avatar_background || getRandomColor();
-                
-                // Пробуем загрузить аватар для участника чата
-                const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
-                const img = new Image();
-                
-                img.onload = function() {
-                    // Аватар успешно загружен - только картинка
-                    chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                    chatAvatar.textContent = '';
-                };
-                
-                img.onerror = function() {
-                    // Аватар не загрузился - только градиент
-                    chatAvatar.style.background = bgColor ? 
-                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                        'linear-gradient(135deg, #0088cc, #40a7e3)';
-                    chatAvatar.textContent = initials;
-                };
-                
-                img.src = avatarUrl;
-            } else {
-                // Если нет другого участника
-                const bgColor = currentChat.avatar_background || getRandomColor();
-                chatAvatar.style.background = bgColor ? 
-                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                    'linear-gradient(135deg, #0088cc, #40a7e3)';
-                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-            }
-        } else {
-            // Если нет участников
-            const bgColor = currentChat.avatar_background || getRandomColor();
-            chatAvatar.style.background = bgColor ? 
-                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                'linear-gradient(135deg, #0088cc, #40a7e3)';
-            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-        }
-        
-        const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-        
+        const chatData = await chatResponse.json();
         const messagesData = await messagesResponse.json();
         
-        if (messagesData.status === 'success') {
-            currentMessages = messagesData.messages;
-            // Передаем флаг анимаций в renderMessages
-            renderMessages(currentMessages, !withoutAnimations);
+        // Мгновенное обновление UI
+        if (chatData.status === 'success') {
+            currentChat = chatData.chat;
             
-            markAllMessagesAsRead(chatId);
-        
-            if (currentMessages.length === 0) {
-                noMessages.style.display = 'block';
-                noMessages.textContent = 'Сообщений пока нет...';
-                // Применяем настройки анимаций к сообщению "нет сообщений"
-                if (withoutAnimations) {
-                    noMessages.style.animation = 'none';
+            // Устанавливаем заголовок мгновенно
+            chatTitle.textContent = currentChat.name || 'Новый чат';
+            chatTitle.style.opacity = '1';
+            
+            // Аватар мгновенно
+            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+            chatAvatar.style.opacity = '1';
+            chatAvatar.style.animation = 'none';
+            
+            // Сообщения мгновенно
+            if (messagesData.status === 'success') {
+                currentMessages = messagesData.messages;
+                
+                // ВАЖНО: renderMessages с флагом false = БЕЗ анимаций
+                renderMessages(currentMessages, false);
+                
+                if (currentMessages.length === 0) {
+                    noMessages.style.display = 'block';
+                    noMessages.textContent = 'Сообщений пока нет...';
                     noMessages.style.opacity = '1';
+                } else {
+                    noMessages.style.display = 'none';
                 }
-            } else {
-                noMessages.style.display = 'none';
-            }
-        } else {
-            currentMessages = [];
-            noMessages.style.display = 'block';
-            noMessages.textContent = 'Сообщений пока нет...';
-            // Применяем настройки анимаций к сообщению "нет сообщений"
-            if (withoutAnimations) {
-                noMessages.style.animation = 'none';
-                noMessages.style.opacity = '1';
             }
         }
         
-        if (isDesktop) {
-            desktopPlaceholder.style.display = 'none';
-            chatModal.style.display = 'flex';
-        } else {
-            chatModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
-        }
-        
-        if (currentMessages.length > 0) {
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        }
-
-        // ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем только счетчик непрочитанных сообщений
-        // НЕ обновляем last_message и last_message_time, чтобы чат не поднимался вверх
-        updateChatItemInDOM(chatId, {
-            last_message: currentChat.last_message, // Сохраняем существующее
-            last_message_time: currentChat.last_message_time, // Сохраняем существующее
-            unread_count: 0 // Только сбрасываем счетчик
-        });
-
-        // Обновляем кэш чатов - только счетчик непрочитанных
-        const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-        if (chatIndex !== -1) {
-            currentChatsList[chatIndex].unread_count = 0;
-            // НЕ изменяем last_message и last_message_time - чат остается на своем месте
-            // НЕ перемещаем чат в начало списка
-        }
+        // Сразу прокручиваем
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 10);
         
     } catch (error) {
-        console.error('Error opening chat:', error);
-        showMessage('Ошибка загрузки чата', 'error');
-        closeChat();
-    } finally {
-        isOpeningChat = false;
+        console.error('Error:', error);
+        // Все равно показываем
+        noMessages.textContent = 'Ошибка загрузки';
+        noMessages.style.opacity = '1';
     }
-
-    window.addEventListener('resize', () => {
-        if (!isDesktop && currentChat) {
-            setupMobileChatHeight();
-        }
-    });
-    
-    window.currentChat = chatData;
 }
-
 
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
@@ -4713,20 +4607,27 @@ function updateChatItemInDOM(chatId, chatData) {
 }
 
 
-function renderMessages(messages, withAnimations = true) {
+function renderMessages(messages, withAnimations = false) {
     const { messagesContainer, noMessages } = getActiveElements();
     
+    // Мгновенная очистка контейнера
     messagesContainer.innerHTML = '';
     
     if (!messages || messages.length === 0) {
         noMessages.style.display = 'block';
         noMessages.textContent = 'Сообщений пока нет...';
+        // Мгновенное отображение
+        noMessages.style.opacity = '1';
+        noMessages.style.animation = 'none';
+        noMessages.style.transition = 'none';
         return;
     }
     
     noMessages.style.display = 'none';
     
     let lastDateHeader = '';
+    
+    // Мгновенный рендеринг всех сообщений
     messages.forEach((message, index) => {
         const currentDateHeader = formatDateHeader(message.sent_at);
         
@@ -4741,23 +4642,24 @@ function renderMessages(messages, withAnimations = true) {
             dateHeader.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
             dateHeader.style.padding = '4px 12px';
             dateHeader.style.borderRadius = '24px'; 
-            dateHeader.style.display = 'block'; 
+            dateHeader.style.display = 'block';
             
-            // Применяем настройки анимаций
-            if (!withAnimations) {
-                dateHeader.style.animation = 'none';
-            }
+            // Принудительно отключаем ВСЕ анимации
+            dateHeader.style.opacity = '1';
+            dateHeader.style.animation = 'none';
+            dateHeader.style.transition = 'none';
+            dateHeader.style.transform = 'none';
             
             messagesContainer.appendChild(dateHeader);
             lastDateHeader = currentDateHeader;
         }
         
+        // Рендерим сообщение БЕЗ анимаций
         renderMessage(message, withAnimations);
     });
     
-    setTimeout(() => {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 50);
+    // Мгновенная прокрутка (без задержки)
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 // New functions for message status updates
@@ -4909,137 +4811,92 @@ async function updateChatStatuses() {
 }
      
 async function initializePage() {
+    console.log('⚡ TheVuntgram: INSTANT LOADING - NO ANIMATIONS');
+    
     const userDataFromStorage = sessionStorage.getItem('userData');
     if (!userDataFromStorage) {
         window.location.href = 'profile.html';
         return;
     }
     
+    // Уведомление Service Worker об обновлении
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+            type: 'SKIP_WAITING'
+        });
+    }
     
     userData = JSON.parse(userDataFromStorage);
-    
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-    // ========== УПРАВЛЕНИЕ АНИМАЦИЯМИ ==========
-    // Проверяем, является ли это ПЕРВЫМ посещением сайта в этой вкладке
-    const isFirstVisit = sessionStorage.getItem('siteFirstVisit') === null;
-    
-    if (isFirstVisit) {
-        // Первый заход на сайт - включаем все анимации
-        isFirstSiteVisit = true;
-        sessionStorage.setItem('siteFirstVisit', 'visited');
-        console.log('🎬 Первый заход на сайт - анимации включены');
-    } else {
-        // Повторное открытие страницы во время той же сессии - выключаем анимации
-        isFirstSiteVisit = false;
-        console.log('🔁 Повторное открытие страницы - анимации выключены');
-        
-        // НЕМЕДЛЕННО применяем стили для отключения ВСЕХ анимаций
-        const style = document.createElement('style');
-        style.id = 'no-animations-instant';
-        style.textContent = `
-            * {
-                animation: none !important;
-                transition: none !important;
-                animation-delay: 0s !important;
-                transition-delay: 0s !important;
-                animation-duration: 0s !important;
-                transition-duration: 0s !important;
-            }
-            .chats-container,
-            .search-container,
-            .chats-content,
-            .chat-item,
-            .message,
-            .no-chats,
-            .date-header,
-            .message-box,
-            .message-with-image,
-            .contact-item,
-            .contacts-modal,
-            .image-modal-overlay {
-                animation: none !important;
-                transition: none !important;
-                opacity: 1 !important;
-                transform: none !important;
-            }
-            .chat-item {
-                opacity: 1 !important;
-                transform: none !important;
-                animation: none !important;
-            }
-            .message {
-                opacity: 1 !important;
-                transform: none !important;
-                animation: none !important;
-            }
-            .message-with-image {
-                opacity: 1 !important;
-                transform: none !important;
-                animation: none !important;
-            }
-            .message-image {
-                transition: none !important;
-                animation: none !important;
-            }
-            .fadeIn, .fadeInUp, .slideDown, .slideUp, .bounce {
-                animation: none !important;
-            }
-            .animate__animated {
-                animation: none !important;
-            }
-        `;
-        document.head.appendChild(style);
-        
-        // Также добавляем класс для дополнительного контроля
-        document.body.classList.add('no-animations');
-    }
-    
-    // Функция для применения настроек анимаций ко всем элементам
-    function applyAnimationSettingsToAllElements(disableAnimations) {
-        if (disableAnimations) {
-            // Принудительно отключаем анимации у всех возможных элементов
-            const allElements = document.querySelectorAll('*');
-            allElements.forEach(el => {
-                el.style.animation = 'none';
-                el.style.transition = 'none';
-                el.style.animationDelay = '0s';
-                el.style.transitionDelay = '0s';
-                el.style.animationDuration = '0s';
-                el.style.transitionDuration = '0s';
-            });
-            
-            // Специфические элементы
-            const animatedElements = [
-                '.chats-container',
-                '.search-container', 
-                '.chats-content',
-                '.chat-item',
-                '.message',
-                '.no-chats',
-                '.date-header',
-                '.message-box',
-                '.contact-item',
-                '.message-with-image'
-            ];
-            
-            animatedElements.forEach(selector => {
-                const elements = document.querySelectorAll(selector);
-                elements.forEach(el => {
-                    el.style.animation = 'none';
-                    el.style.transition = 'none';
-                    el.style.opacity = '1';
-                    el.style.transform = 'none';
-                });
-            });
+    // ========== ПРИНУДИТЕЛЬНОЕ ОТКЛЮЧЕНИЕ ВСЕХ АНИМАЦИЙ ==========
+    // СОЗДАЕМ СТИЛЬ ДЛЯ ПОЛНОГО ОТКЛЮЧЕНИЯ АНИМАЦИЙ СРАЗУ
+    const noAnimationsStyle = document.createElement('style');
+    noAnimationsStyle.id = 'no-animations-global';
+    noAnimationsStyle.textContent = `
+        /* МГНОВЕННОЕ ОТКЛЮЧЕНИЕ ВСЕХ АНИМАЦИЙ И ПЕРЕХОДОВ */
+        *, *::before, *::after {
+            animation: none !important;
+            transition: none !important;
+            animation-duration: 0s !important;
+            transition-duration: 0s !important;
+            animation-delay: 0s !important;
+            transition-delay: 0s !important;
+            animation-fill-mode: none !important;
         }
-    }
+        
+        /* ВСЕГДА ПОЛНАЯ ВИДИМОСТЬ */
+        body {
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+        
+        /* ВСЕ ЭЛЕМЕНТЫ ПОКАЗЫВАЮТСЯ МГНОВЕННО */
+        .chats-container,
+        .search-container,
+        .chats-content,
+        .chat-item,
+        .message,
+        .no-chats,
+        .date-header,
+        .message-box,
+        .message-with-image,
+        .contact-item,
+        .contacts-modal,
+        .image-modal-overlay,
+        .chat-modal,
+        .no-messages,
+        .message-input-container,
+        .bottom-nav,
+        .desktop-sidebar,
+        .desktop-content {
+            animation: none !important;
+            transition: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+            visibility: visible !important;
+        }
+        
+        /* ОТКЛЮЧАЕМ ВСЕ АНИМАЦИИ СТОРОННИХ БИБЛИОТЕК */
+        .fadeIn, .fadeInUp, .slideDown, .slideUp, .bounce,
+        .animate__animated, .animate__fadeIn, .animate__fadeInUp {
+            animation: none !important;
+            opacity: 1 !important;
+        }
+        
+        /* ОТКЛЮЧАЕМ ГРАДИЕНТНЫЕ АНИМАЦИИ */
+        .message-outgoing,
+        .message-incoming {
+            animation: none !important;
+        }
+    `;
+    document.head.appendChild(noAnimationsStyle);
     
-    // Применяем настройки анимаций при инициализации
-    applyAnimationSettingsToAllElements(!isFirstSiteVisit);
-    // ========== КОНЕЦ УПРАВЛЕНИЯ АНИМАЦИЯМИ ==========
+    // ДОБАВЛЯЕМ КЛАСС ДЛЯ ДОПОЛНИТЕЛЬНОГО КОНТРОЛЯ
+    document.body.classList.add('no-animations');
+    // ========== КОНЕЦ ОТКЛЮЧЕНИЯ АНИМАЦИЙ ==========
 
-    // Мгновенная настройка UI без задержек
+    // МГНОВЕННАЯ настройка UI без задержек
     if (isDesktop) {
         mobileChatsContainer.style.display = 'none';
         mobileOnlyNav.style.display = 'none';
@@ -5048,30 +4905,38 @@ async function initializePage() {
         desktopOnlyNav.style.display = 'flex'; 
         chatModalDesktop.style.display = 'none'; 
         desktopPlaceholder.style.display = 'flex';
+        
+        // МГНОВЕННАЯ видимость
+        desktopSidebar.style.opacity = '1';
+        desktopContent.style.opacity = '1';
     } else {
         mobileChatsContainer.style.display = 'flex';
         mobileOnlyNav.style.display = 'flex';
         desktopSidebar.style.display = 'none';
         desktopContent.style.display = 'none';
         desktopOnlyNav.style.display = 'none'; 
-        chatModalMobile.classList.remove('active'); 
+        chatModalMobile.classList.remove('active');
+        
+        // МГНОВЕННАЯ видимость
+        mobileChatsContainer.style.opacity = '1';
+        mobileOnlyNav.style.opacity = '1';
     }
 
-    // Параллельная загрузка данных без индикаторов
-    await Promise.all([
-        loadUserData(),
-        smartLoadChats()
-    ]);
+    // ПАРАЛЛЕЛЬНАЯ загрузка данных без индикаторов
+    try {
+        await Promise.all([
+            loadUserData(),
+            smartLoadChats()
+        ]);
+    } catch (error) {
+        console.error('Error loading initial data:', error);
+    }
     
-    // При повторном открытии сразу показываем контент без анимаций
-    if (!isFirstSiteVisit) {
-        const { chatsList, noChats } = getActiveElements();
-        // Гарантируем что контент виден сразу
-        if (chatsList.children.length > 0) {
-            noChats.style.display = 'none';
-        }
-        
-        // Принудительно показываем элементы без анимаций
+    // МГНОВЕННО показываем контент
+    const { chatsList, noChats } = getActiveElements();
+    if (chatsList.children.length > 0) {
+        noChats.style.display = 'none';
+        // ПРИНУДИТЕЛЬНО показываем элементы
         setTimeout(() => {
             const allChatItems = document.querySelectorAll('.chat-item');
             allChatItems.forEach(item => {
@@ -5079,14 +4944,12 @@ async function initializePage() {
                 item.style.transform = 'none';
                 item.style.animation = 'none';
             });
-        }, 50);
+        }, 10); // Минимальная задержка
     }
     
-    // Обработка открытого чата без задержек
+    // Обработка открытого чата БЕЗ ЗАДЕРЖЕК
     const openChatId = sessionStorage.getItem('openChatId');
     const openChatName = sessionStorage.getItem('openChatName');
-    window.addEventListener('orientationchange', handleOrientationChange);
-    window.addEventListener('resize', handleOrientationChange);
     
     if (openChatId && openChatName) {
         const tempChat = {
@@ -5098,10 +4961,12 @@ async function initializePage() {
         sessionStorage.removeItem('openChatId');
         sessionStorage.removeItem('openChatName');
         
-        // Открываем чат с учетом настроек анимаций
-        openChat(openChatId, !isFirstSiteVisit);
+        // ОТКРЫВАЕМ ЧАТ БЕЗ АНИМАЦИЙ
+        setTimeout(() => {
+            openChat(openChatId, true); // true = БЕЗ анимаций
+        }, 10);
     } else {
-        // Проверяем, есть ли временный чат для открытия (для новых чатов из contacts.html)
+        // Проверяем, есть ли временный чат для открытия
         const tempChatContactId = sessionStorage.getItem('tempChatContactId');
         const tempChatName = sessionStorage.getItem('tempChatName');
         
@@ -5109,7 +4974,6 @@ async function initializePage() {
             sessionStorage.removeItem('tempChatContactId');
             sessionStorage.removeItem('tempChatName');
             
-            // Создаем временный чат объект
             const tempChat = {
                 id: `temp_${Date.now()}`,
                 name: tempChatName,
@@ -5119,12 +4983,14 @@ async function initializePage() {
                 avatar_background: '#0088cc'
             };
             
-            // Открываем временный чат с учетом настроек анимаций
-            openTempChat(tempChat, !isFirstSiteVisit);
+            // ОТКРЫВАЕМ ВРЕМЕННЫЙ ЧАТ БЕЗ АНИМАЦИЙ
+            setTimeout(() => {
+                openTempChat(tempChat, true); // true = БЕЗ анимаций
+            }, 10);
         }
     }
 
-    // Настройка обработчиков событий
+    // Настройка обработчиков событий (быстро)
     const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
 
     // Обработчики для модального окна контактов
@@ -5153,7 +5019,7 @@ async function initializePage() {
         });
     }
     
-    // Обработчики для отправки сообщений
+    // Обработчики для отправки сообщений (МГНОВЕННАЯ отправка)
     if (sendMessageButton && messageInput) {
         sendMessageButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
@@ -5164,11 +5030,9 @@ async function initializePage() {
         
         // Автофокус на поле ввода при открытии чата
         messageInput.addEventListener('focus', () => {
-            // Прокручиваем к нижней части при фокусе на поле ввода
-            setTimeout(() => {
-                const { messagesContainer } = getActiveElements();
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
+            // МГНОВЕННАЯ прокрутка
+            const { messagesContainer } = getActiveElements();
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         });
     }
 
@@ -5188,7 +5052,6 @@ async function initializePage() {
     const statusUpdateInterval = setInterval(async () => {
         const { chatModal } = getActiveElements();
         
-        // Фоновое обновление статусов без блокировки UI
         try {
             await Promise.all([
                 fetch(`${SERVER_URL}/refresh_activity`, {
@@ -5229,7 +5092,6 @@ async function initializePage() {
     setupKeyboardHandlers();
     setupKeyboardDetection();
   
-    
     // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
         e.preventDefault();
@@ -5282,47 +5144,29 @@ async function initializePage() {
     // Обновление статуса активности
     setTimeout(() => {
         updateUserActivity(true);
-    }, 100);
+    }, 10); // Минимальная задержка
 
     const activityInterval = setInterval(() => {
         updateUserActivity(true);
     }, 30000);
-    
     
     // Очистка интервалов при закрытии страницы
     window.addEventListener('beforeunload', () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
-        
-        // Если пользователь полностью закрывает вкладку - сбрасываем флаг первого посещения
-        // Но сохраняем его если это переход между страницами сайта
-        const isNavigatingWithinSite = localStorage.getItem("inside_site") === "yes";
-        if (!isNavigatingWithinSite) {
-            sessionStorage.removeItem('siteFirstVisit');
-        }
     });
 
     window.addEventListener('pagehide', () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
-        
-        const isNavigatingWithinSite = localStorage.getItem("inside_site") === "yes";
-        if (!isNavigatingWithinSite) {
-            sessionStorage.removeItem('siteFirstVisit');
-        }
     });
 
     window.addEventListener('unload', () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
-        
-        const isNavigatingWithinSite = localStorage.getItem("inside_site") === "yes";
-        if (!isNavigatingWithinSite) {
-            sessionStorage.removeItem('siteFirstVisit');
-        }
     });
     
     // Обработчики для дополнительных кнопок
@@ -5330,11 +5174,9 @@ async function initializePage() {
     if (menuButton) {
         menuButton.addEventListener('click', () => {
             console.log('Menu button clicked');
-            // Здесь можно добавить функциональность меню
         });
     }
 
-    
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
         contactsSearchBtn.addEventListener('click', () => {
@@ -5348,7 +5190,7 @@ async function initializePage() {
         window.addEventListener('resize', setupMobileChatHeight);
     }
 
-    console.log('Page initialized successfully');
+    console.log('✅ Page initialized INSTANTLY - NO ANIMATIONS');
 }
 
 
@@ -5392,8 +5234,6 @@ function handleOrientationChange() {
         }
     }, 100);
 }
-
-
 
 function filterContacts(searchTerm) {
     const contactItems = contactsList.querySelectorAll('.contact-item');
