@@ -1690,12 +1690,11 @@ input, textarea {
     
 }
 
-
 /* Гарантированное мгновенное отображение при повторном открытии */
 body.no-animations .chats-content,
 body.no-animations .chat-item,
 body.no-animations .search-container,
-body.no-animations .no-chats {
+body.no-chats {
     animation: none !important;
     transition: none !important;
     opacity: 1 !important;
@@ -1710,7 +1709,48 @@ body.no-animations * {
     transition-duration: 0s !important;
 }
 
+/* Отключаем анимации для всех элементов */
+body.no-animations .animate__animated,
+body.no-animations .fadeIn,
+body.no-animations .fadeInUp,
+body.no-animations .slideDown,
+body.no-animations .slideUp,
+body.no-animations .bounce {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+}
 
+/* Для элементов с индивидуальными анимациями */
+body.no-animations .message {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+}
+
+body.no-animations .chat-item {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+}
+
+body.no-animations .date-header {
+    opacity: 1 !important;
+    animation: none !important;
+}
+
+body.no-animations .message-with-image {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+}
+
+/* Убираем градиентные анимации для сообщений */
+body.no-animations .message-outgoing,
+body.no-animations .message-incoming {
+    animation: none !important;
+    background-position: 0% 50% !important;
+}
 
 
 </style>
@@ -2010,6 +2050,15 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+
+
+function applyAnimationSettings(disableAnimations) {
+    if (disableAnimations) {
+        document.body.classList.add('no-animations');
+    } else {
+        document.body.classList.remove('no-animations');
+    }
+}
 
 // Функция для проверки онлайн-статуса
 function checkOnlineStatus() {
@@ -4874,9 +4923,11 @@ async function initializePage() {
         window.location.href = 'profile.html';
         return;
     }
+    
+    // Уведомление Service Worker об обновлении
     if (navigator.serviceWorker && navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage({
-        type: 'SKIP_WAITING'
+            type: 'SKIP_WAITING'
         });
     }
     
@@ -4884,6 +4935,7 @@ async function initializePage() {
     
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
+    // ========== УПРАВЛЕНИЕ АНИМАЦИЯМИ ==========
     // Проверяем, является ли это ПЕРВЫМ посещением сайта в этой вкладке
     const isFirstVisit = sessionStorage.getItem('siteFirstVisit') === null;
     
@@ -4904,6 +4956,10 @@ async function initializePage() {
             * {
                 animation: none !important;
                 transition: none !important;
+                animation-delay: 0s !important;
+                transition-delay: 0s !important;
+                animation-duration: 0s !important;
+                transition-duration: 0s !important;
             }
             .chats-container,
             .search-container,
@@ -4912,7 +4968,11 @@ async function initializePage() {
             .message,
             .no-chats,
             .date-header,
-            .message-box {
+            .message-box,
+            .message-with-image,
+            .contact-item,
+            .contacts-modal,
+            .image-modal-overlay {
                 animation: none !important;
                 transition: none !important;
                 opacity: 1 !important;
@@ -4921,14 +4981,78 @@ async function initializePage() {
             .chat-item {
                 opacity: 1 !important;
                 transform: none !important;
+                animation: none !important;
             }
             .message {
                 opacity: 1 !important;
                 transform: none !important;
+                animation: none !important;
+            }
+            .message-with-image {
+                opacity: 1 !important;
+                transform: none !important;
+                animation: none !important;
+            }
+            .message-image {
+                transition: none !important;
+                animation: none !important;
+            }
+            .fadeIn, .fadeInUp, .slideDown, .slideUp, .bounce {
+                animation: none !important;
+            }
+            .animate__animated {
+                animation: none !important;
             }
         `;
         document.head.appendChild(style);
+        
+        // Также добавляем класс для дополнительного контроля
+        document.body.classList.add('no-animations');
     }
+    
+    // Функция для применения настроек анимаций ко всем элементам
+    function applyAnimationSettingsToAllElements(disableAnimations) {
+        if (disableAnimations) {
+            // Принудительно отключаем анимации у всех возможных элементов
+            const allElements = document.querySelectorAll('*');
+            allElements.forEach(el => {
+                el.style.animation = 'none';
+                el.style.transition = 'none';
+                el.style.animationDelay = '0s';
+                el.style.transitionDelay = '0s';
+                el.style.animationDuration = '0s';
+                el.style.transitionDuration = '0s';
+            });
+            
+            // Специфические элементы
+            const animatedElements = [
+                '.chats-container',
+                '.search-container', 
+                '.chats-content',
+                '.chat-item',
+                '.message',
+                '.no-chats',
+                '.date-header',
+                '.message-box',
+                '.contact-item',
+                '.message-with-image'
+            ];
+            
+            animatedElements.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    el.style.animation = 'none';
+                    el.style.transition = 'none';
+                    el.style.opacity = '1';
+                    el.style.transform = 'none';
+                });
+            });
+        }
+    }
+    
+    // Применяем настройки анимаций при инициализации
+    applyAnimationSettingsToAllElements(!isFirstSiteVisit);
+    // ========== КОНЕЦ УПРАВЛЕНИЯ АНИМАЦИЯМИ ==========
 
     // Мгновенная настройка UI без задержек
     if (isDesktop) {
@@ -4961,6 +5085,16 @@ async function initializePage() {
         if (chatsList.children.length > 0) {
             noChats.style.display = 'none';
         }
+        
+        // Принудительно показываем элементы без анимаций
+        setTimeout(() => {
+            const allChatItems = document.querySelectorAll('.chat-item');
+            allChatItems.forEach(item => {
+                item.style.opacity = '1';
+                item.style.transform = 'none';
+                item.style.animation = 'none';
+            });
+        }, 50);
     }
     
     // Обработка открытого чата без задержек
@@ -5175,21 +5309,35 @@ async function initializePage() {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
+        
         // Если пользователь полностью закрывает вкладку - сбрасываем флаг первого посещения
-        sessionStorage.removeItem('siteFirstVisit');
+        // Но сохраняем его если это переход между страницами сайта
+        const isNavigatingWithinSite = localStorage.getItem("inside_site") === "yes";
+        if (!isNavigatingWithinSite) {
+            sessionStorage.removeItem('siteFirstVisit');
+        }
     });
 
     window.addEventListener('pagehide', () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
+        
+        const isNavigatingWithinSite = localStorage.getItem("inside_site") === "yes";
+        if (!isNavigatingWithinSite) {
+            sessionStorage.removeItem('siteFirstVisit');
+        }
     });
 
     window.addEventListener('unload', () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
-        sessionStorage.removeItem('siteFirstVisit');
+        
+        const isNavigatingWithinSite = localStorage.getItem("inside_site") === "yes";
+        if (!isNavigatingWithinSite) {
+            sessionStorage.removeItem('siteFirstVisit');
+        }
     });
     
     // Обработчики для дополнительных кнопок
