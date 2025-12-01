@@ -1712,12 +1712,57 @@ body.no-animations * {
 
 
 
+/* Добавить в chats.css */
+.page-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow-y: auto;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.page-enter {
+    opacity: 0;
+    transform: translateX(20px);
+}
+
+.page-enter-active {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.page-exit {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.page-exit-active {
+    opacity: 0;
+    transform: translateX(-20px);
+}
+
+/* Индикатор загрузки */
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s ease-in-out infinite;
+    margin: 0 auto 10px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
 
 
 </style>
 </head>
 <body>
-  
+    <div id="app-container"></div>
 
     <div class="desktop-sidebar">
         <div class="search-container">
@@ -1889,28 +1934,36 @@ body.no-animations * {
 
  
     <div class="bottom-nav mobile-only-nav">
-        <a href="contacts.html" class="nav-item">
+        <button class="nav-item" data-page="contacts">
             <i class="fas fa-user-circle"></i>
             <span>Контакты</span>
-        </a>
+        </button>
         
-        <a href="chats.html" class="nav-item active">
+        <button class="nav-item" data-page="chats">
             <i class="fas fa-comments"></i>
             <span>Чаты</span>
-        </a>
+        </button>
      
-        <a href="profile.html" class="nav-item">
+        <button class="nav-item" data-page="profile">
             <i class="fas fa-cog"></i>
             <span>Профиль</span>
-        </a>
+        </button>
     </div>
 
 
+</div>
 
+<div id="contacts-page" class="page-container" style="display: none;"></div>
+<div id="profile-page" class="page-container" style="display: none;"></div>
 
     <script>
     
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
+
+        window.currentChatsList = window.currentChatsList || [];
+        window.currentChat = window.currentChat || null;
+        window.currentMessages = window.currentMessages || [];
+        window.userData = window.userData || {};
         
         const messageBox = document.getElementById('messageBox');
         const contactsModal = document.getElementById('contactsModal');
@@ -1969,7 +2022,164 @@ body.no-animations * {
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        let currentPage = 'chats';
+        let pageCache = {};
 
+// Функция загрузки страницы
+async function loadPage(pageName) {
+    if (currentPage === pageName) return;
+    
+    const pageUrl = `${pageName}.html`;
+    
+    // Если страница уже в кэше, используем ее
+    if (pageCache[pageName]) {
+        showPage(pageName, pageCache[pageName]);
+        return;
+    }
+    
+    // Показываем индикатор загрузки
+    showLoadingIndicator();
+    
+    try {
+        const response = await fetch(pageUrl);
+        const html = await response.text();
+        
+        // Сохраняем в кэш
+        pageCache[pageName] = html;
+        
+        // Показываем страницу
+        showPage(pageName, html);
+        
+    } catch (error) {
+        console.error(`Error loading page ${pageName}:`, error);
+        showMessage(`Ошибка загрузки страницы ${pageName}`, 'error');
+    } finally {
+        hideLoadingIndicator();
+    }
+}
+
+// Функция отображения страницы
+function showPage(pageName, html) {
+    const oldPage = currentPage;
+    currentPage = pageName;
+    
+    // Скрыть текущую страницу
+    document.getElementById(`${oldPage}-page`).style.display = 'none';
+    document.getElementById(`${oldPage}-page`).innerHTML = '';
+    
+    // Показать новую страницу
+    const pageContainer = document.getElementById(`${pageName}-page`);
+    pageContainer.innerHTML = html;
+    pageContainer.style.display = 'block';
+    
+    // Инициализировать скрипты для новой страницы
+    initializePageScripts(pageName, pageContainer);
+    
+    // Обновить URL в браузере без перезагрузки
+    history.pushState({ page: pageName }, '', pageName === 'chats' ? '/' : `/${pageName}.html`);
+    
+    // Обновить активную кнопку в навигации
+    updateActiveNavButton(pageName);
+    
+    // Сохранить состояние в sessionStorage
+    sessionStorage.setItem('currentPage', pageName);
+}
+
+// Инициализация скриптов для конкретной страницы
+function initializePageScripts(pageName, container) {
+    switch(pageName) {
+        case 'chats':
+            initializeChatsPage(container);
+            break;
+        case 'contacts':
+            initializeContactsPage(container);
+            break;
+        case 'profile':
+            initializeProfilePage(container);
+            break;
+    }
+}
+
+// Инициализация страницы чатов
+function initializeChatsPage(container) {
+    // Перенесите сюда основную логику инициализации из chats.html
+    // Все селекторы должны быть относительно container, а не document
+    
+    const chatsContainer = container.querySelector('.chats-container');
+    const searchInput = container.querySelector('#searchInputMobile') || container.querySelector('#searchInputDesktop');
+    
+    // Инициализация логики чатов
+    if (window.currentChatsList && window.currentChatsList.length > 0) {
+        renderChats(window.currentChatsList);
+    }
+    
+    // Настройка обработчиков событий
+    setupChatsEventHandlers(container);
+}
+
+// Инициализация страницы контактов
+function initializeContactsPage(container) {
+    const contactsList = container.querySelector('#contactsList');
+    const searchInput = container.querySelector('#contactsSearchInput');
+    
+    // Загрузка контактов
+    loadContacts();
+    
+    // Настройка обработчиков
+    setupContactsEventHandlers(container);
+}
+
+// Инициализация страницы профиля
+function initializeProfilePage(container) {
+    // Логика инициализации профиля
+    const userData = JSON.parse(sessionStorage.getItem('userData'));
+    if (userData) {
+        updateProfileDisplay(userData, container);
+    }
+    
+    setupProfileEventHandlers(container);
+}
+
+// Обновление активной кнопки в навигации
+function updateActiveNavButton(pageName) {
+    document.querySelectorAll('.nav-item').forEach(button => {
+        button.classList.remove('active');
+        if (button.dataset.page === pageName) {
+            button.classList.add('active');
+        }
+    });
+}
+
+// Показать индикатор загрузки
+function showLoadingIndicator() {
+    let loader = document.getElementById('page-loader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'page-loader';
+        loader.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 9999;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+        `;
+        loader.innerHTML = '<div class="spinner"></div><p>Загрузка...</p>';
+        document.body.appendChild(loader);
+    }
+    loader.style.display = 'block';
+}
+
+// Скрыть индикатор загрузки
+function hideLoadingIndicator() {
+    const loader = document.getElementById('page-loader');
+    if (loader) {
+        loader.style.display = 'none';
+    }
+}
 
 
 
@@ -2011,13 +2221,28 @@ if ('serviceWorker' in navigator) {
 
 
 
-function applyAnimationSettings(disableAnimations) {
-    if (disableAnimations) {
-        document.body.classList.add('no-animations');
+
+async function setupSPAPage(container) {
+    // Установка обработчиков для текущего контейнера
+    const { addChatButton, searchInput } = getActiveElements(container);
+    
+    if (addChatButton) {
+        addChatButton.addEventListener('click', showContactsModal);
+    }
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => filterChats(e.target.value));
+    }
+    
+    // Загрузка чатов если их еще нет
+    if (!window.currentChatsList || window.currentChatsList.length === 0) {
+        await smartLoadChats();
     } else {
-        document.body.classList.remove('no-animations');
+        // Используем существующие данные
+        renderChats(window.currentChatsList, container);
     }
 }
+
 
 // Функция для проверки онлайн-статуса
 function checkOnlineStatus() {
@@ -4876,12 +5101,56 @@ async function updateChatStatuses() {
     }
 }
      
-async function initializePage() {
+
+
+async function setupSPAPage(container) {
+    // Установка обработчиков для текущего контейнера
+    const { addChatButton, searchInput } = getActiveElements(container);
+    
+    if (addChatButton) {
+        addChatButton.addEventListener('click', showContactsModal);
+    }
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => filterChats(e.target.value));
+    }
+    
+    // Загрузка чатов если их еще нет
+    if (!window.currentChatsList || window.currentChatsList.length === 0) {
+        await smartLoadChats();
+    } else {
+        // Используем существующие данные
+        renderChats(window.currentChatsList, container);
+    }
+}
+
+
+async function initializePage(isSPA = false, container = document) {
+    // Если это SPA режим, используем переданный контейнер
+    const context = isSPA ? container : document;
+    
+    // Загрузка данных пользователя
     const userDataFromStorage = sessionStorage.getItem('userData');
-    if (!userDataFromStorage) {
+    if (!userDataFromStorage && !isSPA) {
+        // Если не SPA и нет данных - редирект на профиль
         window.location.href = 'profile.html';
         return;
     }
+    
+    if (userDataFromStorage) {
+        window.userData = JSON.parse(userDataFromStorage);
+    }
+    
+    // Инициализация только для текущей страницы
+    if (!isSPA) {
+        // Стандартная инициализация для прямого захода на страницу
+        await setupStandardPage();
+    } else {
+        // Инициализация в контексте SPA
+        await setupSPAPage(context);
+    }
+
+
     
     // Уведомление Service Worker об обновлении
     if (navigator.serviceWorker && navigator.serviceWorker.controller) {
@@ -5252,7 +5521,7 @@ async function initializePage() {
         updateChatStatuses();
         updateUserActivity(true);
     });
-
+    
     // Обновление статуса активности
     setTimeout(() => {
         updateUserActivity(true);
@@ -5299,6 +5568,38 @@ async function initializePage() {
         }
     });
     
+
+    // Обработка навигации браузера
+window.addEventListener('popstate', (event) => {
+    if (event.state && event.state.page) {
+        loadPage(event.state.page);
+    } else {
+        loadPage('chats');
+    }
+});
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    // Проверить текущую страницу из sessionStorage
+    const savedPage = sessionStorage.getItem('currentPage') || 'chats';
+    
+    // Инициализировать навигацию
+    setupNavigation();
+    
+    // Загрузить сохраненную страницу
+    loadPage(savedPage);
+});
+
+// Настройка обработчиков навигации
+function setupNavigation() {
+    document.querySelectorAll('.nav-item[data-page]').forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            const page = button.dataset.page;
+            loadPage(page);
+        });
+    });
+}
     // Обработчики для дополнительных кнопок
     const menuButton = document.querySelector('.menu-button');
     if (menuButton) {
@@ -5381,7 +5682,7 @@ function filterContacts(searchTerm) {
     });
 }
       
-        document.addEventListener('DOMContentLoaded', initializePage);
+
         
         
         window.addEventListener('pageshow', (event) => {
