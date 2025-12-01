@@ -1717,51 +1717,32 @@ body.no-animations * {
 </style>
 
 
-// В начале <head> вашего chats.html добавьте этот стиль ПЕРВЫМ
 <style id="disable-all-animations">
-/* СТРОГО ОТКЛЮЧАЕМ ВСЕ АНИМАЦИИ И ПЕРЕХОДЫ НА ВСЕЙ СТРАНИЦЕ */
-*, *::before, *::after {
-    animation: none !important;
-    transition: none !important;
-    animation-duration: 0s !important;
-    transition-duration: 0s !important;
-    animation-delay: 0s !important;
-    transition-delay: 0s !important;
+/* ОТКЛЮЧАЕМ ТОЛЬКО АНИМАЦИИ, НЕ ЛОМАЯ СТРУКТУРУ */
+* {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
 }
 
-/* ГАРАНТИРУЕМ МГНОВЕННОЕ ОТОБРАЖЕНИЕ ВСЕГО */
-body, 
+/* Обеспечиваем мгновенное отображение основных элементов */
 .chats-container,
 .search-container,
 .chats-content,
 .chat-item,
 .message,
 .date-header,
-.message-box,
-.contact-item,
-.contacts-modal,
-.chat-modal,
-.no-chats,
-.no-messages,
 .message-with-image {
     animation: none !important;
     transition: none !important;
-    opacity: 1 !important;
-    transform: none !important;
-    visibility: visible !important;
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
 }
 
-/* Убираем любые задержки */
-.fadeIn, .fadeInUp, .slideDown, .slideUp, .bounce,
-.animate__animated, .animate__fadeIn, .animate__fadeInUp {
-    animation: none !important;
-    opacity: 1 !important;
-}
-
-/* Отключаем градиентные анимации в сообщениях */
-.message-outgoing,
-.message-incoming {
-    animation: none !important;
+/* НЕ трогаем структурные стили */
+body, .desktop-sidebar, .desktop-content, 
+.mobile-only, .bottom-nav, .chat-modal {
+    /* Оставляем оригинальные стили нетронутыми */
 }
 </style>
 
@@ -2093,10 +2074,12 @@ checkOnlineStatus();
 
 
 function applyAnimationSettings(disableAnimations) {
+    // Уберите добавление класса к body
+    const styleId = 'no-animations-style';
+    const existingStyle = document.getElementById(styleId);
+    
     if (disableAnimations) {
-        // Создаем стиль для отключения анимаций
-        const styleId = 'no-animations-style';
-        if (!document.getElementById(styleId)) {
+        if (!existingStyle) {
             const style = document.createElement('style');
             style.id = styleId;
             style.textContent = `
@@ -2105,34 +2088,15 @@ function applyAnimationSettings(disableAnimations) {
                 .chats-content,
                 .chat-item,
                 .message,
-                .no-chats,
                 .date-header {
                     animation: none !important;
                     transition: none !important;
                 }
-                
-                .chat-item {
-                    opacity: 1 !important;
-                    transform: none !important;
-                }
-                
-                .message {
-                    opacity: 1 !important;
-                    transform: none !important;
-                }
             `;
             document.head.appendChild(style);
         }
-        
-        // Также добавляем класс к body для дополнительного контроля
-        document.body.classList.add('no-animations');
-    } else {
-        // Включаем анимации - удаляем стиль
-        const style = document.getElementById('no-animations-style');
-        if (style) {
-            style.remove();
-        }
-        document.body.classList.remove('no-animations');
+    } else if (existingStyle) {
+        existingStyle.remove();
     }
 }
 
@@ -2391,6 +2355,8 @@ function startActivityPolling() {
         await refreshOnlineStatuses();
     }, 10000);
 }
+
+
 
 async function refreshOnlineStatuses() {
     // Обновляем статусы в списке чатов
@@ -4892,9 +4858,7 @@ async function initializePage() {
     `;
     document.head.appendChild(noAnimationsStyle);
     
-    // ДОБАВЛЯЕМ КЛАСС ДЛЯ ДОПОЛНИТЕЛЬНОГО КОНТРОЛЯ
-    document.body.classList.add('no-animations');
-    // ========== КОНЕЦ ОТКЛЮЧЕНИЯ АНИМАЦИЙ ==========
+
 
     // МГНОВЕННАЯ настройка UI без задержек
     if (isDesktop) {
