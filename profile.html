@@ -2016,26 +2016,21 @@ let wallpaperState = {
 function initializeWallpaperSystem() {
     loadWallpaperSettings();
     createWallpaperGrids();
-    
-    // Устанавливаем правильный фон при инициализации
-    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
-    document.body.classList.remove('wallpaper-enabled');
-    
     applyWallpaper(); // Применяем обои сразу
     updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
-    
     setupWallpaperEventListeners();
     setupWallpaperBroadcastListener();
     
-    // Настраиваем слушатель для placeholder
+    // Добавляем обработчик для отслеживания видимости placeholder
     const observer = new MutationObserver(() => {
         updateDesktopPlaceholderWallpaper();
     });
     
+    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (desktopPlaceholder) {
         observer.observe(desktopPlaceholder, {
             attributes: true,
-            attributeFilter: ['style', 'class']
+            attributeFilter: ['style']
         });
     }
 }
@@ -2124,10 +2119,12 @@ function saveWallpaperSettings() {
     sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
 }
 
+// Функция для обновления обоев в desktop-placeholder
 function updateDesktopPlaceholderWallpaper() {
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (!desktopPlaceholder) return;
     
+    // Проверяем, виден ли placeholder
     const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
     
     if (wallpaperState.enabled && isPlaceholderVisible) {
@@ -2136,13 +2133,11 @@ function updateDesktopPlaceholderWallpaper() {
             desktopPlaceholder.classList.add('wallpaper-enabled');
             desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
             desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
-            desktopPlaceholder.style.backgroundColor = ''; // Убираем цветной фон
         }
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
         desktopPlaceholder.style.filter = '';
-        // Восстанавливаем оригинальный фон
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
 }
@@ -2363,7 +2358,6 @@ function applyWallpaper() {
     // Сохраняем настройки для других страниц
     broadcastWallpaperUpdate();
 }
-
 function hideAllDesktopModules() {
     const allModules = [profileModalDesktop, privacyModule, appearanceModule];
     allModules.forEach(mod => {
