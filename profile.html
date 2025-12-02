@@ -58,7 +58,6 @@
             --telegram-shadow-large: 0 4px 16px rgba(0,0,0,0.08);
             --desktop-sidebar-width: 340px;
             --wallpaper-url: url('фон.webp');
-            --wallpaper-blur: 0px;
             --wallpaper-brightness: 100%;
         }
 
@@ -72,7 +71,6 @@
                 --telegram-shadow: 0 1px 3px rgba(0,0,0,0.24);
                 --telegram-shadow-large: 0 4px 16px rgba(0,0,0,0.24);
                 --wallpaper-url: url('фон.webp');
-                --wallpaper-blur: 0px;
                 --wallpaper-brightness: 100%;
             }
         }
@@ -1247,7 +1245,7 @@ body.wallpaper-enabled {
     background-position: center;
     background-repeat: no-repeat;
     background-attachment: fixed;
-    backdrop-filter: blur(var(--wallpaper-blur)) brightness(var(--wallpaper-brightness));
+    backdrop-filter: brightness(var(--wallpaper-brightness));
 }
 
 /* Если обои включены, основной фон должен быть полупрозрачным */
@@ -2005,7 +2003,6 @@ const WALLPAPERS = [
 let wallpaperState = {
     enabled: false,
     selectedWallpaper: 'default',
-    blur: 0,
     brightness: 100
 };
 
@@ -2014,6 +2011,7 @@ function initializeWallpaperSystem() {
     loadWallpaperSettings();
     createWallpaperGrids();
     applyWallpaper(); // Применяем обои сразу
+    updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
     setupWallpaperEventListeners();
     setupWallpaperBroadcastListener();
 }
@@ -2025,8 +2023,9 @@ function loadWallpaperSettings() {
         try {
             const parsed = JSON.parse(saved);
             wallpaperState = {
-                ...wallpaperState,
-                ...parsed
+                enabled: parsed.enabled || false,
+                selectedWallpaper: parsed.selectedWallpaper || 'default',
+                brightness: parsed.brightness || 100
             };
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
@@ -2038,8 +2037,32 @@ function loadWallpaperSettings() {
 
 // Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
-    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(wallpaperState));
-    sessionStorage.setItem('wallpaper_settings', JSON.stringify(wallpaperState));
+    // Сохраняем только те настройки, которые нужны
+    const settingsToSave = {
+        enabled: wallpaperState.enabled,
+        selectedWallpaper: wallpaperState.selectedWallpaper,
+        brightness: wallpaperState.brightness
+    };
+    
+    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
+    sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
+}
+
+// Функция для обновления обоев в desktop-placeholder
+function updateDesktopPlaceholderWallpaper() {
+    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+    if (!desktopPlaceholder) return;
+    
+    if (wallpaperState.enabled) {
+        const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+        if (selectedWallpaper) {
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
+        }
+    } else {
+        desktopPlaceholder.style.backgroundImage = '';
+        desktopPlaceholder.style.filter = '';
+    }
 }
 
 // Создание сетки обоев
@@ -2102,22 +2125,6 @@ function updateWallpaperControls() {
         }
     });
     
-    // Обновление слайдеров размытия
-    ['blurSliderDesktop', 'blurSliderMobile'].forEach(sliderId => {
-        const slider = document.getElementById(sliderId);
-        if (slider) {
-            slider.value = wallpaperState.blur;
-        }
-    });
-    
-    // Обновление значений размытия
-    ['blurValueDesktop', 'blurValueMobile'].forEach(valueId => {
-        const valueElement = document.getElementById(valueId);
-        if (valueElement) {
-            valueElement.textContent = `${wallpaperState.blur}px`;
-        }
-    });
-    
     // Обновление слайдеров яркости
     ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
         const slider = document.getElementById(sliderId);
@@ -2154,26 +2161,7 @@ function setupWallpaperEventListeners() {
                 wallpaperState.enabled = e.target.checked;
                 saveWallpaperSettings();
                 applyWallpaper();
-            });
-        }
-    });
-    
-    // Слайдеры размытия
-    ['blurSliderDesktop', 'blurSliderMobile'].forEach(sliderId => {
-        const slider = document.getElementById(sliderId);
-        if (slider) {
-            slider.addEventListener('input', (e) => {
-                wallpaperState.blur = parseInt(e.target.value);
-                
-                // Обновляем значение рядом со слайдером
-                const valueId = sliderId === 'blurSliderDesktop' ? 'blurValueDesktop' : 'blurValueMobile';
-                const valueElement = document.getElementById(valueId);
-                if (valueElement) {
-                    valueElement.textContent = `${wallpaperState.blur}px`;
-                }
-                
-                saveWallpaperSettings();
-                applyWallpaper();
+                updateDesktopPlaceholderWallpaper();
             });
         }
     });
@@ -2194,6 +2182,7 @@ function setupWallpaperEventListeners() {
                 
                 saveWallpaperSettings();
                 applyWallpaper();
+                updateDesktopPlaceholderWallpaper();
             });
         }
     });
@@ -2225,6 +2214,7 @@ function selectWallpaper(wallpaperId) {
     // Сохраняем и применяем
     saveWallpaperSettings();
     applyWallpaper();
+    updateDesktopPlaceholderWallpaper();
 }
 
 // Применение обоев
@@ -2236,19 +2226,54 @@ function applyWallpaper() {
         return;
     }
     
+    // Всегда применяем обои к body для основного фона
     if (!wallpaperState.enabled) {
         // Отключаем обои
         document.body.classList.remove('wallpaper-enabled');
         document.body.style.setProperty('--wallpaper-url', 'none');
-        document.body.style.setProperty('--wallpaper-blur', '0px');
         document.body.style.setProperty('--wallpaper-brightness', '100%');
     } else {
-        // Включаем обои
+        // Включаем обои на основном фоне
         document.body.classList.add('wallpaper-enabled');
         document.body.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
-        document.body.style.setProperty('--wallpaper-blur', `${wallpaperState.blur}px`);
         document.body.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness}%`);
     }
+    
+    // Убираем обои из всех модулей (profile, privacy, appearance)
+    // Обои не должны отображаться в модальных окнах настроек
+    const modules = [
+        profileModalDesktop,
+        privacyModule,
+        appearanceModule,
+        profileModalMobile,
+        privacyModuleMobile,
+        appearanceModuleMobile
+    ];
+    
+    modules.forEach(module => {
+        if (module) {
+            // Всегда убираем обои из модулей
+            module.style.backgroundImage = '';
+            module.style.backgroundColor = '';
+            
+            // Для desktop-module-content тоже убираем обои
+            const content = module.querySelector('.desktop-module-content');
+            if (content) {
+                content.style.backgroundImage = '';
+                content.style.backgroundColor = '';
+            }
+            
+            // Для profile-modal-content тоже убираем обои
+            const profileContent = module.querySelector('.profile-modal-content');
+            if (profileContent) {
+                profileContent.style.backgroundImage = '';
+                profileContent.style.backgroundColor = '';
+            }
+        }
+    });
+    
+    // Обновляем desktop-placeholder
+    updateDesktopPlaceholderWallpaper();
     
     // Сохраняем настройки для других страниц
     broadcastWallpaperUpdate();
@@ -2261,7 +2286,11 @@ function broadcastWallpaperUpdate() {
             const channel = new BroadcastChannel('vuntgram_wallpaper');
             channel.postMessage({
                 type: 'wallpaper_update',
-                data: wallpaperState
+                data: {
+                    enabled: wallpaperState.enabled,
+                    selectedWallpaper: wallpaperState.selectedWallpaper,
+                    brightness: wallpaperState.brightness
+                }
             });
             channel.close();
         } catch (e) {
@@ -2280,10 +2309,15 @@ function setupWallpaperBroadcastListener() {
             const channel = new BroadcastChannel('vuntgram_wallpaper');
             channel.addEventListener('message', (event) => {
                 if (event.data.type === 'wallpaper_update') {
-                    wallpaperState = event.data.data;
+                    wallpaperState = {
+                        enabled: event.data.data.enabled,
+                        selectedWallpaper: event.data.data.selectedWallpaper,
+                        brightness: event.data.data.brightness
+                    };
                     updateWallpaperControls();
                     createWallpaperGrids();
                     applyWallpaper();
+                    updateDesktopPlaceholderWallpaper();
                 }
             });
         } catch (e) {
@@ -2296,6 +2330,7 @@ function setupWallpaperBroadcastListener() {
 function updateAppearanceUI() {
     createWallpaperGrids();
     updateWallpaperControls();
+    updateDesktopPlaceholderWallpaper();
 }
 
 // Инициализация при загрузке страницы - ОДИН вызов
@@ -2329,9 +2364,9 @@ window.addEventListener('resize', () => {
         initializeLayout();
         updateProfileUI();
         createWallpaperGrids(); // Обновляем сетку обоев
+        updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
     }
 });
-
 
 
         // Страницы, между которыми не должен сбрасываться кэш чатов
