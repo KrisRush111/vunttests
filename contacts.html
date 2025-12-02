@@ -13,7 +13,7 @@
 <!-- Theme Color -->
 <meta name="theme-color" content="#2d5e4f">
 
-<!-- Упрощенные иконки --> 
+<!-- Упрощенные иконки -->
 <link rel="icon" type="image/png" href="icon-192x192.png">
 <link rel="apple-touch-icon" href="icon-192x192.png">
 
@@ -2095,6 +2095,42 @@ window.addEventListener("beforeunload", () => {
 });
 
 
+
+
+// Применение обоев на других страницах
+function applyWallpaperOnOtherPages() {
+    // Загружаем настройки из localStorage
+    const saved = localStorage.getItem('vuntgram_wallpaper');
+    if (saved) {
+        try {
+            const wallpaperState = JSON.parse(saved);
+            const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+            
+            if (wallpaperState.enabled && !selectedWallpaper.isNone) {
+                document.body.classList.add('wallpaper-enabled');
+                document.body.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
+                document.body.style.setProperty('--wallpaper-blur', `${wallpaperState.blur}px`);
+                document.body.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness}%`);
+            }
+        } catch (e) {
+            console.error('Error applying wallpaper:', e);
+        }
+    }
+}
+
+// Слушатель для обновлений обоев из других вкладок
+if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel('vuntgram_wallpaper');
+    channel.addEventListener('message', (event) => {
+        if (event.data.type === 'wallpaper_update') {
+            applyWallpaperOnOtherPages();
+        }
+    });
+}
+
+// Применяем обои при загрузке страницы
+document.addEventListener('DOMContentLoaded', applyWallpaperOnOtherPages);
+
 // Функция для загрузки рекомендаций
 async function loadFriendsRecommendations() {
     if (!userData || !userData.platform_user_id) return;
@@ -3736,6 +3772,5 @@ function setupSearchHandlers() {
       <script src="activity-tracker.js"></script>
 </body>
 </html>
-
 
 
