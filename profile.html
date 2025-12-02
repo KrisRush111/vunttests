@@ -1257,7 +1257,7 @@ body.wallpaper-enabled {
 .mobile-settings-view,
 .mobile-settings-inner-content,
 .desktop-sidebar {
-    background-color: var(--telegram-secondary-bg) !important;
+    background-color: var(--telegram-bg) !important;
     background-image: none !important;
 }
 
@@ -2053,6 +2053,58 @@ function loadWallpaperSettings() {
         }
     }
 }
+
+
+// Добавить явную функцию для работы с обоями
+function setupWallpaperButtons() {
+    const wallpaperButtons = document.querySelectorAll('.wallpaper-btn');
+    
+    wallpaperButtons.forEach(btn => {
+        // Удаляем старые обработчики
+        btn.replaceWith(btn.cloneNode(true));
+    });
+    
+    // Вешаем новые обработчики
+    document.querySelectorAll('.wallpaper-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation(); // Предотвращаем всплытие
+            
+            const wallpaperId = this.dataset.wallpaperId;
+            const wallpaperUrl = this.dataset.wallpaperUrl;
+            
+            // Сохраняем в localStorage
+            const wallpaperState = {
+                enabled: true,
+                selectedWallpaper: wallpaperId,
+                blur: localStorage.getItem('wallpaperBlur') || 10,
+                brightness: localStorage.getItem('wallpaperBrightness') || 80
+            };
+            
+            localStorage.setItem('vuntgram_wallpaper', JSON.stringify(wallpaperState));
+            
+            // Применяем обои сразу
+            document.body.style.backgroundImage = `url('${wallpaperUrl}')`;
+            document.body.style.backgroundSize = 'cover';
+            document.body.style.backgroundPosition = 'center';
+            
+            // Снимаем выделение с других кнопок
+            wallpaperButtons.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // Уведомляем другие вкладки
+            if (typeof BroadcastChannel !== 'undefined') {
+                const channel = new BroadcastChannel('vuntgram_wallpaper');
+                channel.postMessage({type: 'wallpaper_update'});
+            }
+        });
+    });
+}
+
+// Вызывать при каждой инициализации
+document.addEventListener('DOMContentLoaded', function() {
+    initializePage();
+    setupWallpaperButtons(); // Добавить эту строку
+});
 
 // Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
