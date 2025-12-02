@@ -1380,6 +1380,29 @@ body.wallpaper-enabled {
     text-align: center;
 }
 
+.wallpaper-item {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+    border: 2px solid transparent;
+    transform: translateZ(0); /* Fix for shaking */
+    backface-visibility: hidden; /* Fix for shaking */
+    -webkit-backface-visibility: hidden; /* Fix for shaking */
+}
+
+.wallpaper-item:hover {
+    transform: scale(1.05) translateZ(0);
+}
+
+.wallpaper-item.selected {
+    border-color: var(--telegram-blue);
+    box-shadow: 0 0 0 2px rgba(36, 129, 204, 0.3);
+    transform: translateZ(0); /* Ensure no transform when selected */
+}
+
 .wallpaper-checkmark {
     position: absolute;
     top: 8px;
@@ -1393,6 +1416,7 @@ body.wallpaper-enabled {
     justify-content: center;
     color: white;
     font-size: 12px;
+    z-index: 2; /* Ensure checkmark is above preview */
 }
 
 /* Настройки эффектов обоев */
@@ -2088,58 +2112,6 @@ function loadWallpaperSettings() {
     }
 }
 
-
-// Добавить явную функцию для работы с обоями
-function setupWallpaperButtons() {
-    const wallpaperButtons = document.querySelectorAll('.wallpaper-btn');
-    
-    wallpaperButtons.forEach(btn => {
-        // Удаляем старые обработчики
-        btn.replaceWith(btn.cloneNode(true));
-    });
-    
-    // Вешаем новые обработчики
-    document.querySelectorAll('.wallpaper-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation(); // Предотвращаем всплытие
-            
-            const wallpaperId = this.dataset.wallpaperId;
-            const wallpaperUrl = this.dataset.wallpaperUrl;
-            
-            // Сохраняем в localStorage
-            const wallpaperState = {
-                enabled: true,
-                selectedWallpaper: wallpaperId,
-                blur: localStorage.getItem('wallpaperBlur') || 10,
-                brightness: localStorage.getItem('wallpaperBrightness') || 80
-            };
-            
-            localStorage.setItem('vuntgram_wallpaper', JSON.stringify(wallpaperState));
-            
-            // Применяем обои сразу
-            document.body.style.backgroundImage = `url('${wallpaperUrl}')`;
-            document.body.style.backgroundSize = 'cover';
-            document.body.style.backgroundPosition = 'center';
-            
-            // Снимаем выделение с других кнопок
-            wallpaperButtons.forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            
-            // Уведомляем другие вкладки
-            if (typeof BroadcastChannel !== 'undefined') {
-                const channel = new BroadcastChannel('vuntgram_wallpaper');
-                channel.postMessage({type: 'wallpaper_update'});
-            }
-        });
-    });
-}
-
-// Вызывать при каждой инициализации
-document.addEventListener('DOMContentLoaded', function() {
-    initializePage();
-    setupWallpaperButtons(); // Добавить эту строку
-});
-
 // Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
     // Сохраняем только те настройки, которые нужны
@@ -2175,8 +2147,33 @@ function updateDesktopPlaceholderWallpaper() {
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
 }
+
+// Обновление только выбранной обоины без пересоздания всех
+function updateSelectedWallpaper() {
+    // Удаляем ВСЕ существующие checkmarks сначала
+    document.querySelectorAll('.wallpaper-checkmark').forEach(checkmark => {
+        checkmark.remove();
+    });
+    
+    // Снимаем выделение со всех
+    document.querySelectorAll('.wallpaper-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    
+    // Добавляем выделение и checkmark только к выбранной
+    document.querySelectorAll(`[data-wallpaper-id="${wallpaperState.selectedWallpaper}"]`).forEach(item => {
+        item.classList.add('selected');
+        const checkmark = document.createElement('div');
+        checkmark.className = 'wallpaper-checkmark';
+        checkmark.innerHTML = '<i class="fas fa-check"></i>';
+        item.appendChild(checkmark);
+    });
+}
+
 // Создание сетки обоев
 function createWallpaperGrids() {
+    console.log('createWallpaperGrids called');
+    
     const grids = ['wallpaperGridDesktop', 'wallpaperGridMobile'];
     
     grids.forEach(gridId => {
@@ -2186,7 +2183,10 @@ function createWallpaperGrids() {
             return;
         }
         
-        grid.innerHTML = '';
+        // Очищаем grid и удаляем ВСЕ дочерние элементы
+        while (grid.firstChild) {
+            grid.removeChild(grid.firstChild);
+        }
         
         WALLPAPERS.forEach(wallpaper => {
             const wallpaperItem = document.createElement('div');
@@ -2257,7 +2257,7 @@ function setupWallpaperEventListeners() {
     // Выбор обоев - делегирование событий
     document.addEventListener('click', (e) => {
         const wallpaperItem = e.target.closest('.wallpaper-item');
-        if (wallpaperItem) {
+        if (wallpaperItem && !wallpaperItem.classList.contains('selected')) {
             const wallpaperId = wallpaperItem.dataset.wallpaperId;
             selectWallpaper(wallpaperId);
         }
@@ -2298,33 +2298,25 @@ function setupWallpaperEventListeners() {
     });
 }
 
-
 // Выбор обоев
 function selectWallpaper(wallpaperId) {
+    // Если уже выбрана эта обои, ничего не делаем
+    if (wallpaperState.selectedWallpaper === wallpaperId) {
+        return;
+    }
+    
     wallpaperState.selectedWallpaper = wallpaperId;
     wallpaperState.enabled = true;
     
-    // Обновляем UI
-    document.querySelectorAll('.wallpaper-item').forEach(item => {
-        item.classList.remove('selected');
-        const checkmark = item.querySelector('.wallpaper-checkmark');
-        if (checkmark) checkmark.remove();
-    });
-    
-    document.querySelectorAll(`[data-wallpaper-id="${wallpaperId}"]`).forEach(item => {
-        item.classList.add('selected');
-        const checkmark = document.createElement('div');
-        checkmark.className = 'wallpaper-checkmark';
-        checkmark.innerHTML = '<i class="fas fa-check"></i>';
-        item.appendChild(checkmark);
-    });
+    // Обновляем только визуальное выделение
+    updateSelectedWallpaper();
     
     // Обновляем переключатели
     updateWallpaperControls();
     
     // Сохраняем и применяем
     saveWallpaperSettings();
-    applyWallpaper(); // Важно: вызываем applyWallpaper
+    applyWallpaper();
     updateDesktopPlaceholderWallpaper();
 }
 
@@ -2389,21 +2381,13 @@ function applyWallpaper() {
         }
     });
     
+    // Обновляем выделение выбранной обоины
+    updateSelectedWallpaper();
+    
     // Сохраняем настройки для других страниц
     broadcastWallpaperUpdate();
 }
-function hideAllDesktopModules() {
-    const allModules = [profileModalDesktop, privacyModule, appearanceModule];
-    allModules.forEach(mod => {
-        if (mod) mod.classList.remove('visible');
-    });
-    desktopPlaceholder.style.display = 'flex'; // Show placeholder when no module is active
-    
-    // Обновляем обои на placeholder при возврате к нему
-    setTimeout(() => {
-        updateDesktopPlaceholderWallpaper();
-    }, 50);
-}
+
 // Вещание обновления обоев на другие вкладки
 function broadcastWallpaperUpdate() {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -2440,7 +2424,7 @@ function setupWallpaperBroadcastListener() {
                         brightness: event.data.data.brightness
                     };
                     updateWallpaperControls();
-                    createWallpaperGrids();
+                    createWallpaperGrids(); // При обновлении из другой вкладки
                     applyWallpaper();
                     updateDesktopPlaceholderWallpaper();
                 }
@@ -2488,10 +2472,11 @@ window.addEventListener('resize', () => {
     if (newIsDesktop !== isDesktop) {
         initializeLayout();
         updateProfileUI();
-        createWallpaperGrids(); // Обновляем сетку обоев
+        createWallpaperGrids(); // Обновляем сетку обоев при изменении размера
         updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
     }
 });
+
 
 
         // Страницы, между которыми не должен сбрасываться кэш чатов
