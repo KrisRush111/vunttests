@@ -1238,15 +1238,30 @@
 
 
 
-/* Стили для обоев */
-/* Основные обои на body */
 body.wallpaper-enabled {
     background-image: var(--wallpaper-url);
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
     background-attachment: fixed;
+    
+    /* Для поддержки во всех браузерах */
     backdrop-filter: brightness(var(--wallpaper-brightness));
+    -webkit-backdrop-filter: brightness(var(--wallpaper-brightness));
+}
+
+/* Для браузеров без поддержки backdrop-filter */
+@supports not (backdrop-filter: brightness(100%)) {
+    body.wallpaper-enabled::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, calc((100% - var(--wallpaper-brightness)) / 100));
+        z-index: -1;
+    }
 }
 
 /* Убираем обои с основных элементов, но сохраняем нужные фоны */
@@ -2115,22 +2130,30 @@ function initializeWallpaperSystem() {
     }
 }
 
-// Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
     const saved = localStorage.getItem('vuntgram_wallpaper');
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
+            console.log('Loaded wallpaper settings:', parsed);
+            
             wallpaperState = {
-                enabled: parsed.enabled || false,
+                enabled: parsed.enabled !== undefined ? parsed.enabled : false,
                 selectedWallpaper: parsed.selectedWallpaper || 'default',
                 brightness: parsed.brightness || 100
             };
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
             // Используем настройки по умолчанию
+            wallpaperState = {
+                enabled: false,
+                selectedWallpaper: 'default',
+                brightness: 100
+            };
             saveWallpaperSettings();
         }
+    } else {
+        console.log('No saved wallpaper settings found, using defaults');
     }
 }
 
@@ -2180,23 +2203,31 @@ function setupWallpaperButtons() {
     });
 }
 
+
+
+
 // Вызывать при каждой инициализации
 document.addEventListener('DOMContentLoaded', function() {
     initializePage();
     setupWallpaperButtons(); // Добавить эту строку
 });
 
-// Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
-    // Сохраняем только те настройки, которые нужны
-    const settingsToSave = {
-        enabled: wallpaperState.enabled,
-        selectedWallpaper: wallpaperState.selectedWallpaper,
-        brightness: wallpaperState.brightness
-    };
-    
-    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
-    sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
+    try {
+        const settingsToSave = {
+            enabled: wallpaperState.enabled,
+            selectedWallpaper: wallpaperState.selectedWallpaper,
+            brightness: wallpaperState.brightness
+        };
+        
+        console.log('Saving wallpaper settings:', settingsToSave);
+        localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
+        
+        // Также сохраняем в sessionStorage для текущей сессии
+        sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
+    } catch (e) {
+        console.error('Error saving wallpaper settings:', e);
+    }
 }
 
 // Функция для обновления обоев в desktop-placeholder
@@ -2369,23 +2400,30 @@ function setupWallpaperEventListeners() {
         }
     });
     
-    // Слайдеры яркости
+
+    // Обновите обработчики слайдеров:
     ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
         const slider = document.getElementById(sliderId);
         if (slider) {
+            // Удаляем старые обработчики
+            slider.oninput = null;
+            
             slider.addEventListener('input', (e) => {
-                wallpaperState.brightness = parseInt(e.target.value);
+                const brightness = parseInt(e.target.value);
+                wallpaperState.brightness = brightness;
                 
                 // Обновляем значение рядом со слайдером
                 const valueId = sliderId === 'brightnessSliderDesktop' ? 'brightnessValueDesktop' : 'brightnessValueMobile';
                 const valueElement = document.getElementById(valueId);
                 if (valueElement) {
-                    valueElement.textContent = `${wallpaperState.brightness}%`;
+                    valueElement.textContent = `${brightness}%`;
                 }
                 
-                saveWallpaperSettings();
+                // Немедленно применяем изменения
                 applyWallpaper();
-                updateDesktopPlaceholderWallpaper();
+                
+                // Сохраняем настройки
+                saveWallpaperSettings();
             });
         }
     });
@@ -2456,16 +2494,18 @@ function applyWallpaper() {
 
     // --- Общая логика фона для сайта ---
     if (wallpaperState.enabled) {
-        // Активируем CSS-переменные для глобального фона
-        document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
-        document.documentElement.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness}%`);
-
+        // НЕПОСРЕДСТВЕННО применяем стили к body
+        document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundPosition = 'center';
+        document.body.style.backgroundRepeat = 'no-repeat';
+        document.body.style.backgroundAttachment = 'fixed';
+        document.body.style.backdropFilter = `brightness(${wallpaperState.brightness}%)`;
         document.body.classList.add('wallpaper-enabled');
     } else {
-        // Выключаем обои – возвращаем системный фон
-        document.documentElement.style.setProperty('--wallpaper-url', 'none');
-        document.documentElement.style.setProperty('--wallpaper-brightness', '100%');
-
+        // Выключаем обои
+        document.body.style.backgroundImage = '';
+        document.body.style.backdropFilter = '';
         document.body.classList.remove('wallpaper-enabled');
     }
 
@@ -2474,6 +2514,8 @@ function applyWallpaper() {
         if (wallpaperState.enabled) {
             desktopPlaceholder.classList.add('wallpaper-enabled');
             desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            
+            // Для placeholder используем отдельный div для имитации яркости
             desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
             desktopPlaceholder.style.backgroundColor = '';
         } else {
@@ -2504,6 +2546,7 @@ function applyWallpaper() {
     });
 
     // Сохраняем настройки и отправляем другим вкладкам
+    saveWallpaperSettings();
     broadcastWallpaperUpdate();
 }
 
