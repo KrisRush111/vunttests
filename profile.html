@@ -2307,85 +2307,74 @@ function updateWallpaperControls() {
 }
 
 function setupWallpaperEventListeners() {
-    // ОЧИСТИТЬ все старые обработчики сначала
+    // СНАЧАЛА снимаем старый обработчик, если он уже есть
     document.removeEventListener('click', handleWallpaperClick);
-    
-    // Создаем новый обработчик
+
+    // Новый обработчик выбора обоев
     function handleWallpaperClick(e) {
         const wallpaperItem = e.target.closest('.wallpaper-item');
-        if (wallpaperItem) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            const wallpaperId = wallpaperItem.dataset.wallpaperId;
-            console.log('Wallpaper item clicked:', wallpaperId);
-            
-            // Предотвращаем быстрые повторные клики
-            if (wallpaperItem.classList.contains('clicked')) return;
-            wallpaperItem.classList.add('clicked');
-            setTimeout(() => {
-                wallpaperItem.classList.remove('clicked');
-            }, 500);
-            
-            selectWallpaper(wallpaperId);
-        }
+        if (!wallpaperItem) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const wallpaperId = wallpaperItem.dataset.wallpaperId;
+        console.log('Wallpaper item clicked:', wallpaperId);
+
+        selectWallpaper(wallpaperId);
     }
-    
-    // Добавляем ОДИН обработчик
+
+    // Добавляем ОДИН корректный обработчик
     document.addEventListener('click', handleWallpaperClick);
-    
-    // Переключатель обоев
+
+    // ПЕРЕКЛЮЧАТЕЛИ "Использовать обои"
     ['wallpaperToggleDesktop', 'wallpaperToggleMobile'].forEach(toggleId => {
         const toggle = document.getElementById(toggleId);
-        if (toggle) {
-            // Удаляем старые обработчики
-            const newToggle = toggle.cloneNode(true);
-            toggle.parentNode.replaceChild(newToggle, toggle);
-            
-            // Добавляем новый
-            document.getElementById(toggleId).addEventListener('change', (e) => {
-                wallpaperState.enabled = e.target.checked;
-                saveWallpaperSettings();
-                applyWallpaper();
-                updateDesktopPlaceholderWallpaper();
-            });
-        }
+        if (!toggle) return;
+
+        // Удаляем старый обработчик (клон заменяет ноду)
+        const newToggle = toggle.cloneNode(true);
+        toggle.parentNode.replaceChild(newToggle, toggle);
+
+        newToggle.addEventListener('change', (e) => {
+            wallpaperState.enabled = e.target.checked;
+            saveWallpaperSettings();
+            applyWallpaper();
+            updateDesktopPlaceholderWallpaper();
+        });
     });
-    
-    // Слайдеры яркости
+
+    // СЛАЙДЕРЫ ЯРКОСТИ
     ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
         const slider = document.getElementById(sliderId);
-        if (slider) {
-            // Удаляем старые обработчики
-            const newSlider = slider.cloneNode(true);
-            slider.parentNode.replaceChild(newSlider, slider);
-            
-            // Добавляем новый
-            document.getElementById(sliderId).addEventListener('input', (e) => {
-                wallpaperState.brightness = parseInt(e.target.value);
-                
-                const valueId = sliderId === 'brightnessSliderDesktop' ? 'brightnessValueDesktop' : 'brightnessValueMobile';
-                const valueElement = document.getElementById(valueId);
-                if (valueElement) {
-                    valueElement.textContent = `${wallpaperState.brightness}%`;
-                }
-                
-                saveWallpaperSettings();
-                applyWallpaper();
-                updateDesktopPlaceholderWallpaper();
-            });
-        }
+        if (!slider) return;
+
+        // Удаляем старый обработчик через клонирование
+        const newSlider = slider.cloneNode(true);
+        slider.parentNode.replaceChild(newSlider, slider);
+
+        newSlider.addEventListener('input', (e) => {
+            wallpaperState.brightness = parseInt(e.target.value);
+
+            const valueId = sliderId === 'brightnessSliderDesktop'
+                ? 'brightnessValueDesktop'
+                : 'brightnessValueMobile';
+
+            const valueElement = document.getElementById(valueId);
+            if (valueElement) {
+                valueElement.textContent = `${wallpaperState.brightness}%`;
+            }
+
+            saveWallpaperSettings();
+            applyWallpaper();
+            updateDesktopPlaceholderWallpaper();
+        });
     });
 }
 
 // Выбор обоев
+// Выбор обоев - исправленная версия
 function selectWallpaper(wallpaperId) {
-    // ПРОВЕРКА: если уже выбраны эти обои - ничего не делаем
-    if (wallpaperState.selectedWallpaper === wallpaperId && wallpaperState.enabled) {
-        console.log('Этот стиль обоев уже выбран');
-        return;
-    }
-    
     // Проверяем, существует ли выбранные обои
     const wallpaperExists = WALLPAPERS.some(w => w.id === wallpaperId);
     if (!wallpaperExists) {
