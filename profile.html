@@ -2455,28 +2455,36 @@ function applyWallpaper() {
         return;
     }
     
+    // Убедимся, что значение яркости корректное (20-100%)
+    if (wallpaperState.brightness < 20) wallpaperState.brightness = 20;
+    if (wallpaperState.brightness > 100) wallpaperState.brightness = 100;
+    
     // Удаляем обои с body и восстанавливаем оригинальный фон
     document.body.classList.remove('wallpaper-enabled');
-    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)'; // ВОССТАНАВЛИВАЕМ ОРИГИНАЛЬНЫЙ ФОН
+    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
     document.body.style.backgroundImage = '';
     document.body.style.filter = '';
     
-    // Очищаем CSS переменные
-    document.documentElement.style.setProperty('--wallpaper-url', 'none');
-    document.documentElement.style.setProperty('--wallpaper-brightness', '100%');
+    // Обновляем CSS переменные с текущими значениями яркости
+    document.documentElement.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness}%`);
     
     // Обои ТОЛЬКО для desktop-placeholder, если они включены
     if (wallpaperState.enabled) {
         desktopPlaceholder.classList.add('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
         desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
-        desktopPlaceholder.style.backgroundColor = ''; // Убираем цвет фона
+        desktopPlaceholder.style.backgroundColor = '';
+        
+        // Сохраняем URL обоев в CSS переменной (может пригодиться)
+        document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
         desktopPlaceholder.style.filter = '';
-        // Восстанавливаем цвет фона для placeholder
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        
+        // Очищаем CSS переменные когда обои выключены
+        document.documentElement.style.setProperty('--wallpaper-url', 'none');
     }
     
     // Убеждаемся, что все модули имеют правильный фон
@@ -2506,21 +2514,58 @@ function applyWallpaper() {
         }
     });
     
+    // Важно: синхронизируем UI слайдеров с текущим состоянием
+    syncBrightnessSliders(wallpaperState.brightness);
+    
     // Сохраняем настройки для других страниц
+    saveWallpaperSettings();
     broadcastWallpaperUpdate();
+    
+    // Для отладки
+    console.log('Wallpaper applied:', {
+        enabled: wallpaperState.enabled,
+        wallpaper: wallpaperState.selectedWallpaper,
+        brightness: wallpaperState.brightness,
+        placeholderVisible: desktopPlaceholder.style.display !== 'none'
+    });
 }
+
+// Добавьте эту функцию для синхронизации слайдеров
+function syncBrightnessSliders(value) {
+    // Обновляем все слайдеры
+    const sliders = [
+        document.getElementById('brightnessSliderDesktop'),
+        document.getElementById('brightnessSliderMobile')
+    ];
+    
+    const values = [
+        document.getElementById('brightnessValueDesktop'),
+        document.getElementById('brightnessValueMobile')
+    ];
+    
+    sliders.forEach(slider => {
+        if (slider) slider.value = value;
+    });
+    
+    values.forEach(valueElement => {
+        if (valueElement) valueElement.textContent = `${value}%`;
+    });
+}
+
+
 function hideAllDesktopModules() {
     const allModules = [profileModalDesktop, privacyModule, appearanceModule];
     allModules.forEach(mod => {
         if (mod) mod.classList.remove('visible');
     });
-    desktopPlaceholder.style.display = 'flex'; // Show placeholder when no module is active
+    desktopPlaceholder.style.display = 'flex';
     
     // Обновляем обои на placeholder при возврате к нему
     setTimeout(() => {
-        updateDesktopPlaceholderWallpaper();
+        applyWallpaper(); // Теперь applyWallpaper обновит яркость
     }, 50);
 }
+
 // Вещание обновления обоев на другие вкладки
 function broadcastWallpaperUpdate() {
     if (typeof BroadcastChannel !== 'undefined') {
