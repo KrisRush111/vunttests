@@ -1740,6 +1740,51 @@
 
 
 
+
+
+/* Основные обои на body */
+body.wallpaper-enabled {
+    background-image: var(--wallpaper-url);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
+
+/* Убираем обои с основных элементов, но сохраняем нужные фоны */
+.desktop-sidebar {
+    background-color: var(--telegram-bg) !important;
+    background-image: none !important;
+}
+
+.desktop-content {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
+
+/* Фон для контента внутри модулей */
+.desktop-module-content,
+.profile-modal-content,
+.mobile-settings-inner-content {
+    background-color: var(--telegram-bg) !important;
+    background-image: none !important;
+}
+
+/* Фон для самих модулей */
+.desktop-module,
+.profile-modal,
+.mobile-settings-view {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
+
+/* Отдельно для модальных окон на мобильных */
+.profile-modal {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
+
+
     </style>
 </head>
 <body>
@@ -2094,42 +2139,6 @@ window.addEventListener("beforeunload", () => {
     localStorage.removeItem("inside_site");
 });
 
-
-
-
-// Применение обоев на других страницах
-function applyWallpaperOnOtherPages() {
-    // Загружаем настройки из localStorage
-    const saved = localStorage.getItem('vuntgram_wallpaper');
-    if (saved) {
-        try {
-            const wallpaperState = JSON.parse(saved);
-            const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-            
-            if (wallpaperState.enabled && !selectedWallpaper.isNone) {
-                document.body.classList.add('wallpaper-enabled');
-                document.body.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
-                document.body.style.setProperty('--wallpaper-blur', `${wallpaperState.blur}px`);
-                document.body.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness}%`);
-            }
-        } catch (e) {
-            console.error('Error applying wallpaper:', e);
-        }
-    }
-}
-
-// Слушатель для обновлений обоев из других вкладок
-if (typeof BroadcastChannel !== 'undefined') {
-    const channel = new BroadcastChannel('vuntgram_wallpaper');
-    channel.addEventListener('message', (event) => {
-        if (event.data.type === 'wallpaper_update') {
-            applyWallpaperOnOtherPages();
-        }
-    });
-}
-
-// Применяем обои при загрузке страницы
-document.addEventListener('DOMContentLoaded', applyWallpaperOnOtherPages);
 
 // Функция для загрузки рекомендаций
 async function loadFriendsRecommendations() {
@@ -3767,9 +3776,28 @@ function setupSearchHandlers() {
                 initializePage();
             }
         });
+
+
+
+
+        // В конце каждого файла (profile.html, chats.html, contacts.html)
+document.addEventListener('DOMContentLoaded', function() {
+    // Инициализируем обои
+    wallpaperManager.applyWallpaper();
+    wallpaperManager.setupBroadcastListener();
+    
+    // Для отслеживания изменений в режиме реального времени
+    window.addEventListener('storage', function(e) {
+        if (e.key === 'vuntgram_wallpaper') {
+            wallpaperManager.loadWallpaperSettings();
+            wallpaperManager.applyWallpaper();
+        }
+    });
+});
     </script>
 
       <script src="activity-tracker.js"></script>
+      <script src="wallpaper-system.js"></script>
 </body>
 </html>
 
