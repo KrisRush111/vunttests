@@ -2115,36 +2115,22 @@ function initializeWallpaperSystem() {
     }
 }
 
+// Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
     const saved = localStorage.getItem('vuntgram_wallpaper');
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-            // Убедитесь, что все значения загружаются правильно
             wallpaperState = {
-                enabled: parsed.enabled === undefined ? false : parsed.enabled,
+                enabled: parsed.enabled || false,
                 selectedWallpaper: parsed.selectedWallpaper || 'default',
                 brightness: parsed.brightness || 100
             };
-            console.log('Loaded wallpaper settings:', wallpaperState);
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
-            // Сброс к настройкам по умолчанию
-            wallpaperState = {
-                enabled: false,
-                selectedWallpaper: 'default',
-                brightness: 100
-            };
+            // Используем настройки по умолчанию
             saveWallpaperSettings();
         }
-    } else {
-        // Если ничего не сохранено, используем настройки по умолчанию
-        wallpaperState = {
-            enabled: false,
-            selectedWallpaper: 'default',
-            brightness: 100
-        };
-        saveWallpaperSettings();
     }
 }
 
@@ -2200,20 +2186,17 @@ document.addEventListener('DOMContentLoaded', function() {
     setupWallpaperButtons(); // Добавить эту строку
 });
 
+// Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
-    try {
-        const settingsToSave = {
-            enabled: wallpaperState.enabled,
-            selectedWallpaper: wallpaperState.selectedWallpaper,
-            brightness: wallpaperState.brightness,
-            savedAt: new Date().toISOString() // Добавляем timestamp для отладки
-        };
-        
-        localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
-        console.log('Saved wallpaper settings:', settingsToSave);
-    } catch (e) {
-        console.error('Error saving wallpaper settings:', e);
-    }
+    // Сохраняем только те настройки, которые нужны
+    const settingsToSave = {
+        enabled: wallpaperState.enabled,
+        selectedWallpaper: wallpaperState.selectedWallpaper,
+        brightness: wallpaperState.brightness
+    };
+    
+    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
+    sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
 }
 
 // Функция для обновления обоев в desktop-placeholder
@@ -2323,8 +2306,15 @@ function updateWallpaperControls() {
     });
 }
 
+// Настройка обработчиков событий
+// Настройка обработчиков событий - исправленная версия
 function setupWallpaperEventListeners() {
-    // Выбор обоев
+    // Удаляем старые обработчики, если они есть
+    document.querySelectorAll('.wallpaper-item').forEach(item => {
+        item.replaceWith(item.cloneNode(true));
+    });
+    
+    // Выбор обоев - используем прямой обработчик вместо делегирования
     document.addEventListener('click', (e) => {
         const wallpaperItem = e.target.closest('.wallpaper-item');
         if (wallpaperItem) {
@@ -2334,81 +2324,73 @@ function setupWallpaperEventListeners() {
             const wallpaperId = wallpaperItem.dataset.wallpaperId;
             console.log('Wallpaper item clicked:', wallpaperId);
             
+            // Небольшая задержка для предотвращения двойных кликов
+            wallpaperItem.style.pointerEvents = 'none';
+            setTimeout(() => {
+                wallpaperItem.style.pointerEvents = '';
+            }, 300);
+            
             selectWallpaper(wallpaperId);
         }
     });
     
-    // Переключатель обоев - отдельные обработчики для каждого
-    const desktopToggle = document.getElementById('wallpaperToggleDesktop');
-    const mobileToggle = document.getElementById('wallpaperToggleMobile');
+    // Добавляем обработчики для touch-событий на мобильных
+    document.addEventListener('touchstart', (e) => {
+        const wallpaperItem = e.target.closest('.wallpaper-item');
+        if (wallpaperItem) {
+            // Добавляем визуальную обратную связь
+            wallpaperItem.style.transform = 'scale(0.95)';
+        }
+    });
     
-    if (desktopToggle) {
-        desktopToggle.addEventListener('change', function(e) {
-            wallpaperState.enabled = e.target.checked;
-            saveWallpaperSettings();
-            applyWallpaper();
-            updateDesktopPlaceholderWallpaper();
-        });
-    }
+    document.addEventListener('touchend', (e) => {
+        const wallpaperItem = e.target.closest('.wallpaper-item');
+        if (wallpaperItem) {
+            wallpaperItem.style.transform = '';
+        }
+    });
     
-    if (mobileToggle) {
-        mobileToggle.addEventListener('change', function(e) {
-            wallpaperState.enabled = e.target.checked;
-            saveWallpaperSettings();
-            applyWallpaper();
-            updateDesktopPlaceholderWallpaper();
-        });
-    }
+    // Переключатель обоев
+    ['wallpaperToggleDesktop', 'wallpaperToggleMobile'].forEach(toggleId => {
+        const toggle = document.getElementById(toggleId);
+        if (toggle) {
+            // Создаем новый обработчик
+            const toggleChangeHandler = (e) => {
+                wallpaperState.enabled = e.target.checked;
+                saveWallpaperSettings();
+                applyWallpaper();
+                updateDesktopPlaceholderWallpaper();
+            };
+            
+            // Удаляем все старые обработчики события change
+            const newToggle = toggle.cloneNode(true);
+            toggle.parentNode.replaceChild(newToggle, toggle);
+            
+            // Получаем обновленный элемент и добавляем обработчик
+            document.getElementById(toggleId).addEventListener('change', toggleChangeHandler);
+        }
+    });
     
-    // Слайдеры яркости - отдельные обработчики
-    const desktopSlider = document.getElementById('brightnessSliderDesktop');
-    const mobileSlider = document.getElementById('brightnessSliderMobile');
-    
-    if (desktopSlider) {
-        desktopSlider.addEventListener('input', function(e) {
-            const value = parseInt(e.target.value);
-            wallpaperState.brightness = value;
-            
-            // Обновляем значение рядом со слайдером
-            const valueElement = document.getElementById('brightnessValueDesktop');
-            if (valueElement) {
-                valueElement.textContent = `${value}%`;
-            }
-            
-            // Также обновляем мобильное значение для синхронизации
-            const mobileValueElement = document.getElementById('brightnessValueMobile');
-            if (mobileValueElement) {
-                mobileValueElement.textContent = `${value}%`;
-            }
-            
-            saveWallpaperSettings();
-            applyWallpaper();
-            updateDesktopPlaceholderWallpaper();
-        });
-    }
-    
-    if (mobileSlider) {
-        mobileSlider.addEventListener('input', function(e) {
-            const value = parseInt(e.target.value);
-            wallpaperState.brightness = value;
-            
-            // Обновляем значение рядом со слайдером
-            const valueElement = document.getElementById('brightnessValueMobile');
-            if (valueElement) {
-                valueElement.textContent = `${value}%`;
-            }
-            
-            // Также обновляем десктопное значение для синхронизации
-            const desktopValueElement = document.getElementById('brightnessValueDesktop');
-            if (desktopValueElement) {
-                desktopValueElement.textContent = `${value}%`;
-            }
-            
-            saveWallpaperSettings();
-            applyWallpaper();
-            updateDesktopPlaceholderWallpaper();
-        });
-    }
+    // Слайдеры яркости
+    ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
+        const slider = document.getElementById(sliderId);
+        if (slider) {
+            slider.addEventListener('input', (e) => {
+                wallpaperState.brightness = parseInt(e.target.value);
+                
+                // Обновляем значение рядом со слайдером
+                const valueId = sliderId === 'brightnessSliderDesktop' ? 'brightnessValueDesktop' : 'brightnessValueMobile';
+                const valueElement = document.getElementById(valueId);
+                if (valueElement) {
+                    valueElement.textContent = `${wallpaperState.brightness}%`;
+                }
+                
+                saveWallpaperSettings();
+                applyWallpaper();
+                updateDesktopPlaceholderWallpaper();
+            });
+        }
+    });
 }
 
 
