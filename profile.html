@@ -2222,59 +2222,39 @@ function updateDesktopPlaceholderWallpaper() {
     }
 }
 // Создание сетки обоев
-// Создание сетки обоев - исправленная версия
 function createWallpaperGrids() {
     const grids = ['wallpaperGridDesktop', 'wallpaperGridMobile'];
-    
+
     grids.forEach(gridId => {
         const grid = document.getElementById(gridId);
-        if (!grid) {
-            console.warn(`Grid not found: ${gridId}`);
-            return;
-        }
-        
-        // Очищаем сетку
+        if (!grid) return;
+
         grid.innerHTML = '';
-        
-        // Создаем элементы обоев
+
         WALLPAPERS.forEach(wallpaper => {
-            const wallpaperItem = document.createElement('div');
-            wallpaperItem.className = 'wallpaper-item';
-            wallpaperItem.dataset.wallpaperId = wallpaper.id;
-            
-            // Устанавливаем начальное состояние выделения
-            if (wallpaper.id === wallpaperState.selectedWallpaper) {
-                wallpaperItem.classList.add('selected');
-            }
-            
-            // Для системных обоев (по умолчанию) - особый вид
+            const item = document.createElement('div');
+            item.className = 'wallpaper-item';
+            item.dataset.wallpaperId = wallpaper.id;
+
             if (wallpaper.isDefault) {
-                wallpaperItem.innerHTML = `
+                item.innerHTML = `
                     <div class="wallpaper-preview" style="background: var(--telegram-secondary-bg); display: flex; align-items: center; justify-content: center;">
                         <i class="fas fa-paint-brush" style="font-size: 24px; color: var(--telegram-hint);"></i>
                     </div>
                     <div class="wallpaper-label">${wallpaper.name}</div>
                 `;
             } else {
-                wallpaperItem.innerHTML = `
-                    <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}');"></div>
+                item.innerHTML = `
+                    <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}')"></div>
                     <div class="wallpaper-label">${wallpaper.name}</div>
                 `;
             }
-            
-            // Добавляем галочку для выбранных обоев
-            if (wallpaper.id === wallpaperState.selectedWallpaper) {
-                const checkmark = document.createElement('div');
-                checkmark.className = 'wallpaper-checkmark';
-                checkmark.innerHTML = '<i class="fas fa-check"></i>';
-                wallpaperItem.appendChild(checkmark);
-            }
-            
-            grid.appendChild(wallpaperItem);
+
+            grid.appendChild(item);
         });
     });
-    
-    // Обновление переключателей и слайдеров
+
+    updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
     updateWallpaperControls();
 }
 
@@ -2307,10 +2287,9 @@ function updateWallpaperControls() {
 }
 
 function setupWallpaperEventListeners() {
-    // СНАЧАЛА снимаем старый обработчик, если он уже есть
+    // Удаляем старый обработчик, если он существовал
     document.removeEventListener('click', handleWallpaperClick);
 
-    // Новый обработчик выбора обоев
     function handleWallpaperClick(e) {
         const wallpaperItem = e.target.closest('.wallpaper-item');
         if (!wallpaperItem) return;
@@ -2319,46 +2298,39 @@ function setupWallpaperEventListeners() {
         e.stopPropagation();
 
         const wallpaperId = wallpaperItem.dataset.wallpaperId;
-        console.log('Wallpaper item clicked:', wallpaperId);
+        console.log("Wallpaper clicked:", wallpaperId);
 
         selectWallpaper(wallpaperId);
     }
 
-    // Добавляем ОДИН корректный обработчик
+    // Назначаем ОДИН корректный обработчик
     document.addEventListener('click', handleWallpaperClick);
 
-    // ПЕРЕКЛЮЧАТЕЛИ "Использовать обои"
+    // Переключатели "Использовать обои"
     ['wallpaperToggleDesktop', 'wallpaperToggleMobile'].forEach(toggleId => {
         const toggle = document.getElementById(toggleId);
         if (!toggle) return;
 
-        // Удаляем старый обработчик (клон заменяет ноду)
-        const newToggle = toggle.cloneNode(true);
-        toggle.parentNode.replaceChild(newToggle, toggle);
-
-        newToggle.addEventListener('change', (e) => {
+        toggle.onchange = (e) => {
             wallpaperState.enabled = e.target.checked;
             saveWallpaperSettings();
             applyWallpaper();
             updateDesktopPlaceholderWallpaper();
-        });
+        };
     });
 
-    // СЛАЙДЕРЫ ЯРКОСТИ
+    // Слайдеры яркости
     ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
         const slider = document.getElementById(sliderId);
         if (!slider) return;
 
-        // Удаляем старый обработчик через клонирование
-        const newSlider = slider.cloneNode(true);
-        slider.parentNode.replaceChild(newSlider, slider);
+        slider.oninput = (e) => {
+            wallpaperState.brightness = Number(e.target.value);
 
-        newSlider.addEventListener('input', (e) => {
-            wallpaperState.brightness = parseInt(e.target.value);
-
-            const valueId = sliderId === 'brightnessSliderDesktop'
-                ? 'brightnessValueDesktop'
-                : 'brightnessValueMobile';
+            const valueId =
+                sliderId === 'brightnessSliderDesktop'
+                    ? 'brightnessValueDesktop'
+                    : 'brightnessValueMobile';
 
             const valueElement = document.getElementById(valueId);
             if (valueElement) {
@@ -2368,12 +2340,13 @@ function setupWallpaperEventListeners() {
             saveWallpaperSettings();
             applyWallpaper();
             updateDesktopPlaceholderWallpaper();
-        });
+        };
     });
 }
 
+
 // Выбор обоев
-// Выбор обоев - исправленная версия
+// Выбор обоев — исправленная стабильная версия
 function selectWallpaper(wallpaperId) {
     // Проверяем, существует ли выбранные обои
     const wallpaperExists = WALLPAPERS.some(w => w.id === wallpaperId);
@@ -2381,114 +2354,78 @@ function selectWallpaper(wallpaperId) {
         console.error('Wallpaper not found:', wallpaperId);
         return;
     }
-    
+
     // Обновляем состояние
     wallpaperState.selectedWallpaper = wallpaperId;
     wallpaperState.enabled = true;
-    
-    // Сохраняем настройки сразу
+
+    // Сохраняем настройки
     saveWallpaperSettings();
-    
-    // Обновляем UI - более надежный метод
+
+    // Обновляем UI
     updateWallpaperSelectionUI(wallpaperId);
-    
+
     // Применяем обои
     applyWallpaper();
     updateDesktopPlaceholderWallpaper();
-    
+
     console.log('Wallpaper selected:', wallpaperId);
 }
 
-// Новая функция для обновления UI выбора обоев
+
 function updateWallpaperSelectionUI(selectedId) {
-    // Убираем выделение со всех элементов
-    document.querySelectorAll('.wallpaper-item').forEach(item => {
+    const all = document.querySelectorAll('.wallpaper-item');
+
+    all.forEach(item => {
         item.classList.remove('selected');
-        
-        // Удаляем галочку, если она есть
-        const existingCheckmark = item.querySelector('.wallpaper-checkmark');
-        if (existingCheckmark) {
-            existingCheckmark.remove();
-        }
+
+        const mark = item.querySelector('.wallpaper-checkmark');
+        if (mark) mark.remove();
     });
-    
-    // Добавляем выделение и галочку на выбранный элемент
-    document.querySelectorAll(`[data-wallpaper-id="${selectedId}"]`).forEach(item => {
+
+    const selectedItems = document.querySelectorAll(`[data-wallpaper-id="${selectedId}"]`);
+
+    selectedItems.forEach(item => {
         item.classList.add('selected');
-        
-        // Создаем новую галочку
-        const checkmark = document.createElement('div');
-        checkmark.className = 'wallpaper-checkmark';
-        checkmark.innerHTML = '<i class="fas fa-check"></i>';
-        item.appendChild(checkmark);
+
+        const check = document.createElement('div');
+        check.className = 'wallpaper-checkmark';
+        check.innerHTML = '<i class="fas fa-check"></i>';
+        item.appendChild(check);
     });
 }
 
 
-// Применение обоев - сохраняем оригинальный фон
+
+// Применение обоев — исправленная версия
 function applyWallpaper() {
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    const selectedWallpaper = WALLPAPERS.find(
+        w => w.id === wallpaperState.selectedWallpaper
+    );
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    
+
     if (!selectedWallpaper || !desktopPlaceholder) {
-        console.error('Wallpaper or placeholder not found');
+        console.error("Wallpaper or placeholder missing");
         return;
     }
-    
-    // Удаляем обои с body и восстанавливаем оригинальный фон
-    document.body.classList.remove('wallpaper-enabled');
-    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)'; // ВОССТАНАВЛИВАЕМ ОРИГИНАЛЬНЫЙ ФОН
-    document.body.style.backgroundImage = '';
-    document.body.style.filter = '';
-    
-    // Очищаем CSS переменные
-    document.documentElement.style.setProperty('--wallpaper-url', 'none');
-    document.documentElement.style.setProperty('--wallpaper-brightness', '100%');
-    
-    // Обои ТОЛЬКО для desktop-placeholder, если они включены
+
     if (wallpaperState.enabled) {
         desktopPlaceholder.classList.add('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
         desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
-        desktopPlaceholder.style.backgroundColor = ''; // Убираем цвет фона
+        desktopPlaceholder.style.backgroundColor = '';
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
         desktopPlaceholder.style.filter = '';
-        // Восстанавливаем цвет фона для placeholder
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
-    
-    // Убеждаемся, что все модули имеют правильный фон
-    const modules = [
-        profileModalDesktop,
-        privacyModule,
-        appearanceModule,
-        profileModalMobile,
-        privacyModuleMobile,
-        appearanceModuleMobile,
-        mobileSettingsView,
-        desktopSidebar
-    ];
-    
-    modules.forEach(module => {
-        if (module) {
-            module.style.backgroundColor = 'var(--telegram-secondary-bg)';
-            module.style.backgroundImage = '';
-            
-            // Для content внутри модулей
-            const content = module.querySelector('.desktop-module-content') || 
-                           module.querySelector('.profile-modal-content');
-            if (content) {
-                content.style.backgroundColor = 'var(--telegram-secondary-bg)';
-                content.style.backgroundImage = '';
-            }
-        }
-    });
-    
-    // Сохраняем настройки для других страниц
+
     broadcastWallpaperUpdate();
 }
+
+
+
 function hideAllDesktopModules() {
     const allModules = [profileModalDesktop, privacyModule, appearanceModule];
     allModules.forEach(mod => {
