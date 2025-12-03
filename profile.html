@@ -58,7 +58,6 @@
             --telegram-shadow-large: 0 4px 16px rgba(0,0,0,0.08);
             --desktop-sidebar-width: 340px;
             --wallpaper-url: url('фон.webp');
-            --wallpaper-brightness: 100%;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -71,7 +70,6 @@
                 --telegram-shadow: 0 1px 3px rgba(0,0,0,0.24);
                 --telegram-shadow-large: 0 4px 16px rgba(0,0,0,0.24);
                 --wallpaper-url: url('фон.webp');
-                --wallpaper-brightness: 100%;
             }
         }
         
@@ -1462,35 +1460,7 @@ body.wallpaper-enabled {
     color: var(--telegram-hint);
 }
 
-.wallpaper-slider {
-    width: 100%;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: var(--telegram-divider);
-    border-radius: 2px;
-    outline: none;
-}
 
-.wallpaper-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--telegram-blue);
-    cursor: pointer;
-    border: 2px solid var(--telegram-bg);
-}
-
-.wallpaper-slider::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--telegram-blue);
-    cursor: pointer;
-    border: 2px solid var(--telegram-bg);
-}
 
 /* Переключатель */
 .wallpaper-toggle {
@@ -1694,13 +1664,6 @@ input:checked + .toggle-slider:before {
                     <div class="wallpaper-section-title">Эффекты обоев</div>
                     <div class="wallpaper-settings">
                         
-                        <div class="wallpaper-setting-item">
-                            <div class="wallpaper-setting-label">
-                                <span>Яркость</span>
-                                <span class="wallpaper-setting-value" id="brightnessValueDesktop">100%</span>
-                            </div>
-                            <input type="range" min="20" max="100" value="100" class="wallpaper-slider" id="brightnessSliderDesktop">
-                        </div>
                         
                         <div class="wallpaper-toggle">
                             <span>Использовать обои</span>
@@ -1856,13 +1819,6 @@ input:checked + .toggle-slider:before {
                 <div class="wallpaper-section-title">Эффекты обоев</div>
                 <div class="wallpaper-settings">
                     
-                    <div class="wallpaper-setting-item">
-                        <div class="wallpaper-setting-label">
-                            <span>Яркость</span>
-                            <span class="wallpaper-setting-value" id="brightnessValueMobile">100%</span>
-                        </div>
-                        <input type="range" min="20" max="100" value="100" class="wallpaper-slider" id="brightnessSliderMobile">
-                    </div>
                     
                     <div class="wallpaper-toggle">
                         <span>Использовать обои</span>
@@ -2083,7 +2039,7 @@ const WALLPAPERS = [
 let wallpaperState = {
     enabled: false,
     selectedWallpaper: 'default',
-    brightness: 100
+
 };
 
 // Инициализация обоев - ОДНА основная функция
@@ -2124,7 +2080,6 @@ function loadWallpaperSettings() {
             wallpaperState = {
                 enabled: parsed.enabled || false,
                 selectedWallpaper: parsed.selectedWallpaper || 'default',
-                brightness: parsed.brightness || 100
             };
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
@@ -2192,7 +2147,6 @@ function saveWallpaperSettings() {
     const settingsToSave = {
         enabled: wallpaperState.enabled,
         selectedWallpaper: wallpaperState.selectedWallpaper,
-        brightness: wallpaperState.brightness
     };
     
     localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
@@ -2289,21 +2243,6 @@ function updateWallpaperControls() {
         }
     });
     
-    // Обновление слайдеров яркости
-    ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
-        const slider = document.getElementById(sliderId);
-        if (slider) {
-            slider.value = wallpaperState.brightness;
-        }
-    });
-    
-    // Обновление значений яркости
-    ['brightnessValueDesktop', 'brightnessValueMobile'].forEach(valueId => {
-        const valueElement = document.getElementById(valueId);
-        if (valueElement) {
-            valueElement.textContent = `${wallpaperState.brightness}%`;
-        }
-    });
 }
 
 // Настройка обработчиков событий
@@ -2369,26 +2308,7 @@ function setupWallpaperEventListeners() {
         }
     });
     
-    // Слайдеры яркости
-    ['brightnessSliderDesktop', 'brightnessSliderMobile'].forEach(sliderId => {
-        const slider = document.getElementById(sliderId);
-        if (slider) {
-            slider.addEventListener('input', (e) => {
-                wallpaperState.brightness = parseInt(e.target.value);
-                
-                // Обновляем значение рядом со слайдером
-                const valueId = sliderId === 'brightnessSliderDesktop' ? 'brightnessValueDesktop' : 'brightnessValueMobile';
-                const valueElement = document.getElementById(valueId);
-                if (valueElement) {
-                    valueElement.textContent = `${wallpaperState.brightness}%`;
-                }
-                
-                saveWallpaperSettings();
-                applyWallpaper();
-                updateDesktopPlaceholderWallpaper();
-            });
-        }
-    });
+
 }
 
 
@@ -2463,13 +2383,11 @@ function applyWallpaper() {
     
     // Очищаем CSS переменные
     document.documentElement.style.setProperty('--wallpaper-url', 'none');
-    document.documentElement.style.setProperty('--wallpaper-brightness', '100%');
     
     // Обои ТОЛЬКО для desktop-placeholder, если они включены
     if (wallpaperState.enabled) {
         desktopPlaceholder.classList.add('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-        desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
         desktopPlaceholder.style.backgroundColor = ''; // Убираем цвет фона
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
@@ -2531,7 +2449,6 @@ function broadcastWallpaperUpdate() {
                 data: {
                     enabled: wallpaperState.enabled,
                     selectedWallpaper: wallpaperState.selectedWallpaper,
-                    brightness: wallpaperState.brightness
                 }
             });
             channel.close();
@@ -2554,7 +2471,6 @@ function setupWallpaperBroadcastListener() {
                     wallpaperState = {
                         enabled: event.data.data.enabled,
                         selectedWallpaper: event.data.data.selectedWallpaper,
-                        brightness: event.data.data.brightness
                     };
                     updateWallpaperControls();
                     createWallpaperGrids();
