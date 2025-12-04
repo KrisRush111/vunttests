@@ -227,7 +227,6 @@
                 width: 100%;
                 padding: 20px;
                 box-sizing: border-box;
-                background-image: url('фон.webp');
                 background-size: cover;
                 background-position: center;
                 background-repeat: no-repeat;
@@ -2202,27 +2201,59 @@ function setupWallpaperBroadcastListener() {
 
 
 
-// Функция для проверки и обновления обоев
-function checkAndUpdateWallpaper() {
+async function checkAndUpdateWallpaper() {
+    // Сначала загружаем настройки
     loadWallpaperSettings();
-    setupWallpaperBroadcastListener();
-    updateDesktopPlaceholderWallpaper();
     
-    // Также проверяем при изменении видимости placeholder
+    // Устанавливаем слушатель
+    setupWallpaperBroadcastListener();
+    
+    // Принудительно обновляем placeholder СРАЗУ
+    await forceUpdatePlaceholder();
+    
+    // Наблюдатель за изменениями
     const placeholder = document.querySelector('.desktop-placeholder');
     if (placeholder) {
-        // Используем MutationObserver для отслеживания изменений display
         const observer = new MutationObserver(() => {
-            updateDesktopPlaceholderWallpaper();
+            forceUpdatePlaceholder();
         });
         
         observer.observe(placeholder, {
             attributes: true,
-            attributeFilter: ['style']
+            attributeFilter: ['style', 'class']
         });
     }
 }
 
+// Новая функция для принудительного обновления
+function forceUpdatePlaceholder() {
+    const desktopPlaceholder = document.querySelector('.desktop-placeholder');
+    if (!desktopPlaceholder) return;
+    
+    // Очищаем ВСЕ возможные стили обоев
+    desktopPlaceholder.style.backgroundImage = '';
+    desktopPlaceholder.style.filter = '';
+    desktopPlaceholder.style.backgroundColor = '';
+    
+    // Если обои выключены - устанавливаем обычный фон
+    if (!wallpaperState.enabled) {
+        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        return;
+    }
+    
+    // Находим выбранные обои
+    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    if (!selectedWallpaper) {
+        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        return;
+    }
+    
+    // Устанавливаем обои
+    desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+    desktopPlaceholder.style.backgroundSize = 'cover';
+    desktopPlaceholder.style.backgroundPosition = 'center';
+    desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
+}
 
 // Страницы, между которыми не должен сбрасываться кэш чатов
 const internalPages = ["chats.html", "profile.html", "contacts.html"];
@@ -3778,93 +3809,113 @@ function setupSearchHandlers() {
         });
 
 
-        async function initializePage() {
-            console.log('Initializing page...'); 
+async function initializePage() {
+    console.log('Initializing page...'); 
 
-            try {
-   
-                const userDataFromStorage = sessionStorage.getItem('userData');
-                if (!userDataFromStorage) {
-                    console.warn('No user data found, redirecting to profile');
-                    window.location.href = 'profile.html';
-                    return;
-                }
-
-                userData = JSON.parse(userDataFromStorage);
-                console.log('User data loaded:', userData);
-
-                // Запускаем обновление статусов
-                if (userData.platform_user_id) {
-                    setTimeout(() => {
-                        updateUserActivity(true);
-                        startActivityUpdates(); // Для отправки своего статуса
-                        startActivityPolling(); // Для получения статусов других пользователей
-                    }, 1000);
-                }
-         
-                isDesktop = window.matchMedia("(min-width: 768px)").matches;
-                console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
-
-            
-                if (isDesktop) {
-                    profileModalDesktop.classList.remove('active'); 
-                    profileModalDesktop.classList.add('desktop-profile'); 
-                    desktopPlaceholder.style.display = 'flex';
-                    profileModalDesktop.style.display = 'none'; 
-                } else {
-                    profileModalMobile.classList.remove('active', 'desktop-profile'); 
-                }
-
-
-         
-                console.log('Loading user data...');
-                await loadUserData();
-                console.log('Loading contacts...');
-                await loadContacts();
-                console.log('Loading recommendations...');
-                await loadFriendsRecommendations();
-
-           
-                const { searchInput } = getActiveElements();
-                console.log('Setting up search input handler');
-                setupSearchHandlers();
-
-         
-                if (!isDesktop) {
-                    console.log('Setting up mobile event listeners');
-                    if (profileBackButtonMobile) {
-                        profileBackButtonMobile.addEventListener('click', () => {
-                            console.log('Profile back button clicked');
-                            closeProfileModal();
-                        });
-                    }
-
-                    modalOverlay.addEventListener('click', () => {
-                        console.log('Modal overlay clicked');
-                        closeProfileModal();
-                    });
-                }
-
-                checkAndUpdateWallpaper();
-
-
-                console.log('Setting up resize handler');
-                window.addEventListener('resize', () => {
-                    const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-                    if (newIsDesktop !== isDesktop) {
-                        console.log(`Layout changed to ${newIsDesktop ? 'desktop' : 'mobile'}`);
-                        isDesktop = newIsDesktop;
-                        initializePage();
-                    }
-                });
-
-                console.log('Initialization complete');
-            } catch (error) {
-                console.error('Initialization failed:', error);
-          
-            }
+    try {
+        const userDataFromStorage = sessionStorage.getItem('userData');
+        if (!userDataFromStorage) {
+            console.warn('No user data found, redirecting to profile');
+            window.location.href = 'profile.html';
+            return;
         }
 
+        userData = JSON.parse(userDataFromStorage);
+        console.log('User data loaded:', userData);
+
+        // СРАЗУ загружаем и применяем обои перед всем остальным
+        await checkAndUpdateWallpaper();
+        
+        // Очищаем CSS обои на placeholder'е (если они есть из CSS)
+        const desktopPlaceholder = document.querySelector('.desktop-placeholder');
+        if (desktopPlaceholder) {
+            desktopPlaceholder.style.backgroundImage = '';
+            desktopPlaceholder.style.filter = '';
+            desktopPlaceholder.style.backgroundColor = '';
+        }
+
+        // Запускаем обновление статусов
+        if (userData.platform_user_id) {
+            setTimeout(() => {
+                updateUserActivity(true);
+                startActivityUpdates();
+                startActivityPolling();
+            }, 1000);
+        }
+
+        isDesktop = window.matchMedia("(min-width: 768px)").matches;
+        console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
+
+        if (isDesktop) {
+            profileModalDesktop.classList.remove('active'); 
+            profileModalDesktop.classList.add('desktop-profile'); 
+            desktopPlaceholder.style.display = 'flex';
+            profileModalDesktop.style.display = 'none'; 
+            
+            // ПРИНУДИТЕЛЬНО применяем обои к placeholder'у после показа
+            setTimeout(() => {
+                forceUpdatePlaceholder();
+            }, 50);
+        } else {
+            profileModalMobile.classList.remove('active', 'desktop-profile'); 
+        }
+
+        console.log('Loading user data...');
+        await loadUserData();
+        console.log('Loading contacts...');
+        await loadContacts();
+        console.log('Loading recommendations...');
+        await loadFriendsRecommendations();
+
+        const { searchInput } = getActiveElements();
+        console.log('Setting up search input handler');
+        setupSearchHandlers();
+
+        if (!isDesktop) {
+            console.log('Setting up mobile event listeners');
+            if (profileBackButtonMobile) {
+                profileBackButtonMobile.addEventListener('click', () => {
+                    console.log('Profile back button clicked');
+                    closeProfileModal();
+                });
+            }
+
+            modalOverlay.addEventListener('click', () => {
+                console.log('Modal overlay clicked');
+                closeProfileModal();
+            });
+        }
+
+        console.log('Setting up resize handler');
+        window.addEventListener('resize', () => {
+            const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+            if (newIsDesktop !== isDesktop) {
+                console.log(`Layout changed to ${newIsDesktop ? 'desktop' : 'mobile'}`);
+                isDesktop = newIsDesktop;
+                
+                // При изменении размера тоже обновляем обои
+                setTimeout(() => {
+                    forceUpdatePlaceholder();
+                }, 100);
+                
+                initializePage();
+            }
+        });
+
+        // Добавляем слушатель для моментального обновления обоев при возвращении на страницу
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                setTimeout(() => {
+                    forceUpdatePlaceholder();
+                }, 50);
+            }
+        });
+
+        console.log('Initialization complete');
+    } catch (error) {
+        console.error('Initialization failed:', error);
+    }
+}
 
         document.addEventListener('DOMContentLoaded', initializePage);
 
