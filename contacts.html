@@ -236,15 +236,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
             
             .desktop-placeholder h3 {
                 color: white;
@@ -2159,22 +2150,49 @@ function saveWallpaperSettings() {
     sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
 }
 
-function applyWallpaperToPlaceholder() {
+function initializeWallpaper() {
+    loadWallpaperSettings();
+    setupWallpaperBroadcastListener();
+    
+    // СРАЗУ применяем обои к placeholder, без задержки
+    applyWallpaperToPlaceholderImmediately();
+    
+    // Добавляем обработчик для отслеживания видимости placeholder
+    const observer = new MutationObserver(() => {
+        applyWallpaperToPlaceholderImmediately();
+    });
+    
+    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+    if (desktopPlaceholder) {
+        observer.observe(desktopPlaceholder, {
+            attributes: true,
+            attributeFilter: ['style', 'class']
+        });
+    }
+}
+
+// Новая функция для немедленного применения обоев
+function applyWallpaperToPlaceholderImmediately() {
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (!desktopPlaceholder) return;
     
-    // Проверяем, виден ли placeholder
-    const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
-    
-    if (wallpaperState.enabled && isPlaceholderVisible) {
+    // Проверяем наличие обоев в состоянии
+    if (wallpaperState.enabled) {
         const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
         if (selectedWallpaper) {
             desktopPlaceholder.classList.add('wallpaper-enabled');
             desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            desktopPlaceholder.style.backgroundSize = 'cover';
+            desktopPlaceholder.style.backgroundPosition = 'center';
+            desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
+            
+            // Убираем фоновый цвет если есть обои
+            desktopPlaceholder.style.backgroundColor = '';
         }
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
+        // Возвращаем стандартный фон
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
 }
@@ -2196,30 +2214,6 @@ function setupWallpaperBroadcastListener() {
         } catch (e) {
             console.error('BroadcastChannel listener error:', e);
         }
-    }
-}
-
-// Инициализация обоев при загрузке страницы
-function initializeWallpaper() {
-    loadWallpaperSettings();
-    setupWallpaperBroadcastListener();
-    
-    // Применяем обои к placeholder
-    setTimeout(() => {
-        applyWallpaperToPlaceholder();
-    }, 100);
-    
-    // Добавляем обработчик для отслеживания видимости placeholder
-    const observer = new MutationObserver(() => {
-        applyWallpaperToPlaceholder();
-    });
-    
-    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    if (desktopPlaceholder) {
-        observer.observe(desktopPlaceholder, {
-            attributes: true,
-            attributeFilter: ['style']
-        });
     }
 }
 
@@ -3783,6 +3777,8 @@ function setupSearchHandlers() {
             console.log('Initializing page...'); 
 
             try {
+
+                initializeWallpaper();
    
                 const userDataFromStorage = sessionStorage.getItem('userData');
                 if (!userDataFromStorage) {
@@ -3857,7 +3853,7 @@ function setupSearchHandlers() {
                     }
                 });
 
-                initializeWallpaper();
+   
 
                 console.log('Initialization complete');
             } catch (error) {
