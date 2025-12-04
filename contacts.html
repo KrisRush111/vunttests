@@ -3809,113 +3809,93 @@ function setupSearchHandlers() {
         });
 
 
-async function initializePage() {
-    console.log('Initializing page...'); 
+        async function initializePage() {
+            console.log('Initializing page...'); 
 
-    try {
-        const userDataFromStorage = sessionStorage.getItem('userData');
-        if (!userDataFromStorage) {
-            console.warn('No user data found, redirecting to profile');
-            window.location.href = 'profile.html';
-            return;
-        }
+            try {
+   
+                const userDataFromStorage = sessionStorage.getItem('userData');
+                if (!userDataFromStorage) {
+                    console.warn('No user data found, redirecting to profile');
+                    window.location.href = 'profile.html';
+                    return;
+                }
 
-        userData = JSON.parse(userDataFromStorage);
-        console.log('User data loaded:', userData);
+                userData = JSON.parse(userDataFromStorage);
+                console.log('User data loaded:', userData);
 
-        // СРАЗУ загружаем и применяем обои перед всем остальным
-        await checkAndUpdateWallpaper();
-        
-        // Очищаем CSS обои на placeholder'е (если они есть из CSS)
-        const desktopPlaceholder = document.querySelector('.desktop-placeholder');
-        if (desktopPlaceholder) {
-            desktopPlaceholder.style.backgroundImage = '';
-            desktopPlaceholder.style.filter = '';
-            desktopPlaceholder.style.backgroundColor = '';
-        }
+                // Запускаем обновление статусов
+                if (userData.platform_user_id) {
+                    setTimeout(() => {
+                        updateUserActivity(true);
+                        startActivityUpdates(); // Для отправки своего статуса
+                        startActivityPolling(); // Для получения статусов других пользователей
+                    }, 1000);
+                }
+         
+                isDesktop = window.matchMedia("(min-width: 768px)").matches;
+                console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
 
-        // Запускаем обновление статусов
-        if (userData.platform_user_id) {
-            setTimeout(() => {
-                updateUserActivity(true);
-                startActivityUpdates();
-                startActivityPolling();
-            }, 1000);
-        }
-
-        isDesktop = window.matchMedia("(min-width: 768px)").matches;
-        console.log(`Device type: ${isDesktop ? 'Desktop' : 'Mobile'}`);
-
-        if (isDesktop) {
-            profileModalDesktop.classList.remove('active'); 
-            profileModalDesktop.classList.add('desktop-profile'); 
-            desktopPlaceholder.style.display = 'flex';
-            profileModalDesktop.style.display = 'none'; 
             
-            // ПРИНУДИТЕЛЬНО применяем обои к placeholder'у после показа
-            setTimeout(() => {
-                forceUpdatePlaceholder();
-            }, 50);
-        } else {
-            profileModalMobile.classList.remove('active', 'desktop-profile'); 
-        }
+                if (isDesktop) {
+                    profileModalDesktop.classList.remove('active'); 
+                    profileModalDesktop.classList.add('desktop-profile'); 
+                    desktopPlaceholder.style.display = 'flex';
+                    profileModalDesktop.style.display = 'none'; 
+                } else {
+                    profileModalMobile.classList.remove('active', 'desktop-profile'); 
+                }
 
-        console.log('Loading user data...');
-        await loadUserData();
-        console.log('Loading contacts...');
-        await loadContacts();
-        console.log('Loading recommendations...');
-        await loadFriendsRecommendations();
 
-        const { searchInput } = getActiveElements();
-        console.log('Setting up search input handler');
-        setupSearchHandlers();
+         
+                console.log('Loading user data...');
+                await loadUserData();
+                console.log('Loading contacts...');
+                await loadContacts();
+                console.log('Loading recommendations...');
+                await loadFriendsRecommendations();
 
-        if (!isDesktop) {
-            console.log('Setting up mobile event listeners');
-            if (profileBackButtonMobile) {
-                profileBackButtonMobile.addEventListener('click', () => {
-                    console.log('Profile back button clicked');
-                    closeProfileModal();
+           
+                const { searchInput } = getActiveElements();
+                console.log('Setting up search input handler');
+                setupSearchHandlers();
+
+         
+                if (!isDesktop) {
+                    console.log('Setting up mobile event listeners');
+                    if (profileBackButtonMobile) {
+                        profileBackButtonMobile.addEventListener('click', () => {
+                            console.log('Profile back button clicked');
+                            closeProfileModal();
+                        });
+                    }
+
+                    modalOverlay.addEventListener('click', () => {
+                        console.log('Modal overlay clicked');
+                        closeProfileModal();
+                    });
+                }
+
+                checkAndUpdateWallpaper();
+
+
+                console.log('Setting up resize handler');
+                window.addEventListener('resize', () => {
+                    const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+                    if (newIsDesktop !== isDesktop) {
+                        console.log(`Layout changed to ${newIsDesktop ? 'desktop' : 'mobile'}`);
+                        isDesktop = newIsDesktop;
+                        initializePage();
+                    }
                 });
-            }
 
-            modalOverlay.addEventListener('click', () => {
-                console.log('Modal overlay clicked');
-                closeProfileModal();
-            });
+                console.log('Initialization complete');
+            } catch (error) {
+                console.error('Initialization failed:', error);
+          
+            }
         }
 
-        console.log('Setting up resize handler');
-        window.addEventListener('resize', () => {
-            const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-            if (newIsDesktop !== isDesktop) {
-                console.log(`Layout changed to ${newIsDesktop ? 'desktop' : 'mobile'}`);
-                isDesktop = newIsDesktop;
-                
-                // При изменении размера тоже обновляем обои
-                setTimeout(() => {
-                    forceUpdatePlaceholder();
-                }, 100);
-                
-                initializePage();
-            }
-        });
-
-        // Добавляем слушатель для моментального обновления обоев при возвращении на страницу
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                setTimeout(() => {
-                    forceUpdatePlaceholder();
-                }, 50);
-            }
-        });
-
-        console.log('Initialization complete');
-    } catch (error) {
-        console.error('Initialization failed:', error);
-    }
-}
 
         document.addEventListener('DOMContentLoaded', initializePage);
 
@@ -3925,6 +3905,42 @@ async function initializePage() {
                 initializePage();
             }
         });
+
+
+        // Принудительная синхронизация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    // Ждем немного, чтобы все элементы загрузились
+    setTimeout(() => {
+        const placeholder = document.querySelector('.desktop-placeholder');
+        if (placeholder) {
+            // Очищаем все возможные CSS обои
+            placeholder.style.backgroundImage = '';
+            placeholder.style.filter = '';
+            
+            // Применяем обои из настроек
+            forceUpdatePlaceholder();
+        }
+    }, 100);
+});
+
+// Также синхронизируем при каждом показе страницы
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        setTimeout(() => {
+            forceUpdatePlaceholder();
+        }, 50);
+    }
+});
+
+// И при возвращении на вкладку
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        setTimeout(() => {
+            forceUpdatePlaceholder();
+        }, 100);
+    }
+});
+
     </script>
 
       <script src="activity-tracker.js"></script>
