@@ -2083,6 +2083,144 @@ let friendsRecommendations = [];
 
 
 
+
+
+// В самом начале скрипта (после SERVER_URL) добавьте:
+const WALLPAPERS = [
+    {
+        id: 'default',
+        name: 'Системные',
+        url: 'фон.webp',
+        isDefault: true
+    },
+    {
+        id: 'wall1',
+        name: 'Фиолетовые',
+        url: 'фон3.webp'
+    },
+    {
+        id: 'wall2',
+        name: 'Светлые',
+        url: 'фон4.webp'
+    },
+    {
+        id: 'wall3',
+        name: 'зелёно-розовые',
+        url: 'фон5.webp'
+    },
+    {
+        id: 'wall4',
+        name: 'Темные',
+        url: 'фон6.webp'
+    }
+];
+
+
+
+// После объявления currentViewedUser добавьте:
+let wallpaperState = {
+    enabled: false,
+    selectedWallpaper: 'default',
+    blur: 10
+};
+
+// Функция загрузки настроек обоев из localStorage
+function loadWallpaperSettings() {
+    const saved = localStorage.getItem('vuntgram_wallpaper');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            wallpaperState = {
+                enabled: parsed.enabled || false,
+                selectedWallpaper: parsed.selectedWallpaper || 'default',
+                brightness: parsed.brightness || 80,
+                blur: parsed.blur || 10
+            };
+        } catch (e) {
+            console.error('Error loading wallpaper settings:', e);
+        }
+    }
+}
+
+// Функция для обновления desktop-placeholder с обоями
+function updateDesktopPlaceholderWallpaper() {
+    const desktopPlaceholder = document.querySelector('.desktop-placeholder');
+    if (!desktopPlaceholder) return;
+    
+    // Проверяем, виден ли placeholder
+    const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
+    
+    if (wallpaperState.enabled && isPlaceholderVisible) {
+        const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+        if (selectedWallpaper) {
+            desktopPlaceholder.classList.add('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
+            desktopPlaceholder.style.backgroundSize = 'cover';
+            desktopPlaceholder.style.backgroundPosition = 'center';
+            desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
+        }
+    } else {
+        desktopPlaceholder.classList.remove('wallpaper-enabled');
+        desktopPlaceholder.style.backgroundImage = '';
+        desktopPlaceholder.style.filter = '';
+        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+    }
+}
+
+
+
+
+
+// Функция для настройки слушателя BroadcastChannel
+function setupWallpaperBroadcastListener() {
+    if (typeof BroadcastChannel !== 'undefined') {
+        try {
+            const channel = new BroadcastChannel('vuntgram_wallpaper');
+            channel.addEventListener('message', (event) => {
+                if (event.data.type === 'wallpaper_update') {
+                    wallpaperState = {
+                        enabled: event.data.data.enabled,
+                        selectedWallpaper: event.data.data.selectedWallpaper,
+                        brightness: event.data.data.brightness || 80,
+                        blur: event.data.data.blur || 10
+                    };
+                    
+                    // Обновляем placeholder
+                    updateDesktopPlaceholderWallpaper();
+                }
+            });
+        } catch (e) {
+            console.error('BroadcastChannel listener error:', e);
+        }
+    }
+}
+
+
+
+
+// Функция для проверки и обновления обоев
+function checkAndUpdateWallpaper() {
+    loadWallpaperSettings();
+    setupWallpaperBroadcastListener();
+    updateDesktopPlaceholderWallpaper();
+    
+    // Также проверяем при изменении видимости placeholder
+    const placeholder = document.querySelector('.desktop-placeholder');
+    if (placeholder) {
+        // Используем MutationObserver для отслеживания изменений display
+        const observer = new MutationObserver(() => {
+            updateDesktopPlaceholderWallpaper();
+        });
+        
+        observer.observe(placeholder, {
+            attributes: true,
+            attributeFilter: ['style']
+        });
+    }
+}
+
+
 // Страницы, между которыми не должен сбрасываться кэш чатов
 const internalPages = ["chats.html", "profile.html", "contacts.html"];
 
@@ -3703,6 +3841,8 @@ function setupSearchHandlers() {
                         closeProfileModal();
                     });
                 }
+
+                checkAndUpdateWallpaper();
 
 
                 console.log('Setting up resize handler');
