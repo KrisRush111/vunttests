@@ -1,4 +1,5 @@
 // wallpaper-manager.js
+// Глобальный менеджер обоев для всего сайта
 
 const WALLPAPERS = [
     {
@@ -31,93 +32,148 @@ const WALLPAPERS = [
 
 class WallpaperManager {
     constructor() {
-        this.wallpaperState = {
+        this.state = {
             enabled: false,
-            selectedWallpaper: 'default',
+            selectedWallpaper: 'default'
         };
-        this.loadWallpaperSettings();
+        
+        this.loadSettings();
+        this.setupBroadcastListener();
     }
-
-    // Загрузка настроек из localStorage
-    loadWallpaperSettings() {
+    
+    loadSettings() {
         const saved = localStorage.getItem('vuntgram_wallpaper');
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                this.wallpaperState = {
+                this.state = {
                     enabled: parsed.enabled || false,
-                    selectedWallpaper: parsed.selectedWallpaper || 'default',
+                    selectedWallpaper: parsed.selectedWallpaper || 'default'
                 };
             } catch (e) {
                 console.error('Error loading wallpaper settings:', e);
-                this.saveWallpaperSettings();
+                this.saveSettings();
             }
         }
     }
-
-    // Сохранение настроек
-    saveWallpaperSettings() {
-        localStorage.setItem('vuntgram_wallpaper', JSON.stringify(this.wallpaperState));
-        
-        // Отправляем уведомление другим вкладкам
+    
+    saveSettings() {
+        localStorage.setItem('vuntgram_wallpaper', JSON.stringify(this.state));
         this.broadcastUpdate();
     }
-
-    // Применение обоев к странице
-    applyWallpaper() {
-        const selectedWallpaper = WALLPAPERS.find(w => w.id === this.wallpaperState.selectedWallpaper);
+    
+    selectWallpaper(wallpaperId) {
+        const wallpaperExists = WALLPAPERS.some(w => w.id === wallpaperId);
+        if (!wallpaperExists) {
+            console.error('Wallpaper not found:', wallpaperId);
+            return;
+        }
         
+        this.state.selectedWallpaper = wallpaperId;
+        this.state.enabled = true;
+        this.saveSettings();
+        this.applyToCurrentPage();
+    }
+    
+    toggleWallpaper(enabled) {
+        this.state.enabled = enabled;
+        this.saveSettings();
+        this.applyToCurrentPage();
+    }
+    
+    getSelectedWallpaper() {
+        return WALLPAPERS.find(w => w.id === this.state.selectedWallpaper);
+    }
+    
+    applyToCurrentPage() {
+        const selectedWallpaper = this.getSelectedWallpaper();
         if (!selectedWallpaper) return;
-
-        if (this.wallpaperState.enabled) {
-            // Применяем обои к body
+        
+        // Определяем тип страницы
+        const currentPage = window.location.pathname.split('/').pop();
+        
+        if (currentPage === 'contacts.html') {
+            this.applyToContactsPage();
+        } else if (currentPage === 'profile.html') {
+            this.applyToProfilePage();
+        } else if (currentPage === 'chats.html') {
+            this.applyToChatsPage(); // Если у вас есть chats.html
+        }
+        
+        // Также применяем к body если это нужно
+        this.applyToBody();
+    }
+    
+    applyToContactsPage() {
+        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+        if (!desktopPlaceholder) return;
+        
+        const selectedWallpaper = this.getSelectedWallpaper();
+        
+        if (this.state.enabled) {
+            desktopPlaceholder.classList.add('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+        } else {
+            desktopPlaceholder.classList.remove('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = '';
+        }
+    }
+    
+    applyToProfilePage() {
+        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+        if (!desktopPlaceholder) return;
+        
+        const selectedWallpaper = this.getSelectedWallpaper();
+        
+        if (this.state.enabled) {
+            desktopPlaceholder.classList.add('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+        } else {
+            desktopPlaceholder.classList.remove('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = '';
+        }
+    }
+    
+    applyToBody() {
+        const selectedWallpaper = this.getSelectedWallpaper();
+        
+        if (this.state.enabled) {
+            document.body.classList.add('wallpaper-enabled');
             document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
             document.body.style.backgroundSize = 'cover';
             document.body.style.backgroundPosition = 'center';
-            document.body.style.backgroundAttachment = 'fixed';
             document.body.style.backgroundRepeat = 'no-repeat';
-            
-            // Устанавливаем CSS переменную для других элементов
-            document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
+            document.body.style.backgroundAttachment = 'fixed';
         } else {
-            // Убираем обои
+            document.body.classList.remove('wallpaper-enabled');
             document.body.style.backgroundImage = '';
-            document.documentElement.style.setProperty('--wallpaper-url', 'none');
+            document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
         }
     }
-
-    // Обновление состояния
-    updateState(newState) {
-        this.wallpaperState = { ...this.wallpaperState, ...newState };
-        this.saveWallpaperSettings();
-        this.applyWallpaper();
-    }
-
-    // Вещание обновлений другим вкладкам
+    
     broadcastUpdate() {
         if (typeof BroadcastChannel !== 'undefined') {
             try {
                 const channel = new BroadcastChannel('vuntgram_wallpaper');
                 channel.postMessage({
                     type: 'wallpaper_update',
-                    data: this.wallpaperState
+                    data: this.state
                 });
-                setTimeout(() => channel.close(), 100);
+                channel.close();
             } catch (e) {
                 console.error('BroadcastChannel error:', e);
             }
         }
     }
-
-    // Настройка слушателя обновлений
+    
     setupBroadcastListener() {
         if (typeof BroadcastChannel !== 'undefined') {
             try {
                 const channel = new BroadcastChannel('vuntgram_wallpaper');
                 channel.addEventListener('message', (event) => {
                     if (event.data.type === 'wallpaper_update') {
-                        this.wallpaperState = event.data.data;
-                        this.applyWallpaper();
+                        this.state = event.data.data;
+                        this.applyToCurrentPage();
                     }
                 });
             } catch (e) {
@@ -125,7 +181,69 @@ class WallpaperManager {
             }
         }
     }
+    
+    // Методы для UI
+    createWallpaperGrid(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        container.innerHTML = '';
+        
+        WALLPAPERS.forEach(wallpaper => {
+            const wallpaperItem = document.createElement('div');
+            wallpaperItem.className = 'wallpaper-item';
+            wallpaperItem.dataset.wallpaperId = wallpaper.id;
+            
+            if (wallpaper.id === this.state.selectedWallpaper) {
+                wallpaperItem.classList.add('selected');
+            }
+            
+            wallpaperItem.innerHTML = `
+                <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}');"></div>
+                <div class="wallpaper-label">${wallpaper.name}</div>
+            `;
+            
+            if (wallpaper.id === this.state.selectedWallpaper) {
+                const checkmark = document.createElement('div');
+                checkmark.className = 'wallpaper-checkmark';
+                checkmark.innerHTML = '<i class="fas fa-check"></i>';
+                wallpaperItem.appendChild(checkmark);
+            }
+            
+            // Обработчик клика
+            wallpaperItem.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.selectWallpaper(wallpaper.id);
+                
+                // Обновляем UI
+                document.querySelectorAll('.wallpaper-item').forEach(item => {
+                    item.classList.remove('selected');
+                    const existingCheckmark = item.querySelector('.wallpaper-checkmark');
+                    if (existingCheckmark) existingCheckmark.remove();
+                });
+                
+                wallpaperItem.classList.add('selected');
+                const checkmark = document.createElement('div');
+                checkmark.className = 'wallpaper-checkmark';
+                checkmark.innerHTML = '<i class="fas fa-check"></i>';
+                wallpaperItem.appendChild(checkmark);
+            });
+            
+            container.appendChild(wallpaperItem);
+        });
+    }
+    
+    setupToggle(toggleId) {
+        const toggle = document.getElementById(toggleId);
+        if (!toggle) return;
+        
+        toggle.checked = this.state.enabled;
+        toggle.addEventListener('change', (e) => {
+            this.toggleWallpaper(e.target.checked);
+        });
+    }
 }
 
-// Создаем глобальный экземпляр
+// Глобальный экземпляр
 window.wallpaperManager = new WallpaperManager();
