@@ -2104,9 +2104,8 @@ let friendsRecommendations = [];
 
 
 
-// В contacts.html в конце скрипта или в initializePage()
 function applyWallpaperToContacts() {
-    // Применяем обои к placeholder
+    // Применяем обои к placeholder ДО загрузки данных
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (!desktopPlaceholder) return;
     
@@ -2115,12 +2114,13 @@ function applyWallpaperToContacts() {
     
     const selectedWallpaper = wallpaperManager.getSelectedWallpaper();
     
+    // Обои уже должны быть применены applyImmediately(),
+    // но делаем дополнительную проверку
     if (wallpaperManager.state.enabled && selectedWallpaper) {
         desktopPlaceholder.classList.add('wallpaper-enabled');
-        desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-        desktopPlaceholder.style.backgroundSize = 'cover';
-        desktopPlaceholder.style.backgroundPosition = 'center';
-        desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
+        if (!desktopPlaceholder.style.backgroundImage) {
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+        }
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
@@ -2128,6 +2128,20 @@ function applyWallpaperToContacts() {
     }
 }
 
+// ВЫЗЫВАЕМ СРАЗУ, А НЕ В initializePage()
+// Вставьте этот код прямо в глобальную область видимости
+document.addEventListener('DOMContentLoaded', function() {
+    // Применяем обои сразу при загрузке DOM
+    applyWallpaperToContacts();
+    
+    // Устанавливаем правильный фон для body если нужно
+    if (wallpaperManager.state.enabled) {
+        const selectedWallpaper = wallpaperManager.getSelectedWallpaper();
+        if (selectedWallpaper) {
+            document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+        }
+    }
+});
 
 // Функция для загрузки рекомендаций
 async function loadFriendsRecommendations() {
