@@ -234,6 +234,31 @@
             }
 
 
+
+
+
+
+
+
+
+            /* Обои для плейсхолдера в contacts.html */
+.contacts-desktop-placeholder.wallpaper-enabled {
+    background-image: var(--wallpaper-url);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    transition: all 0.3s ease;
+}
+
+.contacts-desktop-placeholder:not(.wallpaper-enabled) {
+    background-color: var(--telegram-secondary-bg);
+    background-image: none;
+}
+
+
+
+
+
             
             .desktop-placeholder h3 {
                 color: white;
@@ -2084,7 +2109,8 @@ let friendsRecommendations = [];
 
 
 
-// В самом начале скрипта (после SERVER_URL) добавьте:
+
+// Конфигурация обоев (совпадает с profile.html)
 const WALLPAPERS = [
     {
         id: 'default',
@@ -2114,16 +2140,13 @@ const WALLPAPERS = [
     }
 ];
 
-
-
-// После объявления currentViewedUser добавьте:
+// Состояние обоев
 let wallpaperState = {
     enabled: false,
-    selectedWallpaper: 'default',
-    blur: 10
+    selectedWallpaper: 'default'
 };
 
-// Функция загрузки настроек обоев из localStorage
+// Функции для работы с обоями
 function loadWallpaperSettings() {
     const saved = localStorage.getItem('vuntgram_wallpaper');
     if (saved) {
@@ -2131,19 +2154,27 @@ function loadWallpaperSettings() {
             const parsed = JSON.parse(saved);
             wallpaperState = {
                 enabled: parsed.enabled || false,
-                selectedWallpaper: parsed.selectedWallpaper || 'default',
-                brightness: parsed.brightness || 80,
-                blur: parsed.blur || 10
+                selectedWallpaper: parsed.selectedWallpaper || 'default'
             };
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
+            saveWallpaperSettings();
         }
     }
 }
 
-// Функция для обновления desktop-placeholder с обоями
-function updateDesktopPlaceholderWallpaper() {
-    const desktopPlaceholder = document.querySelector('.desktop-placeholder');
+function saveWallpaperSettings() {
+    const settingsToSave = {
+        enabled: wallpaperState.enabled,
+        selectedWallpaper: wallpaperState.selectedWallpaper
+    };
+    
+    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
+    sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
+}
+
+function applyWallpaperToPlaceholder() {
+    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (!desktopPlaceholder) return;
     
     // Проверяем, виден ли placeholder
@@ -2154,27 +2185,15 @@ function updateDesktopPlaceholderWallpaper() {
         if (selectedWallpaper) {
             desktopPlaceholder.classList.add('wallpaper-enabled');
             desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            
-            // УБИРАЕМ фильтр brightness (строка ниже)
-            // desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
-            
-            desktopPlaceholder.style.backgroundSize = 'cover';
-            desktopPlaceholder.style.backgroundPosition = 'center';
-            desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
         }
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
-        desktopPlaceholder.style.filter = '';
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
 }
 
-
-
-
-
-// Функция для настройки слушателя BroadcastChannel
+// Слушатель для обновлений обоев из других вкладок
 function setupWallpaperBroadcastListener() {
     if (typeof BroadcastChannel !== 'undefined') {
         try {
@@ -2183,13 +2202,9 @@ function setupWallpaperBroadcastListener() {
                 if (event.data.type === 'wallpaper_update') {
                     wallpaperState = {
                         enabled: event.data.data.enabled,
-                        selectedWallpaper: event.data.data.selectedWallpaper,
-                        brightness: event.data.data.brightness || 80,
-                        blur: event.data.data.blur || 10
+                        selectedWallpaper: event.data.data.selectedWallpaper
                     };
-                    
-                    // Обновляем placeholder
-                    updateDesktopPlaceholderWallpaper();
+                    applyWallpaperToPlaceholder();
                 }
             });
         } catch (e) {
@@ -2198,62 +2213,31 @@ function setupWallpaperBroadcastListener() {
     }
 }
 
-
-
-
-async function checkAndUpdateWallpaper() {
-    // Сначала загружаем настройки
+// Инициализация обоев при загрузке страницы
+function initializeWallpaper() {
     loadWallpaperSettings();
-    
-    // Устанавливаем слушатель
     setupWallpaperBroadcastListener();
     
-    // Принудительно обновляем placeholder СРАЗУ
-    await forceUpdatePlaceholder();
+    // Применяем обои к placeholder
+    setTimeout(() => {
+        applyWallpaperToPlaceholder();
+    }, 100);
     
-    // Наблюдатель за изменениями
-    const placeholder = document.querySelector('.desktop-placeholder');
-    if (placeholder) {
-        const observer = new MutationObserver(() => {
-            forceUpdatePlaceholder();
-        });
-        
-        observer.observe(placeholder, {
+    // Добавляем обработчик для отслеживания видимости placeholder
+    const observer = new MutationObserver(() => {
+        applyWallpaperToPlaceholder();
+    });
+    
+    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+    if (desktopPlaceholder) {
+        observer.observe(desktopPlaceholder, {
             attributes: true,
-            attributeFilter: ['style', 'class']
+            attributeFilter: ['style']
         });
     }
 }
 
-// Новая функция для принудительного обновления
-function forceUpdatePlaceholder() {
-    const desktopPlaceholder = document.querySelector('.desktop-placeholder');
-    if (!desktopPlaceholder) return;
-    
-    // Очищаем ВСЕ возможные стили обоев
-    desktopPlaceholder.style.backgroundImage = '';
-    desktopPlaceholder.style.filter = '';
-    desktopPlaceholder.style.backgroundColor = '';
-    
-    // Если обои выключены - устанавливаем обычный фон
-    if (!wallpaperState.enabled) {
-        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
-        return;
-    }
-    
-    // Находим выбранные обои
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-    if (!selectedWallpaper) {
-        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
-        return;
-    }
-    
-    // Устанавливаем обои
-    desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-    desktopPlaceholder.style.backgroundSize = 'cover';
-    desktopPlaceholder.style.backgroundPosition = 'center';
-    desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
-}
+
 
 // Страницы, между которыми не должен сбрасываться кэш чатов
 const internalPages = ["chats.html", "profile.html", "contacts.html"];
@@ -3876,8 +3860,6 @@ function setupSearchHandlers() {
                     });
                 }
 
-                checkAndUpdateWallpaper();
-
 
                 console.log('Setting up resize handler');
                 window.addEventListener('resize', () => {
@@ -3888,6 +3870,8 @@ function setupSearchHandlers() {
                         initializePage();
                     }
                 });
+
+                initializeWallpaper();
 
                 console.log('Initialization complete');
             } catch (error) {
@@ -3905,42 +3889,6 @@ function setupSearchHandlers() {
                 initializePage();
             }
         });
-
-
-        // Принудительная синхронизация при загрузке
-document.addEventListener('DOMContentLoaded', () => {
-    // Ждем немного, чтобы все элементы загрузились
-    setTimeout(() => {
-        const placeholder = document.querySelector('.desktop-placeholder');
-        if (placeholder) {
-            // Очищаем все возможные CSS обои
-            placeholder.style.backgroundImage = '';
-            placeholder.style.filter = '';
-            
-            // Применяем обои из настроек
-            forceUpdatePlaceholder();
-        }
-    }, 100);
-});
-
-// Также синхронизируем при каждом показе страницы
-window.addEventListener('pageshow', (event) => {
-    if (event.persisted) {
-        setTimeout(() => {
-            forceUpdatePlaceholder();
-        }, 50);
-    }
-});
-
-// И при возвращении на вкладку
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        setTimeout(() => {
-            forceUpdatePlaceholder();
-        }, 100);
-    }
-});
-
     </script>
 
       <script src="activity-tracker.js"></script>
