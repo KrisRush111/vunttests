@@ -65,6 +65,7 @@
         --desktop-sidebar-width: 340px;
         --my-message-gradient: linear-gradient(135deg, #9501ff, #a043fd);
         --their-message-gradient: linear-gradient(135deg, #f5f5f5, #e0e0e0);
+        --wallpaper-url: url('фон.webp');
     }
 
     /* Запрет масштабирования и фиксация размера */
@@ -1693,52 +1694,43 @@ input, textarea {
 
 
 
-
-/* Добавьте эти стили в конец CSS секции */
-
-/* Класс для включения обоев */
-body.wallpaper-enabled .desktop-placeholder h3 {
-    background-color: rgba(0, 0, 0, 0.3); /* Более прозрачный фон для текста на обоях */
-    backdrop-filter: blur(6px);
-}
-
-/* Стили для активного чата с обоями */
-.chat-modal {
+/* Стили для обоев в chats.html */
+body.wallpaper-enabled {
+    background-image: var(--wallpaper-url);
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
+    background-attachment: fixed;
     transition: background-image 0.3s ease;
 }
 
-/* Прозрачность для контейнера сообщений на обоях */
-body.wallpaper-enabled .messages-container {
-    background-color: transparent;
+/* Убираем обои с элементов, которые должны иметь свой фон */
+.desktop-sidebar,
+.desktop-content,
+.chats-container.mobile-only,
+.chat-modal,
+.chats-content,
+.search-container {
+    background-color: var(--telegram-bg) !important;
+    background-image: none !important;
 }
 
-/* Затемнение для лучшей читаемости текста на обоях */
-body.wallpaper-enabled .message {
-    background-color: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
+/* Обои для desktop-placeholder */
+.desktop-placeholder.wallpaper-enabled {
+    background-image: var(--wallpaper-url);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    filter: brightness(var(--wallpaper-brightness, 100%));
 }
 
-/* Специфичные стили для входящих сообщений на обоях */
-body.wallpaper-enabled .message-incoming {
-    background: rgba(245, 245, 245, 0.85);
-    backdrop-filter: blur(5px);
+/* Обои для фона сообщений в чате */
+.chat-modal.wallpaper-enabled {
+    background-image: var(--wallpaper-url) !important;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
 }
-
-/* Специфичные стили для исходящих сообщений на обоях */
-body.wallpaper-enabled .message-outgoing {
-    background: rgba(149, 1, 255, 0.85);
-    backdrop-filter: blur(5px);
-}
-
-/* Поля ввода на обоях */
-body.wallpaper-enabled .message-input-wrapper {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(20px);
-}
-
 
 
 
@@ -2005,121 +1997,161 @@ body.wallpaper-enabled .message-input-wrapper {
 
 
 
-        // Функция загрузки настроек обоев
+
+        // Конфигурация обоев (должна совпадать с profile.html)
+const WALLPAPERS = [
+    {
+        id: 'default',
+        name: 'Системные',
+        url: 'фон.webp',
+        isDefault: true
+    },
+    {
+        id: 'wall1',
+        name: 'Фиолетовые',
+        url: 'фон3.webp'
+    },
+    {
+        id: 'wall2',
+        name: 'Светлые',
+        url: 'фон4.webp'
+    },
+    {
+        id: 'wall3',
+        name: 'зелёно-розовые',
+        url: 'фон5.webp'
+    },
+    {
+        id: 'wall4',
+        name: 'Темные',
+        url: 'фон6.webp'
+    }
+];
+
+// Состояние обоев
+let wallpaperState = {
+    enabled: false,
+    selectedWallpaper: 'default'
+};
+
+// Инициализация системы обоев
+function initializeWallpaperSystem() {
+    loadWallpaperSettings();
+    applyWallpaper();
+    setupWallpaperBroadcastListener();
+    
+    // Применяем обои при изменении ориентации/размера
+    window.addEventListener('resize', () => {
+        applyWallpaper();
+    });
+    
+    // Обновляем обои при возвращении на вкладку
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            setTimeout(applyWallpaper, 100);
+        }
+    });
+}
+
+// Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
     const saved = localStorage.getItem('vuntgram_wallpaper');
     if (saved) {
         try {
-            const settings = JSON.parse(saved);
-            if (settings.enabled && settings.selectedWallpaper) {
-                const wallpapers = {
-                    'default': 'фон.webp',
-                    'wall1': 'фон3.webp',
-                    'wall2': 'фон4.webp',
-                    'wall3': 'фон5.webp',
-                    'wall4': 'фон6.webp'
-                };
-                
-                const wallpaperUrl = wallpapers[settings.selectedWallpaper] || 'фон.webp';
-                
-                // Применяем обои к элементам чата
-                applyWallpaperToElements(wallpaperUrl);
-                
-                // Добавляем класс для body чтобы можно было стилизовать
-                document.body.classList.add('wallpaper-enabled');
-                
-                console.log('Wallpaper applied:', settings.selectedWallpaper);
-            } else {
-                removeWallpaper();
-            }
-        } catch (error) {
-            console.error('Error loading wallpaper settings:', error);
-            removeWallpaper();
+            const parsed = JSON.parse(saved);
+            wallpaperState = {
+                enabled: parsed.enabled || false,
+                selectedWallpaper: parsed.selectedWallpaper || 'default'
+            };
+        } catch (e) {
+            console.error('Error loading wallpaper settings:', e);
+            // Используем настройки по умолчанию
+            wallpaperState = {
+                enabled: false,
+                selectedWallpaper: 'default'
+            };
+        }
+    }
+}
+
+// Применение обоев
+function applyWallpaper() {
+    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    
+    if (!selectedWallpaper) {
+        console.error('Selected wallpaper not found');
+        return;
+    }
+    
+    // Устанавливаем CSS переменную
+    document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
+    
+    // Применяем или убираем обои
+    if (wallpaperState.enabled) {
+        document.body.classList.add('wallpaper-enabled');
+        
+        // Применяем обои к desktop-placeholder
+        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+        if (desktopPlaceholder) {
+            desktopPlaceholder.classList.add('wallpaper-enabled');
+        }
+        
+        // Применяем обои к открытому чату
+        const chatModalDesktop = document.getElementById('chatModalDesktop');
+        const chatModalMobile = document.getElementById('chatModalMobile');
+        
+        if (chatModalDesktop && chatModalDesktop.style.display === 'flex') {
+            chatModalDesktop.classList.add('wallpaper-enabled');
+        }
+        
+        if (chatModalMobile && chatModalMobile.classList.contains('active')) {
+            chatModalMobile.classList.add('wallpaper-enabled');
         }
     } else {
-        removeWallpaper();
-    }
-}
-
-// Функция применения обоев к элементам
-function applyWallpaperToElements(wallpaperUrl) {
-    // Применяем обои к desktop placeholder
-    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    if (desktopPlaceholder) {
-        desktopPlaceholder.style.backgroundImage = `url('${wallpaperUrl}')`;
-        desktopPlaceholder.style.backgroundSize = 'cover';
-        desktopPlaceholder.style.backgroundPosition = 'center';
-        desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
-    }
-    
-    // Применяем обои к desktop content (фон для чатов)
-    const desktopContent = document.querySelector('.desktop-content');
-    if (desktopContent) {
-        desktopContent.style.backgroundImage = `url('${wallpaperUrl}')`;
-        desktopContent.style.backgroundSize = 'cover';
-        desktopContent.style.backgroundPosition = 'center';
-        desktopContent.style.backgroundRepeat = 'no-repeat';
-    }
-    
-    // Применяем обои к мобильным и десктопным модалкам чатов
-    const chatModals = document.querySelectorAll('.chat-modal');
-    chatModals.forEach(modal => {
-        if (!modal.classList.contains('active')) {
-            modal.style.backgroundImage = `url('${wallpaperUrl}')`;
-            modal.style.backgroundSize = 'cover';
-            modal.style.backgroundPosition = 'center';
-            modal.style.backgroundRepeat = 'no-repeat';
+        document.body.classList.remove('wallpaper-enabled');
+        
+        // Убираем обои с desktop-placeholder
+        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+        if (desktopPlaceholder) {
+            desktopPlaceholder.classList.remove('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = '';
         }
-    });
-    
-    // Применяем обои к активному чату (если открыт)
-    const activeChatModal = document.querySelector('.chat-modal.active');
-    if (activeChatModal) {
-        activeChatModal.style.backgroundImage = `url('${wallpaperUrl}')`;
-        activeChatModal.style.backgroundSize = 'cover';
-        activeChatModal.style.backgroundPosition = 'center';
-        activeChatModal.style.backgroundRepeat = 'no-repeat';
+        
+        // Убираем обои с чатов
+        const chatModalDesktop = document.getElementById('chatModalDesktop');
+        const chatModalMobile = document.getElementById('chatModalMobile');
+        
+        if (chatModalDesktop) {
+            chatModalDesktop.classList.remove('wallpaper-enabled');
+        }
+        
+        if (chatModalMobile) {
+            chatModalMobile.classList.remove('wallpaper-enabled');
+        }
     }
-    
-    // Также обновляем CSS переменную для стилей
-    document.documentElement.style.setProperty('--wallpaper-url', `url('${wallpaperUrl}')`);
 }
 
-// Функция удаления обоев
-function removeWallpaper() {
-    // Убираем обои с элементов
-    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    if (desktopPlaceholder) {
-        desktopPlaceholder.style.backgroundImage = '';
-        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
-    }
-    
-    const desktopContent = document.querySelector('.desktop-content');
-    if (desktopContent) {
-        desktopContent.style.backgroundImage = '';
-        desktopContent.style.backgroundColor = 'var(--telegram-secondary-bg)';
-    }
-    
-    const chatModals = document.querySelectorAll('.chat-modal');
-    chatModals.forEach(modal => {
-        modal.style.backgroundImage = '';
-        modal.style.backgroundColor = 'var(--telegram-secondary-bg)';
-    });
-    
-    // Убираем класс с body
-    document.body.classList.remove('wallpaper-enabled');
-}
-
-// Функция настройки слушателя обновлений обоев
+// Слушатель для обновлений обоев из других вкладок (например, из profile.html)
 function setupWallpaperBroadcastListener() {
     if (typeof BroadcastChannel !== 'undefined') {
         try {
             const channel = new BroadcastChannel('vuntgram_wallpaper');
             channel.addEventListener('message', (event) => {
                 if (event.data.type === 'wallpaper_update') {
-                    console.log('Wallpaper update received from other tab');
-                    loadWallpaperSettings();
+                    console.log('Received wallpaper update from other tab');
+                    wallpaperState = {
+                        enabled: event.data.data.enabled,
+                        selectedWallpaper: event.data.data.selectedWallpaper
+                    };
+                    
+                    // Применяем новые обои
+                    applyWallpaper();
                 }
+            });
+            
+            // Закрываем канал при выгрузке страницы
+            window.addEventListener('beforeunload', () => {
+                channel.close();
             });
         } catch (e) {
             console.error('BroadcastChannel listener error:', e);
@@ -2127,38 +2159,27 @@ function setupWallpaperBroadcastListener() {
     }
 }
 
-// Функция обновления обоев при открытии чата
+// Функция для обновления обоев при открытии/закрытии чата
 function updateChatWallpaper() {
-    const saved = localStorage.getItem('vuntgram_wallpaper');
-    if (saved) {
-        try {
-            const settings = JSON.parse(saved);
-            if (settings.enabled && settings.selectedWallpaper) {
-                const wallpapers = {
-                    'default': 'фон.webp',
-                    'wall1': 'фон3.webp',
-                    'wall2': 'фон4.webp',
-                    'wall3': 'фон5.webp',
-                    'wall4': 'фон6.webp'
-                };
-                
-                const wallpaperUrl = wallpapers[settings.selectedWallpaper] || 'фон.webp';
-                
-                // Применяем обои к активному чату
-                const activeChatModal = document.querySelector('.chat-modal.active');
-                if (activeChatModal) {
-                    activeChatModal.style.backgroundImage = `url('${wallpaperUrl}')`;
-                    activeChatModal.style.backgroundSize = 'cover';
-                    activeChatModal.style.backgroundPosition = 'center';
-                    activeChatModal.style.backgroundRepeat = 'no-repeat';
-                }
-            }
-        } catch (error) {
-            console.error('Error updating chat wallpaper:', error);
+    const chatModalDesktop = document.getElementById('chatModalDesktop');
+    const chatModalMobile = document.getElementById('chatModalMobile');
+    
+    if (wallpaperState.enabled) {
+        if (chatModalDesktop && chatModalDesktop.style.display === 'flex') {
+            chatModalDesktop.classList.add('wallpaper-enabled');
+        }
+        if (chatModalMobile && chatModalMobile.classList.contains('active')) {
+            chatModalMobile.classList.add('wallpaper-enabled');
+        }
+    } else {
+        if (chatModalDesktop) {
+            chatModalDesktop.classList.remove('wallpaper-enabled');
+        }
+        if (chatModalMobile) {
+            chatModalMobile.classList.remove('wallpaper-enabled');
         }
     }
 }
-
 
 
 
@@ -4004,13 +4025,13 @@ async function openChat(chatId) {
     isOpeningChat = true;
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+
+    updateChatWallpaper();
     
     try {
         messagesContainer.innerHTML = '';
         noMessages.style.display = 'block';
         noMessages.textContent = 'Загрузка...';
-
-        loadWallpaperSettings();
 
         chatModal.classList.add('changing');
         setTimeout(() => {
@@ -4226,7 +4247,6 @@ function closeChat() {
     
     // Reload chat list
     loadChats();
-    loadWallpaperSettings();
 
     window.currentChat = null;
 
@@ -4518,6 +4538,8 @@ async function initializePage() {
     }
     
     userData = JSON.parse(userDataFromStorage);
+
+    initializeWallpaperSystem();
     
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
@@ -4692,8 +4714,6 @@ imageInput.addEventListener('change', handleImageSelection);
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
     setupKeyboardDetection();
-    loadWallpaperSettings();
-    setupWallpaperBroadcastListener();
   
     
     // Запрет масштабирования жестами
@@ -4818,20 +4838,18 @@ function filterChats(searchTerm) {
 }
 
 
-// И саму функцию handleOrientationChange:
 function handleOrientationChange() {
     console.log('Orientation changed');
     
-    // Только обновляем флаг, без перезагрузки данных
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
-    // Даем браузеру время на перерасчет layout
     setTimeout(() => {
-        // Только пересчитываем высоту для мобильных
+        // Переприменяем обои при изменении ориентации
+        applyWallpaper();
+        
         if (!isDesktop && currentChat) {
             setupMobileChatHeight();
             
-            // Прокручиваем к последнему сообщению
             const { messagesContainer } = getActiveElements();
             if (messagesContainer && currentMessages.length > 0) {
                 setTimeout(() => {
