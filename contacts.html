@@ -1745,17 +1745,7 @@
 }
 
 
-/* Стили для обоев в contacts.html */
-body.wallpaper-enabled {
-    background-image: var(--wallpaper-url);
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-    backdrop-filter: brightness(var(--wallpaper-brightness));
-}
-
-/* Desktop placeholder с обоями */
+/* Обои ТОЛЬКО для десктопного плейсхолдера */
 .desktop-placeholder.wallpaper-enabled {
     background-image: var(--wallpaper-url);
     background-size: cover;
@@ -1765,13 +1755,26 @@ body.wallpaper-enabled {
     transition: all 0.3s ease;
 }
 
+/* Для мобильных устройств - без обоев */
+@media (max-width: 767px) {
+    .desktop-placeholder.wallpaper-enabled {
+        background-image: none !important;
+        background-color: var(--telegram-secondary-bg);
+    }
+}
+
 /* Без обоев - стандартный фон */
 .desktop-placeholder:not(.wallpaper-enabled) {
     background-color: var(--telegram-secondary-bg);
     background-image: none;
 }
 
-/* Убираем обои с других элементов */
+/* Убираем обои с других элементов на всех устройствах */
+body {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
+
 .desktop-sidebar,
 .desktop-content,
 .contacts-content,
@@ -1781,6 +1784,23 @@ body.wallpaper-enabled {
     background-image: none !important;
 }
 
+/* Для мобильных контейнеров - всегда без обоев */
+.contacts-container.mobile-only {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
+
+/* Также обновим стиль для desktop-content чтобы он не наследовал обои */
+.desktop-content {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
+
+/* Desktop sidebar тоже должен быть без обоев */
+.desktop-sidebar {
+    background-color: var(--telegram-bg) !important;
+    background-image: none !important;
+}
 
     </style>
 </head>
@@ -2141,18 +2161,14 @@ function loadWallpaperSettings() {
                 
                 const wallpaperUrl = wallpapers[settings.selectedWallpaper] || 'фон.webp';
                 
-                // Применяем обои
-                document.documentElement.style.setProperty('--wallpaper-url', `url('${wallpaperUrl}')`);
-                document.body.classList.add('wallpaper-enabled');
-                
-                // Обновляем desktop-placeholder если он есть
+                // ПРИМЕНЯЕМ ОБОИ ТОЛЬКО К DESKTOP PLACEHOLDER
                 const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-                if (desktopPlaceholder) {
+                if (desktopPlaceholder && window.matchMedia("(min-width: 768px)").matches) {
                     desktopPlaceholder.classList.add('wallpaper-enabled');
                     desktopPlaceholder.style.backgroundImage = `url('${wallpaperUrl}')`;
                 }
                 
-                console.log('Wallpaper applied:', settings.selectedWallpaper);
+                console.log('Wallpaper applied to desktop placeholder:', settings.selectedWallpaper);
             } else {
                 removeWallpaper();
             }
@@ -2165,9 +2181,9 @@ function loadWallpaperSettings() {
     }
 }
 
-// Функция для удаления обоев
+// Обновляем функцию removeWallpaper
 function removeWallpaper() {
-    document.body.classList.remove('wallpaper-enabled');
+    // УДАЛЯЕМ ТОЛЬКО С DESKTOP PLACEHOLDER
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (desktopPlaceholder) {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
