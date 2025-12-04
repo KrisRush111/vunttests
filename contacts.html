@@ -2163,6 +2163,26 @@ function loadWallpaperSettings() {
     }
 }
 
+
+// Добавьте функцию предзагрузки:
+function preloadWallpapers() {
+    WALLPAPERS.forEach(wallpaper => {
+        // Создаем скрытый Image для предзагрузки
+        const img = new Image();
+        img.src = wallpaper.url;
+        
+        // Для текущих обоев добавляем preload
+        if (wallpaper.id === wallpaperState.selectedWallpaper) {
+            const link = document.createElement('link');
+            link.rel = 'preload';
+            link.href = wallpaper.url;
+            link.as = 'image';
+            document.head.appendChild(link);
+        }
+    });
+}
+
+
 function saveWallpaperSettings() {
     const settingsToSave = {
         enabled: wallpaperState.enabled,
@@ -2177,14 +2197,24 @@ function applyWallpaperToPlaceholder() {
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     if (!desktopPlaceholder) return;
     
-    // Проверяем, виден ли placeholder
     const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
     
     if (wallpaperState.enabled && isPlaceholderVisible) {
         const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
         if (selectedWallpaper) {
+            // ПРИМЕНЯЕМ СРАЗУ (как в profile.html)
             desktopPlaceholder.classList.add('wallpaper-enabled');
             desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            
+            // Добавляем оптимизацию
+            desktopPlaceholder.style.backgroundSize = 'cover';
+            desktopPlaceholder.style.backgroundPosition = 'center';
+            desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
+            
+            // Предзагрузка следующего кадра для плавности
+            requestAnimationFrame(() => {
+                desktopPlaceholder.style.opacity = '1';
+            });
         }
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
@@ -3871,7 +3901,10 @@ function setupSearchHandlers() {
                     }
                 });
 
+                preloadWallpapers();
+
                 initializeWallpaper();
+                
 
                 console.log('Initialization complete');
             } catch (error) {
