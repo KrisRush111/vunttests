@@ -58,6 +58,8 @@
             --telegram-success: #00c73c;
             --desktop-sidebar-width: 340px;
             --wallpaper-url: url('фон.webp');
+            --wallpaper-brightness: 100%;
+            --wallpaper-enabled: 0;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -70,6 +72,8 @@
                 --telegram-shadow: 0 1px 3px rgba(0,0,0,0.24);
                 --telegram-shadow-large: 0 4px 16px rgba(0,0,0,0.24);
                 --wallpaper-url: url('фон.webp');
+                --wallpaper-brightness: 100%;
+                --wallpaper-enabled: 0;
             }
         }
 
@@ -229,7 +233,7 @@
                 width: 100%;
                 padding: 20px;
                 box-sizing: border-box;
-                background-image: var(--wallpaper-url);
+                background-image: url('фон.webp');
                 background-size: cover;
                 background-position: center;
                 background-repeat: no-repeat;
@@ -1741,7 +1745,17 @@
 }
 
 
-/* Обои для contacts.html */
+/* Стили для обоев в contacts.html */
+body.wallpaper-enabled {
+    background-image: var(--wallpaper-url);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    backdrop-filter: brightness(var(--wallpaper-brightness));
+}
+
+/* Desktop placeholder с обоями */
 .desktop-placeholder.wallpaper-enabled {
     background-image: var(--wallpaper-url);
     background-size: cover;
@@ -1751,12 +1765,21 @@
     transition: all 0.3s ease;
 }
 
+/* Без обоев - стандартный фон */
 .desktop-placeholder:not(.wallpaper-enabled) {
     background-color: var(--telegram-secondary-bg);
     background-image: none;
 }
 
-
+/* Убираем обои с других элементов */
+.desktop-sidebar,
+.desktop-content,
+.contacts-content,
+.profile-modal,
+.profile-modal-content {
+    background-color: var(--telegram-bg) !important;
+    background-image: none !important;
+}
 
 
     </style>
@@ -2018,14 +2041,12 @@
 
 
 
-<!-- В head или перед основным скриптом -->
-<script src="wallpaper-manager.js"></script>
+
 
     <script>
       
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
 
-        
         
         const loadingOverlay = document.getElementById('loadingOverlay');
        
@@ -2104,44 +2125,78 @@ let friendsRecommendations = [];
 
 
 
-function applyWallpaperToContacts() {
-    // Применяем обои к placeholder ДО загрузки данных
-    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    if (!desktopPlaceholder) return;
-    
-    const isDesktopView = window.matchMedia("(min-width: 768px)").matches;
-    if (!isDesktopView) return; // Только для десктопной версии
-    
-    const selectedWallpaper = wallpaperManager.getSelectedWallpaper();
-    
-    // Обои уже должны быть применены applyImmediately(),
-    // но делаем дополнительную проверку
-    if (wallpaperManager.state.enabled && selectedWallpaper) {
-        desktopPlaceholder.classList.add('wallpaper-enabled');
-        if (!desktopPlaceholder.style.backgroundImage) {
-            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+function loadWallpaperSettings() {
+    const saved = localStorage.getItem('vuntgram_wallpaper');
+    if (saved) {
+        try {
+            const settings = JSON.parse(saved);
+            if (settings.enabled && settings.selectedWallpaper) {
+                const wallpapers = {
+                    'default': 'фон.webp',
+                    'wall1': 'фон3.webp',
+                    'wall2': 'фон4.webp',
+                    'wall3': 'фон5.webp',
+                    'wall4': 'фон6.webp'
+                };
+                
+                const wallpaperUrl = wallpapers[settings.selectedWallpaper] || 'фон.webp';
+                
+                // Применяем обои
+                document.documentElement.style.setProperty('--wallpaper-url', `url('${wallpaperUrl}')`);
+                document.body.classList.add('wallpaper-enabled');
+                
+                // Обновляем desktop-placeholder если он есть
+                const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+                if (desktopPlaceholder) {
+                    desktopPlaceholder.classList.add('wallpaper-enabled');
+                    desktopPlaceholder.style.backgroundImage = `url('${wallpaperUrl}')`;
+                }
+                
+                console.log('Wallpaper applied:', settings.selectedWallpaper);
+            } else {
+                removeWallpaper();
+            }
+        } catch (error) {
+            console.error('Error loading wallpaper settings:', error);
+            removeWallpaper();
         }
     } else {
+        removeWallpaper();
+    }
+}
+
+// Функция для удаления обоев
+function removeWallpaper() {
+    document.body.classList.remove('wallpaper-enabled');
+    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+    if (desktopPlaceholder) {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
 }
 
-// ВЫЗЫВАЕМ СРАЗУ, А НЕ В initializePage()
-// Вставьте этот код прямо в глобальную область видимости
-document.addEventListener('DOMContentLoaded', function() {
-    // Применяем обои сразу при загрузке DOM
-    applyWallpaperToContacts();
-    
-    // Устанавливаем правильный фон для body если нужно
-    if (wallpaperManager.state.enabled) {
-        const selectedWallpaper = wallpaperManager.getSelectedWallpaper();
-        if (selectedWallpaper) {
-            document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+// Слушатель для обновлений из других вкладок
+function setupWallpaperBroadcastListener() {
+    if (typeof BroadcastChannel !== 'undefined') {
+        try {
+            const channel = new BroadcastChannel('vuntgram_wallpaper');
+            channel.addEventListener('message', (event) => {
+                if (event.data.type === 'wallpaper_update') {
+                    console.log('Wallpaper update received from other tab');
+                    loadWallpaperSettings();
+                }
+            });
+        } catch (e) {
+            console.error('BroadcastChannel listener error:', e);
         }
     }
-});
+}
+
+
+
+
+
 
 // Функция для загрузки рекомендаций
 async function loadFriendsRecommendations() {
@@ -3696,6 +3751,12 @@ function setupSearchHandlers() {
                     window.location.href = 'profile.html';
                     return;
                 }
+
+                console.log('Loading wallpaper settings...');
+                loadWallpaperSettings();
+                setupWallpaperBroadcastListener();
+                        
+                console.log('Initialization complete');
 
                 userData = JSON.parse(userDataFromStorage);
                 console.log('User data loaded:', userData);
