@@ -2553,11 +2553,17 @@ function createWallpaperGrids() {
                 wallpaperItem.classList.add('selected');
             }
             
-            wallpaperItem.innerHTML = `
-                <div class="wallpaper-horizontal-preview" 
-                     style="background-image: url('${wallpaper.url}');"></div>
-                <div class="wallpaper-horizontal-label">${wallpaper.name}</div>
-            `;
+            // Создаем содержимое
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'wallpaper-horizontal-preview';
+            previewDiv.style.backgroundImage = `url('${wallpaper.url}')`;
+            
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'wallpaper-horizontal-label';
+            labelDiv.textContent = wallpaper.name;
+            
+            wallpaperItem.appendChild(previewDiv);
+            wallpaperItem.appendChild(labelDiv);
             
             // Добавляем галочку для выбранных обоев
             if (wallpaper.id === wallpaperState.selectedWallpaper) {
@@ -2566,6 +2572,13 @@ function createWallpaperGrids() {
                 checkmark.innerHTML = '<i class="fas fa-check"></i>';
                 wallpaperItem.appendChild(checkmark);
             }
+            
+            // ДОБАВЛЯЕМ ОБРАБОТЧИК КЛИКА ПРЯМО НА ЭЛЕМЕНТ
+            wallpaperItem.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                selectWallpaper(wallpaper.id);
+            });
             
             grid.appendChild(wallpaperItem);
         });
@@ -2666,13 +2679,16 @@ function selectWallpaper(wallpaperId) {
     
     // Обновляем состояние
     wallpaperState.selectedWallpaper = wallpaperId;
-    wallpaperState.enabled = true;
+    wallpaperState.enabled = true; // Автоматически включаем обои при выборе
     
     // Сохраняем настройки
     saveWallpaperSettings();
     
     // Обновляем UI
     updateWallpaperSelectionUI(wallpaperId);
+    
+    // Обновляем переключатели
+    updateWallpaperControls();
     
     // Применяем обои и обновляем предпросмотр
     applyWallpaper();
@@ -2695,7 +2711,7 @@ function updateWallpaperSelectionUI(selectedId) {
     });
     
     // Добавляем выделение и галочку на выбранный элемент
-    document.querySelectorAll(`[data-wallpaper-id="${selectedId}"]`).forEach(item => {
+    document.querySelectorAll(`.wallpaper-item-horizontal[data-wallpaper-id="${selectedId}"]`).forEach(item => {
         item.classList.add('selected');
         
         // Создаем новую галочку
