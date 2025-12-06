@@ -2372,7 +2372,6 @@ function initializeWallpaperSystem() {
     loadWallpaperSettings();
     createWallpaperGrids();
     applyWallpaper();
-    updateDesktopPlaceholderWallpaper();
     setupWallpaperEventListeners();
     setupWallpaperBroadcastListener();
     
@@ -2380,11 +2379,18 @@ function initializeWallpaperSystem() {
     setTimeout(() => {
         updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
         updateWallpaperControls();
+        
+        // ОСОБЕННО ВАЖНО: Применяем обои для мобильных устройств
+        applyWallpaperToMobile();
     }, 100);
     
     // Добавляем обработчик для отслеживания видимости placeholder
     const observer = new MutationObserver(() => {
         updateDesktopPlaceholderWallpaper();
+        // Также обновляем для мобильных
+        if (!isDesktop) {
+            applyWallpaperToMobile();
+        }
     });
     
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
@@ -2395,6 +2401,31 @@ function initializeWallpaperSystem() {
         });
     }
 }
+
+
+
+function applyWallpaperToMobile() {
+    // Если это мобильное устройство, обновляем фон body
+    if (!isDesktop && wallpaperState.enabled) {
+        const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+        if (selectedWallpaper) {
+            document.body.classList.add('wallpaper-enabled');
+            document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            document.body.style.backgroundSize = 'cover';
+            document.body.style.backgroundPosition = 'center';
+            document.body.style.backgroundAttachment = 'fixed';
+            document.body.style.filter = `brightness(${wallpaperState.brightness}%)`;
+        }
+    } else {
+        // Для десктопа или когда обои выключены
+        document.body.classList.remove('wallpaper-enabled');
+        document.body.style.backgroundImage = '';
+        document.body.style.filter = '';
+        document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
+    }
+}
+
+
 
   
 
@@ -2601,6 +2632,22 @@ function updateWallpaperControls() {
         const toggle = document.getElementById(toggleId);
         if (toggle) {
             toggle.checked = wallpaperState.enabled;
+            
+            // Добавляем обработчик для мобильного переключателя
+            if (toggleId === 'wallpaperToggleMobile') {
+                toggle.addEventListener('change', (e) => {
+                    wallpaperState.enabled = e.target.checked;
+                    saveWallpaperSettings();
+                    
+                    // Применяем обои в зависимости от устройства
+                    if (isDesktop) {
+                        applyWallpaper();
+                        updateDesktopPlaceholderWallpaper();
+                    } else {
+                        applyWallpaperToMobile();
+                    }
+                });
+            }
         }
     });
 }
@@ -2695,9 +2742,14 @@ function selectWallpaper(wallpaperId) {
     // Обновляем переключатели
     updateWallpaperControls();
     
-    // Применяем обои и обновляем предпросмотр
-    applyWallpaper();
-    updateDesktopPlaceholderWallpaper();
+    // Применяем обои в зависимости от устройства
+    if (isDesktop) {
+        applyWallpaper();
+        updateDesktopPlaceholderWallpaper();
+    } else {
+        applyWallpaperToMobile();
+    }
+    
     updateWallpaperPreview();
 }
 
@@ -2727,37 +2779,38 @@ function updateWallpaperSelectionUI(selectedId) {
     });
 }
 
-// Применение обоев - сохраняем оригинальный фон
 function applyWallpaper() {
     const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     
-    if (!selectedWallpaper || !desktopPlaceholder) {
-        console.error('Wallpaper or placeholder not found');
+    if (!selectedWallpaper) {
+        console.error('Wallpaper not found');
         return;
     }
     
-    // Удаляем обои с body и восстанавливаем оригинальный фон
+    // Очищаем фон body (будет настроено в applyWallpaperToMobile для мобильных)
     document.body.classList.remove('wallpaper-enabled');
-    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)'; // ВОССТАНАВЛИВАЕМ ОРИГИНАЛЬНЫЙ ФОН
     document.body.style.backgroundImage = '';
     document.body.style.filter = '';
     
-    // Очищаем CSS переменные
-    document.documentElement.style.setProperty('--wallpaper-url', 'none');
-    
-    // Обои ТОЛЬКО для desktop-placeholder, если они включены
-    if (wallpaperState.enabled) {
-        desktopPlaceholder.classList.add('wallpaper-enabled');
-        desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-        desktopPlaceholder.style.backgroundColor = ''; // Убираем цвет фона
+    // Обои ТОЛЬКО для desktop-placeholder на десктопе
+    if (isDesktop && wallpaperState.enabled) {
+        if (desktopPlaceholder) {
+            desktopPlaceholder.classList.add('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            desktopPlaceholder.style.backgroundColor = '';
+        }
     } else {
-        desktopPlaceholder.classList.remove('wallpaper-enabled');
-        desktopPlaceholder.style.backgroundImage = '';
-        desktopPlaceholder.style.filter = '';
-        // Восстанавливаем цвет фона для placeholder
-        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        if (desktopPlaceholder) {
+            desktopPlaceholder.classList.remove('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = '';
+            desktopPlaceholder.style.filter = '';
+            desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        }
     }
+    
+    // Обновляем фон для мобильных устройств
+    applyWallpaperToMobile();
     
     // Убеждаемся, что все модули имеют правильный фон
     const modules = [
@@ -2789,6 +2842,7 @@ function applyWallpaper() {
     // Сохраняем настройки для других страниц
     broadcastWallpaperUpdate();
 }
+
 function hideAllDesktopModules() {
     const allModules = [profileModalDesktop, privacyModule, appearanceModule];
     allModules.forEach(mod => {
@@ -2874,16 +2928,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Обновление при изменении размера окна
-window.addEventListener('resize', () => {
-    const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-    if (newIsDesktop !== isDesktop) {
-        initializeLayout();
-        updateProfileUI();
-        createWallpaperGrids(); // Обновляем сетку обоев
-        updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
-    }
-});
+
 
 
         // Страницы, между которыми не должен сбрасываться кэш чатов
@@ -3593,28 +3638,40 @@ function updateProfileUI() {
         }
 
     
-        function initializeLayout() {
-            isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-            if (isDesktop) {
-                mobileSettingsView.style.display = 'none';
-                mobileBottomNav.style.display = 'none';
-                desktopSidebar.style.display = 'flex';
-                desktopContent.style.display = 'flex';
-                desktopPlaceholder.style.display = 'flex'; 
-                hideAllDesktopModules(); // Ensure all desktop modules are hidden initially
-                desktopBottomNav.style.display = 'flex';
-                hideAllMobileModals(); // Ensure mobile modals are hidden
-                  document.querySelector('.mobile-settings-view').style.display = 'none';
-            } else {
-                 document.querySelector('.mobile-settings-view').style.display = 'flex';
-                mobileSettingsView.style.display = 'flex'; // Show mobile settings view
-                mobileBottomNav.style.display = 'flex';
-                desktopSidebar.style.display = 'none';
-                desktopContent.style.display = 'none';
-                hideAllMobileModals(); // Ensure all mobile modals are hidden initially
-            }
-        }
+        
+
+
+
+function initializeLayout() {
+    isDesktop = window.matchMedia("(min-width: 768px)").matches;
+
+    if (isDesktop) {
+        mobileSettingsView.style.display = 'none';
+        mobileBottomNav.style.display = 'none';
+        desktopSidebar.style.display = 'flex';
+        desktopContent.style.display = 'flex';
+        desktopPlaceholder.style.display = 'flex'; 
+        hideAllDesktopModules(); // Ensure all desktop modules are hidden initially
+        desktopBottomNav.style.display = 'flex';
+        hideAllMobileModals(); // Ensure mobile modals are hidden
+        document.querySelector('.mobile-settings-view').style.display = 'none';
+        
+        // Применяем обои для десктопного режима
+        applyWallpaper();
+    } else {
+        document.querySelector('.mobile-settings-view').style.display = 'flex';
+        mobileSettingsView.style.display = 'flex'; // Show mobile settings view
+        mobileBottomNav.style.display = 'flex';
+        desktopSidebar.style.display = 'none';
+        desktopContent.style.display = 'none';
+        hideAllMobileModals(); // Ensure all mobile modals are hidden initially
+        
+        // Применяем обои для мобильного режима
+        applyWallpaperToMobile();
+    }
+}
+
 
         // Event Listeners
         profileAvatarMobile.addEventListener('click', () => {
@@ -3719,14 +3776,23 @@ function updateProfileUI() {
         });
 
    
-        window.addEventListener('resize', () => {
-            const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
-            if (newIsDesktop !== isDesktop) {
-                initializeLayout();
-                updateProfileUI(); 
+window.addEventListener('resize', () => {
+    const newIsDesktop = window.matchMedia("(min-width: 768px)").matches;
+    if (newIsDesktop !== isDesktop) {
+        initializeLayout();
+        updateProfileUI();
+        createWallpaperGrids(); // Обновляем сетку обоев
+        
+        // Принудительно обновляем обои при изменении размера
+        setTimeout(() => {
+            if (newIsDesktop) {
+                updateDesktopPlaceholderWallpaper();
+            } else {
+                applyWallpaperToMobile();
             }
-        });
-
+        }, 100);
+    }
+});
 
 
 
