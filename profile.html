@@ -2320,7 +2320,6 @@ function initializeWallpaperSystem() {
     updateDesktopPlaceholderWallpaper();
     setupWallpaperEventListeners();
     setupWallpaperBroadcastListener();
-    restoreChatPreview();
     
     // Анимируем сообщения в предпросмотре
     setTimeout(() => {
@@ -2356,30 +2355,26 @@ function initializeWallpaperSystem() {
 
 
 
-function restoreChatPreview() {
+// Обновление обоев в превью чата
+function updateChatPreviewWallpaper() {
     const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-    if (!selectedWallpaper) return;
-    
-    // Находим ВСЕ контейнеры preview-чата
-    const previewContainers = [
-        document.getElementById('chatPreviewMessagesDesktop'),
-        document.getElementById('chatPreviewMessages')
-    ].filter(Boolean); // Убираем null элементы
-    
-    previewContainers.forEach(container => {
-        if (wallpaperState.enabled && wallpaperState.selectedWallpaper !== 'default') {
-            // Применяем выбранные обои
-            container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+    if (selectedWallpaper) {
+        const previewContainers = document.querySelectorAll('.chat-preview-messages');
+        previewContainers.forEach(container => {
+            container.style.backgroundImage = wallpaperState.selectedWallpaper === 'default' ? 'none' : `url('${selectedWallpaper.url}')`;
             container.style.backgroundSize = 'cover';
             container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = ''; // Убираем белый фон
-        } else {
-            // Системные обои или обои выключены
-            container.style.backgroundImage = 'none';
-            container.style.backgroundColor = 'var(--telegram-secondary-bg)';
-        }
-    });
+            container.style.backgroundColor = wallpaperState.selectedWallpaper === 'default' ? 'var(--telegram-secondary-bg)' : '';
+        });
+        
+        // Обновляем название выбранных обоев
+        const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
+        wallpaperNameElements.forEach(el => {
+            if (el) el.textContent = selectedWallpaper.name;
+        });
+    }
 }
+
 
 
 // Загрузка настроек обоев из localStorage
@@ -2391,16 +2386,26 @@ function loadWallpaperSettings() {
             wallpaperState = {
                 enabled: parsed.enabled || false,
                 selectedWallpaper: parsed.selectedWallpaper || 'default',
-                previewStyle: parsed.previewStyle || null 
             };
+            
+            // Восстанавливаем название обоев
+            const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
+            wallpaperNameElements.forEach(el => {
+                if (el) {
+                    const wallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+                    el.textContent = wallpaper?.name || 'Системные';
+                }
+            });
+            
+            // Восстанавливаем обои в превью чата
+            updateChatPreviewWallpaper();
+            
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
-            // Используем настройки по умолчанию
             saveWallpaperSettings();
         }
     }
 }
-
 
 // Добавить явную функцию для работы с обоями
 function setupWallpaperButtons() {
@@ -2457,8 +2462,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function saveWallpaperSettings() {
     const settingsToSave = {
         enabled: wallpaperState.enabled,
-        selectedWallpaper: wallpaperState.selectedWallpaper,
-        previewStyle: wallpaperState.previewStyle
+        selectedWallpaper: wallpaperState.selectedWallpaper
     };
     
     localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
@@ -2634,12 +2638,6 @@ function selectWallpaper(wallpaperId) {
         container.style.backgroundSize = 'cover';
         container.style.backgroundPosition = 'center';
         container.style.backgroundColor = wallpaperId === 'default' ? 'var(--telegram-secondary-bg)' : '';
-        
-        // ✅ ДОБАВЬТЕ: Сохраняем в состояние
-        wallpaperState.previewStyle = {
-            backgroundImage: wallpaperId === 'default' ? 'none' : `url('${wallpaper.url}')`,
-            backgroundColor: wallpaperId === 'default' ? 'var(--telegram-secondary-bg)' : ''
-        };
     });
     
     // Обновляем название выбранных обоев
@@ -2648,6 +2646,9 @@ function selectWallpaper(wallpaperId) {
         if (el) el.textContent = wallpaper.name;
     });
     
+
+    updateChatPreviewWallpaper();
+
     // Обновляем UI выбора
     updateWallpaperSelectionUI(wallpaperId);
     
@@ -2718,6 +2719,9 @@ function applyWallpaper() {
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
     
+
+    updateChatPreviewWallpaper();
+
     // Убеждаемся, что все модули имеют правильный фон
     const modules = [
         profileModalDesktop,
@@ -2795,6 +2799,7 @@ function setupWallpaperBroadcastListener() {
                     createWallpaperGrids();
                     applyWallpaper();
                     updateDesktopPlaceholderWallpaper();
+                    updateChatPreviewWallpaper();
                 }
             });
         } catch (e) {
@@ -2818,18 +2823,24 @@ function updateAppearanceUI() {
         message.style.animationDelay = `${index * 0.1}s`;
     });
     
-    // ОБНОВЛЕНО: Восстанавливаем preview с учетом текущих обоев
-    restoreChatPreview();
-    
-    // Обновляем название выбранных обоев
+    // Обновляем предпросмотр чата текущими обоями
     const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
     if (selectedWallpaper) {
+        const previewContainers = document.querySelectorAll('.chat-preview-messages');
+        previewContainers.forEach(container => {
+            container.style.backgroundImage = wallpaperState.selectedWallpaper === 'default' ? 'none' : `url('${selectedWallpaper.url}')`;
+            container.style.backgroundSize = 'cover';
+            container.style.backgroundPosition = 'center';
+            container.style.backgroundColor = wallpaperState.selectedWallpaper === 'default' ? 'var(--telegram-secondary-bg)' : '';
+        });
+        
         const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
         wallpaperNameElements.forEach(el => {
             if (el) el.textContent = selectedWallpaper.name;
         });
     }
 }
+
 
 // Инициализация при загрузке страницы - ОДИН вызов
 document.addEventListener('DOMContentLoaded', () => {
