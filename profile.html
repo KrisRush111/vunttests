@@ -2358,28 +2358,28 @@ function initializeWallpaperSystem() {
 
 function restoreChatPreview() {
     const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-    if (selectedWallpaper) {
-        const previewContainers = document.querySelectorAll('.chat-preview-messages');
-        previewContainers.forEach(container => {
-            if (wallpaperState.selectedWallpaper === 'default') {
-                container.style.backgroundImage = 'none';
-                container.style.backgroundColor = 'var(--telegram-secondary-bg)';
-            } else {
-                container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-                container.style.backgroundColor = '';
-                container.style.backgroundSize = 'cover';
-                container.style.backgroundPosition = 'center';
-            }
-        });
-        
-        // Обновляем название
-        const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
-        wallpaperNameElements.forEach(el => {
-            if (el) el.textContent = selectedWallpaper.name;
-        });
-    }
+    if (!selectedWallpaper) return;
+    
+    // Находим ВСЕ контейнеры preview-чата
+    const previewContainers = [
+        document.getElementById('chatPreviewMessagesDesktop'),
+        document.getElementById('chatPreviewMessages')
+    ].filter(Boolean); // Убираем null элементы
+    
+    previewContainers.forEach(container => {
+        if (wallpaperState.enabled && wallpaperState.selectedWallpaper !== 'default') {
+            // Применяем выбранные обои
+            container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            container.style.backgroundSize = 'cover';
+            container.style.backgroundPosition = 'center';
+            container.style.backgroundColor = ''; // Убираем белый фон
+        } else {
+            // Системные обои или обои выключены
+            container.style.backgroundImage = 'none';
+            container.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        }
+    });
 }
-
 
 
 // Загрузка настроек обоев из localStorage
@@ -2818,24 +2818,18 @@ function updateAppearanceUI() {
         message.style.animationDelay = `${index * 0.1}s`;
     });
     
-    // Обновляем предпросмотр чата текущими обоями
+    // ОБНОВЛЕНО: Восстанавливаем preview с учетом текущих обоев
+    restoreChatPreview();
+    
+    // Обновляем название выбранных обоев
     const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
     if (selectedWallpaper) {
-        const previewContainers = document.querySelectorAll('.chat-preview-messages');
-        previewContainers.forEach(container => {
-            container.style.backgroundImage = wallpaperState.selectedWallpaper === 'default' ? 'none' : `url('${selectedWallpaper.url}')`;
-            container.style.backgroundSize = 'cover';
-            container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = wallpaperState.selectedWallpaper === 'default' ? 'var(--telegram-secondary-bg)' : '';
-        });
-        
         const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
         wallpaperNameElements.forEach(el => {
             if (el) el.textContent = selectedWallpaper.name;
         });
     }
 }
-
 
 // Инициализация при загрузке страницы - ОДИН вызов
 document.addEventListener('DOMContentLoaded', () => {
