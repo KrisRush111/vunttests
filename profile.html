@@ -1236,7 +1236,16 @@
 
 
 
-
+/* Стили для обоев */
+/* Основные обои на body */
+body.wallpaper-enabled {
+    background-image: var(--wallpaper-url);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    backdrop-filter: brightness(var(--wallpaper-brightness));
+}
 
 /* Убираем обои с основных элементов, но сохраняем нужные фоны */
 .desktop-sidebar {
@@ -1265,7 +1274,11 @@
     background-image: none !important;
 }
 
-
+/* Отдельно для модальных окон на мобильных */
+.profile-modal {
+    background-color: var(--telegram-secondary-bg) !important;
+    background-image: none !important;
+}
 
 /* Для контента в модальных окнах "Конфиденциальность" и "Оформление" на мобильных */
 #privacyModuleMobile .profile-modal-content,
@@ -2472,29 +2485,26 @@ function saveWallpaperSettings() {
 // Функция для обновления обоев в desktop-placeholder
 function updateDesktopPlaceholderWallpaper() {
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    if (!desktopPlaceholder) return; // Важно: проверяем существование элемента
+    if (!desktopPlaceholder) return;
     
-    // Только для десктопа показываем обои в placeholder
-    if (window.matchMedia("(min-width: 768px)").matches) {
-        if (wallpaperState.enabled) {
-            const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-            if (selectedWallpaper) {
-                desktopPlaceholder.classList.add('wallpaper-enabled');
-                desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-                desktopPlaceholder.style.backgroundSize = 'cover';
-                desktopPlaceholder.style.backgroundPosition = 'center';
-                desktopPlaceholder.style.display = 'flex'; // Убедимся, что отображается
-            }
-        } else {
-            desktopPlaceholder.classList.remove('wallpaper-enabled');
-            desktopPlaceholder.style.backgroundImage = '';
-            desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
+    // Проверяем, виден ли placeholder
+    const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
+    
+    if (wallpaperState.enabled && isPlaceholderVisible) {
+        const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+        if (selectedWallpaper) {
+            desktopPlaceholder.classList.add('wallpaper-enabled');
+            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
         }
     } else {
-        // На мобильных - всегда показываем стандартный фон
-        desktopPlaceholder.style.display = 'none'; // На мобильных скрываем
+        desktopPlaceholder.classList.remove('wallpaper-enabled');
+        desktopPlaceholder.style.backgroundImage = '';
+        desktopPlaceholder.style.filter = '';
+        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
 }
+
 
 // Обновление предпросмотра обоев в чате
 function updateWallpaperPreview() {
@@ -2775,7 +2785,7 @@ function applyWallpaper() {
             }
         }
     });
-    updateWallpaperPreview();
+    
     // Сохраняем настройки для других страниц
     broadcastWallpaperUpdate();
 }
