@@ -2060,103 +2060,8 @@ input, textarea {
         let currentActivityData = {};
         let isSendingMessage = false;
 
-
-
-// После объявления глобальных переменных
-let longPollingInterval;
-let isPolling = false;
-let lastMessageTimestamp = null;
-
-// Функция для проверки новых сообщений
-async function checkForNewMessages() {
-    if (!currentChat || isPolling) return;
-    
-    isPolling = true;
-    
-    try {
-        const response = await fetch(`${SERVER_URL}/check_new_messages`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                chat_id: currentChat.id,
-                platform_user_id: userData.platform_user_id,
-                last_check: lastMessageTimestamp || new Date().toISOString()
-            }),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success' && data.has_new_messages) {
-            // Загружаем новые сообщения
-            await loadMessagesForChat(currentChat.id);
-            
-            // Обновляем timestamp
-            if (data.last_message_timestamp) {
-                lastMessageTimestamp = data.last_message_timestamp;
-            }
-        }
-    } catch (error) {
-        console.error('Error checking for new messages:', error);
-    } finally {
-        isPolling = false;
-    }
-}
-
-// Функция для загрузки сообщений
-async function loadMessagesForChat(chatId) {
-    try {
-        const response = await fetch(`${SERVER_URL}/get_messages`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            currentMessages = data.messages;
-            renderMessages(currentMessages);
-            
-            // Прокручиваем к последнему сообщению
-            const { messagesContainer } = getActiveElements();
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 50);
-        }
-    } catch (error) {
-        console.error('Error loading messages:', error);
-    }
-}
-
-// Запуск long polling при открытии чата
-function startMessagePolling() {
-    if (longPollingInterval) {
-        clearInterval(longPollingInterval);
-    }
-    
-    // Проверяем каждые 2 секунды
-    longPollingInterval = setInterval(() => {
-        if (currentChat) {
-            checkForNewMessages();
-        }
-    }, 2000);
-}
-
-// Остановка polling при закрытии чата
-function stopMessagePolling() {
-    if (longPollingInterval) {
-        clearInterval(longPollingInterval);
-        longPollingInterval = null;
-    }
-    isPolling = false;
-    lastMessageTimestamp = null;
-}
-
+        let messagePollInterval;
+        let isCheckingMessages = false;
 
 
 
@@ -2464,6 +2369,89 @@ function adjustColor(hex, percent) {
         (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
         (B < 255 ? (B < 1 ? 0 : B) : 255)
     ).toString(16).slice(1)}`;
+}
+
+
+
+
+async function checkForNewMessagesInOpenChat() {
+    // Проверяем только если есть открытый чат и не в процессе проверки
+    if (!currentChat || isCheckingMessages || currentChat.is_temp) return;
+    
+    isCheckingMessages = true;
+    
+    try {
+        const { messagesContainer } = getActiveElements();
+        
+        // Получаем ID последнего сообщения в текущем чате
+        const lastMessageId = currentMessages.length > 0 
+            ? currentMessages[currentMessages.length - 1].id 
+            : 0;
+        
+        // Проверяем есть ли новые сообщения
+        const response = await fetch(`${SERVER_URL}/check_new_messages`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chat_id: currentChat.id,
+                platform_user_id: userData.platform_user_id,
+                last_message_id: lastMessageId
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.has_new) {
+            // Загружаем только новые сообщения
+            const newMessagesResponse = await fetch(`${SERVER_URL}/get_new_messages`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: currentChat.id,
+                    platform_user_id: userData.platform_user_id,
+                    last_message_id: lastMessageId
+                }),
+                credentials: 'include'
+            });
+            
+            const newMessagesData = await newMessagesResponse.json();
+            
+            if (newMessagesData.status === 'success' && newMessagesData.messages.length > 0) {
+                // Добавляем новые сообщения
+                currentMessages = [...currentMessages, ...newMessagesData.messages];
+                
+                // Рендерим ТОЛЬКО новые сообщения
+                newMessagesData.messages.forEach(message => {
+                    renderMessage(message);
+                });
+                
+                // Прокручиваем вниз
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
+                
+                // Обновляем список чатов (чтобы показать последнее сообщение)
+                if (currentChatsList.length > 0) {
+                    const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+                    if (chatIndex !== -1) {
+                        currentChatsList[chatIndex].last_message = newMessagesData.messages[newMessagesData.messages.length - 1].content;
+                        currentChatsList[chatIndex].last_message_time = new Date().toISOString();
+                        
+                        // Обновляем в DOM
+                        updateChatItemInDOM(currentChat.id, {
+                            last_message: newMessagesData.messages[newMessagesData.messages.length - 1].content,
+                            last_message_time: new Date().toISOString()
+                        });
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error checking for new messages:', error);
+    } finally {
+        isCheckingMessages = false;
+    }
 }
 
 
@@ -4236,7 +4224,7 @@ async function openChat(chatId) {
             chatModal.classList.remove('changing');
         }, 300);
 
-        startMessagePolling();
+
         
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
@@ -4455,7 +4443,6 @@ function closeChat() {
     
     // Reload chat list
     loadChats();
-    stopMessagePolling();
 
     window.currentChat = null;
 
@@ -4866,6 +4853,14 @@ async function initializePage() {
         });
     }
 
+
+    const chatListUpdateInterval = setInterval(async () => {
+    // Обновляем список чатов если нет открытого чата
+    if (!currentChat) {
+        await loadChats();
+    }
+}, 3000);
+
 // Обработчики для кнопки прикрепления
 const { attachButton } = getActiveElements();
 if (attachButton) {
@@ -4982,6 +4977,11 @@ imageInput.addEventListener('change', handleImageSelection);
     const activityInterval = setInterval(() => {
         updateUserActivity(true);
     }, 30000);
+
+
+    const messageUpdateInterval = setInterval(async () => {
+    await checkForNewMessagesInOpenChat();
+}, 3000);
     
     // Очистка интервалов при закрытии страницы
     window.addEventListener('beforeunload', () => {
