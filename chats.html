@@ -2062,6 +2062,7 @@ input, textarea {
 
         let messagePollInterval;
         let isCheckingMessages = false;
+        let chatListPollInterval;
 
 
 
@@ -2340,6 +2341,35 @@ function adjustTimeToMoscow(timestamp) {
 }
 
 
+
+async function updateChatListInBackground() {
+    if (!userData || !userData.platform_user_id || isSendingMessage) return;
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chats`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({platform_user_id: userData.platform_user_id}),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Обновляем кэш
+            currentChatsList = data.chats;
+            
+            // Рендерим обновленный список
+            renderChats(data.chats);
+        }
+    } catch (error) {
+        console.error('Error updating chat list in background:', error);
+    }
+}
+
+
+
+
 function formatChatListTime(timestamp) {
     if (!timestamp) return ''; 
     
@@ -2374,8 +2404,8 @@ function adjustColor(hex, percent) {
 
 
 
+// Модифицируйте функцию checkForNewMessagesInOpenChat
 async function checkForNewMessagesInOpenChat() {
-    // Проверяем только если есть открытый чат и не в процессе проверки
     if (!currentChat || isCheckingMessages || currentChat.is_temp) return;
     
     isCheckingMessages = true;
@@ -2383,12 +2413,12 @@ async function checkForNewMessagesInOpenChat() {
     try {
         const { messagesContainer } = getActiveElements();
         
-        // Получаем ID последнего сообщения в текущем чате
+        // Получаем ID последнего сообщения
         const lastMessageId = currentMessages.length > 0 
             ? Math.max(...currentMessages.map(m => m.id))
             : 0;
         
-        // Проверяем есть ли новые сообщения
+        // Проверяем новые сообщения
         const response = await fetch(`${SERVER_URL}/check_new_messages`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -2403,7 +2433,7 @@ async function checkForNewMessagesInOpenChat() {
         const data = await response.json();
         
         if (data.status === 'success' && data.has_new && data.count > 0) {
-            // Загружаем только новые сообщения
+            // Загружаем новые сообщения
             const newMessagesResponse = await fetch(`${SERVER_URL}/get_new_messages`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2418,7 +2448,7 @@ async function checkForNewMessagesInOpenChat() {
             const newMessagesData = await newMessagesResponse.json();
             
             if (newMessagesData.status === 'success' && newMessagesData.messages.length > 0) {
-                // ФИЛЬТРУЕМ сообщения, которые уже есть в currentMessages
+                // Фильтруем дубликаты
                 const existingMessageIds = new Set(currentMessages.map(m => m.id));
                 const trulyNewMessages = newMessagesData.messages.filter(
                     msg => !existingMessageIds.has(msg.id)
@@ -2426,13 +2456,25 @@ async function checkForNewMessagesInOpenChat() {
                 
                 if (trulyNewMessages.length === 0) return;
                 
-                // Добавляем ТОЛЬКО действительно новые сообщения
+                // Добавляем новые сообщения
                 currentMessages = [...currentMessages, ...trulyNewMessages];
                 
-                // Рендерим ТОЛЬКО новые сообщения
+                // Рендерим новые сообщения
                 trulyNewMessages.forEach(message => {
                     renderMessage(message);
                 });
+                
+                // Автоматически отмечаем входящие сообщения как прочитанные
+                const incomingMessages = trulyNewMessages.filter(msg => !msg.is_me);
+                if (incomingMessages.length > 0) {
+                    // Отправляем запрос на сервер для отметки как прочитанные
+                    await markMessagesAsRead(incomingMessages.map(msg => msg.id));
+                    
+                    // Обновляем статус в UI
+                    incomingMessages.forEach(msg => {
+                        msg.is_read = true;
+                    });
+                }
                 
                 // Прокручиваем вниз
                 setTimeout(() => {
@@ -2440,7 +2482,7 @@ async function checkForNewMessagesInOpenChat() {
                 }, 100);
                 
                 // Обновляем список чатов
-                await updateChatListWithNewMessage(currentChat.id, trulyNewMessages[trulyNewMessages.length - 1]);
+                updateChatListInBackground();
             }
         }
     } catch (error) {
@@ -2449,6 +2491,27 @@ async function checkForNewMessagesInOpenChat() {
         isCheckingMessages = false;
     }
 }
+
+// Функция для отметки сообщений как прочитанных
+async function markMessagesAsRead(messageIds) {
+    if (!currentChat || messageIds.length === 0) return;
+    
+    try {
+        await fetch(`${SERVER_URL}/mark_messages_as_read`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chat_id: currentChat.id,
+                message_ids: messageIds,
+                reader_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+    } catch (error) {
+        console.error('Error marking messages as read:', error);
+    }
+}
+
 
 // Новая функция для обновления списка чатов
 async function updateChatListWithNewMessage(chatId, lastMessage) {
@@ -4391,6 +4454,24 @@ async function openChat(chatId) {
             unread_count: 0 // Только сбрасываем счетчик
         });
 
+
+
+        if (currentMessages.length > 0) {
+        const unreadMessages = currentMessages.filter(msg => !msg.is_me && !msg.is_read);
+        if (unreadMessages.length > 0) {
+            await markMessagesAsRead(unreadMessages.map(msg => msg.id));
+            
+            // Обновляем статус в UI
+            unreadMessages.forEach(msg => {
+                msg.is_read = true;
+            });
+            
+            // Обновляем отображение статусов
+            updateAllMessageStatusesInUI();
+        }
+    }
+
+
         // Обновляем кэш чатов - только счетчик непрочитанных
         const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
         if (chatIndex !== -1) {
@@ -4973,65 +5054,7 @@ imageInput.addEventListener('change', handleImageSelection);
             sendOfflineStatus();
         }
 
-
-
-
-
-
-        // В initializePage() добавьте:
-async function updateChatListInBackground() {
-    if (!userData || !userData.platform_user_id) return;
-    
-    try {
-        const response = await fetch(`${SERVER_URL}/get_chats`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({platform_user_id: userData.platform_user_id}),
-            credentials: 'include'
-        });
         
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            // Обновляем кэш
-            currentChatsList = data.chats;
-            
-            // Если нет открытого чата - обновляем весь список
-            if (!currentChat) {
-                renderChats(data.chats);
-            } else {
-                // Если есть открытый чат, обновляем только его
-                const currentChatIndex = data.chats.findIndex(chat => chat.id === currentChat.id);
-                if (currentChatIndex !== -1) {
-                    const updatedChat = data.chats[currentChatIndex];
-                    
-                    // Обновляем в кэше
-                    const oldChatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
-                    if (oldChatIndex !== -1) {
-                        currentChatsList[oldChatIndex] = updatedChat;
-                    }
-                    
-                    // Обновляем в DOM
-                    updateChatItemInDOM(currentChat.id, {
-                        last_message: updatedChat.last_message,
-                        last_message_time: updatedChat.last_message_time,
-                        unread_count: updatedChat.unread_count
-                    });
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error updating chat list in background:', error);
-    }
-}
-
-// И запустите интервал
-const chatListBackgroundInterval = setInterval(() => {
-    updateChatListInBackground();
-}, 1000); // Каждые 10 секунд
-
-
-
     });
 
     // Обновление при активации окна
@@ -5097,6 +5120,30 @@ const chatListBackgroundInterval = setInterval(() => {
     }
 
     console.log('Page initialized successfully');
+
+
+
+
+    function startBackgroundPolling() {
+    // Обновление списка чатов каждые 5 секунд
+    chatListPollInterval = setInterval(() => {
+        updateChatListInBackground();
+    }, 1000);
+}
+
+
+
+}
+
+
+    startBackgroundPolling(); // Обновление списка чатов
+
+
+function stopBackgroundPolling() {
+    if (chatListPollInterval) {
+        clearInterval(chatListPollInterval);
+        chatListPollInterval = null;
+    }
 }
 
 
