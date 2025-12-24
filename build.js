@@ -11,7 +11,6 @@ folders.forEach(folder => {
   if (!fs.existsSync(folder)) fs.mkdirSync(folder);
 });
 
-// Простая защита (без минификации)
 // В защитный код добавьте этот блок:
 const protectionCode = `
 <script>
@@ -68,13 +67,6 @@ const protectionCode = `
     return false;
   });
   
-  // 7. БЛОКИРОВКА DevTools
-  var devtools = function() {};
-  devtools.toString = function() {
-    window.location.href = 'https://t.me/VuntgramBot';
-    return '';
-  };
-  console.log('%c', devtools);
   
   // 8. ОБНАРУЖЕНИЕ СОХРАНЕНИЯ ЧЕРЕЗ PRINT
   window.addEventListener('beforeprint', function() {
@@ -110,6 +102,7 @@ const protectionCode = `
 // =====================================
 </script>
 `;
+
 // Обрабатываем страницы
 PAGES.forEach(page => {
   console.log(`Обработка ${page}...`);
