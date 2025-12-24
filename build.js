@@ -12,22 +12,104 @@ folders.forEach(folder => {
 });
 
 // Простая защита (без минификации)
+// В защитный код добавьте этот блок:
 const protectionCode = `
 <script>
-// Vuntgram Protection
-(function(){
-  setInterval(()=>{debugger},4000);
-  document.addEventListener('contextmenu',e=>e.preventDefault());
-  document.addEventListener('keydown',e=>{
-    if(e.key==='F12'||(e.ctrlKey&&e.shiftKey&&e.key==='I')){
+// ===== VUNTGRAM SUPER PROTECTION =====
+(function() {
+  'use strict';
+  
+  // 1. БЛОКИРОВКА ВСЕХ СОХРАНЕНИЙ
+  // Блокировка Cmd/Ctrl+S
+  document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
-      location.href='https://t.me/VuntgramBot';
+      e.stopPropagation();
+      alert('Сохранение страницы запрещено');
+      return false;
+    }
+  });
+  
+  // 2. БЛОКИРОВКА МЕНЮ File → Save
+  window.addEventListener('beforeunload', function(e) {
+    // Не даем легко сохранить через диалог
+    return "Вы уверены, что хотите уйти? Изменения могут быть потеряны.";
+  });
+  
+  // 3. ЗАПРЕТ ПЕРЕТАСКИВАНИЯ ФАЙЛОВ
+  document.addEventListener('dragstart', function(e) {
+    if (e.target.tagName === 'IMG' || e.target.tagName === 'A') {
+      e.preventDefault();
+      return false;
+    }
+  });
+  
+  // 4. ПОДМЕНА СОДЕРЖИМОГО ПРИ СОХРАНЕНИИ
+  // Перехватываем innerHTML и outerHTML
+  var originalHTML = document.documentElement.outerHTML;
+  Object.defineProperty(document.documentElement, 'innerHTML', {
+    get: function() {
+      return '<!-- Защищено Vuntgram -->' + this._originalInner;
+    },
+    set: function(value) {
+      this._originalInner = value;
+    }
+  });
+  
+  // 5. АНТИ-ОТЛАДКА (уже есть, но усилим)
+  setInterval(function() {
+    (function() {})['constructor']('debugger')();
+  }, 3000);
+  
+  // 6. БЛОКИРОВКА ПРАВОЙ КНОПКИ
+  document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  });
+  
+  // 7. БЛОКИРОВКА DevTools
+  var devtools = function() {};
+  devtools.toString = function() {
+    window.location.href = 'https://t.me/VuntgramBot';
+    return '';
+  };
+  console.log('%c', devtools);
+  
+  // 8. ОБНАРУЖЕНИЕ СОХРАНЕНИЯ ЧЕРЕЗ PRINT
+  window.addEventListener('beforeprint', function() {
+    alert('Печать/сохранение в PDF запрещено');
+    window.stop();
+  });
+  
+  // 9. ЗАЩИТА ОТ КОПИРОВАНИЯ ВСЕГО СОДЕРЖИМОГО
+  document.addEventListener('selectstart', function(e) {
+    e.preventDefault();
+    return false;
+  });
+  
+  document.addEventListener('copy', function(e) {
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', 'Копирование запрещено Vuntgram');
+    return false;
+  });
+  
+  // 10. ДИНАМИЧЕСКОЕ ИЗМЕНЕНИЕ DOM ПРИ ПОПЫТКЕ СОХРАНЕНИЯ
+  var saveAttempts = 0;
+  window.addEventListener('keydown', function(e) {
+    if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
+      saveAttempts++;
+      if (saveAttempts > 2) {
+        // При многократных попытках портим страницу
+        document.body.innerHTML = '<h1>Доступ заблокирован</h1>';
+        window.location.reload();
+      }
     }
   });
 })();
+// =====================================
 </script>
 `;
-
 // Обрабатываем страницы
 PAGES.forEach(page => {
   console.log(`Обработка ${page}...`);
