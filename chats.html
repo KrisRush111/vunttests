@@ -1661,6 +1661,23 @@ input, textarea {
 
 /* Адаптация для мобильных устройств */
 @media (max-width: 767px) {
+    .message-input-container {
+        padding: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        /* Гарантируем прозрачность на мобильных */
+        background: transparent;
+        z-index: 98;
+        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
+        transform: translateY(0); 
+    }
+    
+    .message-input-wrapper {
+        width: 95%;
+        max-width: 350px;
+        /* Усиливаем эффект на мобильных */
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(25px);
+    }
 
         /* Когда клавиатура открыта - уменьшаем отступ */
     .keyboard-open .message-input-container {
@@ -1981,8 +1998,9 @@ input, textarea {
 
 
 
+
 @media (max-width: 767px) {
-    /* Основные исправления для фона */
+    /* Модальное окно чата - полный экран с обоями */
     .chat-modal {
         position: fixed;
         top: 0;
@@ -1995,14 +2013,17 @@ input, textarea {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
-        overflow: hidden;
+        overflow: hidden; /* Убираем скролл у самого окна */
+        display: flex;
+        flex-direction: column;
+        background-color: transparent; /* Прозрачный фон, обои через background-image */
     }
     
     .chat-modal.active {
         transform: translateX(0);
     }
     
-    /* Фон чата - на весь экран всегда */
+    /* Обои на весь экран */
     .chat-modal.wallpaper-enabled {
         background-image: var(--wallpaper-url) !important;
         background-size: cover !important;
@@ -2011,80 +2032,210 @@ input, textarea {
         background-attachment: fixed !important;
     }
     
-    /* Хедер чата - всегда фиксированный поверх фона */
-    .chat-header {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        height: 60px !important;
-        min-height: 60px !important;
-        padding: 12px 16px !important;
-        border-bottom: 1px solid var(--telegram-divider) !important;
-        background: var(--telegram-bg) !important;
-        z-index: 1000 !important;
-        backdrop-filter: blur(10px) !important;
-        -webkit-backdrop-filter: blur(10px) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+    /* Хедер чата - всегда сверху, поверх обоев */
+    .chat-modal .chat-header {
+        position: fixed !important; /* ВАЖНО: fixed вместо sticky */
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        min-height: 60px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--telegram-divider);
+        background: var(--telegram-bg);
+        z-index: 1000; /* Высокий z-index чтобы был поверх клавиатуры */
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        margin: 0;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
     }
     
-    /* Контейнер сообщений - адаптивная высота с учетом хедера и поля ввода */
-    .messages-container {
-        position: absolute !important;
-        top: 60px !important; /* Отступ под хедер */
-        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important; /* Отступ над полем ввода */
-        left: 0 !important;
-        right: 0 !important;
-        padding: 16px !important;
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
-        -webkit-overflow-scrolling: touch !important;
-        background: transparent !important; /* Прозрачный фон для обоев */
-        z-index: 1 !important;
+    /* Контейнер сообщений - занимает все пространство между хедером и строкой ввода */
+    .chat-modal .messages-container {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        padding: 16px;
+        padding-top: 76px; /* Отступ сверху = высота хедера (60px + 16px padding) */
+        padding-bottom: 90px; /* Отступ снизу = высота строки ввода */
+        position: relative;
+        z-index: 1;
+        background-color: transparent; /* Прозрачный фон чтобы видно было обои */
+        box-sizing: border-box;
+        width: 100%;
+        height: calc(100vh - 60px); /* Высота минус хедер */
+        margin-top: 60px; /* Отступ для фиксированного хедера */
     }
     
-    /* Контейнер поля ввода - всегда прижат к низу */
-    .message-input-container {
-        position: fixed !important;
-        bottom: env(safe-area-inset-bottom, 0px) !important;
-        left: 0 !important;
-        right: 0 !important;
-        padding: 8px 16px !important;
-        background: transparent !important;
-        z-index: 1001 !important;
-        transition: all 0.3s ease !important;
+    /* Убираем скроллбар у контейнера сообщений для чистоты */
+    .chat-modal .messages-container::-webkit-scrollbar {
+        width: 4px;
     }
     
-    /* Обертка поля ввода с эффектом стекла */
-    .message-input-wrapper {
-        display: flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        border-radius: 50px !important;
-        padding: 10px 14px 8px 18px !important;
-        width: 95% !important;
-        max-width: 380px !important;
-        margin: 0 auto !important;
-        background: rgba(255, 255, 255, 0.50) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1) !important;
+    .chat-modal .messages-container::-webkit-scrollbar-track {
+        background: transparent;
     }
     
-    /* Сообщение "нет сообщений" */
-    .no-messages {
-        position: absolute !important;
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%) !important;
-        z-index: 2 !important;
+    .chat-modal .messages-container::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 2px;
     }
     
+    /* Контейнер ввода сообщения - фиксирован внизу */
+    .chat-modal .message-input-container {
+        position: fixed !important; /* ВАЖНО: fixed вместо sticky/absolute */
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        background: transparent; /* Прозрачный фон чтобы видно было обои */
+        z-index: 1000; /* Высокий z-index чтобы был поверх клавиатуры */
+        box-sizing: border-box;
+        margin: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: auto;
+        min-height: 70px;
+        backdrop-filter: none; /* Убираем размытие для прозрачности */
+        -webkit-backdrop-filter: none;
+    }
+    
+    /* Обертка поля ввода - сохраняем существующие стили */
+    .chat-modal .message-input-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 50px;
+        padding: 10px 14px 8px 18px;
+        max-width: 380px;
+        width: 85%;
+        background: rgba(255, 255, 255, 0.50);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        box-sizing: border-box;
+    }
+    
+    /* Поле ввода - сохраняем существующие стили */
+    .chat-modal .message-input {
+        flex: 1;
+        border: none;
+        outline: none;
+        padding: 6px 0;
+        font-size: 15px;
+        color: #000;
+        border-radius: 0;
+        background: transparent;
+    }
+    
+    /* Кнопка отправки - сохраняем существующие стили */
+    .chat-modal .send-button {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: none;
+        background: linear-gradient(135deg, #9501ff, #a043fd);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 13px;
+        box-shadow: 0 2px 6px rgba(149, 1, 255, 0.3);
+        flex-shrink: 0;
+    }
+    
+    /* Надпись "нет сообщений" */
+    .chat-modal .no-messages {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 14px;
+        padding: 8px 16px;
+        border-radius: 24px;
+        background-color: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(4px);
+        z-index: 2;
+        text-align: center;
+        max-width: 80%;
+    }
+    
+    /* =========================== */
+    /* ОБРАБОТКА КЛАВИАТУРЫ */
+    /* =========================== */
+
+    
+    /* Запрещаем клавиатуре что-либо сдвигать */
+    body {
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+        height: 100%;
+    }
+    
+    /* Сообщения должны быть читаемыми на фоне обоев */
+    .chat-modal .message {
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+    
+    .chat-modal .message-incoming {
+        background: linear-gradient(135deg, 
+            rgba(245, 245, 245, 0.9), 
+            rgba(224, 224, 224, 0.9)
+        ) !important;
+    }
+    
+    .chat-modal .message-outgoing {
+        background: linear-gradient(135deg, 
+            rgba(149, 1, 255, 0.9), 
+            rgba(160, 67, 253, 0.9)
+        ) !important;
+    }
+    
+    /* =========================== */
+    /* АДАПТАЦИЯ ДЛЯ РАЗНЫХ ВЫСОТ ЭКРАНА */
+    /* =========================== */
+    
+    /* Для очень высоких экранов */
+    @media (max-height: 700px) {
+        .chat-modal .messages-container {
+            padding-top: 70px;
+            padding-bottom: 80px;
+        }
+        
+        .chat-modal .message-input-container {
+            padding: 8px;
+            padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        }
+    }
+    
+    /* Для низких экранов (когда клавиатура открыта) */
+    @media (max-height: 500px) {
+        .chat-modal .messages-container {
+            padding-bottom: 75px; /* Уменьшаем отступ снизу */
+        }
+        
+        .chat-modal .message-input-container {
+            padding: 6px;
+            padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+        }
+        
+        .chat-modal .message-input-wrapper {
+            padding: 8px 12px 6px 16px;
+        }
+    }
 }
-
-
-
 </style>
 </head>
 <body>
@@ -2463,7 +2614,6 @@ function applyWallpaper() {
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     const chatModalDesktop = document.getElementById('chatModalDesktop');
     const chatModalMobile = document.getElementById('chatModalMobile');
-    const desktopContent = document.querySelector('.desktop-content');
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     
     if (wallpaperState.enabled) {
@@ -2486,14 +2636,6 @@ function applyWallpaper() {
             desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
         }
         
-        // Для десктоп контента
-        if (desktopContent && !isMobile) {
-            desktopContent.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            desktopContent.style.backgroundSize = 'cover';
-            desktopContent.style.backgroundPosition = 'center';
-            desktopContent.style.backgroundRepeat = 'no-repeat';
-        }
-        
         // Для десктоп чата
         if (chatModalDesktop && !isMobile) {
             chatModalDesktop.classList.add('wallpaper-enabled');
@@ -2503,60 +2645,13 @@ function applyWallpaper() {
             chatModalDesktop.style.backgroundRepeat = 'no-repeat';
         }
         
-        // Для мобильного чата - ОБОИ НА ВЕСЬ ЭКРАН С ПРИКРЕПЛЕННЫМ ХЕДЕРОМ
+        // Для мобильного чата - обои только в открытом чате
         if (chatModalMobile && isMobile) {
             chatModalMobile.classList.add('wallpaper-enabled');
-            // Важные свойства для полноэкранного фона на мобильных устройствах
-            chatModalMobile.style.cssText += `
-                background-image: url('${selectedWallpaper.url}') !important;
-                background-size: cover !important;
-                background-position: center !important;
-                background-repeat: no-repeat !important;
-                background-attachment: fixed !important;
-                background-color: transparent !important;
-            `;
-            
-            // Гарантируем, что хедер будет поверх обоев
-            const chatHeader = chatModalMobile.querySelector('.chat-header');
-            if (chatHeader) {
-                chatHeader.style.cssText += `
-                    position: fixed !important;
-                    top: 0 !important;
-                    left: 0 !important;
-                    right: 0 !important;
-                    z-index: 1000 !important;
-                    background: var(--telegram-bg) !important;
-                    backdrop-filter: blur(10px) !important;
-                    -webkit-backdrop-filter: blur(10px) !important;
-                `;
-            }
-            
-            // Гарантируем, что сообщения будут прокручиваться поверх обоев
-            const messagesContainer = chatModalMobile.querySelector('.messages-container');
-            if (messagesContainer) {
-                messagesContainer.style.cssText += `
-                    background: transparent !important;
-                    position: absolute !important;
-                    top: 60px !important;
-                    bottom: 70px !important;
-                    left: 0 !important;
-                    right: 0 !important;
-                    z-index: 1 !important;
-                `;
-            }
-            
-            // Гарантируем, что поле ввода будет поверх обоев
-            const messageInputContainer = chatModalMobile.querySelector('.message-input-container');
-            if (messageInputContainer) {
-                messageInputContainer.style.cssText += `
-                    position: fixed !important;
-                    bottom: env(safe-area-inset-bottom, 0px) !important;
-                    left: 0 !important;
-                    right: 0 !important;
-                    background: transparent !important;
-                    z-index: 1001 !important;
-                `;
-            }
+            chatModalMobile.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            chatModalMobile.style.backgroundSize = 'cover';
+            chatModalMobile.style.backgroundPosition = 'center';
+            chatModalMobile.style.backgroundRepeat = 'no-repeat';
         }
     } else {
         // Убираем обои со всех элементов
@@ -2570,11 +2665,6 @@ function applyWallpaper() {
             desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
         }
         
-        if (desktopContent && !isMobile) {
-            desktopContent.style.backgroundImage = '';
-            desktopContent.style.backgroundColor = 'var(--telegram-secondary-bg)';
-        }
-        
         if (chatModalDesktop) {
             chatModalDesktop.classList.remove('wallpaper-enabled');
             chatModalDesktop.style.backgroundImage = '';
@@ -2585,33 +2675,9 @@ function applyWallpaper() {
             chatModalMobile.classList.remove('wallpaper-enabled');
             chatModalMobile.style.backgroundImage = '';
             chatModalMobile.style.backgroundColor = 'var(--telegram-secondary-bg)';
-            
-            // Восстанавливаем стандартные стили для мобильного чата
-            const chatHeader = chatModalMobile.querySelector('.chat-header');
-            if (chatHeader) {
-                chatHeader.style.cssText = '';
-            }
-            
-            const messagesContainer = chatModalMobile.querySelector('.messages-container');
-            if (messagesContainer) {
-                messagesContainer.style.cssText = '';
-            }
-            
-            const messageInputContainer = chatModalMobile.querySelector('.message-input-container');
-            if (messageInputContainer) {
-                messageInputContainer.style.cssText = '';
-            }
         }
     }
-    
-    // Добавляем CSS-класс для обоев в body при необходимости
-    if (wallpaperState.enabled && isMobile) {
-        document.body.classList.add('mobile-wallpaper-active');
-    } else {
-        document.body.classList.remove('mobile-wallpaper-active');
-    }
 }
-
 
 // Слушатель для обновлений обоев из других вкладок (например, из profile.html)
 function setupWallpaperBroadcastListener() {
@@ -4433,32 +4499,25 @@ async function sendMessage() {
     }
 }
 
-// В функции setupKeyboardHandlers добавьте:
+// Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
-    if (isDesktop) return;
-    
     const { messagesContainer, messageInput } = getActiveElements();
     
-    // Предотвращаем скрытие клавиатуры при клике на сообщения
-    messagesContainer.addEventListener('touchstart', (e) => {
-        if (!e.target.closest('.message-input-wrapper') && 
-            !e.target.closest('.message-input')) {
-            // Не блокируем фокус, но предотвращаем быструю потерю фокуса
-            setTimeout(() => {
-                if (document.activeElement === messageInput) {
-                    // Прокручиваем к последнему сообщению если клавиатура открыта
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }
-            }, 50);
+    // Закрытие клавиатуры при клике на сообщения
+    messagesContainer.addEventListener('click', (e) => {
+        if (!e.target.closest('.message-input-container')) {
+            messageInput.blur();
         }
     });
     
-    // Фокусируемся на поле ввода при клике на область сообщений
-    messagesContainer.addEventListener('click', (e) => {
-        if (!e.target.closest('.message-input-wrapper') && 
-            !e.target.closest('.message-input')) {
-            messageInput.focus();
-        }
+    // Предотвращение закрытия при клике на поле ввода
+    messageInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    // Обработка потери фокуса
+    messageInput.addEventListener('blur', () => {
+        // Не делаем ничего - клавиатура закроется сама
     });
 }
 
@@ -4469,64 +4528,43 @@ function setupKeyboardDetection() {
 
     const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    let originalViewportHeight = window.innerHeight;
+    let isSendingMessage = false; // Добавляем флаг отправки сообщения
 
-    function checkKeyboardState() {
-        const currentViewportHeight = window.innerHeight;
-        const isKeyboardOpen = currentViewportHeight < originalViewportHeight * 0.8;
-        
-        if (isKeyboardOpen && !keyboardShown) {
-            keyboardShown = true;
-            chatModal.classList.add('keyboard-open');
-            
-            // Прокручиваем к последнему сообщению при открытии клавиатуры
+    function adjustInputPosition(keyboardOpen) {
+        const { messageInputContainer, messagesContainer } = getActiveElements();
+        if (!messageInputContainer) return;
+
+        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
+            messageInputContainer.style.bottom = '8px';
+            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
             setTimeout(() => {
-                const { messagesContainer } = getActiveElements();
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
-            }, 300);
-            
-        } else if (!isKeyboardOpen && keyboardShown) {
-            keyboardShown = false;
-            chatModal.classList.remove('keyboard-open');
-            
-            // Восстанавливаем отступ для безопасной зоны
-            setTimeout(() => {
-                const { messageInputContainer } = getActiveElements();
-                if (messageInputContainer) {
-                    messageInputContainer.style.bottom = `env(safe-area-inset-bottom, 0px)`;
-                }
             }, 100);
+        } else {
+            messageInputContainer.style.bottom = '12px';
+            messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         }
     }
 
-    // Отслеживаем изменения размера окна (клавиатура меняет высоту)
-    window.addEventListener('resize', checkKeyboardState);
-    
-    // Также отслеживаем фокус на поле ввода
+    // Обработка открытия клавиатуры
     messageInput.addEventListener('focus', () => {
-        setTimeout(checkKeyboardState, 200);
-    });
-    
-    messageInput.addEventListener('blur', () => {
-        setTimeout(checkKeyboardState, 200);
-    });
-    
-    // Инициализация при загрузке
-    setTimeout(() => {
-        originalViewportHeight = window.innerHeight;
-        checkKeyboardState();
-    }, 100);
-    
-    // Обновляем оригинальную высоту при изменении ориентации
-    window.addEventListener('orientationchange', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
+        keyboardShown = true;
         setTimeout(() => {
-            originalViewportHeight = window.innerHeight;
-            checkKeyboardState();
-        }, 300);
+            adjustInputPosition(true);
+        }, 100);
+    });
+
+    // Обработка закрытия клавиатуры
+    messageInput.addEventListener('blur', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
+        keyboardShown = false;
+        adjustInputPosition(false);
     });
 }
+
 
 
        
