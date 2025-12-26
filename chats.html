@@ -2081,15 +2081,6 @@ input, textarea {
         z-index: 2 !important;
     }
     
-    /* Класс для состояния с открытой клавиатурой */
-    .keyboard-open .message-input-container {
-        bottom: 0 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-    }
-    
-    .keyboard-open .messages-container {
-        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
-    }
 }
 
 
@@ -2472,28 +2463,9 @@ function applyWallpaper() {
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     const chatModalDesktop = document.getElementById('chatModalDesktop');
     const chatModalMobile = document.getElementById('chatModalMobile');
+    const desktopContent = document.querySelector('.desktop-content');
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     
-
-        if (chatModalMobile && isMobile) {
-        if (wallpaperState.enabled) {
-            chatModalMobile.classList.add('wallpaper-enabled');
-            // Устанавливаем фон несколькими способами для надежности
-            chatModalMobile.style.cssText += `
-                background-image: url('${selectedWallpaper.url}') !important;
-                background-size: cover !important;
-                background-position: center !important;
-                background-repeat: no-repeat !important;
-                background-attachment: fixed !important;
-            `;
-        } else {
-            chatModalMobile.classList.remove('wallpaper-enabled');
-            chatModalMobile.style.cssText = '';
-            chatModalMobile.style.backgroundColor = 'var(--telegram-secondary-bg)';
-        }
-    }
-
-
     if (wallpaperState.enabled) {
         // Для десктопа - обои везде
         if (!isMobile) {
@@ -2514,6 +2486,14 @@ function applyWallpaper() {
             desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
         }
         
+        // Для десктоп контента
+        if (desktopContent && !isMobile) {
+            desktopContent.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            desktopContent.style.backgroundSize = 'cover';
+            desktopContent.style.backgroundPosition = 'center';
+            desktopContent.style.backgroundRepeat = 'no-repeat';
+        }
+        
         // Для десктоп чата
         if (chatModalDesktop && !isMobile) {
             chatModalDesktop.classList.add('wallpaper-enabled');
@@ -2523,13 +2503,60 @@ function applyWallpaper() {
             chatModalDesktop.style.backgroundRepeat = 'no-repeat';
         }
         
-        // Для мобильного чата - обои только в открытом чате
+        // Для мобильного чата - ОБОИ НА ВЕСЬ ЭКРАН С ПРИКРЕПЛЕННЫМ ХЕДЕРОМ
         if (chatModalMobile && isMobile) {
             chatModalMobile.classList.add('wallpaper-enabled');
-            chatModalMobile.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            chatModalMobile.style.backgroundSize = 'cover';
-            chatModalMobile.style.backgroundPosition = 'center';
-            chatModalMobile.style.backgroundRepeat = 'no-repeat';
+            // Важные свойства для полноэкранного фона на мобильных устройствах
+            chatModalMobile.style.cssText += `
+                background-image: url('${selectedWallpaper.url}') !important;
+                background-size: cover !important;
+                background-position: center !important;
+                background-repeat: no-repeat !important;
+                background-attachment: fixed !important;
+                background-color: transparent !important;
+            `;
+            
+            // Гарантируем, что хедер будет поверх обоев
+            const chatHeader = chatModalMobile.querySelector('.chat-header');
+            if (chatHeader) {
+                chatHeader.style.cssText += `
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    z-index: 1000 !important;
+                    background: var(--telegram-bg) !important;
+                    backdrop-filter: blur(10px) !important;
+                    -webkit-backdrop-filter: blur(10px) !important;
+                `;
+            }
+            
+            // Гарантируем, что сообщения будут прокручиваться поверх обоев
+            const messagesContainer = chatModalMobile.querySelector('.messages-container');
+            if (messagesContainer) {
+                messagesContainer.style.cssText += `
+                    background: transparent !important;
+                    position: absolute !important;
+                    top: 60px !important;
+                    bottom: 70px !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    z-index: 1 !important;
+                `;
+            }
+            
+            // Гарантируем, что поле ввода будет поверх обоев
+            const messageInputContainer = chatModalMobile.querySelector('.message-input-container');
+            if (messageInputContainer) {
+                messageInputContainer.style.cssText += `
+                    position: fixed !important;
+                    bottom: env(safe-area-inset-bottom, 0px) !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    background: transparent !important;
+                    z-index: 1001 !important;
+                `;
+            }
         }
     } else {
         // Убираем обои со всех элементов
@@ -2543,6 +2570,11 @@ function applyWallpaper() {
             desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
         }
         
+        if (desktopContent && !isMobile) {
+            desktopContent.style.backgroundImage = '';
+            desktopContent.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        }
+        
         if (chatModalDesktop) {
             chatModalDesktop.classList.remove('wallpaper-enabled');
             chatModalDesktop.style.backgroundImage = '';
@@ -2553,9 +2585,33 @@ function applyWallpaper() {
             chatModalMobile.classList.remove('wallpaper-enabled');
             chatModalMobile.style.backgroundImage = '';
             chatModalMobile.style.backgroundColor = 'var(--telegram-secondary-bg)';
+            
+            // Восстанавливаем стандартные стили для мобильного чата
+            const chatHeader = chatModalMobile.querySelector('.chat-header');
+            if (chatHeader) {
+                chatHeader.style.cssText = '';
+            }
+            
+            const messagesContainer = chatModalMobile.querySelector('.messages-container');
+            if (messagesContainer) {
+                messagesContainer.style.cssText = '';
+            }
+            
+            const messageInputContainer = chatModalMobile.querySelector('.message-input-container');
+            if (messageInputContainer) {
+                messageInputContainer.style.cssText = '';
+            }
         }
     }
+    
+    // Добавляем CSS-класс для обоев в body при необходимости
+    if (wallpaperState.enabled && isMobile) {
+        document.body.classList.add('mobile-wallpaper-active');
+    } else {
+        document.body.classList.remove('mobile-wallpaper-active');
+    }
 }
+
 
 // Слушатель для обновлений обоев из других вкладок (например, из profile.html)
 function setupWallpaperBroadcastListener() {
