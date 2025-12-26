@@ -1997,88 +1997,6 @@ input, textarea {
 }
 
 
-
-
-/* =========================== */
-/* УПРОЩЕННЫЕ СТИЛИ ДЛЯ КЛАВИАТУРЫ */
-/* =========================== */
-
-@media (max-width: 767px) {
-    /* Когда клавиатура открыта */
-    .chat-modal.keyboard-open {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        z-index: 10000 !important; /* Очень высокий z-index */
-    }
-    
-    /* Хедер остается сверху */
-    .chat-modal.keyboard-open .chat-header {
-        position: fixed !important;
-        top: 0 !important;
-        z-index: 10001 !important;
-    }
-    
-    /* Контейнер сообщений */
-    .chat-modal.keyboard-open .messages-container {
-        position: fixed !important;
-        top: 60px !important;
-        bottom: 70px !important;
-        left: 0 !important;
-        right: 0 !important;
-        padding: 16px !important;
-        padding-bottom: 0 !important;
-        overflow-y: auto !important;
-        z-index: 10000 !important;
-        background-color: transparent !important;
-    }
-    
-    /* Контейнер ввода */
-    .chat-modal.keyboard-open .message-input-container {
-        position: fixed !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        z-index: 10002 !important; /* Самый высокий */
-        padding: 12px !important;
-        background: transparent !important;
-    }
-    
-    /* Обертка поля ввода */
-    .chat-modal.keyboard-open .message-input-wrapper {
-        background: rgba(255, 255, 255, 0.95) !important;
-        border: 1px solid rgba(255, 255, 255, 0.8) !important;
-        box-shadow: 0 4px 25px rgba(0, 0, 0, 0.25) !important;
-    }
-    
-    /* Обои на весь экран */
-    .chat-modal.keyboard-open.wallpaper-enabled {
-        background-image: var(--wallpaper-url) !important;
-        background-size: cover !important;
-        background-position: center !important;
-        background-repeat: no-repeat !important;
-    }
-    
-    /* Для iOS с безопасными зонами */
-    @supports (-webkit-touch-callout: none) {
-        .chat-modal.keyboard-open .chat-header {
-            padding-top: env(safe-area-inset-top) !important;
-            height: calc(60px + env(safe-area-inset-top)) !important;
-        }
-        
-        .chat-modal.keyboard-open .messages-container {
-            top: calc(60px + env(safe-area-inset-top)) !important;
-            padding-top: 8px !important;
-        }
-        
-        .chat-modal.keyboard-open .message-input-container {
-            padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
-        }
-    }
-}
-
 </style>
 </head>
 <body>
@@ -4366,225 +4284,49 @@ function setupKeyboardHandlers() {
 
 
 
-// Замените существующую функцию setupKeyboardDetection() на эту:
 function setupKeyboardDetection() {
     if (isDesktop) return;
-    
-    // Получаем элементы для мобильной версии
-    const chatModalMobile = document.getElementById('chatModalMobile');
-    const messageInputMobile = document.getElementById('messageInputMobile');
-    const messagesContainerMobile = document.getElementById('messagesContainerMobile');
-    
-    if (!chatModalMobile || !messageInputMobile) return;
-    
-    let keyboardOpen = false;
-    let originalHeight = window.innerHeight;
 
-    // Функция для обнаружения открытия клавиатуры
-    function detectKeyboard() {
-        if (!chatModalMobile.classList.contains('active')) return;
-        
-        const currentHeight = window.innerHeight;
-        const isKeyboardOpen = currentHeight < originalHeight * 0.7; // Уменьшил порог для большей надежности
-        
-        if (isKeyboardOpen !== keyboardOpen) {
-            keyboardOpen = isKeyboardOpen;
-            handleKeyboardStateChange(keyboardOpen);
-        }
-    }
+    const { messageInput, chatModal } = getActiveElements();
+    let keyboardShown = false;
+    let isSendingMessage = false; // Добавляем флаг отправки сообщения
 
-    // Обработка изменения состояния клавиатуры
-    function handleKeyboardStateChange(isOpen) {
-        if (!chatModalMobile.classList.contains('active')) return;
-        
-        const messageInputContainer = chatModalMobile.querySelector('.message-input-container');
-        const messagesContainer = messagesContainerMobile;
-        
-        if (isOpen) {
-            // Клавиатура открыта
-            chatModalMobile.classList.add('keyboard-open');
-            document.body.classList.add('keyboard-open');
-            
-            // Поднимаем контейнер ввода над клавиатурой
-            if (messageInputContainer) {
-                messageInputContainer.style.position = 'fixed';
-                messageInputContainer.style.bottom = '0';
-                messageInputContainer.style.zIndex = '2000';
-            }
-            
-            // Прокручиваем сообщения к последнему
+    function adjustInputPosition(keyboardOpen) {
+        const { messageInputContainer, messagesContainer } = getActiveElements();
+        if (!messageInputContainer) return;
+
+        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
+            messageInputContainer.style.bottom = '8px';
+            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
             setTimeout(() => {
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
-            }, 200);
+            }, 100);
         } else {
-            // Клавиатура закрыта
-            chatModalMobile.classList.remove('keyboard-open');
-            document.body.classList.remove('keyboard-open');
-            
-            if (messageInputContainer) {
-                messageInputContainer.style.position = 'fixed';
-                messageInputContainer.style.bottom = '0';
-                messageInputContainer.style.zIndex = '1000';
-            }
+            messageInputContainer.style.bottom = '12px';
+            messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         }
     }
 
-    // Обновляем исходную высоту при ресайзе
-    function updateOriginalHeight() {
-        // Только если клавиатура закрыта
-        if (!keyboardOpen) {
-            originalHeight = window.innerHeight;
-        }
-    }
-
-    // Фокус на поле ввода
-    messageInputMobile.addEventListener('focus', (e) => {
-        if (!chatModalMobile.classList.contains('active')) return;
-        
-        e.stopPropagation();
-        
-        // Для iOS - дополнительный фокус
+    // Обработка открытия клавиатуры
+    messageInput.addEventListener('focus', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
+        keyboardShown = true;
         setTimeout(() => {
-            messageInputMobile.focus();
-        }, 100);
-        
-        // Помечаем что клавиатура открыта
-        chatModalMobile.classList.add('keyboard-focused');
-    });
-
-    // Потеря фокуса
-    messageInputMobile.addEventListener('blur', () => {
-        chatModalMobile.classList.remove('keyboard-focused');
-    });
-
-    // Слушаем события ресайза (клавиатура меняет высоту окна)
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            detectKeyboard();
-            updateOriginalHeight();
+            adjustInputPosition(true);
         }, 100);
     });
 
-    // Слушаем изменения ориентации
-    window.addEventListener('orientationchange', () => {
-        setTimeout(() => {
-            originalHeight = window.innerHeight;
-            detectKeyboard();
-        }, 500);
-    });
-
-    // Таймер для периодической проверки
-    let keyboardCheckInterval;
-    
-    function startKeyboardCheck() {
-        if (keyboardCheckInterval) return;
-        
-        keyboardCheckInterval = setInterval(() => {
-            if (chatModalMobile.classList.contains('active')) {
-                detectKeyboard();
-            }
-        }, 300);
-    }
-    
-    function stopKeyboardCheck() {
-        if (keyboardCheckInterval) {
-            clearInterval(keyboardCheckInterval);
-            keyboardCheckInterval = null;
-        }
-    }
-
-    // Запускаем проверку когда открыт чат
-    function observeChatModal() {
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.attributeName === 'class') {
-                    if (chatModalMobile.classList.contains('active')) {
-                        // Даем время на анимацию открытия
-                        setTimeout(() => {
-                            startKeyboardCheck();
-                            originalHeight = window.innerHeight;
-                        }, 300);
-                    } else {
-                        stopKeyboardCheck();
-                        keyboardOpen = false;
-                        chatModalMobile.classList.remove('keyboard-open');
-                        document.body.classList.remove('keyboard-open');
-                    }
-                }
-            });
-        });
-
-        observer.observe(chatModalMobile, { attributes: true });
-    }
-
-    // Инициализация
-    observeChatModal();
-    
-    // Если чат уже открыт при загрузке
-    if (chatModalMobile.classList.contains('active')) {
-        setTimeout(() => {
-            startKeyboardCheck();
-            originalHeight = window.innerHeight;
-        }, 500);
-    }
-
-    // Также добавляем слушатель для виртуальной клавиатуры на iOS
-    document.addEventListener('focusin', (e) => {
-        if (e.target === messageInputMobile && chatModalMobile.classList.contains('active')) {
-            // iOS иногда требует дополнительного фокуса
-            setTimeout(() => {
-                messageInputMobile.focus();
-            }, 50);
-        }
-    });
-
-    // Обработка касания вне поля ввода для скрытия клавиатуры
-    document.addEventListener('click', (e) => {
-        if (chatModalMobile.classList.contains('active') && 
-            !e.target.closest('.message-input-wrapper') &&
-            !e.target.closest('.message') &&
-            keyboardOpen) {
-            // При клике вне поля ввода - скрываем клавиатуру
-            messageInputMobile.blur();
-        }
-    });
-
-    // Обработка свайпа вниз для скрытия клавиатуры
-    let startY = 0;
-    chatModalMobile.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 1) {
-            startY = e.touches[0].clientY;
-        }
-    });
-
-    chatModalMobile.addEventListener('touchmove', (e) => {
-        if (!keyboardOpen || e.touches.length !== 1) return;
-        
-        const currentY = e.touches[0].clientY;
-        const diffY = currentY - startY;
-        
-        // Свайп вниз более 50px скрывает клавиатуру
-        if (diffY > 50) {
-            messageInputMobile.blur();
-        }
-    });
-    
-    // Обработка нажатия Enter для отправки сообщения
-    messageInputMobile.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            // Вызываем функцию отправки сообщения
-            const sendButton = document.getElementById('sendMessageButtonMobile');
-            if (sendButton) {
-                sendButton.click();
-            }
-        }
+    // Обработка закрытия клавиатуры
+    messageInput.addEventListener('blur', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
+        keyboardShown = false;
+        adjustInputPosition(false);
     });
 }
+
+
 
        
 async function openChat(chatId) {
