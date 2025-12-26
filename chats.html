@@ -1661,23 +1661,6 @@ input, textarea {
 
 /* Адаптация для мобильных устройств */
 @media (max-width: 767px) {
-    .message-input-container {
-        padding: 12px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom));
-        /* Гарантируем прозрачность на мобильных */
-        background: transparent;
-        z-index: 98;
-        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
-        transform: translateY(0); 
-    }
-    
-    .message-input-wrapper {
-        width: 95%;
-        max-width: 350px;
-        /* Усиливаем эффект на мобильных */
-        backdrop-filter: blur(25px);
-        -webkit-backdrop-filter: blur(25px);
-    }
 
         /* Когда клавиатура открыта - уменьшаем отступ */
     .keyboard-open .message-input-container {
@@ -1995,6 +1978,120 @@ input, textarea {
         padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     }
 }
+
+
+
+@media (max-width: 767px) {
+    /* Основные исправления для фона */
+    .chat-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+        z-index: 100;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        overflow: hidden;
+    }
+    
+    .chat-modal.active {
+        transform: translateX(0);
+    }
+    
+    /* Фон чата - на весь экран всегда */
+    .chat-modal.wallpaper-enabled {
+        background-image: var(--wallpaper-url) !important;
+        background-size: cover !important;
+        background-position: center !important;
+        background-repeat: no-repeat !important;
+        background-attachment: fixed !important;
+    }
+    
+    /* Хедер чата - всегда фиксированный поверх фона */
+    .chat-header {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        height: 60px !important;
+        min-height: 60px !important;
+        padding: 12px 16px !important;
+        border-bottom: 1px solid var(--telegram-divider) !important;
+        background: var(--telegram-bg) !important;
+        z-index: 1000 !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    /* Контейнер сообщений - адаптивная высота с учетом хедера и поля ввода */
+    .messages-container {
+        position: absolute !important;
+        top: 60px !important; /* Отступ под хедер */
+        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important; /* Отступ над полем ввода */
+        left: 0 !important;
+        right: 0 !important;
+        padding: 16px !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch !important;
+        background: transparent !important; /* Прозрачный фон для обоев */
+        z-index: 1 !important;
+    }
+    
+    /* Контейнер поля ввода - всегда прижат к низу */
+    .message-input-container {
+        position: fixed !important;
+        bottom: env(safe-area-inset-bottom, 0px) !important;
+        left: 0 !important;
+        right: 0 !important;
+        padding: 8px 16px !important;
+        background: transparent !important;
+        z-index: 1001 !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    /* Обертка поля ввода с эффектом стекла */
+    .message-input-wrapper {
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        border-radius: 50px !important;
+        padding: 10px 14px 8px 18px !important;
+        width: 95% !important;
+        max-width: 380px !important;
+        margin: 0 auto !important;
+        background: rgba(255, 255, 255, 0.50) !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    /* Сообщение "нет сообщений" */
+    .no-messages {
+        position: absolute !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        z-index: 2 !important;
+    }
+    
+    /* Класс для состояния с открытой клавиатурой */
+    .keyboard-open .message-input-container {
+        bottom: 0 !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    }
+    
+    .keyboard-open .messages-container {
+        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+}
+
 
 
 </style>
@@ -2377,6 +2474,26 @@ function applyWallpaper() {
     const chatModalMobile = document.getElementById('chatModalMobile');
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     
+
+        if (chatModalMobile && isMobile) {
+        if (wallpaperState.enabled) {
+            chatModalMobile.classList.add('wallpaper-enabled');
+            // Устанавливаем фон несколькими способами для надежности
+            chatModalMobile.style.cssText += `
+                background-image: url('${selectedWallpaper.url}') !important;
+                background-size: cover !important;
+                background-position: center !important;
+                background-repeat: no-repeat !important;
+                background-attachment: fixed !important;
+            `;
+        } else {
+            chatModalMobile.classList.remove('wallpaper-enabled');
+            chatModalMobile.style.cssText = '';
+            chatModalMobile.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        }
+    }
+
+
     if (wallpaperState.enabled) {
         // Для десктопа - обои везде
         if (!isMobile) {
@@ -4260,25 +4377,32 @@ async function sendMessage() {
     }
 }
 
-// Функция для закрытия клавиатуры при клике вне поля ввода
+// В функции setupKeyboardHandlers добавьте:
 function setupKeyboardHandlers() {
+    if (isDesktop) return;
+    
     const { messagesContainer, messageInput } = getActiveElements();
     
-    // Закрытие клавиатуры при клике на сообщения
-    messagesContainer.addEventListener('click', (e) => {
-        if (!e.target.closest('.message-input-container')) {
-            messageInput.blur();
+    // Предотвращаем скрытие клавиатуры при клике на сообщения
+    messagesContainer.addEventListener('touchstart', (e) => {
+        if (!e.target.closest('.message-input-wrapper') && 
+            !e.target.closest('.message-input')) {
+            // Не блокируем фокус, но предотвращаем быструю потерю фокуса
+            setTimeout(() => {
+                if (document.activeElement === messageInput) {
+                    // Прокручиваем к последнему сообщению если клавиатура открыта
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 50);
         }
     });
     
-    // Предотвращение закрытия при клике на поле ввода
-    messageInput.addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
-    
-    // Обработка потери фокуса
-    messageInput.addEventListener('blur', () => {
-        // Не делаем ничего - клавиатура закроется сама
+    // Фокусируемся на поле ввода при клике на область сообщений
+    messagesContainer.addEventListener('click', (e) => {
+        if (!e.target.closest('.message-input-wrapper') && 
+            !e.target.closest('.message-input')) {
+            messageInput.focus();
+        }
     });
 }
 
@@ -4289,43 +4413,64 @@ function setupKeyboardDetection() {
 
     const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+    let originalViewportHeight = window.innerHeight;
 
-    function adjustInputPosition(keyboardOpen) {
-        const { messageInputContainer, messagesContainer } = getActiveElements();
-        if (!messageInputContainer) return;
-
-        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
-            messageInputContainer.style.bottom = '8px';
-            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
+    function checkKeyboardState() {
+        const currentViewportHeight = window.innerHeight;
+        const isKeyboardOpen = currentViewportHeight < originalViewportHeight * 0.8;
+        
+        if (isKeyboardOpen && !keyboardShown) {
+            keyboardShown = true;
+            chatModal.classList.add('keyboard-open');
+            
+            // Прокручиваем к последнему сообщению при открытии клавиатуры
             setTimeout(() => {
+                const { messagesContainer } = getActiveElements();
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
+            }, 300);
+            
+        } else if (!isKeyboardOpen && keyboardShown) {
+            keyboardShown = false;
+            chatModal.classList.remove('keyboard-open');
+            
+            // Восстанавливаем отступ для безопасной зоны
+            setTimeout(() => {
+                const { messageInputContainer } = getActiveElements();
+                if (messageInputContainer) {
+                    messageInputContainer.style.bottom = `env(safe-area-inset-bottom, 0px)`;
+                }
             }, 100);
-        } else {
-            messageInputContainer.style.bottom = '12px';
-            messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         }
     }
 
-    // Обработка открытия клавиатуры
+    // Отслеживаем изменения размера окна (клавиатура меняет высоту)
+    window.addEventListener('resize', checkKeyboardState);
+    
+    // Также отслеживаем фокус на поле ввода
     messageInput.addEventListener('focus', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
-        keyboardShown = true;
-        setTimeout(() => {
-            adjustInputPosition(true);
-        }, 100);
+        setTimeout(checkKeyboardState, 200);
     });
-
-    // Обработка закрытия клавиатуры
+    
     messageInput.addEventListener('blur', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
-        keyboardShown = false;
-        adjustInputPosition(false);
+        setTimeout(checkKeyboardState, 200);
+    });
+    
+    // Инициализация при загрузке
+    setTimeout(() => {
+        originalViewportHeight = window.innerHeight;
+        checkKeyboardState();
+    }, 100);
+    
+    // Обновляем оригинальную высоту при изменении ориентации
+    window.addEventListener('orientationchange', () => {
+        setTimeout(() => {
+            originalViewportHeight = window.innerHeight;
+            checkKeyboardState();
+        }, 300);
     });
 }
-
 
 
        
