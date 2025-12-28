@@ -2117,7 +2117,7 @@ html, body {
     width: 100%;
 }
 
-/* Модальное окно чата на мобильных - исправлено для полного экрана и фиксации */
+/* Модальное окно чата на мобильных - полный экран + корректная работа с клавиатурой */
 @media (max-width: 767px) {
     .chat-modal {
         position: fixed;
@@ -2125,82 +2125,89 @@ html, body {
         left: 0;
         right: 0;
         bottom: 0;
+
         border-radius: 0;
         z-index: 100;
-        transform: translateX(100%);
+
+        /* ВАЖНО: используем CSS-переменную для смещения вверх на высоту клавиатуры */
+        --keyboard-offset: 0px;
+
+        /* Вместо translateX отдельно — сразу translate3d(x, y, 0) */
+        transform: translate3d(100%, calc(-1 * var(--keyboard-offset)), 0);
         transition: transform 0.3s ease;
-        overflow: hidden; /* предотвращаем конфликтующие скроллы */
+
+        overflow: hidden;
+        background: var(--telegram-bg); /* на всякий случай, чтобы не было “обоев” под контентом */
     }
 
     .chat-modal.active {
-        transform: translateX(0);
+        transform: translate3d(0, calc(-1 * var(--keyboard-offset)), 0);
     }
 
-    /* Хедер чата - фиксированный */
+    /* Хедер фиксируем внутри модалки (фикс будет работать стабильно, т.к. модалка трансформируется) */
     .chat-header {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
+
         height: 60px;
         min-height: 60px;
         padding: 12px 16px;
+
         border-bottom: 1px solid var(--telegram-divider);
         background: var(--telegram-bg);
-        z-index: 200; /* выше всего внутри чата */
+
+        z-index: 200;
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
     }
 
-    /* Скрываем нижнюю навигацию когда открыт чат */
+    /* Скрываем навигацию когда открыт чат */
     .chat-modal.active ~ .bottom-nav {
         display: none !important;
     }
 
-    /*
-      Строка ввода - ДЕЛАЕМ FIXED (самое стабильное на мобилках)
-      Чтобы она не "пропадала" из-за sticky/overflow/фиксированного body.
-    */
-    .message-input-container {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: calc(12px + env(safe-area-inset-bottom));
-        z-index: 300; /* гарантированно поверх сообщений */
-        display: flex;
-        justify-content: center;
-        background: transparent;
-
-        margin-top: 0; /* важно: убираем отрицательный margin */
-        padding: 12px;
-
-        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-        transform: translateY(0);
-    }
-
-    /* Контейнер сообщений - занимает место между хедером и строкой ввода */
+    /* Контейнер сообщений — между хедером и строкой ввода */
     .messages-container {
         position: absolute;
-        top: 60px; /* ниже хедера */
+        top: 60px;
         left: 0;
         right: 0;
 
-        /*
-          ВАЖНО: оставляем место под строку ввода, иначе сообщения будут под ней,
-          и создаётся ощущение что "инпут пропал/перекрыт".
-          Подберите значение при необходимости (80-120px).
-        */
+        /* Резервируем место под строку ввода */
         bottom: 92px;
 
         padding: 16px;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+
         display: flex;
         flex-direction: column;
         z-index: 120;
     }
 
-    /* Когда клавиатура открыта - чуть прижимаем вниз/вверх (по желанию) */
+    /* Строка ввода — фиксируем внизу (внутри модалки) */
+    .message-input-container {
+        position: fixed;
+        left: 0;
+        right: 0;
+
+        /* Важное: safe-area снизу учтён */
+        bottom: calc(12px + env(safe-area-inset-bottom));
+
+        z-index: 300;
+        display: flex;
+        justify-content: center;
+
+        background: transparent;
+        margin-top: 0;
+        padding: 12px;
+
+        transform: translateY(0);
+    }
+
+    /* Эти классы можно оставить — они работают, но уже не обязательны */
     .keyboard-open .message-input-container {
         bottom: calc(8px + env(safe-area-inset-bottom));
     }
@@ -2209,7 +2216,7 @@ html, body {
         bottom: calc(12px + env(safe-area-inset-bottom));
     }
 
-    /* Контейнер списка чатов - оставляем как есть */
+    /* Контейнер списка чатов — как у вас */
     .chats-container.mobile-only {
         height: 100vh;
         max-height: 100vh;
@@ -2220,7 +2227,6 @@ html, body {
         overflow: hidden;
     }
 }
-
 
 
 </style>
@@ -5437,9 +5443,63 @@ function filterContacts(searchTerm) {
                 initializePage();
             }
         });
+
+
+
+
+
+
+
+        (() => {
+  const modal = document.querySelector('.chat-modal');
+  if (!modal) return;
+
+  const vv = window.visualViewport;
+  if (!vv) {
+    // Нет visualViewport — оставим 0, просто будет как раньше
+    return;
+  }
+
+  const updateKeyboardOffset = () => {
+    // Высота "занятого" места снизу = разница между layout viewport и visual viewport
+    const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+
+    modal.style.setProperty('--keyboard-offset', `${offset}px`);
+
+    // (необязательно) можно переключать классы для ваших правил keyboard-open/closed
+    document.documentElement.classList.toggle('keyboard-open', offset > 0);
+    document.documentElement.classList.toggle('keyboard-closed', offset === 0);
+  };
+
+  vv.addEventListener('resize', updateKeyboardOffset);
+  vv.addEventListener('scroll', updateKeyboardOffset);
+
+  window.addEventListener('orientationchange', () => {
+    // даём браузеру пересчитать viewport
+    setTimeout(updateKeyboardOffset, 250);
+  });
+
+  document.addEventListener('focusin', (e) => {
+    if (e.target && e.target.closest && e.target.closest('.chat-modal')) {
+      setTimeout(updateKeyboardOffset, 50);
+    }
+  });
+
+  document.addEventListener('focusout', () => {
+    setTimeout(updateKeyboardOffset, 50);
+  });
+
+  updateKeyboardOffset();
+})();
+
+
+
+
     </script>
 
      <script src="activity-tracker.js"></script>
+
+     
 </body>
 </html>
 
