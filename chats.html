@@ -2129,16 +2129,16 @@ html, body {
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.3s ease;
-        overflow: hidden; /* Предотвращаем внутренние скроллы, которые могут конфликтовать */
+        overflow: hidden; /* предотвращаем конфликтующие скроллы */
     }
 
     .chat-modal.active {
         transform: translateX(0);
     }
 
-    /* Хедер чата - закрепляем фиксированно, чтобы он не пропадал при клавиатуре */
+    /* Хедер чата - фиксированный */
     .chat-header {
-        position: fixed; /* Фиксируем хедер, чтобы он оставался на месте */
+        position: fixed;
         top: 0;
         left: 0;
         right: 0;
@@ -2147,59 +2147,69 @@ html, body {
         padding: 12px 16px;
         border-bottom: 1px solid var(--telegram-divider);
         background: var(--telegram-bg);
-        z-index: 100;
+        z-index: 200; /* выше всего внутри чата */
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
     }
-    
-    /* Скрываем навигацию когда открыт чат */
+
+    /* Скрываем нижнюю навигацию когда открыт чат */
     .chat-modal.active ~ .bottom-nav {
         display: none !important;
     }
 
-    /* Контейнер сообщений - позиционируем абсолютно, чтобы он занимал пространство между хедером и строкой ввода */
-    .messages-container {
-        position: absolute;
-        top: 60px; /* Ниже хедера */
-        left: 0;
-        right: 0;
-        bottom: 0; /* До низа экрана, строка ввода будет накладываться */
-        padding: 16px;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        z-index: 97;
-        /* Убираем flex: 1, так как теперь абсолютное позиционирование */
-    }
-
-    /* Строка ввода - оставляем position: sticky, но добавляем z-index выше сообщений */
+    /*
+      Строка ввода - ДЕЛАЕМ FIXED (самое стабильное на мобилках)
+      Чтобы она не "пропадала" из-за sticky/overflow/фиксированного body.
+    */
     .message-input-container {
-        position: sticky;
-        bottom: 12px; /* Оставляем как есть */
+        position: fixed;
         left: 0;
         right: 0;
-        z-index: 99; /* Выше сообщений, чтобы накладываться */
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        z-index: 300; /* гарантированно поверх сообщений */
         display: flex;
         justify-content: center;
         background: transparent;
-        margin-top: -20px;
+
+        margin-top: 0; /* важно: убираем отрицательный margin */
         padding: 12px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+
         transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
         transform: translateY(0);
     }
 
-    /* Когда клавиатура открыта - уменьшаем отступ (оставляем как есть) */
-    .keyboard-open .message-input-container {
-        bottom: 8px;
-    }
-    
-    /* Когда клавиатуры нет - нормальный отступ (оставляем как есть) */
-    .keyboard-closed .message-input-container {
-        bottom: 12px;
+    /* Контейнер сообщений - занимает место между хедером и строкой ввода */
+    .messages-container {
+        position: absolute;
+        top: 60px; /* ниже хедера */
+        left: 0;
+        right: 0;
+
+        /*
+          ВАЖНО: оставляем место под строку ввода, иначе сообщения будут под ней,
+          и создаётся ощущение что "инпут пропал/перекрыт".
+          Подберите значение при необходимости (80-120px).
+        */
+        bottom: 92px;
+
+        padding: 16px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        display: flex;
+        flex-direction: column;
+        z-index: 120;
     }
 
-    /* Контейнер списка чатов - оставляем как есть, не трогаем */
+    /* Когда клавиатура открыта - чуть прижимаем вниз/вверх (по желанию) */
+    .keyboard-open .message-input-container {
+        bottom: calc(8px + env(safe-area-inset-bottom));
+    }
+
+    .keyboard-closed .message-input-container {
+        bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+
+    /* Контейнер списка чатов - оставляем как есть */
     .chats-container.mobile-only {
         height: 100vh;
         max-height: 100vh;
