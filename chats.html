@@ -72,10 +72,13 @@
 html, body {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
-    touch-action: manipulation;
-    overscroll-behavior: none;
+    touch-action: pan-y;
+    overscroll-behavior-y: contain;
+    overscroll-behavior-x: none;
     height: 100%;
     overflow: hidden;
+    position: fixed;
+    width: 100%;
 }
 
 /* Для контейнеров чатов */
@@ -94,6 +97,7 @@ html, body {
     -ms-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
 }
 
 /* Разрешить выделение только для полей ввода */
@@ -102,6 +106,7 @@ input, textarea {
     -moz-user-select: text;
     -ms-user-select: text;
     user-select: text;
+    -webkit-touch-callout: default;
 }
 
     @media (prefers-color-scheme: dark) {
@@ -345,8 +350,7 @@ input, textarea {
     .add-chat-button:active {
         transform: scale(0.95);
     }
-    
-.chats-content {
+    .chats-content {
     background: var(--telegram-bg);
     border-radius: 12px;
     padding: 0;
@@ -357,7 +361,10 @@ input, textarea {
     animation: fadeInUp 0.3s ease-out 0.1s;
     animation-fill-mode: both;
     overflow: hidden;
-    /* ИСПРАВЛЕННЫЕ СТРОКИ: */
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scroll-behavior: smooth;
+  /* ИСПРАВЛЕННЫЕ СТРОКИ: */
     flex: 1;
     overflow-y: auto;
     max-height: none; /* Убираем ограничение */
@@ -382,7 +389,9 @@ input, textarea {
         background-color: var(--telegram-bg);
         animation: fadeIn 0.3s ease-out;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: all 0.15s ease;
+        -webkit-tap-highlight-color: rgba(0, 136, 204, 0.1);
+        touch-action: manipulation;
     }
 
     .chat-item:last-child {
@@ -533,11 +542,20 @@ input, textarea {
         border-radius: 0;
         z-index: 100;
         transform: translateX(100%);
-        transition: transform 0.3s ease;
+        transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+        will-change: transform;
+        -webkit-overflow-scrolling: touch;
     }
 
     .chat-modal.active {
         transform: translateX(0);
+    }
+    
+    body.chat-open {
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+        height: 100%;
     }
 
 
@@ -618,6 +636,13 @@ input, textarea {
         display: flex;
         align-items: center;
         justify-content: center;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        transition: transform 0.15s ease;
+    }
+    
+    .chat-header .back-button:active {
+        transform: scale(0.95);
     }
 
     .chat-header .chat-title-container {
@@ -712,10 +737,14 @@ input, textarea {
     flex: 1;
     padding: 16px;
     overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     z-index: 97;
     flex-direction: column;
     position: relative;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scroll-behavior: smooth;
 }
 
 
@@ -755,10 +784,12 @@ input, textarea {
         border-radius: 24px;
         position: relative;
         word-wrap: break-word;
+        word-break: break-word;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         opacity: 0;
         transform: translateY(10px);
         transition: opacity 0.3s ease, transform 0.3s ease;
+        will-change: opacity, transform;
     }
 
     .message-incoming {
@@ -1363,6 +1394,8 @@ input, textarea {
     flex-shrink: 0;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
 }
 
 .attach-button:hover {
@@ -1624,17 +1657,22 @@ input, textarea {
     flex: 1;
     border: none;
     outline: none;
-    padding: 6px 0; /* Уменьшил вертикальные отступы */
-    font-size: 15px; /* Чуть уменьшил размер шрифта */
+    padding: 6px 0;
+    font-size: 16px;
     color: #000;
     border-radius: 0;
-    /* ДОБАВЛЯЕМ: прозрачный фон для поля ввода */
     background: transparent;
+    resize: none;
+    max-height: 120px;
+    min-height: 20px;
+    line-height: 1.4;
+    -webkit-appearance: none;
+    appearance: none;
 }
 
 .send-button {
-    width: 34px; /* Чуть уменьшил размер */
-    height: 34px; /* Чуть уменьшил размер */
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     border: none;
     background: linear-gradient(135deg, #9501ff, #a043fd);
@@ -1644,9 +1682,15 @@ input, textarea {
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s ease;
-    font-size: 13px; /* Чуть уменьшил иконку */
+    font-size: 13px;
     box-shadow: 0 2px 6px rgba(149, 1, 255, 0.3);
     flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.send-button:active {
+    transform: scale(0.95);
 }
 
 /* Для десктопной версии */
@@ -1664,11 +1708,20 @@ input, textarea {
     .message-input-container {
         padding: 12px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom));
-        /* Гарантируем прозрачность на мобильных */
         background: transparent;
         z-index: 98;
-        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
-        transform: translateY(0); 
+        transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+        transform: translateY(0);
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+    }
+    
+    .message-input {
+        font-size: 16px;
+        -webkit-user-select: text;
+        user-select: text;
     }
     
     .message-input-wrapper {
@@ -3857,17 +3910,82 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
 function setupMobileChatHeight() {
     if (!isDesktop) {
-        const { messagesContainer } = getActiveElements();
+        const { messagesContainer, chatModal } = getActiveElements();
         
-        // УБЕРИТЕ все фиксированные высоты - пусть браузер сам рассчитывает
-        messagesContainer.style.height = '';
-        messagesContainer.style.maxHeight = '';
-        messagesContainer.style.minHeight = '';
-        
-        // Просто гарантируем flex-растяжение
-        messagesContainer.style.flex = '1 1 auto';
-        messagesContainer.style.overflowY = 'auto';
+        if (messagesContainer && chatModal.classList.contains('active')) {
+            const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            const headerHeight = 60;
+            const inputContainerHeight = 70;
+            
+            messagesContainer.style.height = '';
+            messagesContainer.style.maxHeight = '';
+            messagesContainer.style.minHeight = `${viewportHeight - headerHeight - inputContainerHeight}px`;
+            messagesContainer.style.flex = '1 1 auto';
+            messagesContainer.style.overflowY = 'auto';
+            messagesContainer.style.webkitOverflowScrolling = 'touch';
+            
+            requestAnimationFrame(() => {
+                if (messagesContainer.scrollHeight > 0) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            });
+        }
     }
+}
+
+function setupSwipeToClose() {
+    const { chatModal, chatHeader } = getActiveElements();
+    if (!chatModal || !chatHeader) return;
+
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let isDragging = false;
+    let startTime = 0;
+
+    chatHeader.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        startTime = Date.now();
+        isDragging = true;
+        chatModal.style.transition = 'none';
+    }, { passive: true });
+
+    chatHeader.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        
+        currentX = e.touches[0].clientX;
+        const deltaX = currentX - startX;
+        const deltaY = e.touches[0].clientY - startY;
+        
+        if (Math.abs(deltaY) > Math.abs(deltaX)) {
+            return;
+        }
+        
+        if (deltaX > 0) {
+            chatModal.style.transform = `translateX(${deltaX}px)`;
+        }
+    }, { passive: true });
+
+    chatHeader.addEventListener('touchend', (e) => {
+        if (!isDragging) return;
+        
+        const deltaX = currentX - startX;
+        const deltaTime = Date.now() - startTime;
+        const velocity = deltaX / deltaTime;
+        
+        chatModal.style.transition = 'transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1)';
+        
+        if (deltaX > 100 || velocity > 0.5) {
+            closeChat();
+        } else {
+            chatModal.style.transform = 'translateX(0)';
+        }
+        
+        isDragging = false;
+        startX = 0;
+        currentX = 0;
+    }, { passive: true });
 }
 
 
@@ -4299,29 +4417,49 @@ function setupKeyboardDetection() {
 
     const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+    let isSendingMessage = false;
+    let initialViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
     function adjustInputPosition(keyboardOpen) {
         const { messageInputContainer, messagesContainer } = getActiveElements();
         if (!messageInputContainer) return;
 
-        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
-            messageInputContainer.style.bottom = '8px';
+        if (keyboardOpen && !isSendingMessage) {
+            messageInputContainer.style.transition = 'all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1)';
+            messageInputContainer.style.bottom = '0px';
             messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
-            setTimeout(() => {
+            
+            requestAnimationFrame(() => {
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
-            }, 100);
+            });
         } else {
-            messageInputContainer.style.bottom = '12px';
+            messageInputContainer.style.transition = 'all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1)';
+            messageInputContainer.style.bottom = '0px';
             messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         }
     }
 
+    // Visual Viewport API для более точного определения клавиатуры
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            const currentHeight = window.visualViewport.height;
+            const heightDiff = initialViewportHeight - currentHeight;
+            
+            if (heightDiff > 150) {
+                keyboardShown = true;
+                adjustInputPosition(true);
+            } else if (heightDiff < 50) {
+                keyboardShown = false;
+                adjustInputPosition(false);
+            }
+        });
+    }
+
     // Обработка открытия клавиатуры
     messageInput.addEventListener('focus', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
+        if (isSendingMessage) return;
         keyboardShown = true;
         setTimeout(() => {
             adjustInputPosition(true);
@@ -4496,6 +4634,7 @@ async function openChat(chatId) {
             chatModal.style.display = 'flex';
         } else {
             chatModal.classList.add('active');
+            document.body.classList.add('chat-open');
             document.body.style.overflow = 'hidden';
         }
         
@@ -4571,6 +4710,7 @@ function closeChat() {
         desktopPlaceholder.style.display = 'flex';
     } else {
         chatModal.classList.remove('active');
+        document.body.classList.remove('chat-open');
         document.body.style.overflow = '';
     }
     
@@ -5057,6 +5197,11 @@ imageInput.addEventListener('change', handleImageSelection);
     document.addEventListener('gestureend', function(e) {
         e.preventDefault();
     });
+
+    // Улучшенная обработка свайпов для закрытия чата на мобильных
+    if (!isDesktop) {
+        setupSwipeToClose();
+    }
 
     // Обновление статусов при возвращении на вкладку
     document.addEventListener('visibilitychange', () => {
