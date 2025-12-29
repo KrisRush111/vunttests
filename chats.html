@@ -588,22 +588,22 @@ input, textarea {
         }
     }
 
-    .chat-header {
-        display: flex;
-        align-items: center;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--telegram-divider);
-        background: var(--telegram-bg);
-        position: fixed; /* Changed from sticky to fixed */
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 1000; /* Higher z-index */
-        height: 60px;
-        min-height: 60px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-    }
+.chat-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--telegram-divider);
+    background: var(--telegram-bg);
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    height: 60px;
+    min-height: 60px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
 
 
 
@@ -710,14 +710,12 @@ input, textarea {
 
 .messages-container {
     flex: 1;
-    padding: 76px 16px 80px 16px; /* Added top padding for fixed header and bottom for input */
+    padding: 16px;
     overflow-y: auto;
     display: flex;
     z-index: 97;
     flex-direction: column;
     position: relative;
-    height: 100%;
-    -webkit-overflow-scrolling: touch;
 }
 
 
@@ -1666,13 +1664,11 @@ input, textarea {
     .message-input-container {
         padding: 12px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        /* Гарантируем прозрачность на мобильных */
         background: transparent;
-        z-index: 1001; /* Above keyboard overlay */
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        transition: transform 0.3s ease-out;
+        z-index: 98;
+        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Плавная анимация */
+        transform: translateY(0); 
     }
     
     .message-input-wrapper {
@@ -1751,7 +1747,6 @@ input, textarea {
         background-size: cover !important;
         background-position: center !important;
         background-repeat: no-repeat !important;
-        background-attachment: fixed !important; /* Ensure wallpaper stays put when keyboard opens */
     }
     
     /* Гарантируем, что закрытый чат не показывает обои */
@@ -4310,32 +4305,18 @@ function setupKeyboardDetection() {
         const { messageInputContainer, messagesContainer } = getActiveElements();
         if (!messageInputContainer) return;
 
-        if (keyboardOpen && !isSendingMessage) {
-            if (window.visualViewport) {
-                const offset = window.innerHeight - window.visualViewport.height;
-                messageInputContainer.style.transform = `translateY(-${offset}px)`;
-                messageInputContainer.style.paddingBottom = '12px';
-            }
+        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
+            messageInputContainer.style.bottom = '8px';
+            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
             setTimeout(() => {
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
             }, 100);
         } else {
-            messageInputContainer.style.transform = 'translateY(0)';
+            messageInputContainer.style.bottom = '12px';
             messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         }
-    }
-
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            const { messageInput } = getActiveElements();
-            if (document.activeElement === messageInput) {
-                adjustInputPosition(true);
-            } else {
-                adjustInputPosition(false);
-            }
-        });
     }
 
     // Обработка открытия клавиатуры
