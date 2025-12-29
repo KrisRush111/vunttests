@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
    <!-- Запрет масштабирования -->
 
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
     <title>Чаты - TheVuntgram</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
@@ -1995,77 +1995,6 @@ input, textarea {
         padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     }
 }
-
-
-
-@media (max-width: 767px) {
-    /* Основные фиксы для фиксации чата */
-    body {
-        position: fixed;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-    }
-    
-    /* Фиксируем контейнер чата */
-    .chat-modal {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-        z-index: 100;
-        background-image: var(--wallpaper-url) !important;
-        background-size: cover !important;
-        background-position: center !important;
-        background-repeat: no-repeat !important;
-        background-attachment: fixed !important;
-    }
-    
-    .chat-modal.active {
-        transform: translateX(0);
-        display: flex;
-        flex-direction: column;
-    }
-    
-    /* Контейнер сообщений должен растягиваться */
-    .messages-container {
-        flex: 1;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 16px;
-        padding-bottom: 70px; /* Место для поля ввода */
-    }
-    
-    /* Поле ввода должно быть фиксированным внизу */
-    .message-input-container {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: transparent;
-        padding: 12px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom));
-        z-index: 101;
-        transition: all 0.3s ease;
-        backdrop-filter: none;
-    }
-    
-    /* Когда клавиатура открыта - двигаем поле ввода вверх */
-    .keyboard-open .message-input-container {
-        transform: translateY(-100px); /* Примерное значение */
-        padding-bottom: 12px;
-    }
-    
-    /* Сообщения должны быть прокручиваемыми */
-    .messages-container {
-        flex: 1;
-        min-height: 0; /* Важно для flex контейнеров */
-    }
-}
-
 
 
 </style>
@@ -4368,83 +4297,45 @@ function setupKeyboardHandlers() {
 function setupKeyboardDetection() {
     if (isDesktop) return;
 
-    const { messageInput, messageInputContainer, messagesContainer } = getActiveElements();
+    const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    
-    // Функция для определения высоты клавиатуры
-    function getKeyboardHeight() {
-        if (window.visualViewport) {
-            const windowHeight = window.innerHeight;
-            const viewportHeight = window.visualViewport.height;
-            return Math.max(0, windowHeight - viewportHeight);
+    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+
+    function adjustInputPosition(keyboardOpen) {
+        const { messageInputContainer, messagesContainer } = getActiveElements();
+        if (!messageInputContainer) return;
+
+        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
+            messageInputContainer.style.bottom = '8px';
+            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
+            setTimeout(() => {
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
+        } else {
+            messageInputContainer.style.bottom = '12px';
+            messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
         }
-        return 0;
     }
-    
-    // Обработчик изменения viewport (для виртуальной клавиатуры)
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            const keyboardHeight = getKeyboardHeight();
-            
-            if (keyboardHeight > 100) {
-                // Клавиатура открыта
-                const body = document.body;
-                body.classList.add('keyboard-open');
-                
-                // Поднимаем поле ввода над клавиатурой
-                if (messageInputContainer) {
-                    messageInputContainer.style.transform = `translateY(-${keyboardHeight - 50}px)`;
-                }
-                
-                // Подгоняем контейнер сообщений
-                if (messagesContainer) {
-                    messagesContainer.style.paddingBottom = `${keyboardHeight + 100}px`;
-                    
-                    // Прокручиваем к последнему сообщению
-                    setTimeout(() => {
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 50);
-                }
-            } else {
-                // Клавиатура закрыта
-                const body = document.body;
-                body.classList.remove('keyboard-open');
-                
-                // Возвращаем все на место
-                if (messageInputContainer) {
-                    messageInputContainer.style.transform = '';
-                }
-                
-                if (messagesContainer) {
-                    messagesContainer.style.paddingBottom = '70px';
-                }
-            }
-        });
-    }
-    
-    // Старый способ как fallback
+
+    // Обработка открытия клавиатуры
     messageInput.addEventListener('focus', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
         keyboardShown = true;
-        document.body.classList.add('keyboard-open');
-        
-        // Прокручиваем к последнему сообщению
         setTimeout(() => {
-            if (messagesContainer) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        }, 300);
+            adjustInputPosition(true);
+        }, 100);
     });
-    
+
+    // Обработка закрытия клавиатуры
     messageInput.addEventListener('blur', () => {
+        if (isSendingMessage) return; // Игнорируем при отправке
         keyboardShown = false;
-        document.body.classList.remove('keyboard-open');
+        adjustInputPosition(false);
     });
-    
-    // Предотвращаем прокрутку body при открытой клавиатуре
-    messageInput.addEventListener('touchmove', (e) => {
-        e.stopPropagation();
-    }, { passive: true });
 }
+
 
 
        
@@ -5085,14 +4976,7 @@ async function initializePage() {
             }
         });
         
-        // Автофокус на поле ввода при открытии чата
-        messageInput.addEventListener('focus', () => {
-            // Прокручиваем к нижней части при фокусе на поле ввода
-            setTimeout(() => {
-                const { messagesContainer } = getActiveElements();
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        });
+
     }
 
 // Обработчики для кнопки прикрепления
@@ -5202,6 +5086,23 @@ imageInput.addEventListener('change', handleImageSelection);
         updateChatStatuses();
         updateUserActivity(true);
     });
+
+
+    messageInput.addEventListener('focus', () => {
+    if (isSendingMessage) return;
+    keyboardShown = true;
+    preventBodyScroll(true);
+    setTimeout(() => {
+        adjustForKeyboard(true);
+    }, 150);
+});
+
+messageInput.addEventListener('blur', () => {
+    if (isSendingMessage) return;
+    keyboardShown = false;
+    preventBodyScroll(false);
+    adjustForKeyboard(false);
+});
 
     // Обновление статуса активности
     setTimeout(() => {
