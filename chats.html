@@ -1997,6 +1997,17 @@ input, textarea {
 }
 
 
+@media (max-width: 767px) {
+    .message-input-container {
+        transition: bottom 0.3s ease; /* Плавная анимация при изменении позиции */
+    }
+    
+    /* Гарантируем, что строка ввода не перекрывается */
+    .message-input-container.keyboard-open {
+        z-index: 9999; /* Высокий z-index для гарантии */
+    }
+}
+
 </style>
 </head>
 <body>
@@ -2381,21 +2392,40 @@ function applyWallpaper() {
     // Устанавливаем CSS переменную
     document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
     
-    // Получаем все необходимые элементы
+    // Получаем элементы
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     const chatModalDesktop = document.getElementById('chatModalDesktop');
     const chatModalMobile = document.getElementById('chatModalMobile');
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     
     if (wallpaperState.enabled) {
-        // Для десктопа - обои везде
         if (!isMobile) {
+            // Для десктопа - обои везде
             document.body.classList.add('wallpaper-enabled');
             document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
             document.body.style.backgroundSize = 'cover';
             document.body.style.backgroundPosition = 'center';
             document.body.style.backgroundRepeat = 'no-repeat';
             document.body.style.backgroundAttachment = 'fixed';
+        } else {
+            // Для мобильных - обои ТОЛЬКО когда чат открыт (применяем к body для покрытия всей области)
+            if (chatModalMobile.classList.contains('active')) {
+                document.body.classList.add('wallpaper-enabled');
+                document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+                document.body.style.backgroundSize = 'cover';
+                document.body.style.backgroundPosition = 'center';
+                document.body.style.backgroundRepeat = 'no-repeat';
+                document.body.style.backgroundAttachment = 'fixed'; // Фиксируем обои, чтобы они покрывали всю область
+                
+                // Убираем обои с chat-modal, чтобы избежать дублирования
+                chatModalMobile.classList.remove('wallpaper-enabled');
+                chatModalMobile.style.backgroundImage = '';
+            } else {
+                // Когда чат закрыт - убираем обои с body
+                document.body.classList.remove('wallpaper-enabled');
+                document.body.style.backgroundImage = '';
+                document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
+            }
         }
         
         // Для десктоп плейсхолдера
@@ -2414,15 +2444,6 @@ function applyWallpaper() {
             chatModalDesktop.style.backgroundSize = 'cover';
             chatModalDesktop.style.backgroundPosition = 'center';
             chatModalDesktop.style.backgroundRepeat = 'no-repeat';
-        }
-        
-        // Для мобильного чата - обои только в открытом чате
-        if (chatModalMobile && isMobile) {
-            chatModalMobile.classList.add('wallpaper-enabled');
-            chatModalMobile.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            chatModalMobile.style.backgroundSize = 'cover';
-            chatModalMobile.style.backgroundPosition = 'center';
-            chatModalMobile.style.backgroundRepeat = 'no-repeat';
         }
     } else {
         // Убираем обои со всех элементов
@@ -4298,44 +4319,57 @@ function setupKeyboardDetection() {
     if (isDesktop) return;
 
     const { messageInput, chatModal } = getActiveElements();
-    let keyboardShown = false;
-    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+    let isKeyboardOpen = false;
+    let isSendingMessage = false;
 
-    function adjustInputPosition(keyboardOpen) {
-        const { messageInputContainer, messagesContainer } = getActiveElements();
+    // Проверяем поддержку VisualViewport API
+    const visualViewport = window.visualViewport;
+    if (!visualViewport) {
+        console.warn('VisualViewport API not supported, falling back to basic detection');
+        return;
+    }
+
+    function adjustInputPosition() {
+        const { messageInputContainer } = getActiveElements();
         if (!messageInputContainer) return;
 
-        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
-            messageInputContainer.style.bottom = '8px';
-            messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
-            setTimeout(() => {
-                if (messagesContainer) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }
-            }, 100);
+        const viewportHeight = window.innerHeight;
+        const visualHeight = visualViewport.height;
+        const keyboardHeight = viewportHeight - visualHeight;
+
+        if (keyboardHeight > 150) { // Клавиатура открыта (порог для избежания ложных срабатываний)
+            isKeyboardOpen = true;
+            // Позиционируем строку ввода точно над клавиатурой
+            messageInputContainer.style.bottom = `${keyboardHeight + 8}px`; // 8px - небольшой отступ
+            messageInputContainer.style.position = 'fixed'; // Гарантируем фиксированное позиционирование
         } else {
+            isKeyboardOpen = false;
             messageInputContainer.style.bottom = '12px';
-            messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
+            messageInputContainer.style.position = 'sticky'; // Возвращаем sticky для нормального состояния
         }
     }
 
-    // Обработка открытия клавиатуры
-    messageInput.addEventListener('focus', () => {
+    // Слушаем изменения visual viewport (включая открытие/закрытие клавиатуры)
+    visualViewport.addEventListener('resize', () => {
         if (isSendingMessage) return; // Игнорируем при отправке
-        keyboardShown = true;
+        adjustInputPosition();
+    });
+
+    // Дополнительные обработчики для фокуса/блюра (на случай, если VisualViewport не сработает)
+    messageInput.addEventListener('focus', () => {
+        if (isSendingMessage) return;
+        setTimeout(adjustInputPosition, 100); // Небольшая задержка для корректного расчета
+    });
+
+    messageInput.addEventListener('blur', () => {
+        if (isSendingMessage) return;
         setTimeout(() => {
-            adjustInputPosition(true);
+            if (!isKeyboardOpen) {
+                adjustInputPosition();
+            }
         }, 100);
     });
-
-    // Обработка закрытия клавиатуры
-    messageInput.addEventListener('blur', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
-        keyboardShown = false;
-        adjustInputPosition(false);
-    });
 }
-
 
 
        
