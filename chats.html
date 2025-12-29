@@ -4291,7 +4291,8 @@ function setupKeyboardDetection() {
     if (isDesktop) return;
 
     const { messageInput, chatModal } = getActiveElements();
-    let initialViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    let isKeyboardOpen = false;
+    let maxViewportHeight = window.innerHeight; // Максимальная высота (без клавиатуры)
 
     // Отслеживаем изменение высоты viewport (когда открывается клавиатура)
     function handleViewportChange() {
@@ -4299,10 +4300,17 @@ function setupKeyboardDetection() {
         if (!messageInputContainer) return;
 
         const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-        const keyboardHeight = initialViewportHeight - currentHeight;
+        
+        // Обновляем максимальную высоту если текущая больше
+        if (currentHeight > maxViewportHeight) {
+            maxViewportHeight = currentHeight;
+        }
+        
+        const keyboardHeight = maxViewportHeight - currentHeight;
 
         if (keyboardHeight > 100) {
             // Клавиатура открыта - поднимаем строку ввода
+            isKeyboardOpen = true;
             messageInputContainer.style.transform = `translateY(-${keyboardHeight}px)`;
             messageInputContainer.style.transition = 'transform 0.2s ease-out';
             
@@ -4314,6 +4322,7 @@ function setupKeyboardDetection() {
             }, 250);
         } else {
             // Клавиатура закрыта - возвращаем строку ввода
+            isKeyboardOpen = false;
             messageInputContainer.style.transform = 'translateY(0)';
             messageInputContainer.style.transition = 'transform 0.2s ease-out';
         }
@@ -4328,9 +4337,14 @@ function setupKeyboardDetection() {
         window.addEventListener('resize', handleViewportChange);
     }
 
-    // Обновляем начальную высоту при фокусе
-    messageInput.addEventListener('focus', () => {
-        initialViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    // При закрытии клавиатуры обновляем максимальную высоту
+    messageInput.addEventListener('blur', () => {
+        setTimeout(() => {
+            const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            if (currentHeight > maxViewportHeight) {
+                maxViewportHeight = currentHeight;
+            }
+        }, 300);
     });
 }
 
