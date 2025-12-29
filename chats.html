@@ -4290,48 +4290,89 @@ function setupKeyboardHandlers() {
 function setupKeyboardDetection() {
     if (isDesktop) return;
 
-    const { messageInput, chatModal } = getActiveElements();
+    let keyboardVisible = false;
     let initialViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
-    // Отслеживаем изменение высоты viewport (когда открывается клавиатура)
+    // Функция для безопасного вычисления высоты клавиатуры
+    function calculateKeyboardHeight() {
+        if (!window.visualViewport) return 0;
+        
+        const currentHeight = window.visualViewport.height;
+        const windowHeight = window.innerHeight;
+        const keyboardHeight = windowHeight - currentHeight;
+        
+        return Math.max(0, keyboardHeight);
+    }
+
+    // Главная функция обработки изменения viewport
     function handleViewportChange() {
-        const { messageInputContainer, messagesContainer } = getActiveElements();
-        if (!messageInputContainer) return;
-
-        const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-        const keyboardHeight = initialViewportHeight - currentHeight;
-
-        if (keyboardHeight > 100) {
-            // Клавиатура открыта - поднимаем строку ввода
-            messageInputContainer.style.transform = `translateY(-${keyboardHeight}px)`;
-            messageInputContainer.style.transition = 'transform 0.2s ease-out';
+        if (!window.visualViewport) return;
+        
+        const { messagesContainer, messageInputContainer } = getActiveElements();
+        if (!messagesContainer || !messageInputContainer) return;
+        
+        const currentHeight = window.visualViewport.height;
+        const windowHeight = window.innerHeight;
+        const keyboardHeight = windowHeight - currentHeight;
+        
+        // Определяем, открыта ли клавиатура
+        const isKeyboardOpen = keyboardHeight > 100;
+        
+        if (isKeyboardOpen) {
+            // Когда клавиатура открыта, поднимаем контейнер сообщений
+            // вместо перемещения строки ввода
             
-            // Прокручиваем сообщения вниз
+            // Рассчитываем сколько нужно прокрутить
+            const containerHeight = messagesContainer.clientHeight;
+            const scrollAmount = Math.max(0, messagesContainer.scrollHeight - containerHeight);
+            
+            // Прокручиваем к последнему сообщению
             setTimeout(() => {
-                if (messagesContainer) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+                // Дополнительный скролл для компенсации клавиатуры
+                if (messagesContainer.scrollHeight > containerHeight) {
+                    const extraScroll = Math.min(keyboardHeight, 200);
+                    messagesContainer.scrollTop += extraScroll;
                 }
-            }, 250);
+            }, 100);
+            
+            keyboardVisible = true;
         } else {
-            // Клавиатура закрыта - возвращаем строку ввода
-            messageInputContainer.style.transform = 'translateY(0)';
-            messageInputContainer.style.transition = 'transform 0.2s ease-out';
+            // Когда клавиатура закрывается
+            if (keyboardVisible) {
+                // Возвращаем скролл в нормальное состояние
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 50);
+                
+                keyboardVisible = false;
+            }
         }
     }
 
-    // Используем Visual Viewport API для отслеживания клавиатуры
+    // Используем Visual Viewport API если доступен
     if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', handleViewportChange);
-        window.visualViewport.addEventListener('scroll', handleViewportChange);
     } else {
         // Fallback для старых браузеров
         window.addEventListener('resize', handleViewportChange);
     }
 
-    // Обновляем начальную высоту при фокусе
-    messageInput.addEventListener('focus', () => {
-        initialViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-    });
+    // При фокусе на поле ввода даем время клавиатуре открыться
+    const { messageInput } = getActiveElements();
+    if (messageInput) {
+        messageInput.addEventListener('focus', () => {
+            initialViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            
+            // Небольшая задержка для стабильности
+            setTimeout(handleViewportChange, 300);
+        });
+        
+        messageInput.addEventListener('blur', () => {
+            keyboardVisible = false;
+        });
+    }
 }
 
 
