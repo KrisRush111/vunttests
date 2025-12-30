@@ -1,16 +1,12 @@
-// activity-tracker.js
-// Универсальный трекер активности для Vuntgram (Contacts, Chats, Profile)
-
-const SERVER_URL = 'https://vuntserver-479v.onrender.com';
-
+// activity-tracker.js с поддержкой мгновенных переходов
 class ActivityTracker {
     constructor() {
+        this.isInitialized = false;
+        this.updateInterval = null;
+        this.statusPollInterval = null;
+        this.lastActivity = Date.now();
         this.userData = null;
         this.isOnline = false;
-        this.activityInterval = null;
-        this.statusPollInterval = null;
-        this.lastActivityTime = Date.now();
-        this.isInitialized = false;
         this.currentPage = this.detectCurrentPage();
         
         // Добавляем отслеживание платформы
@@ -22,6 +18,9 @@ class ActivityTracker {
         this.lastCacheUpdate = 0;
         this.cacheTTL = 5000; // Уменьшено до 5 секунд
         
+        // Добавляем BroadcastChannel для межвкладочного общения
+        this.activityChannel = null;
+        
         console.log(`ActivityTracker initialized for page: ${this.currentPage}, on platform: ${this.isOnPlatform}`);
         
         // Инициализация только если на платформе
@@ -29,7 +28,7 @@ class ActivityTracker {
             setTimeout(() => this.init(), 500);
         }
     }
-
+    
     // Определение текущей страницы - расширенная версия
     detectCurrentPage() {
         const hostname = window.location.hostname;
@@ -52,6 +51,13 @@ class ActivityTracker {
         // Инициализируем только если на платформе
         if (!this.isOnPlatform || this.isInitialized) return;
         
+        // Подключаемся к глобальному состоянию
+        if (!window.GlobalState) {
+            console.warn('GlobalState not available, delaying tracker init');
+            setTimeout(() => this.init(), 1000);
+            return;
+        }
+        
         try {
             // Получаем данные пользователя из sessionStorage
             const userDataFromStorage = sessionStorage.getItem('userData');
@@ -69,6 +75,9 @@ class ActivityTracker {
             this.startActivityTracking();
             this.startStatusPolling();
             
+            // Настраиваем межвкладочное общение
+            this.setupCrossTabCommunication();
+            
             this.isInitialized = true;
             console.log(`ActivityTracker initialized for user: ${this.userData.platform_user_id} on ${this.currentPage}`);
         } catch (error) {
@@ -81,7 +90,7 @@ class ActivityTracker {
         if (!this.userData) return;
 
         // Обновляем статус каждые 25 секунд (чаще)
-        this.activityInterval = setInterval(() => {
+        this.updateInterval = setInterval(() => {
             if (document.visibilityState === 'visible' && this.isOnPlatform) {
                 this.updateOnlineStatus(true);
             }
@@ -119,7 +128,7 @@ class ActivityTracker {
         ];
 
         const activityHandler = () => {
-            this.lastActivityTime = Date.now();
+            this.lastActivity = Date.now();
             // Обновляем статус только если на платформе
             if (!this.isOnline && document.visibilityState === 'visible' && this.isOnPlatform) {
                 this.updateOnlineStatus(true);
@@ -199,9 +208,9 @@ class ActivityTracker {
 
     // Остановка отслеживания при уходе с платформы
     stopTracking() {
-        if (this.activityInterval) {
-            clearInterval(this.activityInterval);
-            this.activityInterval = null;
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
         }
         if (this.statusPollInterval) {
             clearInterval(this.statusPollInterval);
@@ -259,6 +268,17 @@ class ActivityTracker {
             if (response.ok) {
                 this.isOnline = isOnline;
                 console.log(`ActivityTracker: User is ${isOnline ? 'online' : 'offline'} on page: ${this.currentPage}`);
+                
+                // Сохраняем статус в глобальное состояние
+                window.GlobalState.updatePartial('activityData', {
+                    [this.userData.platform_user_id]: {
+                        is_online: isOnline,
+                        last_update: Date.now()
+                    }
+                });
+                
+                // Уведомляем другие вкладки
+                this.broadcastStatusUpdate(this.userData.platform_user_id, isOnline);
                 
                 // Обновляем свой статус на текущей странице если нужно
                 if (this.currentPage === 'profile') {
