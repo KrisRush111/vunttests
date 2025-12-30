@@ -29,8 +29,8 @@
 <meta name="msapplication-TileImage" content="icon-512x512.png">
 
 
-    <script src="global-state.js"></script>
-    <script src="platform-router.js"></script>
+<script src="global-state.js"></script>
+<script src="platform-router.js"></script>
     <!-- Stylesheets -->
     <script src="tailwind.js"></script>
     <link rel="stylesheet" href="fontawesome-free-6.7.2-web/css/all.min.css">
@@ -3982,104 +3982,6 @@ function updateAllAvatars(avatarUrl) {
         });
 
 
-
-
-
-// Глобальная инициализация платформы
-document.addEventListener('DOMContentLoaded', function() {
-    // Проверяем авторизацию
-    if (!checkAuthorization && !sessionStorage.getItem('userData')) {
-        window.location.href = 'index.html';
-        return;
-    }
-    
-    // Инициализируем трекер активности
-    if (window.activityTracker && !window.activityTracker.isInitialized) {
-        window.activityTracker.init();
-    }
-    
-    // Настраиваем слежение за уходом с платформы
-    setupPlatformExitTracking();
-});
-
-// Отслеживание ухода с платформы
-function setupPlatformExitTracking() {
-    // Помечаем, что пользователь на платформе
-    localStorage.setItem('on_platform', 'true');
-    
-    // Следим за переходом на внешние страницы
-    document.addEventListener('click', function(e) {
-        const link = e.target.closest('a[href]');
-        if (link && link.href && !link.href.includes(window.location.hostname)) {
-            // Пользователь уходит с платформы
-            window.GlobalState.endPlatformSession();
-        }
-    });
-    
-    // При закрытии вкладки/окна
-    window.addEventListener('beforeunload', function() {
-        // Проверяем, остались ли другие вкладки платформы
-        setTimeout(() => {
-            if (!document.hidden) return;
-            
-            // Даем время на переход между вкладками
-            setTimeout(() => {
-                const platformTabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
-                if (platformTabs.length === 0) {
-                    window.GlobalState.endPlatformSession();
-                }
-            }, 1000);
-        }, 100);
-    });
-    
-    // Отслеживание вкладок
-    if (typeof BroadcastChannel !== 'undefined') {
-        const tabChannel = new BroadcastChannel('platform_tabs');
-        const tabId = Date.now().toString(36) + Math.random().toString(36).substr(2);
-        
-        // Регистрируем вкладку
-        let platformTabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
-        platformTabs = platformTabs.filter(id => id !== tabId);
-        platformTabs.push(tabId);
-        localStorage.setItem('platform_tabs', JSON.stringify(platformTabs));
-        
-        // Уведомляем другие вкладки
-        tabChannel.postMessage({ type: 'tab_registered', tabId });
-        
-        // Слушаем сообщения от других вкладок
-        tabChannel.onmessage = function(event) {
-            if (event.data.type === 'tab_closed') {
-                let tabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
-                tabs = tabs.filter(id => id !== event.data.tabId);
-                localStorage.setItem('platform_tabs', JSON.stringify(tabs));
-                
-                // Если вкладок не осталось, завершаем сессию
-                if (tabs.length === 0) {
-                    window.GlobalState.endPlatformSession();
-                }
-            }
-        };
-        
-        // При закрытии вкладки
-        window.addEventListener('beforeunload', function() {
-            tabChannel.postMessage({ type: 'tab_closed', tabId });
-        });
-    }
-}
-
-// Быстрая проверка авторизации для всех страниц
-function quickAuthCheck() {
-    const userData = sessionStorage.getItem('userData');
-    if (!userData) {
-        const remembered = localStorage.getItem('rememberedUser');
-        if (remembered) {
-            sessionStorage.setItem('userData', remembered);
-            return true;
-        }
-        return false;
-    }
-    return true;
-}
 
 
 
