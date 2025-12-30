@@ -4462,15 +4462,24 @@ async function openChat(chatId) {
     isOpeningChat = true;
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-        // 0. Обновляем заголовок из кэша списка чатов (если есть)
-        const cachedChat = currentChatsList.find(c => c.id === chatId);
-        if (cachedChat) {
-            chatTitle.textContent = cachedChat.name || 'Новый чат';
-            const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
-            const bgColor = cachedChat.avatar_background || '#0088cc';
+    
+    // 0. МГНОВЕННОЕ ОБНОВЛЕНИЕ ХЕДЕРА ИЗ КЭША
+    const cachedChat = currentChatsList.find(c => c.id === chatId);
+    if (cachedChat) {
+        chatTitle.textContent = cachedChat.name || 'Новый чат';
+        const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
+        const bgColor = cachedChat.avatar_background || '#0088cc';
+        
+        // Устанавливаем аватар сразу (градиент + попытка загрузить фото из кэша браузера)
+        const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
+            chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+        } else {
             chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.textContent = initials;
         }
+        chatAvatar.textContent = initials;
+    }
 
 
     try {
@@ -4492,9 +4501,7 @@ async function openChat(chatId) {
             }
 
             // Прокручиваем вниз сразу
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 10);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         } else {
             messagesContainer.innerHTML = '';
             noMessages.style.display = 'block';
@@ -4557,10 +4564,7 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
-        // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
-        chatAvatar.style.backgroundImage = '';
-        chatAvatar.style.backgroundColor = '';
-        chatAvatar.textContent = '';
+// Avatar clearing removed to prevent flicker
         
         // Загрузка аватара
         if (currentChat.participants && currentChat.participants.length > 0) {
@@ -4696,15 +4700,6 @@ async function openChat(chatId) {
 
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-        // 0. Обновляем заголовок из кэша списка чатов (если есть)
-        const cachedChat = currentChatsList.find(c => c.id === chatId);
-        if (cachedChat) {
-            chatTitle.textContent = cachedChat.name || 'Новый чат';
-            const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
-            const bgColor = cachedChat.avatar_background || '#0088cc';
-            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.textContent = initials;
-        }
 
 
     // Reset chat state
@@ -5121,10 +5116,19 @@ async function initializePage() {
 
     // Обработчик кнопки "Назад" в чате
     if (backToChats) { 
-        backToChats.addEventListener('click', (e) => {
+        backToChats.onclick = (e) => {
             e.preventDefault();
             closeChat();
-        });
+        };
+    }
+    
+    // Дополнительно для мобильной версии
+    const backToChatsMobile = document.getElementById('backToChatsMobile');
+    if (backToChatsMobile) {
+        backToChatsMobile.onclick = (e) => {
+            e.preventDefault();
+            closeChat();
+        };
     }
     
     // Обработчики для отправки сообщений
