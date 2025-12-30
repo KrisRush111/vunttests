@@ -2210,6 +2210,93 @@ input, textarea {
     <script>
     
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
+// --- IndexedDB Logic for Local Caching ---
+const DB_NAME = 'VuntgramDB';
+const DB_VERSION = 1;
+const STORE_CHATS = 'chats';
+const STORE_MESSAGES = 'messages';
+
+let db;
+
+function initDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_CHATS)) {
+                db.createObjectStore(STORE_CHATS, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(STORE_MESSAGES)) {
+                db.createObjectStore(STORE_MESSAGES, { keyPath: 'chat_id' });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            resolve(db);
+        };
+
+        request.onerror = (event) => {
+            console.error('IndexedDB error:', event.target.error);
+            reject(event.target.error);
+        };
+    });
+}
+
+async function saveChatsLocal(chats) {
+    if (!db) await initDB();
+    const tx = db.transaction(STORE_CHATS, 'readwrite');
+    const store = tx.objectStore(STORE_CHATS);
+    // Clear old chats and save new ones
+    store.clear();
+    chats.forEach(chat => store.put(chat));
+    return tx.complete;
+}
+
+async function getChatsLocal() {
+    if (!db) await initDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(STORE_CHATS, 'readonly');
+        const store = tx.objectStore(STORE_CHATS);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+    });
+}
+
+async function saveMessagesLocal(chatId, messages) {
+    if (!db) await initDB();
+    const tx = db.transaction(STORE_MESSAGES, 'readwrite');
+    const store = tx.objectStore(STORE_MESSAGES);
+    store.put({ chat_id: chatId, messages: messages, timestamp: Date.now() });
+    return tx.complete;
+}
+
+async function getMessagesLocal(chatId) {
+    if (!db) await initDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readonly');
+        const store = tx.objectStore(STORE_MESSAGES);
+        const request = store.get(chatId);
+        request.onsuccess = () => resolve(request.result ? request.result.messages : null);
+    });
+}
+
+async function updateLocalChat(chatId, updates) {
+    if (!db) await initDB();
+    const tx = db.transaction(STORE_CHATS, 'readwrite');
+    const store = tx.objectStore(STORE_CHATS);
+    const request = store.get(chatId);
+    request.onsuccess = () => {
+        const chat = request.result;
+        if (chat) {
+            Object.assign(chat, updates);
+            store.put(chat);
+        }
+    };
+}
+// --- End of IndexedDB Logic ---
+
         
         const messageBox = document.getElementById('messageBox');
         const contactsModal = document.getElementById('contactsModal');
@@ -2263,7 +2350,7 @@ input, textarea {
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false; // Flag to prevent multiple chat openings
-        let currentChatsList = JSON.parse(sessionStorage.getItem("cachedChats") || "[]"); // Кэш списка чатов
+        let currentChatsList = []; // Кэш списка чатов
         // В разделе с другими глобальными переменными добавьте:
         let activityPollInterval;
         let currentActivityData = {};
@@ -3433,16 +3520,13 @@ function openImageModal(imageUrl, messageIndex = 0) {
                     return true;
                 }
                 
-                const userId = userData.platform_user_id || sessionStorage.getItem('platform_user_id');
-                if (!userId) return false;
-
                 const response = await fetch(`${SERVER_URL}/get_user_data`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        platform_user_id: userId 
+                        platform_user_id: userData.platform_user_id 
                     }),
                     credentials: 'include'
                 });
@@ -3463,28 +3547,16 @@ function openImageModal(imageUrl, messageIndex = 0) {
         
      
 async function loadChats(forceReload = false) {
-    // 1. Мгновенно загружаем из кэша sessionStorage
-    const cachedChats = sessionStorage.getItem('cachedChats');
-    if (cachedChats) {
-        try {
-            const parsedChats = JSON.parse(cachedChats);
-            if (parsedChats && parsedChats.length > 0) {
-                currentChatsList = parsedChats;
-                renderChats(currentChatsList);
-                console.log('Rendered from cache immediately');
-            }
-        } catch (e) {
-            console.error('Cache parse error', e);
-        }
-    }
+    // Эта функция теперь вызывается ТОЛЬКО при:
+    // 1. Первоначальной загрузке страницы (forceReload = false)
+    // 2. Явном требовании перезагрузить все чаты (forceReload = true)
     
-    // 2. ВСЕГДА делаем фоновый запрос к серверу для актуализации
-    // Если это принудительная перезагрузка или в кэше ничего нет - ждем загрузки
-    if (forceReload || !currentChatsList || currentChatsList.length === 0) {
+    if (forceReload) {
+        // Полная перезагрузка только если явно запрошено
         await performFullChatsReload();
     } else {
-        // Иначе обновляем в фоне
-        performFullChatsReload().catch(err => console.error('Background update failed', err));
+        // При обычном вызове - интеллектуальное обновление
+        await performSmartChatsUpdate();
     }
 }
 
@@ -3504,8 +3576,8 @@ async function performFullChatsReload() {
         
         if (data.status === 'success') {
             currentChatsList = data.chats;
-            sessionStorage.setItem('cachedChats', JSON.stringify(currentChatsList));
             renderChats(data.chats);
+            saveChatsLocal(data.chats); // Сохраняем локально
         } else {
             currentChatsList = [];
             renderChats([]);
@@ -3518,8 +3590,17 @@ async function performFullChatsReload() {
 }
 
 async function performSmartChatsUpdate() {
-    // Эта функция теперь просто вызывает полную загрузку, 
-    // так как логика кэширования перенесена в loadChats
+    // 1. Сначала пробуем загрузить из локальной базы
+    const localChats = await getChatsLocal();
+    if (localChats && localChats.length > 0) {
+        console.log('Loaded chats from local storage');
+        currentChatsList = localChats;
+        renderChats(localChats);
+    }
+    
+    // 2. В любом случае запрашиваем свежие данные с сервера в фоновом режиме
+    // Но если у нас уже есть данные в памяти (currentChatsList), 
+    // мы можем пропустить этот шаг или сделать его тихим
     await performFullChatsReload();
 }
         
@@ -3777,28 +3858,32 @@ function getRussianNoun(number, forms) {
         
         
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-    // Используем кэшированный URL если возможно, или обычный без случайных параметров для использования кэша браузера
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
-    
-    // Проверяем, есть ли уже картинка в кэше браузера
+    // Добавляем случайные параметры для обхода кеша
+    const randomParam = Math.random().toString(36).substring(7);
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${randomParam}`;
     const img = new Image();
-    img.src = avatarUrl;
     
-    if (img.complete) {
-        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+    img.onload = function() {
+        // При успешной загрузке - только картинка, без фона
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.style.backgroundSize = 'cover';
+        avatarElement.style.backgroundPosition = 'center';
+        avatarElement.style.backgroundColor = 'transparent'; // Прозрачный фон
+        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`; // Явно перезаписываем все background свойства
         avatarElement.textContent = '';
-    } else {
-        img.onload = function() {
-            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-            avatarElement.textContent = '';
-        };
-        img.onerror = function() {
-            avatarElement.style.background = bgColor ? 
-                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                'linear-gradient(135deg, #0088cc, #40a7e3)';
-            avatarElement.textContent = initials;
-        };
-    }
+    };
+    
+    img.onerror = function() {
+        console.log('Failed to load avatar, using initials');
+        // При ошибке - только градиентный фон и инициалы
+        avatarElement.style.backgroundImage = 'none';
+        avatarElement.style.background = bgColor ? 
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
+        avatarElement.textContent = initials;
+    };
+    
+    img.src = avatarUrl;
 }
 
 
@@ -3825,10 +3910,7 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
       
         async function loadContacts() {
-            const cachedContacts = sessionStorage.getItem('cachedContacts');
-            if (cachedContacts) {
-                renderContacts(JSON.parse(cachedContacts));
-            }
+            contactsList.innerHTML = '';
             
             try {
                 const response = await fetch(`${SERVER_URL}/get_friends`, {
@@ -3845,14 +3927,13 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    sessionStorage.setItem('cachedContacts', JSON.stringify(data.friends));
                     renderContacts(data.friends);
                 } else {
                     throw new Error(data.error || 'Не удалось загрузить контакты');
                 }
             } catch (error) {
                 console.error('Error loading contacts:', error);
-                if (!cachedContacts) showMessage('Ошибка загрузки контактов', 'error');
+                showMessage('Ошибка загрузки контактов', 'error');
             }
         }
 
@@ -3976,25 +4057,25 @@ async function renderContacts(contacts) {
 }
 
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
     const img = new Image();
-    img.src = avatarUrl;
     
-    if (img.complete) {
-        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+    img.onload = function() {
+        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        avatarElement.style.backgroundSize = 'cover';
+        avatarElement.style.backgroundPosition = 'center';
+        avatarElement.style.backgroundColor = 'transparent'; // Добавьте эту строку
         avatarElement.textContent = '';
-    } else {
-        img.onload = function() {
-            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-            avatarElement.textContent = '';
-        };
-        img.onerror = function() {
-            avatarElement.style.background = bgColor ? 
-                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                'linear-gradient(135deg, #0088cc, #40a7e3)';
-            avatarElement.textContent = initials;
-        };
-    }
+    };
+    
+    img.onerror = function() {
+        console.log('Failed to load avatar, using initials');
+        avatarElement.style.backgroundImage = '';
+        avatarElement.textContent = initials;
+        avatarElement.style.backgroundColor = bgColor;
+    };
+    
+    img.src = avatarUrl;
 }
 
 
@@ -4353,23 +4434,23 @@ async function openChat(chatId) {
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
-
-    
     try {
-        // 1. Сначала пробуем загрузить сообщения из кэша (БЕЗ ОЧИСТКИ КОНТЕЙНЕРА)
-        const cachedMessages = sessionStorage.getItem(`messages_${chatId}`);
-        if (cachedMessages) {
-            try {
-                currentMessages = JSON.parse(cachedMessages);
-                renderMessages(currentMessages);
-                noMessages.style.display = 'none';
-            } catch (e) {
-                console.error('Messages cache parse error', e);
-                messagesContainer.innerHTML = '';
-            }
+        // 1. Сначала пробуем загрузить сообщения из локальной базы
+        const localMessages = await getMessagesLocal(chatId);
+        if (localMessages) {
+            console.log('Loaded messages from local storage');
+            currentMessages = localMessages;
+            renderMessages(currentMessages);
+            noMessages.style.display = 'none';
+            
+            // Прокручиваем вниз сразу
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 50);
         } else {
             messagesContainer.innerHTML = '';
             noMessages.style.display = 'block';
+            noMessages.textContent = 'Загрузка...';
         }
 
         chatModal.classList.add('changing');
@@ -4377,6 +4458,8 @@ async function openChat(chatId) {
             chatModal.classList.remove('changing');
         }, 300);
 
+
+        
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {
@@ -4477,9 +4560,6 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
-        
-        // Кэш уже обработан выше
-    
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -4496,8 +4576,8 @@ async function openChat(chatId) {
         
         if (messagesData.status === 'success') {
             currentMessages = messagesData.messages;
-            sessionStorage.setItem(`messages_${chatId}`, JSON.stringify(currentMessages));
             renderMessages(currentMessages);
+            saveMessagesLocal(chatId, currentMessages); // Сохраняем локально
             
             markAllMessagesAsRead(chatId);
         
@@ -4912,17 +4992,11 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    // Загружаем данные пользователя (из кэша или сервера)
-    const userLoaded = await loadUserData();
-    
-    if (userLoaded) {
-        // Если пользователь авторизован, загружаем чаты и контакты
-        loadChats();
-        loadContacts();
-    } else {
-        // Если данных нет совсем, перенаправляем на профиль
-        window.location.href = 'profile.html';
-    }
+    // Параллельная загрузка данных без индикаторов
+    await Promise.all([
+        loadUserData(),
+        loadChats()
+    ]);
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
