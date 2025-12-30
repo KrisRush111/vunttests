@@ -29,6 +29,8 @@
 <meta name="msapplication-TileImage" content="icon-512x512.png">
 
 
+    <script src="global-state.js"></script>
+    <script src="platform-router.js"></script>
     <!-- Stylesheets -->
     <script src="tailwind.js"></script>
     <link rel="stylesheet" href="fontawesome-free-6.7.2-web/css/all.min.css">
@@ -2432,6 +2434,44 @@ input:checked + .toggle-slider:before {
 
 
 
+        // Инициализация профиля с глобальным состоянием
+async function initializeProfileWithState() {
+    // Проверяем активность сессии
+    if (!window.GlobalState.isPlatformSessionActive()) {
+        await loadProfileData();
+        window.GlobalState.initPlatform();
+    } else {
+        await fastInitializeProfile();
+    }
+    
+    setupProfileUpdates();
+}
+
+async function fastInitializeProfile() {
+    console.log('Fast profile initialization');
+    
+    // Восстанавливаем данные из кэша
+    userData = window.GlobalState.getCache('userData') || userData;
+    
+    if (!userData) {
+        // Если данных нет в кэше, загружаем
+        await loadProfileData();
+        return;
+    }
+    
+    // Быстро обновляем UI
+    updateProfileUI();
+    
+    // Применяем обои
+    if (window.applyWallpaper) {
+        applyWallpaper();
+    }
+    
+    console.log('Profile fast initialized');
+}
+
+
+
 
 
 
@@ -3062,6 +3102,8 @@ window.addEventListener("beforeunload", () => {
 });
 
 
+
+
         // Logout functions
         function showLogoutModal() {
             logoutModal.classList.add('active');
@@ -3277,7 +3319,7 @@ window.addEventListener("beforeunload", () => {
         }
 
    
-     async function handleAvatarUpload(event) {
+async function handleAvatarUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
     
@@ -3297,20 +3339,7 @@ window.addEventListener("beforeunload", () => {
     const localImageUrl = URL.createObjectURL(file);
     
     // Немедленно обновляем все аватары
-    const avatarElements = [
-        profileAvatarMobile, 
-        sidebarProfileAvatar, 
-        desktopProfileAvatar,
-        mobileSidebarProfileAvatar
-    ];
-    
-    avatarElements.forEach(element => {
-        element.style.backgroundImage = `url(${localImageUrl})`;
-        element.style.backgroundSize = 'cover';
-        element.style.backgroundPosition = 'center';
-        element.textContent = '';
-        element.style.backgroundColor = '';
-    });
+    updateAllAvatars(localImageUrl);
 
     // Асинхронно загружаем на сервер (без блокировки UI)
     const formData = new FormData();
@@ -3334,15 +3363,23 @@ window.addEventListener("beforeunload", () => {
             throw new Error(data.message || data.error || 'Ошибка загрузки.');
         }
 
-        // Обновляем данные пользователя
+        // Обновляем глобальное состояние
         userData.has_avatar = true;
-        userData.avatar_background = data.avatar_background || userData.avatar_background;
-        sessionStorage.setItem('userData', JSON.stringify(userData));
-
-        // Освобождаем локальный URL и используем серверный
-        avatarElements.forEach(element => {
-            element.style.backgroundImage = `url(${data.avatar_url}?t=${Date.now()})`;
+        userData.avatar_background = data.avatar_background;
+        
+        window.GlobalState.updatePartial('userData', {
+            has_avatar: true,
+            avatar_background: data.avatar_background
         });
+        
+        // Уведомляем другие вкладки
+        window.GlobalState.emit('avatar_update', {
+            platform_user_id: userData.platform_user_id,
+            avatar_url: data.avatar_url
+        });
+        
+        // Освобождаем локальный URL и используем серверный
+        updateAllAvatars(data.avatar_url);
         
         URL.revokeObjectURL(localImageUrl);
         
@@ -3367,7 +3404,6 @@ window.addEventListener("beforeunload", () => {
         URL.revokeObjectURL(localImageUrl);
     }
 }
-
    
         async function handleAvatarRemove() {
             // Removed showLoading call
@@ -3734,27 +3770,81 @@ function updateProfileUI() {
         }
 
        
-        async function loadProfileData() {
-            // Removed showLoading call
-            try {
-                const dataUpdated = await fetchUserData();
-                
-                if (!dataUpdated) {
-                    console.warn('Using cached data from sessionStorage');
-                }
-                
-                updateProfileUI();
-            } catch (error) {
-                console.error('Profile loading error:', error);
-                showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
-                
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 5000);
-            } finally {
-                // Removed hideLoading call
-            }
+async function loadProfileData() {
+    // Проверяем кэш
+    if (window.GlobalState.isDataFresh('userData', 60000)) {
+        userData = window.GlobalState.getCache('userData');
+        updateProfileUI();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_user_data`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            userData = data.user;
+            sessionStorage.setItem('userData', JSON.stringify(userData));
+            
+            // Сохраняем в глобальное состояние
+            window.GlobalState.setCache('userData', userData);
+            
+            updateProfileUI();
         }
+    } catch (error) {
+        console.error('Error loading profile:', error);
+    }
+}
+
+
+
+function setupProfileUpdates() {
+    // Обновление аватара
+    window.GlobalState.on('avatar_update', (data) => {
+        if (data.platform_user_id === userData.platform_user_id) {
+            // Обновляем все аватары на странице
+            updateAllAvatars(data.avatar_url);
+        }
+    });
+    
+    // Обновление данных профиля
+    window.GlobalState.on('profile_data_update', (updatedData) => {
+        if (updatedData.platform_user_id === userData.platform_user_id) {
+            userData = { ...userData, ...updatedData };
+            sessionStorage.setItem('userData', JSON.stringify(userData));
+            updateProfileUI();
+        }
+    });
+}
+
+// Функция для обновления всех аватаров
+function updateAllAvatars(avatarUrl) {
+    const avatarElements = [
+        profileAvatarMobile,
+        sidebarProfileAvatar,
+        desktopProfileAvatar,
+        mobileSidebarProfileAvatar
+    ];
+    
+    avatarElements.forEach(element => {
+        if (element) {
+            element.style.backgroundImage = `url(${avatarUrl}?t=${Date.now()})`;
+            element.style.backgroundSize = 'cover';
+            element.style.backgroundPosition = 'center';
+            element.textContent = '';
+        }
+    });
+}
+
+
 
     
         function initializeLayout() {
@@ -3895,6 +3985,104 @@ function updateProfileUI() {
 
 
 
+// Глобальная инициализация платформы
+document.addEventListener('DOMContentLoaded', function() {
+    // Проверяем авторизацию
+    if (!checkAuthorization && !sessionStorage.getItem('userData')) {
+        window.location.href = 'index.html';
+        return;
+    }
+    
+    // Инициализируем трекер активности
+    if (window.activityTracker && !window.activityTracker.isInitialized) {
+        window.activityTracker.init();
+    }
+    
+    // Настраиваем слежение за уходом с платформы
+    setupPlatformExitTracking();
+});
+
+// Отслеживание ухода с платформы
+function setupPlatformExitTracking() {
+    // Помечаем, что пользователь на платформе
+    localStorage.setItem('on_platform', 'true');
+    
+    // Следим за переходом на внешние страницы
+    document.addEventListener('click', function(e) {
+        const link = e.target.closest('a[href]');
+        if (link && link.href && !link.href.includes(window.location.hostname)) {
+            // Пользователь уходит с платформы
+            window.GlobalState.endPlatformSession();
+        }
+    });
+    
+    // При закрытии вкладки/окна
+    window.addEventListener('beforeunload', function() {
+        // Проверяем, остались ли другие вкладки платформы
+        setTimeout(() => {
+            if (!document.hidden) return;
+            
+            // Даем время на переход между вкладками
+            setTimeout(() => {
+                const platformTabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
+                if (platformTabs.length === 0) {
+                    window.GlobalState.endPlatformSession();
+                }
+            }, 1000);
+        }, 100);
+    });
+    
+    // Отслеживание вкладок
+    if (typeof BroadcastChannel !== 'undefined') {
+        const tabChannel = new BroadcastChannel('platform_tabs');
+        const tabId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        
+        // Регистрируем вкладку
+        let platformTabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
+        platformTabs = platformTabs.filter(id => id !== tabId);
+        platformTabs.push(tabId);
+        localStorage.setItem('platform_tabs', JSON.stringify(platformTabs));
+        
+        // Уведомляем другие вкладки
+        tabChannel.postMessage({ type: 'tab_registered', tabId });
+        
+        // Слушаем сообщения от других вкладок
+        tabChannel.onmessage = function(event) {
+            if (event.data.type === 'tab_closed') {
+                let tabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
+                tabs = tabs.filter(id => id !== event.data.tabId);
+                localStorage.setItem('platform_tabs', JSON.stringify(tabs));
+                
+                // Если вкладок не осталось, завершаем сессию
+                if (tabs.length === 0) {
+                    window.GlobalState.endPlatformSession();
+                }
+            }
+        };
+        
+        // При закрытии вкладки
+        window.addEventListener('beforeunload', function() {
+            tabChannel.postMessage({ type: 'tab_closed', tabId });
+        });
+    }
+}
+
+// Быстрая проверка авторизации для всех страниц
+function quickAuthCheck() {
+    const userData = sessionStorage.getItem('userData');
+    if (!userData) {
+        const remembered = localStorage.getItem('rememberedUser');
+        if (remembered) {
+            sessionStorage.setItem('userData', remembered);
+            return true;
+        }
+        return false;
+    }
+    return true;
+}
+
+
+
 
         // Инициализация ActivityTracker для profile.html
 document.addEventListener('DOMContentLoaded', function() {
@@ -3911,6 +4099,27 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 1000);
     }
 });
+
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // Проверяем авторизацию
+    if (!checkAuthorization()) {
+        return;
+    }
+    
+    // Используем улучшенную инициализацию
+    if (window.GlobalState?.isPlatformSessionActive()) {
+        await fastInitializeProfile();
+    } else {
+        await loadProfileData();
+        window.GlobalState.initPlatform();
+    }
+    
+    // Стандартная инициализация
+    initializeLayout();
+    setupProfileUpdates();
+});
+
 
 // Функция для обновления статуса активности
 async function updateUserActivityStatus() {
