@@ -423,8 +423,10 @@ input, textarea {
     background-position: center;
     background-repeat: no-repeat;
     box-shadow: var(--telegram-shadow);
-    transition: transform 0.2s ease;
+    transition: transform 0.2s ease, background 0.3s ease;
     flex-shrink: 0;
+    /* Скелетная загрузка */
+    background-color: var(--telegram-secondary-bg);
 }
 
     .chat-avatar:hover {
@@ -656,7 +658,8 @@ input, textarea {
     .chat-header .chat-status {
         font-size: 13px;
         color: var(--telegram-hint);
-        margin-top: 2px;
+        margin-top: 1px;
+        transition: color 0.2s ease;
         text-align: center;
     }
 
@@ -3877,31 +3880,26 @@ function getRussianNoun(number, forms) {
         
         
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-    // Добавляем случайные параметры для обхода кеша
-    const randomParam = Math.random().toString(36).substring(7);
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${randomParam}`;
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+    
+    // Мгновенно устанавливаем фон, не дожидаясь загрузки
+    avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat, ${bgColor ? 
+        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+        'linear-gradient(135deg, #0088cc, #40a7e3)'}`;
+    avatarElement.textContent = '';
+
     const img = new Image();
-    
     img.onload = function() {
-        // При успешной загрузке - только картинка, без фона
+        avatarElement.style.backgroundColor = 'transparent';
         avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-        avatarElement.style.backgroundSize = 'cover';
-        avatarElement.style.backgroundPosition = 'center';
-        avatarElement.style.backgroundColor = 'transparent'; // Прозрачный фон
-        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`; // Явно перезаписываем все background свойства
-        avatarElement.textContent = '';
     };
-    
     img.onerror = function() {
-        console.log('Failed to load avatar, using initials');
-        // При ошибке - только градиентный фон и инициалы
         avatarElement.style.backgroundImage = 'none';
         avatarElement.style.background = bgColor ? 
             `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
             'linear-gradient(135deg, #0088cc, #40a7e3)';
         avatarElement.textContent = initials;
     };
-    
     img.src = avatarUrl;
 }
 
@@ -4076,24 +4074,26 @@ async function renderContacts(contacts) {
 }
 
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+    
+    // Мгновенно устанавливаем фон
+    avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat, ${bgColor ? 
+        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+        'linear-gradient(135deg, #0088cc, #40a7e3)'}`;
+    avatarElement.textContent = '';
+
     const img = new Image();
-    
     img.onload = function() {
+        avatarElement.style.backgroundColor = 'transparent';
         avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-        avatarElement.style.backgroundSize = 'cover';
-        avatarElement.style.backgroundPosition = 'center';
-        avatarElement.style.backgroundColor = 'transparent'; // Добавьте эту строку
-        avatarElement.textContent = '';
     };
-    
     img.onerror = function() {
-        console.log('Failed to load avatar, using initials');
-        avatarElement.style.backgroundImage = '';
+        avatarElement.style.backgroundImage = 'none';
+        avatarElement.style.background = bgColor ? 
+            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+            'linear-gradient(135deg, #0088cc, #40a7e3)';
         avatarElement.textContent = initials;
-        avatarElement.style.backgroundColor = bgColor;
     };
-    
     img.src = avatarUrl;
 }
 
@@ -4470,23 +4470,22 @@ async function openChat(chatId) {
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
         
-        // Сначала ставим градиент и инициалы
-        chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-        chatAvatar.textContent = initials;
-        chatAvatar.style.backgroundImage = '';
-
-        // Если есть информация об аватаре, пробуем загрузить его сразу
-        if (cachedChat.has_avatar_photo || cachedChat.participants?.some(p => p.platform_user_id !== userData.platform_user_id)) {
-            const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant) {
-                const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
-                const img = new Image();
-                img.onload = () => {
-                    chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                    chatAvatar.textContent = '';
-                };
-                img.src = avatarUrl;
+        const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
+            // Мгновенно устанавливаем фон
+            chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = '';
+            
+            // Также мгновенно обновляем статус из кэша, если он там есть
+            const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
+            if (statusElement) {
+                chatStatus.innerHTML = statusElement.innerHTML;
+                chatStatus.className = statusElement.className;
             }
+        } else {
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = initials;
         }
     }
 
@@ -4576,53 +4575,18 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
-        // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
-        chatAvatar.style.backgroundImage = '';
-        chatAvatar.style.backgroundColor = '';
-        chatAvatar.textContent = '';
-        
-        // Загрузка аватара
+        // Обновление аватара (уже установленного из кэша, но на случай изменений)
         if (currentChat.participants && currentChat.participants.length > 0) {
             const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
                 const userId = otherParticipant.platform_user_id;
                 const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
                 const bgColor = currentChat.avatar_background || getRandomColor();
+                const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
                 
-                // Пробуем загрузить аватар для участника чата
-                const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
-                const img = new Image();
-                
-                img.onload = function() {
-                    // Аватар успешно загружен - только картинка
-                    chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                    chatAvatar.textContent = '';
-                };
-                
-                img.onerror = function() {
-                    // Аватар не загрузился - только градиент
-                    chatAvatar.style.background = bgColor ? 
-                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                        'linear-gradient(135deg, #0088cc, #40a7e3)';
-                    chatAvatar.textContent = initials;
-                };
-                
-                img.src = avatarUrl;
-            } else {
-                // Если нет другого участника
-                const bgColor = currentChat.avatar_background || getRandomColor();
-                chatAvatar.style.background = bgColor ? 
-                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                    'linear-gradient(135deg, #0088cc, #40a7e3)';
-                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                chatAvatar.textContent = '';
             }
-        } else {
-            // Если нет участников
-            const bgColor = currentChat.avatar_background || getRandomColor();
-            chatAvatar.style.background = bgColor ? 
-                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                'linear-gradient(135deg, #0088cc, #40a7e3)';
-            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
         // 2. Загружаем с сервера только если нет локальных или для обновления в фоне
