@@ -2271,7 +2271,20 @@ input, textarea {
 
 
 
-        
+
+        // В начало файла chats.html, после других глобальных переменных
+        let chatCache = {
+            key: null,
+            data: null,
+            timestamp: null,
+            isFresh: false
+        };
+
+        let platformSession = {
+            isActive: false,
+            lastCheck: null
+        };
+                
 
 
 
@@ -3460,18 +3473,131 @@ function openImageModal(imageUrl, messageIndex = 0) {
         
      
 async function loadChats(forceReload = false) {
-    // Эта функция теперь вызывается ТОЛЬКО при:
-    // 1. Первоначальной загрузке страницы (forceReload = false)
-    // 2. Явном требовании перезагрузить все чаты (forceReload = true)
+    const { chatsList, noChats } = getActiveElements();
     
-    if (forceReload) {
-        // Полная перезагрузка только если явно запрошено
-        await performFullChatsReload();
-    } else {
-        // При обычном вызове - интеллектуальное обновление
-        await performSmartChatsUpdate();
+    // Если у нас есть актуальный кэш и не требуется принудительная перезагрузка
+    if (!forceReload && chatCache.data && chatCache.isFresh) {
+        console.log('Using cached chats data');
+        renderChats(chatCache.data);
+        return;
+    }
+    
+    // Проверяем кэш на сервере
+    try {
+        const cacheCheckResponse = await fetch(`${SERVER_URL}/get_cached_chats`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id,
+                cache_key: chatCache.key
+            }),
+            credentials: 'include'
+        });
+        
+        const cacheData = await cacheCheckResponse.json();
+        
+        if (cacheData.status === 'cached') {
+            console.log('Using server-cached chats');
+            chatCache.data = cacheData.chats;
+            chatCache.key = cacheData.cache_key;
+            chatCache.timestamp = new Date(cacheData.timestamp);
+            chatCache.isFresh = true;
+            
+            renderChats(cacheData.chats);
+            return;
+        }
+    } catch (error) {
+        console.warn('Cache check failed, loading fresh:', error);
+    }
+    
+    // Если кэша нет или он устарел, загружаем свежие данные
+    await performFreshChatsLoad();
+}
+
+async function performFreshChatsLoad() {
+    const { chatsList, noChats } = getActiveElements();
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chats`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({platform_user_id: userData.platform_user_id}),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentChatsList = data.chats;
+            chatCache.data = data.chats;
+            chatCache.key = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            chatCache.timestamp = new Date();
+            chatCache.isFresh = true;
+            
+            // Сохраняем кэш на сервере
+            try {
+                await fetch(`${SERVER_URL}/cache_chats`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        platform_user_id: userData.platform_user_id,
+                        chats: data.chats,
+                        cache_key: chatCache.key
+                    }),
+                    credentials: 'include'
+                });
+            } catch (cacheError) {
+                console.warn('Failed to cache on server:', cacheError);
+            }
+            
+            // Сохраняем в localStorage как резерв
+            localStorage.setItem(`chat_cache_${userData.platform_user_id}`, JSON.stringify({
+                data: data.chats,
+                key: chatCache.key,
+                timestamp: chatCache.timestamp.toISOString()
+            }));
+            
+            renderChats(data.chats);
+        } else {
+            // Пробуем загрузить из localStorage при ошибке
+            loadFromLocalStorage();
+        }
+    } catch (error) {
+        console.error('Error loading chats:', error);
+        loadFromLocalStorage();
     }
 }
+
+function loadFromLocalStorage() {
+    const cacheStr = localStorage.getItem(`chat_cache_${userData.platform_user_id}`);
+    if (cacheStr) {
+        try {
+            const cache = JSON.parse(cacheStr);
+            const cacheDate = new Date(cache.timestamp);
+            const now = new Date();
+            
+            // Используем кэш если он не старше 30 минут
+            if ((now - cacheDate) / 1000 / 60 < 30) {
+                console.log('Using localStorage cache');
+                currentChatsList = cache.data;
+                chatCache.data = cache.data;
+                chatCache.key = cache.key;
+                chatCache.timestamp = cacheDate;
+                chatCache.isFresh = true;
+                
+                renderChats(cache.data);
+                return;
+            }
+        } catch (e) {
+            console.warn('LocalStorage cache invalid:', e);
+        }
+    }
+    
+    // Если кэша нет вообще
+    currentChatsList = [];
+    renderChats([]);
+}
+
 
 async function performFullChatsReload() {
     // Полная перезагрузка всех чатов (редкий случай)
@@ -4858,6 +4984,61 @@ async function updateChatStatuses() {
         console.error('Error updating chat statuses:', error);
     }
 }
+
+
+
+
+async function checkPlatformActivity() {
+    try {
+        const response = await fetch(`${SERVER_URL}/check_platform_activity`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            platformSession.isActive = data.is_active_on_platform;
+            platformSession.lastCheck = new Date();
+            
+            // Если пользователь активен на платформе, помечаем кэш как свежий
+            if (platformSession.isActive && chatCache.data) {
+                chatCache.isFresh = true;
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to check platform activity:', error);
+    }
+}
+
+function restoreCacheFromStorage() {
+    const cacheStr = localStorage.getItem(`chat_cache_${userData.platform_user_id}`);
+    if (cacheStr) {
+        try {
+            const cache = JSON.parse(cacheStr);
+            const cacheDate = new Date(cache.timestamp);
+            const now = new Date();
+            
+            // Восстанавливаем кэш если он не старше 30 минут
+            if ((now - cacheDate) / 1000 / 60 < 30) {
+                chatCache.data = cache.data;
+                chatCache.key = cache.key;
+                chatCache.timestamp = cacheDate;
+                chatCache.isFresh = true;
+                currentChatsList = cache.data;
+            }
+        } catch (e) {
+            console.warn('Failed to restore cache from storage:', e);
+        }
+    }
+}
+
+
+
      
 async function initializePage() {
     const userDataFromStorage = sessionStorage.getItem('userData');
@@ -4867,6 +5048,11 @@ async function initializePage() {
     }
     
     userData = JSON.parse(userDataFromStorage);
+
+    await checkPlatformActivity();
+    
+    // Восстанавливаем кэш из localStorage
+    restoreCacheFromStorage();
 
     initializeWallpaperSystem();
     
@@ -4888,6 +5074,14 @@ async function initializePage() {
         desktopContent.style.display = 'none';
         desktopOnlyNav.style.display = 'none'; 
         chatModalMobile.classList.remove('active'); 
+    }
+
+    if (platformSession.isActive && chatCache.isFresh) {
+        console.log('Platform session active, using cached data instantly');
+        renderChats(chatCache.data);
+    } else {
+        // Загружаем данные (будет использован кэш если есть)
+        await loadChats(false);
     }
 
     // Параллельная загрузка данных без индикаторов
