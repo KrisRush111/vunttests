@@ -32,8 +32,6 @@
 <meta name="msapplication-TileColor" content="#2d5e4f">
 <meta name="msapplication-TileImage" content="icon-512x512.png">
     
-    <script src="global-state.js"></script>
-    <script src="platform-router.js"></script>
     <!-- Stylesheets -->
     <script src="tailwind.js"></script>
     <link rel="stylesheet" href="fontawesome-free-6.7.2-web/css/all.min.css">
@@ -2273,174 +2271,7 @@ input, textarea {
 
 
 
-if (!window.GlobalState) {
-    // Загружаем global-state.js если еще не загружен
-    const script = document.createElement('script');
-    script.src = 'global-state.js';
-    script.onload = () => initializeChatsWithState();
-    document.head.appendChild(script);
-} else {
-    initializeChatsWithState();
-}
-
-async function initializeChatsWithState() {
-    // Проверяем активность сессии платформы
-    if (!window.GlobalState.isPlatformSessionActive()) {
-        // Первая загрузка - стандартная инициализация
-        await initializePage();
-        window.GlobalState.initPlatform();
-    } else {
-        // Быстрая загрузка из кэша
-        await fastInitializeChats();
-    }
-    
-    // Подписываемся на обновления
-    setupRealTimeUpdates();
-}
-
-async function fastInitializeChats() {
-    // Быстрая инициализация без загрузки данных
-    console.log('Fast initialization from cache');
-    
-    // Восстанавливаем данные из глобального состояния
-    userData = window.GlobalState.getCache('userData') || userData;
-    currentChatsList = window.GlobalState.getCache('chatsList') || [];
-    wallpaperState = window.GlobalState.getCache('wallpaperState') || wallpaperState;
-    
-    // Быстрая настройка UI
-    isDesktop = window.matchMedia("(min-width: 768px)").matches;
-    if (isDesktop) {
-        desktopPlaceholder.style.display = 'flex';
-        chatModalDesktop.style.display = 'none';
-    } else {
-        chatModalMobile.classList.remove('active');
-    }
-    
-    // Рендерим кэшированные чаты
-    if (currentChatsList.length > 0) {
-        renderChats(currentChatsList);
-    } else {
-        // Если кэш пуст, загружаем свежие данные
-        await loadChats();
-    }
-    
-    // Восстанавливаем открытый чат если был
-    const savedChat = sessionStorage.getItem('lastOpenChat');
-    if (savedChat && !isOpeningChat) {
-        setTimeout(() => {
-            openChat(JSON.parse(savedChat).id);
-        }, 100);
-    }
-    
-    // Применяем обои
-    applyWallpaper();
-    
-    console.log('Chats fast initialized');
-}
-
-
-
-
-
         
-
-// Глобальная инициализация платформы
-document.addEventListener('DOMContentLoaded', function() {
-    // Проверяем авторизацию
-    if (!checkAuthorization && !sessionStorage.getItem('userData')) {
-        window.location.href = 'index.html';
-        return;
-    }
-    
-    // Инициализируем трекер активности
-    if (window.activityTracker && !window.activityTracker.isInitialized) {
-        window.activityTracker.init();
-    }
-    
-    // Настраиваем слежение за уходом с платформы
-    setupPlatformExitTracking();
-});
-
-// Отслеживание ухода с платформы
-function setupPlatformExitTracking() {
-    // Помечаем, что пользователь на платформе
-    localStorage.setItem('on_platform', 'true');
-    
-    // Следим за переходом на внешние страницы
-    document.addEventListener('click', function(e) {
-        const link = e.target.closest('a[href]');
-        if (link && link.href && !link.href.includes(window.location.hostname)) {
-            // Пользователь уходит с платформы
-            window.GlobalState.endPlatformSession();
-        }
-    });
-    
-    // При закрытии вкладки/окна
-    window.addEventListener('beforeunload', function() {
-        // Проверяем, остались ли другие вкладки платформы
-        setTimeout(() => {
-            if (!document.hidden) return;
-            
-            // Даем время на переход между вкладками
-            setTimeout(() => {
-                const platformTabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
-                if (platformTabs.length === 0) {
-                    window.GlobalState.endPlatformSession();
-                }
-            }, 1000);
-        }, 100);
-    });
-    
-    // Отслеживание вкладок
-    if (typeof BroadcastChannel !== 'undefined') {
-        const tabChannel = new BroadcastChannel('platform_tabs');
-        const tabId = Date.now().toString(36) + Math.random().toString(36).substr(2);
-        
-        // Регистрируем вкладку
-        let platformTabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
-        platformTabs = platformTabs.filter(id => id !== tabId);
-        platformTabs.push(tabId);
-        localStorage.setItem('platform_tabs', JSON.stringify(platformTabs));
-        
-        // Уведомляем другие вкладки
-        tabChannel.postMessage({ type: 'tab_registered', tabId });
-        
-        // Слушаем сообщения от других вкладок
-        tabChannel.onmessage = function(event) {
-            if (event.data.type === 'tab_closed') {
-                let tabs = JSON.parse(localStorage.getItem('platform_tabs') || '[]');
-                tabs = tabs.filter(id => id !== event.data.tabId);
-                localStorage.setItem('platform_tabs', JSON.stringify(tabs));
-                
-                // Если вкладок не осталось, завершаем сессию
-                if (tabs.length === 0) {
-                    window.GlobalState.endPlatformSession();
-                }
-            }
-        };
-        
-        // При закрытии вкладки
-        window.addEventListener('beforeunload', function() {
-            tabChannel.postMessage({ type: 'tab_closed', tabId });
-        });
-    }
-}
-
-// Быстрая проверка авторизации для всех страниц
-function quickAuthCheck() {
-    const userData = sessionStorage.getItem('userData');
-    if (!userData) {
-        const remembered = localStorage.getItem('rememberedUser');
-        if (remembered) {
-            sessionStorage.setItem('userData', remembered);
-            return true;
-        }
-        return false;
-    }
-    return true;
-}
-
-
 
 
 
@@ -3629,107 +3460,18 @@ function openImageModal(imageUrl, messageIndex = 0) {
         
      
 async function loadChats(forceReload = false) {
-    // Используем кэш если данные свежие
-    if (!forceReload && window.GlobalState.isDataFresh('chatsList', 30000, 'chats')) {
-        console.log('Using cached chats');
-        renderChats(currentChatsList);
-        return;
-    }
+    // Эта функция теперь вызывается ТОЛЬКО при:
+    // 1. Первоначальной загрузке страницы (forceReload = false)
+    // 2. Явном требовании перезагрузить все чаты (forceReload = true)
     
-    // Загружаем свежие данные
-    const { chatsList, noChats } = getActiveElements();
-    
-    try {
-        const response = await fetch(`${SERVER_URL}/get_chats`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({platform_user_id: userData.platform_user_id}),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            currentChatsList = data.chats;
-            
-            // Сохраняем в глобальное состояние
-            window.GlobalState.setCache('chatsList', data.chats, 'chats');
-            
-            renderChats(data.chats);
-            
-            // Загружаем статусы активности
-            updateChatStatuses();
-        }
-    } catch (error) {
-        console.error('Error loading chats:', error);
+    if (forceReload) {
+        // Полная перезагрузка только если явно запрошено
+        await performFullChatsReload();
+    } else {
+        // При обычном вызове - интеллектуальное обновление
+        await performSmartChatsUpdate();
     }
 }
-
-
-
-
-// Функция для настройки real-time обновлений
-function setupRealTimeUpdates() {
-    // Обновление чатов при получении нового сообщения
-    window.GlobalState.on('new_message', async (data) => {
-        if (data.chat_id === currentChat?.id) {
-            // Добавляем сообщение в текущий чат
-            const newMessage = {
-                id: data.message_id,
-                sender_id: data.sender_id,
-                content: data.content,
-                sent_at: data.sent_at,
-                is_read: false,
-                is_me: data.sender_id === userData.platform_user_id
-            };
-            
-            currentMessages.push(newMessage);
-            renderMessage(newMessage);
-            
-            // Прокручиваем вниз
-            const { messagesContainer } = getActiveElements();
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 50);
-        }
-        
-        // Обновляем список чатов
-        await updateSingleChat(data.chat_id);
-    });
-    
-    // Обновление статусов онлайн
-    window.GlobalState.on('activity_update', (data) => {
-        updateChatStatuses();
-        
-        // Обновляем статус в открытом чате
-        if (currentChat) {
-            const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-            if (otherParticipant && data[otherParticipant.platform_user_id]) {
-                const chatStatus = getActiveElements().chatStatus;
-                const activity = data[otherParticipant.platform_user_id];
-                
-                if (activity.is_online) {
-                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                    chatStatus.classList.add('online');
-                } else {
-                    chatStatus.textContent = formatLastSeen(activity.last_online);
-                    chatStatus.classList.remove('online');
-                }
-            }
-        }
-    });
-    
-    // Обновление профиля пользователя
-    window.GlobalState.on('profile_update', (updatedUser) => {
-        if (updatedUser.platform_user_id === userData.platform_user_id) {
-            userData = { ...userData, ...updatedUser };
-            sessionStorage.setItem('userData', JSON.stringify(userData));
-            window.GlobalState.setCache('userData', userData);
-        }
-    });
-}
-
-
 
 async function performFullChatsReload() {
     // Полная перезагрузка всех чатов (редкий случай)
@@ -4390,7 +4132,7 @@ async function sendMessage() {
     const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
     const content = messageInput.value.trim();
     
-    if (!content || !currentChat || isSendingMessage) return;
+    if (!content || !currentChat) return;
     
     sendMessageButton.disabled = true;
     isSendingMessage = true;
@@ -4440,29 +4182,7 @@ async function sendMessage() {
             updateChatItemInDOM(data.chat_id, newChat);
         }
         
-        // Оптимистичное обновление UI
-        const tempMessage = {
-            id: `temp_${Date.now()}`,
-            sender_id: userData.platform_user_id,
-            content: messageContent,
-            sent_at: new Date().toISOString(),
-            is_read: false,
-            is_me: true,
-            is_temp: true
-        };
-        
-        currentMessages.push(tempMessage);
-        renderMessage(tempMessage);
-        
-        // Обновляем UI
-        noMessages.style.display = 'none';
-        
-        // Прокручиваем к последнему сообщению
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
-        
-        // Отправка на сервер
+        // Отправляем сообщение
         const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4480,42 +4200,36 @@ async function sendMessage() {
             throw new Error(messageData.error || 'Не удалось отправить сообщение');
         }
         
-        // Заменяем временное сообщение на настоящее
-        const messageIndex = currentMessages.findIndex(m => m.id === tempMessage.id);
-        if (messageIndex > -1) {
-            currentMessages[messageIndex] = {
-                ...tempMessage,
-                id: messageData.message_id,
-                is_temp: false
-            };
-            
-            // Перерисовываем сообщение
-            const messageElement = messagesContainer.querySelector(`[data-message-id="${tempMessage.id}"]`);
-            if (messageElement) {
-                messageElement.setAttribute('data-message-id', messageData.message_id);
-            }
-        }
-        
-        // Обновляем кэш
-        window.GlobalState.updatePartial(`chat_${currentChat.id}`, {
-            last_message: messageContent,
-            last_message_time: new Date().toISOString()
-        });
-        
-        // Уведомляем другие вкладки
-        window.GlobalState.emit('new_message', {
-            chat_id: currentChat.id,
-            message_id: messageData.message_id,
+        // Создаем новое сообщение для UI
+        const newMessage = {
+            id: messageData.message_id,
             sender_id: userData.platform_user_id,
             content: messageContent,
-            sent_at: new Date().toISOString()
-        });
+            sent_at: new Date().toISOString(),
+            is_read: false,
+            sender_name: userData.nickname,
+            sender_avatar: userData.avatar_url,
+            sender_avatar_background: userData.avatar_background,
+            is_me: true
+        };
+        
+        // Добавляем сообщение в текущий список
+        currentMessages = [...currentMessages, newMessage];
+        
+        // Обновляем UI
+        noMessages.style.display = 'none';
+        renderMessages(currentMessages);
+        
+        // Прокручиваем к последнему сообщению
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 50);
         
         // Обновляем информацию о чате в списке (только для существующих чатов)
         if (!currentChat.is_temp) {
             updateChatItemInDOM(currentChat.id, {
                 last_message: messageContent,
-                last_message_time: new Date().toISOString(),
+                last_message_time: newMessage.sent_at,
                 unread_count: 0
             });
             
@@ -4523,7 +4237,7 @@ async function sendMessage() {
             const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex].last_message = messageContent;
-                currentChatsList[chatIndex].last_message_time = new Date().toISOString();
+                currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
                 currentChatsList[chatIndex].unread_count = 0;
                 
                 // Перемещаем чат в начало списка
@@ -4536,22 +4250,16 @@ async function sendMessage() {
         // Фокусируемся на поле ввода после успешной отправки
         setTimeout(() => {
             messageInput.focus();
+            isSendingMessage = false;
         }, 100);
         
     } catch (error) {
         console.error('Error sending message:', error);
         showMessage('Ошибка отправки сообщения: ' + error.message, 'error');
         
-        // Удаляем временное сообщение при ошибке
-        const tempIndex = currentMessages.findIndex(m => m.is_temp);
-        if (tempIndex > -1) {
-            currentMessages.splice(tempIndex, 1);
-            const tempElement = messagesContainer.querySelector(`[data-message-id^="temp_"]`);
-            if (tempElement) tempElement.remove();
-        }
-        
         // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
+        isSendingMessage = false;
         
         // Показываем "нет сообщений" если сообщений действительно нет
         if (currentMessages.length === 0) {
@@ -4559,7 +4267,6 @@ async function sendMessage() {
         }
     } finally {
         sendMessageButton.disabled = false;
-        isSendingMessage = false;
     }
 }
 
@@ -4638,25 +4345,7 @@ async function openChat(chatId) {
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
-    // Сохраняем текущий чат
-    sessionStorage.setItem('lastOpenChat', JSON.stringify({ id: chatId }));
-    
-    try {
-        // Проверяем кэш чата
-        const cachedChat = window.GlobalState.getCache(`chat_${chatId}`);
-        if (cachedChat && window.GlobalState.isDataFresh(`chat_${chatId}`, 60000)) {
-            // Используем кэшированный чат для быстрого открытия
-            currentChat = cachedChat;
-            await renderChatFromCache();
-        } else {
-            // Загружаем свежий чат
-            await loadFreshChat(chatId);
-        }
-    } catch (error) {
-        console.error('Error opening chat:', error);
-    } finally {
-        isOpeningChat = false;
-    }
+
     
     try {
         messagesContainer.innerHTML = '';
@@ -4853,40 +4542,6 @@ async function openChat(chatId) {
 
     window.currentChat = chatData;
 }
-
-
-async function renderChatFromCache() {
-    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-    
-    // Быстрый рендеринг из кэша
-    chatTitle.textContent = currentChat.name;
-    
-    // Показываем кэшированные сообщения
-    const cachedMessages = window.GlobalState.getCache(`messages_${currentChat.id}`);
-    if (cachedMessages && cachedMessages.length > 0) {
-        currentMessages = cachedMessages;
-        renderMessages(currentMessages);
-        noMessages.style.display = 'none';
-    } else {
-        noMessages.style.display = 'block';
-    }
-    
-    // Показываем чат
-    if (isDesktop) {
-        desktopPlaceholder.style.display = 'none';
-        chatModal.style.display = 'flex';
-    } else {
-        chatModal.classList.add('active');
-        document.body.style.overflow = 'hidden';
-    }
-    
-    // Загружаем свежие данные в фоне
-    setTimeout(async () => {
-        await loadFreshChat(currentChat.id);
-    }, 100);
-}
-
-
 
 
 function closeChat() {
@@ -5492,30 +5147,6 @@ imageInput.addEventListener('change', handleImageSelection);
 
     console.log('Page initialized successfully');
 }
-
-
-function enhanceInitializePage() {
-    // Сохраняем оригинальную функцию
-    const originalInitializePage = window.initializePage;
-    
-    // Переопределяем
-    window.initializePage = async function() {
-        // Проверяем, первый ли это вход
-        if (!window.GlobalState.isPlatformSessionActive()) {
-            await originalInitializePage.call(this);
-            window.GlobalState.initPlatform();
-        } else {
-            await fastInitializeChats();
-        }
-        
-        setupRealTimeUpdates();
-    };
-}
-
-// Вызываем в DOMContentLoaded
-document.addEventListener('DOMContentLoaded', enhanceInitializePage);
-
-
 
 
 
