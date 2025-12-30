@@ -2352,7 +2352,8 @@ async function updateLocalChat(chatId, updates) {
         let currentChat = null;
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
-        let isOpeningChat = false; // Flag to prevent multiple chat openings
+        let isOpeningChat = false;
+let openChatAbortController = null; // Flag to prevent multiple chat openings
         let currentChatsList = []; // Кэш списка чатов
         // В разделе с другими глобальными переменными добавьте:
         let activityPollInterval;
@@ -3882,24 +3883,19 @@ function getRussianNoun(number, forms) {
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
     
-    // Мгновенно устанавливаем фон, не дожидаясь загрузки
-    avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat, ${bgColor ? 
+    // Сначала ставим инициалы и фон
+    avatarElement.style.background = bgColor ? 
         `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-        'linear-gradient(135deg, #0088cc, #40a7e3)'}`;
-    avatarElement.textContent = '';
+        'linear-gradient(135deg, #0088cc, #40a7e3)';
+    avatarElement.textContent = initials;
 
     const img = new Image();
     img.onload = function() {
-        avatarElement.style.backgroundColor = 'transparent';
-        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
+        // Если картинка загрузилась, ставим её фоном и убираем текст
+        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+        avatarElement.textContent = '';
     };
-    img.onerror = function() {
-        avatarElement.style.backgroundImage = 'none';
-        avatarElement.style.background = bgColor ? 
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-        avatarElement.textContent = initials;
-    };
+    // Если ошибка, инициалы уже на месте
     img.src = avatarUrl;
 }
 
@@ -4076,23 +4072,15 @@ async function renderContacts(contacts) {
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
     
-    // Мгновенно устанавливаем фон
-    avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat, ${bgColor ? 
+    avatarElement.style.background = bgColor ? 
         `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-        'linear-gradient(135deg, #0088cc, #40a7e3)'}`;
-    avatarElement.textContent = '';
+        'linear-gradient(135deg, #0088cc, #40a7e3)';
+    avatarElement.textContent = initials;
 
     const img = new Image();
     img.onload = function() {
-        avatarElement.style.backgroundColor = 'transparent';
-        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-    };
-    img.onerror = function() {
-        avatarElement.style.backgroundImage = 'none';
-        avatarElement.style.background = bgColor ? 
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-        avatarElement.textContent = initials;
+        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+        avatarElement.textContent = '';
     };
     img.src = avatarUrl;
 }
@@ -4169,8 +4157,12 @@ async function createChatWithContact(contact) {
         }, 300);
         
     } catch (error) {
-        console.error('Error preparing chat:', error);
-        showMessage('Ошибка подготовки чата: ' + error.message, 'error');
+        if (error.name === 'AbortError') {
+            console.log('Fetch aborted');
+            return;
+        }
+        console.error('Error opening chat:', error);
+        showMessage('Ошибка загрузки чата: ' + error.message, 'error');
     } finally {
         isOpeningChat = false;
     }
@@ -4458,7 +4450,13 @@ function setupKeyboardDetection() {
 
        
 async function openChat(chatId) {
-    if (isOpeningChat) return;
+    // Отменяем предыдущий запрос, если он есть
+    if (openChatAbortController) {
+        openChatAbortController.abort();
+    }
+    openChatAbortController = new AbortController();
+    const signal = openChatAbortController.signal;
+
     isOpeningChat = true;
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
@@ -4533,7 +4531,8 @@ async function openChat(chatId) {
                 chat_id: chatId,
                 platform_user_id: userData.platform_user_id
             }),
-            credentials: 'include'
+            credentials: 'include',
+            signal: signal
         });
         
         const chatData = await response.json();
@@ -4599,7 +4598,8 @@ async function openChat(chatId) {
                 chat_id: chatId,
                 platform_user_id: userData.platform_user_id
             }),
-            credentials: 'include'
+            credentials: 'include',
+            signal: signal
         });
         
         const messagesData = await messagesResponse.json();
@@ -4663,6 +4663,10 @@ async function openChat(chatId) {
         }
         
     } catch (error) {
+        if (error.name === 'AbortError') {
+            console.log('Fetch aborted');
+            return;
+        }
         console.error('Error opening chat:', error);
         showMessage('Ошибка загрузки чата', 'error');
         closeChat();
@@ -4743,7 +4747,8 @@ async function updateChatInList(chatId, updates) {
                 chat_id: chatId,
                 platform_user_id: userData.platform_user_id
             }),
-            credentials: 'include'
+            credentials: 'include',
+            signal: signal
         });
         
         const data = await response.json();
