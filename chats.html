@@ -542,14 +542,14 @@ input, textarea {
 
 
     .chat-header {
-        position: fixed; /* Sticky вместо fixed */
+        position: sticky; /* Исправлено с fixed на sticky для корректного потока */
         top: 0;
         height: 60px;
         min-height: 60px;
         padding: 12px 16px;
         border-bottom: 1px solid var(--telegram-divider);
         background: var(--telegram-bg);
-        z-index: 100;
+        z-index: 1000; /* Увеличен z-index */
     }
 
     
@@ -663,17 +663,20 @@ input, textarea {
 
 @media (max-width: 767px) {
     .chat-header .back-button {
-        display: flex;
+        display: flex !important; /* Гарантируем видимость */
         align-items: center;
         background: none;
         border: none;
         color: var(--telegram-blue);
-        font-size: 18px; /* Увеличиваем размер шрифта */
+        font-size: 18px;
         cursor: pointer;
-        padding: 12px 16px; /* Увеличиваем отступы */
-        margin-right: 8px; /* Добавляем отступ справа */
-        min-height: 44px; /* Минимальная высота для удобного нажатия */
-        min-width: 80px; /* Минимальная ширина */
+        padding: 12px 16px;
+        margin-right: 8px;
+        min-height: 44px;
+        min-width: 80px;
+        position: relative;
+        z-index: 1001; /* Выше чем заголовок */
+        -webkit-tap-highlight-color: rgba(0,0,0,0.1);
     }
     
     .chat-header .back-button span {
@@ -2125,10 +2128,10 @@ input, textarea {
 
 <div id="chatModalMobile" class="chat-modal">
     <div class="chat-header">
-<button id="backToChatsMobile" class="back-button" style="margin-left: -20px;">
-    <span style="color: var(--telegram-blue); display: flex; align-items: center;">
-        <span style="font-size: 36px; margin-right: -4px;"><</span>
-        <span style="font-size: 17px; position: relative; top: -3px;">Назад</span>
+<button id="backToChatsMobile" class="back-button">
+    <span style="color: var(--telegram-blue); display: flex; align-items: center; pointer-events: none;">
+        <span style="font-size: 36px; margin-right: -4px; pointer-events: none;"><</span>
+        <span style="font-size: 17px; position: relative; top: -3px; pointer-events: none;">Назад</span>
     </span>
 </button>
 
@@ -5053,19 +5056,16 @@ async function initializePage() {
         return;
     }
 
-    // Находим кнопку для мобильной версии
-    const mobileBackBtn = document.getElementById('backToChatsMobile');
-    if (mobileBackBtn) {
-        // Удаляем старые слушатели, если они есть, чтобы избежать дублирования
-        const newBackBtn = mobileBackBtn.cloneNode(true);
-        mobileBackBtn.parentNode.replaceChild(newBackBtn, mobileBackBtn);
-        
-        newBackBtn.addEventListener('click', (e) => {
+    // Глобальное делегирование для кнопки назад (самый надежный способ)
+    document.addEventListener('click', (e) => {
+        const backBtn = e.target.closest('#backToChatsMobile');
+        if (backBtn) {
+            console.log('Back button clicked via delegation');
             e.preventDefault();
             e.stopPropagation();
             closeChat();
-        });
-    }
+        }
+    });
     
     userData = JSON.parse(userDataFromStorage);
 
