@@ -3433,13 +3433,16 @@ function openImageModal(imageUrl, messageIndex = 0) {
                     return true;
                 }
                 
+                const userId = userData.platform_user_id || sessionStorage.getItem('platform_user_id');
+                if (!userId) return false;
+
                 const response = await fetch(`${SERVER_URL}/get_user_data`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id 
+                        platform_user_id: userId 
                     }),
                     credentials: 'include'
                 });
@@ -3460,18 +3463,28 @@ function openImageModal(imageUrl, messageIndex = 0) {
         
      
 async function loadChats(forceReload = false) {
-    // Сначала пробуем загрузить из кэша
+    // 1. Мгновенно загружаем из кэша sessionStorage
     const cachedChats = sessionStorage.getItem('cachedChats');
-    if (cachedChats && !forceReload && currentChatsList.length === 0) {
-        currentChatsList = JSON.parse(cachedChats);
-        renderChats(currentChatsList);
-        console.log('Loaded chats from cache');
+    if (cachedChats) {
+        try {
+            const parsedChats = JSON.parse(cachedChats);
+            if (parsedChats && parsedChats.length > 0) {
+                currentChatsList = parsedChats;
+                renderChats(currentChatsList);
+                console.log('Rendered from cache immediately');
+            }
+        } catch (e) {
+            console.error('Cache parse error', e);
+        }
     }
     
-    if (forceReload) {
+    // 2. ВСЕГДА делаем фоновый запрос к серверу для актуализации
+    // Если это принудительная перезагрузка или в кэше ничего нет - ждем загрузки
+    if (forceReload || !currentChatsList || currentChatsList.length === 0) {
         await performFullChatsReload();
     } else {
-        await performSmartChatsUpdate();
+        // Иначе обновляем в фоне
+        performFullChatsReload().catch(err => console.error('Background update failed', err));
     }
 }
 
@@ -3505,16 +3518,8 @@ async function performFullChatsReload() {
 }
 
 async function performSmartChatsUpdate() {
-    // Умное обновление - только если это первоначальная загрузка
-    // или есть конкретные изменения
-    
-    // Если у нас уже есть кэш чатов - не перезагружаем
-    if (currentChatsList && currentChatsList.length > 0) {
-        console.log('Using existing chats cache, no reload needed');
-        return;
-    }
-    
-    // Только если чатов нет - загружаем
+    // Эта функция теперь просто вызывает полную загрузку, 
+    // так как логика кэширования перенесена в loadChats
     await performFullChatsReload();
 }
         
@@ -4351,17 +4356,27 @@ async function openChat(chatId) {
 
     
     try {
-        messagesContainer.innerHTML = '';
-        noMessages.style.display = 'block';
-        // noMessages.textContent = 'Загрузка...';
+        // 1. Сначала пробуем загрузить сообщения из кэша (БЕЗ ОЧИСТКИ КОНТЕЙНЕРА)
+        const cachedMessages = sessionStorage.getItem(`messages_${chatId}`);
+        if (cachedMessages) {
+            try {
+                currentMessages = JSON.parse(cachedMessages);
+                renderMessages(currentMessages);
+                noMessages.style.display = 'none';
+            } catch (e) {
+                console.error('Messages cache parse error', e);
+                messagesContainer.innerHTML = '';
+            }
+        } else {
+            messagesContainer.innerHTML = '';
+            noMessages.style.display = 'block';
+        }
 
         chatModal.classList.add('changing');
         setTimeout(() => {
             chatModal.classList.remove('changing');
         }, 300);
 
-
-        
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {
@@ -4463,18 +4478,7 @@ async function openChat(chatId) {
         }
         
         
-        // Пробуем загрузить сообщения из кэша
-        const cachedMessages = sessionStorage.getItem(`messages_${chatId}`);
-        if (cachedMessages) {
-            currentMessages = JSON.parse(cachedMessages);
-            renderMessages(currentMessages);
-            noMessages.style.display = 'none';
-            if (currentMessages.length > 0) {
-                setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }, 10);
-            }
-        }
+        // Кэш уже обработан выше
     
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
@@ -4908,10 +4912,17 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    // Параллельная загрузка данных без индикаторов
-    loadUserData();
-    loadChats();
-    loadContacts();
+    // Загружаем данные пользователя (из кэша или сервера)
+    const userLoaded = await loadUserData();
+    
+    if (userLoaded) {
+        // Если пользователь авторизован, загружаем чаты и контакты
+        loadChats();
+        loadContacts();
+    } else {
+        // Если данных нет совсем, перенаправляем на профиль
+        window.location.href = 'profile.html';
+    }
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
