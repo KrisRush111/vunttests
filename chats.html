@@ -4576,34 +4576,53 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
-            // Загрузка аватара - ТОЛЬКО ЕСЛИ ОН ЕЩЕ НЕ ЗАГРУЖЕН ИЗ КЭША
-        if (!chatAvatar.style.backgroundImage || chatAvatar.style.backgroundImage === 'none') {
-            if (currentChat.participants && currentChat.participants.length > 0) {
-                const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    const userId = otherParticipant.platform_user_id;
-                    const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
-                    const bgColor = currentChat.avatar_background || getRandomColor();
-                    
-                    // Пробуем загрузить аватар для участника чата (без случайных параметров для кэширования браузером)
-                    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
-                    const img = new Image();
-                    
-                    img.onload = function() {
-                        chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                        chatAvatar.textContent = '';
-                    };
-                    
-                    img.onerror = function() {
-                        if (!chatAvatar.style.backgroundImage || chatAvatar.style.backgroundImage === 'none') {
-                            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                            chatAvatar.textContent = initials;
-                        }
-                    };
-                    
-                    img.src = avatarUrl;
-                }
+        // ПРИНУДИТЕЛЬНО ОЧИЩАЕМ АВАТАР ПЕРЕД ЗАГРУЗКОЙ
+        chatAvatar.style.backgroundImage = '';
+        chatAvatar.style.backgroundColor = '';
+        chatAvatar.textContent = '';
+        
+        // Загрузка аватара
+        if (currentChat.participants && currentChat.participants.length > 0) {
+            const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (otherParticipant) {
+                const userId = otherParticipant.platform_user_id;
+                const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                
+                // Пробуем загрузить аватар для участника чата
+                const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
+                const img = new Image();
+                
+                img.onload = function() {
+                    // Аватар успешно загружен - только картинка
+                    chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+                    chatAvatar.textContent = '';
+                };
+                
+                img.onerror = function() {
+                    // Аватар не загрузился - только градиент
+                    chatAvatar.style.background = bgColor ? 
+                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                        'linear-gradient(135deg, #0088cc, #40a7e3)';
+                    chatAvatar.textContent = initials;
+                };
+                
+                img.src = avatarUrl;
+            } else {
+                // Если нет другого участника
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                chatAvatar.style.background = bgColor ? 
+                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                    'linear-gradient(135deg, #0088cc, #40a7e3)';
+                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
             }
+        } else {
+            // Если нет участников
+            const bgColor = currentChat.avatar_background || getRandomColor();
+            chatAvatar.style.background = bgColor ? 
+                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                'linear-gradient(135deg, #0088cc, #40a7e3)';
+            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
         // 2. Загружаем с сервера только если нет локальных или для обновления в фоне
@@ -5127,22 +5146,13 @@ async function initializePage() {
         filterChats(e.target.value);
     });
 
-    // Обработчик кнопки "Назад" в чате
-    const handleBackAction = (e) => {
-        if (e.target.closest('#backToChatsMobile') || e.target.closest('.back-button')) {
+    if (backToChats) {
+        backToChats.addEventListener('click', (e) => {
             e.preventDefault();
-            e.stopPropagation();
+            e.stopPropagation(); // Важно: предотвращаем всплытие
             closeChat();
-        }
-    };
-
-    document.addEventListener('click', handleBackAction, true);
-    document.addEventListener('touchstart', (e) => {
-        if (e.target.closest('#backToChatsMobile') || e.target.closest('.back-button')) {
-            // Не вызываем preventDefault здесь, чтобы не блокировать клик, 
-            // но можем обработать быстрое нажатие
-        }
-    }, { passive: true });
+        });
+    }
     
     // Обработчики для отправки сообщений
     if (sendMessageButton && messageInput) {
@@ -5324,6 +5334,7 @@ imageInput.addEventListener('change', handleImageSelection);
 
     console.log('Page initialized successfully');
 }
+
 
 
 
