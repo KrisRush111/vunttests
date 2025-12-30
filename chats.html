@@ -3575,9 +3575,14 @@ async function performFullChatsReload() {
         const data = await response.json();
         
         if (data.status === 'success') {
-            currentChatsList = data.chats;
-            renderChats(data.chats);
-            saveChatsLocal(data.chats); // Сохраняем локально
+            const sortedChats = sortChats(data.chats);
+            currentChatsList = sortedChats;
+            const chatsJson = JSON.stringify(sortedChats);
+            if (chatsJson !== lastRenderedChatsJson) {
+                renderChats(sortedChats);
+                lastRenderedChatsJson = chatsJson;
+            }
+            saveChatsLocal(sortedChats);
         } else {
             currentChatsList = [];
             renderChats([]);
@@ -3589,20 +3594,34 @@ async function performFullChatsReload() {
     }
 }
 
+
+let lastRenderedChatsJson = '';
+
 async function performSmartChatsUpdate() {
     // 1. Сначала пробуем загрузить из локальной базы
     const localChats = await getChatsLocal();
     if (localChats && localChats.length > 0) {
         console.log('Loaded chats from local storage');
-        currentChatsList = localChats;
-        renderChats(localChats);
+        currentChatsList = sortChats(localChats);
+        const chatsJson = JSON.stringify(currentChatsList);
+        if (chatsJson !== lastRenderedChatsJson) {
+            renderChats(currentChatsList);
+            lastRenderedChatsJson = chatsJson;
+        }
     }
     
-    // 2. В любом случае запрашиваем свежие данные с сервера в фоновом режиме
-    // Но если у нас уже есть данные в памяти (currentChatsList), 
-    // мы можем пропустить этот шаг или сделать его тихим
+    // 2. Запрашиваем свежие данные с сервера
     await performFullChatsReload();
 }
+
+function sortChats(chats) {
+    return [...chats].sort((a, b) => {
+        const timeA = new Date(a.last_message_time || 0).getTime();
+        const timeB = new Date(b.last_message_time || 0).getTime();
+        return timeB - timeA;
+    });
+}
+
         
        
 
@@ -4161,6 +4180,16 @@ async function createChatWithContact(contact) {
 
 function openTempChat(tempChat) {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+        // 0. Обновляем заголовок из кэша списка чатов (если есть)
+        const cachedChat = currentChatsList.find(c => c.id === chatId);
+        if (cachedChat) {
+            chatTitle.textContent = cachedChat.name || 'Новый чат';
+            const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
+            const bgColor = cachedChat.avatar_background || '#0088cc';
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = initials;
+        }
+
     
     currentChat = tempChat;
     
@@ -4433,6 +4462,16 @@ async function openChat(chatId) {
     isOpeningChat = true;
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+        // 0. Обновляем заголовок из кэша списка чатов (если есть)
+        const cachedChat = currentChatsList.find(c => c.id === chatId);
+        if (cachedChat) {
+            chatTitle.textContent = cachedChat.name || 'Новый чат';
+            const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
+            const bgColor = cachedChat.avatar_background || '#0088cc';
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = initials;
+        }
+
 
     try {
         // 1. Сначала пробуем загрузить сообщения из локальной базы
@@ -4459,7 +4498,7 @@ async function openChat(chatId) {
         } else {
             messagesContainer.innerHTML = '';
             noMessages.style.display = 'block';
-            noMessages.textContent = 'Загрузка...';
+            if (!localMessages) { noMessages.textContent = 'Загрузка...'; } else { noMessages.style.display = 'none'; }
         }
 
         // chatModal.classList.remove('changing');
@@ -4657,6 +4696,16 @@ async function openChat(chatId) {
 
 function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+        // 0. Обновляем заголовок из кэша списка чатов (если есть)
+        const cachedChat = currentChatsList.find(c => c.id === chatId);
+        if (cachedChat) {
+            chatTitle.textContent = cachedChat.name || 'Новый чат';
+            const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
+            const bgColor = cachedChat.avatar_background || '#0088cc';
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = initials;
+        }
+
 
     // Reset chat state
     currentChat = null;
@@ -4685,8 +4734,8 @@ function closeChat() {
         document.body.style.overflow = '';
     }
     
-    // Reload chat list
-    loadChats();
+    // Reload chat list only if needed
+    // loadChats(); // Removed to prevent double loading on close
 
     window.currentChat = null;
 
