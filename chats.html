@@ -2263,7 +2263,7 @@ input, textarea {
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false; // Flag to prevent multiple chat openings
-        let currentChatsList = []; // Кэш списка чатов
+        let currentChatsList = JSON.parse(sessionStorage.getItem("cachedChats") || "[]"); // Кэш списка чатов
         // В разделе с другими глобальными переменными добавьте:
         let activityPollInterval;
         let currentActivityData = {};
@@ -2271,20 +2271,7 @@ input, textarea {
 
 
 
-
-        // В начало файла chats.html, после других глобальных переменных
-        let chatCache = {
-            key: null,
-            data: null,
-            timestamp: null,
-            isFresh: false
-        };
-
-        let platformSession = {
-            isActive: false,
-            lastCheck: null
-        };
-                
+        
 
 
 
@@ -3473,131 +3460,20 @@ function openImageModal(imageUrl, messageIndex = 0) {
         
      
 async function loadChats(forceReload = false) {
-    const { chatsList, noChats } = getActiveElements();
-    
-    // Если у нас есть актуальный кэш и не требуется принудительная перезагрузка
-    if (!forceReload && chatCache.data && chatCache.isFresh) {
-        console.log('Using cached chats data');
-        renderChats(chatCache.data);
-        return;
+    // Сначала пробуем загрузить из кэша
+    const cachedChats = sessionStorage.getItem('cachedChats');
+    if (cachedChats && !forceReload && currentChatsList.length === 0) {
+        currentChatsList = JSON.parse(cachedChats);
+        renderChats(currentChatsList);
+        console.log('Loaded chats from cache');
     }
     
-    // Проверяем кэш на сервере
-    try {
-        const cacheCheckResponse = await fetch(`${SERVER_URL}/get_cached_chats`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id,
-                cache_key: chatCache.key
-            }),
-            credentials: 'include'
-        });
-        
-        const cacheData = await cacheCheckResponse.json();
-        
-        if (cacheData.status === 'cached') {
-            console.log('Using server-cached chats');
-            chatCache.data = cacheData.chats;
-            chatCache.key = cacheData.cache_key;
-            chatCache.timestamp = new Date(cacheData.timestamp);
-            chatCache.isFresh = true;
-            
-            renderChats(cacheData.chats);
-            return;
-        }
-    } catch (error) {
-        console.warn('Cache check failed, loading fresh:', error);
-    }
-    
-    // Если кэша нет или он устарел, загружаем свежие данные
-    await performFreshChatsLoad();
-}
-
-async function performFreshChatsLoad() {
-    const { chatsList, noChats } = getActiveElements();
-    
-    try {
-        const response = await fetch(`${SERVER_URL}/get_chats`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({platform_user_id: userData.platform_user_id}),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            currentChatsList = data.chats;
-            chatCache.data = data.chats;
-            chatCache.key = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            chatCache.timestamp = new Date();
-            chatCache.isFresh = true;
-            
-            // Сохраняем кэш на сервере
-            try {
-                await fetch(`${SERVER_URL}/cache_chats`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id,
-                        chats: data.chats,
-                        cache_key: chatCache.key
-                    }),
-                    credentials: 'include'
-                });
-            } catch (cacheError) {
-                console.warn('Failed to cache on server:', cacheError);
-            }
-            
-            // Сохраняем в localStorage как резерв
-            localStorage.setItem(`chat_cache_${userData.platform_user_id}`, JSON.stringify({
-                data: data.chats,
-                key: chatCache.key,
-                timestamp: chatCache.timestamp.toISOString()
-            }));
-            
-            renderChats(data.chats);
-        } else {
-            // Пробуем загрузить из localStorage при ошибке
-            loadFromLocalStorage();
-        }
-    } catch (error) {
-        console.error('Error loading chats:', error);
-        loadFromLocalStorage();
+    if (forceReload) {
+        await performFullChatsReload();
+    } else {
+        await performSmartChatsUpdate();
     }
 }
-
-function loadFromLocalStorage() {
-    const cacheStr = localStorage.getItem(`chat_cache_${userData.platform_user_id}`);
-    if (cacheStr) {
-        try {
-            const cache = JSON.parse(cacheStr);
-            const cacheDate = new Date(cache.timestamp);
-            const now = new Date();
-            
-            // Используем кэш если он не старше 30 минут
-            if ((now - cacheDate) / 1000 / 60 < 30) {
-                console.log('Using localStorage cache');
-                currentChatsList = cache.data;
-                chatCache.data = cache.data;
-                chatCache.key = cache.key;
-                chatCache.timestamp = cacheDate;
-                chatCache.isFresh = true;
-                
-                renderChats(cache.data);
-                return;
-            }
-        } catch (e) {
-            console.warn('LocalStorage cache invalid:', e);
-        }
-    }
-    
-    // Если кэша нет вообще
-    currentChatsList = [];
-    renderChats([]);
-}
-
 
 async function performFullChatsReload() {
     // Полная перезагрузка всех чатов (редкий случай)
@@ -3615,6 +3491,7 @@ async function performFullChatsReload() {
         
         if (data.status === 'success') {
             currentChatsList = data.chats;
+            sessionStorage.setItem('cachedChats', JSON.stringify(currentChatsList));
             renderChats(data.chats);
         } else {
             currentChatsList = [];
@@ -3895,32 +3772,28 @@ function getRussianNoun(number, forms) {
         
         
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-    // Добавляем случайные параметры для обхода кеша
-    const randomParam = Math.random().toString(36).substring(7);
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${randomParam}`;
+    // Используем кэшированный URL если возможно, или обычный без случайных параметров для использования кэша браузера
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+    
+    // Проверяем, есть ли уже картинка в кэше браузера
     const img = new Image();
-    
-    img.onload = function() {
-        // При успешной загрузке - только картинка, без фона
-        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-        avatarElement.style.backgroundSize = 'cover';
-        avatarElement.style.backgroundPosition = 'center';
-        avatarElement.style.backgroundColor = 'transparent'; // Прозрачный фон
-        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`; // Явно перезаписываем все background свойства
-        avatarElement.textContent = '';
-    };
-    
-    img.onerror = function() {
-        console.log('Failed to load avatar, using initials');
-        // При ошибке - только градиентный фон и инициалы
-        avatarElement.style.backgroundImage = 'none';
-        avatarElement.style.background = bgColor ? 
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-        avatarElement.textContent = initials;
-    };
-    
     img.src = avatarUrl;
+    
+    if (img.complete) {
+        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+        avatarElement.textContent = '';
+    } else {
+        img.onload = function() {
+            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+            avatarElement.textContent = '';
+        };
+        img.onerror = function() {
+            avatarElement.style.background = bgColor ? 
+                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                'linear-gradient(135deg, #0088cc, #40a7e3)';
+            avatarElement.textContent = initials;
+        };
+    }
 }
 
 
@@ -3947,7 +3820,10 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
       
         async function loadContacts() {
-            contactsList.innerHTML = '';
+            const cachedContacts = sessionStorage.getItem('cachedContacts');
+            if (cachedContacts) {
+                renderContacts(JSON.parse(cachedContacts));
+            }
             
             try {
                 const response = await fetch(`${SERVER_URL}/get_friends`, {
@@ -3964,13 +3840,14 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
                 const data = await response.json();
                 
                 if (data.status === 'success') {
+                    sessionStorage.setItem('cachedContacts', JSON.stringify(data.friends));
                     renderContacts(data.friends);
                 } else {
                     throw new Error(data.error || 'Не удалось загрузить контакты');
                 }
             } catch (error) {
                 console.error('Error loading contacts:', error);
-                showMessage('Ошибка загрузки контактов', 'error');
+                if (!cachedContacts) showMessage('Ошибка загрузки контактов', 'error');
             }
         }
 
@@ -4094,25 +3971,25 @@ async function renderContacts(contacts) {
 }
 
 function loadContactAvatar(avatarElement, userId, initials, bgColor) {
-    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+    const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
     const img = new Image();
-    
-    img.onload = function() {
-        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-        avatarElement.style.backgroundSize = 'cover';
-        avatarElement.style.backgroundPosition = 'center';
-        avatarElement.style.backgroundColor = 'transparent'; // Добавьте эту строку
-        avatarElement.textContent = '';
-    };
-    
-    img.onerror = function() {
-        console.log('Failed to load avatar, using initials');
-        avatarElement.style.backgroundImage = '';
-        avatarElement.textContent = initials;
-        avatarElement.style.backgroundColor = bgColor;
-    };
-    
     img.src = avatarUrl;
+    
+    if (img.complete) {
+        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+        avatarElement.textContent = '';
+    } else {
+        img.onload = function() {
+            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+            avatarElement.textContent = '';
+        };
+        img.onerror = function() {
+            avatarElement.style.background = bgColor ? 
+                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                'linear-gradient(135deg, #0088cc, #40a7e3)';
+            avatarElement.textContent = initials;
+        };
+    }
 }
 
 
@@ -4476,7 +4353,7 @@ async function openChat(chatId) {
     try {
         messagesContainer.innerHTML = '';
         noMessages.style.display = 'block';
-        noMessages.textContent = 'Загрузка...';
+        // noMessages.textContent = 'Загрузка...';
 
         chatModal.classList.add('changing');
         setTimeout(() => {
@@ -4585,6 +4462,20 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
+        
+        // Пробуем загрузить сообщения из кэша
+        const cachedMessages = sessionStorage.getItem(`messages_${chatId}`);
+        if (cachedMessages) {
+            currentMessages = JSON.parse(cachedMessages);
+            renderMessages(currentMessages);
+            noMessages.style.display = 'none';
+            if (currentMessages.length > 0) {
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 10);
+            }
+        }
+    
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -4601,6 +4492,7 @@ async function openChat(chatId) {
         
         if (messagesData.status === 'success') {
             currentMessages = messagesData.messages;
+            sessionStorage.setItem(`messages_${chatId}`, JSON.stringify(currentMessages));
             renderMessages(currentMessages);
             
             markAllMessagesAsRead(chatId);
@@ -4984,61 +4876,6 @@ async function updateChatStatuses() {
         console.error('Error updating chat statuses:', error);
     }
 }
-
-
-
-
-async function checkPlatformActivity() {
-    try {
-        const response = await fetch(`${SERVER_URL}/check_platform_activity`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            platformSession.isActive = data.is_active_on_platform;
-            platformSession.lastCheck = new Date();
-            
-            // Если пользователь активен на платформе, помечаем кэш как свежий
-            if (platformSession.isActive && chatCache.data) {
-                chatCache.isFresh = true;
-            }
-        }
-    } catch (error) {
-        console.warn('Failed to check platform activity:', error);
-    }
-}
-
-function restoreCacheFromStorage() {
-    const cacheStr = localStorage.getItem(`chat_cache_${userData.platform_user_id}`);
-    if (cacheStr) {
-        try {
-            const cache = JSON.parse(cacheStr);
-            const cacheDate = new Date(cache.timestamp);
-            const now = new Date();
-            
-            // Восстанавливаем кэш если он не старше 30 минут
-            if ((now - cacheDate) / 1000 / 60 < 30) {
-                chatCache.data = cache.data;
-                chatCache.key = cache.key;
-                chatCache.timestamp = cacheDate;
-                chatCache.isFresh = true;
-                currentChatsList = cache.data;
-            }
-        } catch (e) {
-            console.warn('Failed to restore cache from storage:', e);
-        }
-    }
-}
-
-
-
      
 async function initializePage() {
     const userDataFromStorage = sessionStorage.getItem('userData');
@@ -5048,11 +4885,6 @@ async function initializePage() {
     }
     
     userData = JSON.parse(userDataFromStorage);
-
-    await checkPlatformActivity();
-    
-    // Восстанавливаем кэш из localStorage
-    restoreCacheFromStorage();
 
     initializeWallpaperSystem();
     
@@ -5076,19 +4908,10 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    if (platformSession.isActive && chatCache.isFresh) {
-        console.log('Platform session active, using cached data instantly');
-        renderChats(chatCache.data);
-    } else {
-        // Загружаем данные (будет использован кэш если есть)
-        await loadChats(false);
-    }
-
     // Параллельная загрузка данных без индикаторов
-    await Promise.all([
-        loadUserData(),
-        loadChats()
-    ]);
+    loadUserData();
+    loadChats();
+    loadContacts();
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
