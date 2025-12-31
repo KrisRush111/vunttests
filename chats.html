@@ -4174,70 +4174,219 @@ async function createChatWithContact(contact) {
 
 
 function openTempChat(tempChat) {
-    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-        // 0. Обновляем заголовок из кэша списка чатов (если есть)
-        const cachedChat = currentChatsList.find(c => c.id === chatId);
-        if (cachedChat) {
-            chatTitle.textContent = cachedChat.name || 'Новый чат';
-            const initials = cachedChat.name ? cachedChat.name[0].toUpperCase() : '?';
-            const bgColor = cachedChat.avatar_background || '#0088cc';
-            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.textContent = initials;
-        }
-
+    console.log('openTempChat called for:', tempChat.name, 'isDesktop:', isDesktop);
     
+    const { 
+        chatModal, 
+        chatAvatar, 
+        chatTitle, 
+        chatStatus, 
+        messagesContainer, 
+        noMessages,
+        messageInput,
+        sendMessageButton
+    } = getActiveElements();
+    
+    // Проверяем что все элементы существуют
+    if (!chatModal) {
+        console.error('Chat modal not found');
+        return;
+    }
+    
+    // 0. Обновляем заголовок из кэша списка чатов (если есть)
+    // Это не применимо для временных чатов, так как их нет в кэше
+    // Но оставляем логику на случай если это не временный чат
+    const cachedChat = currentChatsList.find(c => c.id === tempChat.id);
+    if (cachedChat && !tempChat.is_temp) {
+        console.log('Found cached chat');
+        chatTitle.textContent = cachedChat.name || 'Новый чат';
+        const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
+        const bgColor = cachedChat.avatar_background || '#0088cc';
+        chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+        chatAvatar.textContent = initials;
+    }
+    
+    // Устанавливаем текущий чат
     currentChat = tempChat;
     
-    // Apply changing class for animation
-    // chatModal.classList.remove('changing');
-    setTimeout(() => {
-        chatModal.classList.remove('changing');
-    }, 300);
-
-    chatTitle.textContent = tempChat.name;
-    chatStatus.textContent = 'был(а) недавно';
-    
- 
-    chatAvatar.style.backgroundImage = '';
-    chatAvatar.style.backgroundColor = tempChat.avatar_background;
-    chatAvatar.textContent = tempChat.initials;
-    
-   
-    if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
-        const userId = tempChat.participants[0].platform_user_id;
-        const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-        const img = new Image();
-        
-        img.onload = function() {
-            chatAvatar.style.backgroundImage = `url(${avatarUrl})`;
-            chatAvatar.style.backgroundSize = 'cover';
-            chatAvatar.style.backgroundPosition = 'center';
-            chatAvatar.textContent = '';
-        };
-        
-        img.onerror = function() {
-          
-            chatAvatar.style.backgroundImage = '';
-            chatAvatar.textContent = tempChat.initials;
-            chatAvatar.style.backgroundColor = tempChat.avatar_background;
-        };
-        
-        img.src = avatarUrl;
+    // Apply changing class for animation (если используется)
+    if (chatModal.classList.contains('changing')) {
+        setTimeout(() => {
+            chatModal.classList.remove('changing');
+        }, 300);
     }
     
-  
-    messagesContainer.innerHTML = '';
-    noMessages.style.display = 'block';
-    noMessages.textContent = 'Напишите сообщение, чтобы начать чат';
+    // Настраиваем заголовок чата
+    if (chatTitle) {
+        chatTitle.textContent = tempChat.name || 'Новый чат';
+    }
     
-
+    // Настраиваем статус
+    if (chatStatus) {
+        chatStatus.textContent = 'был(а) недавно';
+        chatStatus.classList.remove('online');
+    }
+    
+    // Настраиваем аватар
+    if (chatAvatar) {
+        const initials = tempChat.initials || 
+            (tempChat.name ? tempChat.name.split(' ').map(n => n[0]).join('') : '?');
+        const bgColor = tempChat.avatar_background || '#0088cc';
+        
+        // Сначала показываем инициалы и градиент
+        chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+        chatAvatar.style.backgroundImage = '';
+        chatAvatar.style.backgroundSize = 'cover';
+        chatAvatar.style.backgroundPosition = 'center';
+        chatAvatar.style.backgroundRepeat = 'no-repeat';
+        chatAvatar.textContent = initials;
+        
+        // Пытаемся загрузить аватар если есть фото
+        if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
+            const userId = tempChat.participants[0].platform_user_id;
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+            
+            console.log('Loading avatar from:', avatarUrl);
+            
+            const img = new Image();
+            img.onload = function() {
+                chatAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                chatAvatar.textContent = '';
+            };
+            
+            img.onerror = function() {
+                console.log('Avatar failed to load, keeping initials');
+                // Если не загрузилось, оставляем инициалы
+                chatAvatar.style.backgroundImage = '';
+                chatAvatar.textContent = initials;
+                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            };
+            
+            img.src = avatarUrl;
+        }
+    }
+    
+    // Очищаем сообщения и показываем приветствие
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+    }
+    
+    if (noMessages) {
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Напишите сообщение, чтобы начать чат';
+    }
+    
+    // Сбрасываем текущие сообщения
+    currentMessages = [];
+    
+    // ОТКРЫВАЕМ ЧАТ В ЗАВИСИМОСТИ ОТ ПЛАТФОРМЫ
     if (isDesktop) {
-        desktopPlaceholder.style.display = 'none';
-        chatModal.style.display = 'flex';
+        console.log('Opening temp chat on DESKTOP');
+        
+        // Скрываем плейсхолдер и показываем чат
+        if (desktopPlaceholder) {
+            desktopPlaceholder.style.display = 'none';
+        }
+        
+        if (chatModal) {
+            chatModal.style.display = 'flex';
+        }
+        
+        // Фокусируемся на поле ввода
+        setTimeout(() => {
+            if (messageInput) {
+                messageInput.focus();
+            }
+        }, 100);
+        
     } else {
+        console.log('Opening temp chat on MOBILE');
+        
+        // КРИТИЧЕСКИ ВАЖНЫЙ БЛОК ДЛЯ МОБИЛЬНЫХ УСТРОЙСТВ
+        
+        // 1. Добавляем класс active (основной способ открытия)
         chatModal.classList.add('active');
+        
+        // 2. Скрываем контейнер списка чатов
+        if (mobileChatsContainer) {
+            mobileChatsContainer.style.display = 'none';
+            console.log('Mobile chats container hidden');
+        }
+        
+        // 3. Скрываем нижнюю навигацию
+        if (mobileOnlyNav) {
+            mobileOnlyNav.style.display = 'none';
+            console.log('Mobile navigation hidden');
+        }
+        
+        // 4. Блокируем скролл body
         document.body.style.overflow = 'hidden';
+        
+        // 5. Применяем обои если включены
+        if (wallpaperState.enabled) {
+            chatModal.classList.add('wallpaper-enabled');
+            const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+            if (selectedWallpaper) {
+                chatModal.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+                chatModal.style.backgroundSize = 'cover';
+                chatModal.style.backgroundPosition = 'center';
+                chatModal.style.backgroundRepeat = 'no-repeat';
+            }
+        }
+        
+        // 6. Фокусируемся на поле ввода после небольшой задержки
+        setTimeout(() => {
+            if (messageInput) {
+                messageInput.focus();
+                console.log('Input focused on mobile');
+                
+                // Прокручиваем к низу если нужно
+                setTimeout(() => {
+                    if (messagesContainer) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                }, 50);
+            }
+        }, 300);
+        
+        // 7. Логируем состояние для отладки
+        console.log('Mobile chat modal state:', {
+            hasActiveClass: chatModal.classList.contains('active'),
+            display: chatModal.style.display,
+            transform: chatModal.style.transform
+        });
     }
+    
+    // Обновляем обои
+    updateChatWallpaper();
+    
+    // Устанавливаем обработчики для отправки сообщений (уже должны быть установлены в initializePage)
+    console.log('Temp chat opened successfully:', currentChat);
+    
+    // Дополнительная проверка: если через 1 секунду чат не открылся, покажем alert для отладки
+    setTimeout(() => {
+        const modal = document.getElementById(isDesktop ? 'chatModalDesktop' : 'chatModalMobile');
+        if (modal) {
+            const isVisible = isDesktop ? 
+                (modal.style.display === 'flex') : 
+                modal.classList.contains('active');
+            
+            if (!isVisible) {
+                console.error('Chat modal still not visible after 1 second!');
+                // Попробуем альтернативный способ открытия
+                if (!isDesktop) {
+                    console.log('Trying alternative opening method...');
+                    modal.style.display = 'flex';
+                    modal.style.position = 'fixed';
+                    modal.style.top = '0';
+                    modal.style.left = '0';
+                    modal.style.right = '0';
+                    modal.style.bottom = '0';
+                    modal.style.zIndex = '1000';
+                }
+            }
+        }
+    }, 1000);
 }
 
 
