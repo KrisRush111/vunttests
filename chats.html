@@ -2359,8 +2359,6 @@ let openChatAbortController = null; // Flag to prevent multiple chat openings
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
-        let eventSource = null;
-        let processedMessageIds = new Set();
 
 
 
@@ -3974,128 +3972,6 @@ function setupMobileChatHeight() {
     }
 }
 
-function initSSE() {
-    if (eventSource) {
-        eventSource.close();
-    }
-
-    if (!userData || !userData.platform_user_id) return;
-
-    console.log('Initializing SSE for user:', userData.platform_user_id);
-    eventSource = new EventSource(`${SERVER_URL}/events/${userData.platform_user_id}`);
-
-    eventSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        console.log('SSE Event received:', data);
-
-        if (data.type === 'new_message') {
-            handleNewMessageEvent(data.data);
-        } else if (data.type === 'messages_read') {
-            handleMessagesReadEvent(data.data);
-        }
-    };
-
-    eventSource.onerror = function(err) {
-        console.error('SSE Error:', err);
-    };
-}
-
-function handleNewMessageEvent(messageData) {
-    if (processedMessageIds.has(messageData.message_id)) return;
-    processedMessageIds.add(messageData.message_id);
-
-    if (currentChat && currentChat.id === messageData.chat_id) {
-        const newMessage = {
-            id: messageData.message_id,
-            sender_id: messageData.sender_id,
-            content: messageData.content,
-            sent_at: messageData.sent_at,
-            is_read: false,
-            is_me: messageData.sender_id === userData.platform_user_id
-        };
-
-        const chatIndex = currentChatsList.findIndex(c => c.id === messageData.chat_id);
-        if (chatIndex !== -1) {
-            const chat = currentChatsList[chatIndex];
-            const sender = chat.participants.find(p => p.platform_user_id === messageData.sender_id);
-            if (sender) {
-                newMessage.sender_name = sender.nickname;
-                newMessage.sender_avatar = sender.avatar_url;
-                newMessage.sender_avatar_background = sender.avatar_background;
-            }
-        }
-
-        currentMessages.push(newMessage);
-        renderMessages(currentMessages);
-        
-        const { messagesContainer } = getActiveElements();
-        if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
-
-        if (!newMessage.is_me) {
-            markChatAsRead(messageData.chat_id);
-        }
-    }
-
-    updateChatListRealtime(messageData);
-}
-
-function handleMessagesReadEvent(readData) {
-    if (currentChat && currentChat.id === readData.chat_id) {
-        currentMessages.forEach(msg => {
-            if (msg.sender_id === userData.platform_user_id) {
-                msg.is_read = true;
-            }
-        });
-        renderMessages(currentMessages);
-    }
-    
-    const chatIndex = currentChatsList.findIndex(c => c.id === readData.chat_id);
-    if (chatIndex !== -1) {
-        currentChatsList[chatIndex].unread_count = 0;
-        updateChatItemInDOM(readData.chat_id, currentChatsList[chatIndex]);
-    }
-}
-
-async function markChatAsRead(chatId) {
-    try {
-        await fetch(`${SERVER_URL}/get_messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform_user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-    } catch (e) {
-        console.error('Error marking as read:', e);
-    }
-}
-
-function updateChatListRealtime(messageData) {
-    const chatIndex = currentChatsList.findIndex(c => c.id === messageData.chat_id);
-    
-    if (chatIndex !== -1) {
-        const chat = currentChatsList[chatIndex];
-        chat.last_message = messageData.content;
-        chat.last_message_time = messageData.sent_at;
-        
-        if ((!currentChat || currentChat.id !== messageData.chat_id) && messageData.sender_id !== userData.platform_user_id) {
-            chat.unread_count = (chat.unread_count || 0) + 1;
-        }
-
-        currentChatsList.splice(chatIndex, 1);
-        currentChatsList.unshift(chat);
-        
-        renderChats(currentChatsList);
-        saveChatsLocal(currentChatsList);
-    } else {
-        loadChats();
-    }
-}
-
 
         // Добавьте эту функцию для отладки
 async function debugActivityStatus(userId) {
@@ -4581,9 +4457,7 @@ function setupKeyboardDetection() {
 
     const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    let isSendingMessage = false;
-        let eventSource = null;
-        let processedMessageIds = new Set(); // Добавляем флаг отправки сообщения
+    let isSendingMessage = false; // Добавляем флаг отправки сообщения
 
     function adjustInputPosition(keyboardOpen) {
         const { messageInputContainer, messagesContainer } = getActiveElements();
@@ -4837,7 +4711,7 @@ async function openChat(chatId) {
                 saveMessagesLocal(chatId, currentMessages);
             }
             
-            markChatAsRead(chatId);
+            markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
                 noMessages.style.display = 'block';
@@ -5204,6 +5078,77 @@ function updateAllMessageStatusesInUI() {
 }
 
 
+let messageEventSource = null;
+
+function initMessageStream() {
+    if (messageEventSource) {
+        messageEventSource.close();
+    }
+
+    const url = `${SERVER_URL}/stream_messages?platform_user_id=${userData.platform_user_id}`;
+    messageEventSource = new EventSource(url);
+
+    messageEventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'new_message') {
+            handleIncomingMessage(data.chat_id, data.message);
+        } else if (data.type === 'connected') {
+            console.log('SSE connected');
+        }
+    };
+
+    messageEventSource.onerror = function(err) {
+        console.error('SSE error:', err);
+        messageEventSource.close();
+        // Попытка переподключения через 5 секунд
+        setTimeout(initMessageStream, 5000);
+    };
+}
+
+function handleIncomingMessage(chatId, message) {
+    // 1. Если этот чат сейчас открыт, добавляем сообщение в окно
+    if (currentChatId === chatId) {
+        // Проверяем, нет ли уже такого сообщения (чтобы не дублировать свои)
+        if (!currentMessages.some(m => m.id === message.id)) {
+            message.is_me = message.sender_id === userData.platform_user_id;
+            currentMessages.push(message);
+            
+            const { messagesContainer } = getActiveElements();
+            const messageElement = createMessageElement(message);
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // Если сообщение не от нас, помечаем как прочитанное
+            if (!message.is_me) {
+                markMessageAsRead(message.id);
+            }
+        }
+    }
+
+    // 2. Обновляем список чатов (последнее сообщение и счетчик)
+    updateChatInList(chatId, message);
+}
+
+function updateChatInList(chatId, message) {
+    const chat = currentChatsList.find(c => c.id === chatId);
+    if (chat) {
+        chat.last_message = message.content;
+        chat.last_message_time = message.sent_at;
+        chat.last_message_sender_id = message.sender_id;
+        
+        if (currentChatId !== chatId && message.sender_id !== userData.platform_user_id) {
+            chat.unread_count = (chat.unread_count || 0) + 1;
+        }
+        
+        // Перерисовываем список чатов
+        renderChatsList();
+    } else {
+        // Если чата нет в списке (например, новое сообщение от нового контакта), загружаем список заново
+        loadChats();
+    }
+}
+
 async function updateChatStatuses() {
     if (!currentChatsList || currentChatsList.length === 0) {
         return;
@@ -5265,9 +5210,6 @@ async function initializePage() {
         window.location.href = 'profile.html';
         return;
     }
-    
-    userData = JSON.parse(userDataFromStorage);
-    initSSE();
 
     if (!isDesktop) {
     // Явно находим кнопку для мобильной версии
@@ -5280,6 +5222,8 @@ async function initializePage() {
         });
     }
 }
+    
+    userData = JSON.parse(userDataFromStorage);
 
     initializeWallpaperSystem();
     
@@ -5403,6 +5347,9 @@ if (attachButton) {
 // Обработчик выбора изображений
 imageInput.addEventListener('change', handleImageSelection);
 
+
+    // Инициализация SSE для получения сообщений в реальном времени
+    initMessageStream();
 
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
