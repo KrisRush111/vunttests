@@ -477,14 +477,22 @@ input, textarea {
 
 
     .message-box {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
         text-align: center;
         padding: 12px 16px;
-        margin: 12px;
+        margin: 0;
         border-radius: 12px;
         display: none;
         font-size: 15px;
         font-weight: 500;
         animation: slideDown 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        max-width: 90%;
+        width: auto;
     }
 
     .message-box.error {
@@ -4495,6 +4503,9 @@ function setupKeyboardDetection() {
 
        
 async function openChat(chatId) {
+    // Сохраняем ID чата, который мы ПЫТАЕМСЯ открыть сейчас
+    const targetChatId = chatId;
+    
     // Отменяем предыдущий запрос, если он есть
     if (openChatAbortController) {
         openChatAbortController.abort();
@@ -4708,10 +4719,11 @@ async function openChat(chatId) {
         }
         
     } catch (error) {
-        if (error.name === 'AbortError') {
-            console.log('Fetch aborted');
+        if (error.name === 'AbortError' || signal.aborted) {
+            console.log('Fetch aborted or signal cancelled for a previous chat, ignoring.');
             return;
         }
+
         console.error('Error opening chat:', error);
         showMessage('Ошибка загрузки чата', 'error');
         closeChat();
