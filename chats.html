@@ -2353,16 +2353,477 @@ async function updateLocalChat(chatId, updates) {
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false;
-let openChatAbortController = null; // Flag to prevent multiple chat openings
+        let openChatAbortController = null; // Flag to prevent multiple chat openings
         let currentChatsList = []; // Кэш списка чатов
         // В разделе с другими глобальными переменными добавьте:
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        let messagePollInterval;
+        let chatPollInterval;
+        let unreadPollInterval;
+        let isPollingActive = true;
+        let lastCheckTime = new Date().toISOString();
+        let activeChatPollAbortController = null;
+        // Глобальная блокировка для предотвращения одновременных обновлений
+        let isUpdatingMessages = false;
 
-
-
+async function safeUpdateMessages(chatId, messages) {
+    if (isUpdatingMessages) {
+        // Ждем освобождения блокировки
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return safeUpdateMessages(chatId, messages);
+    }
+    
+    isUpdatingMessages = true;
+    
+    try {
+        // Получаем текущие сообщения из локальной базы
+        const localMessages = await getMessagesLocal(chatId) || [];
         
+        // Фильтруем дубликаты
+        const existingIds = new Set(localMessages.map(m => m.id));
+        const newMessages = messages.filter(msg => !existingIds.has(msg.id));
+        
+        if (newMessages.length === 0) {
+            return localMessages;
+        }
+        
+        // Добавляем новые сообщения
+        const updatedMessages = [...localMessages, ...newMessages.map(msg => ({
+            ...msg,
+            is_me: msg.sender_id === userData.platform_user_id
+        }))];
+        
+        // Сохраняем в локальную базу
+        await saveMessagesLocal(chatId, updatedMessages);
+        
+        return updatedMessages;
+    } finally {
+        isUpdatingMessages = false;
+    }
+}
+
+
+
+        // Начать polling для новых сообщений
+function startMessagePolling() {
+    if (messagePollInterval) {
+        clearInterval(messagePollInterval);
+    }
+    
+    // Запускаем проверку каждые 2 секунды
+    messagePollInterval = setInterval(async () => {
+        if (!isPollingActive || !userData || !userData.platform_user_id) return;
+        
+        try {
+            const response = await fetch(`${SERVER_URL}/check_new_messages`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id,
+                    last_check_time: lastCheckTime
+                }),
+                credentials: 'include'
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === 'success' && data.has_updates) {
+                lastCheckTime = data.last_check_time || new Date().toISOString();
+                
+                if (data.new_messages && data.new_messages.length > 0) {
+                    await handleNewMessages(data.new_messages);
+                }
+                
+                if (data.read_messages && data.read_messages.length > 0) {
+                    await handleReadMessages(data.read_messages);
+                }
+            } else if (data.status === 'success') {
+                // Обновляем время проверки даже если нет обновлений
+                lastCheckTime = data.last_check_time || lastCheckTime;
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Message polling error:', error);
+            }
+        }
+    }, 2000);
+}
+
+// Обработка новых сообщений
+async function handleNewMessages(newMessages) {
+    // Группируем сообщения по chat_id
+    const messagesByChat = {};
+    
+    newMessages.forEach(msg => {
+        if (!messagesByChat[msg.chat_id]) {
+            messagesByChat[msg.chat_id] = [];
+        }
+        messagesByChat[msg.chat_id].push(msg);
+    });
+    
+    // Обрабатываем каждую группу сообщений с блокировкой
+    for (const [chatId, messages] of Object.entries(messagesByChat)) {
+        await safeUpdateMessages(chatId, messages);
+        await processChatMessages(chatId, messages);
+    }
+}
+
+// Обработка сообщений для конкретного чата
+async function processChatMessages(chatId, messages) {
+    // Сортируем по времени
+    messages.sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+    
+    // Получаем информацию о чате
+    const chatInfo = await getChatInfo(chatId);
+    const isCurrentChat = currentChat && currentChat.id == chatId;
+    
+    // Если чат открыт - добавляем сообщения напрямую
+    if (isCurrentChat) {
+        const newMessagesWithMe = messages.map(msg => ({
+            ...msg,
+            is_me: msg.sender_id === userData.platform_user_id
+        }));
+        
+        currentMessages = [...currentMessages, ...newMessagesWithMe];
+        
+        // Сохраняем в локальную базу
+        saveMessagesLocal(chatId, currentMessages);
+        
+        // Рендерим новые сообщения
+        messages.forEach(msg => {
+            if (msg.sender_id !== userData.platform_user_id) {
+                renderMessage({
+                    ...msg,
+                    is_me: false
+                });
+            }
+        });
+        
+        // Прокручиваем к последнему сообщению
+        const { messagesContainer } = getActiveElements();
+        setTimeout(() => {
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }, 100);
+        
+        // Если сообщение от другого пользователя, помечаем как прочитанное
+        const otherUserMessages = messages.filter(msg => msg.sender_id !== userData.platform_user_id);
+        if (otherUserMessages.length > 0) {
+            await markMessagesAsRead(chatId, otherUserMessages.map(m => m.id));
+        }
+    } else {
+        // Чат не открыт - обновляем список чатов
+        const lastMessage = messages[messages.length - 1];
+        
+        // Обновляем кэш чатов
+        const chatIndex = currentChatsList.findIndex(chat => chat.id == chatId);
+        if (chatIndex !== -1) {
+            // Обновляем данные чата
+            currentChatsList[chatIndex].last_message = lastMessage.content;
+            currentChatsList[chatIndex].last_message_time = lastMessage.sent_at;
+            currentChatsList[chatIndex].last_message_type = lastMessage.is_image ? 'image' : 'text';
+            currentChatsList[chatIndex].unread_count = (currentChatsList[chatIndex].unread_count || 0) + messages.length;
+            
+            // Перемещаем чат в начало
+            const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+            currentChatsList.unshift(updatedChat);
+            
+            // Обновляем DOM
+            updateChatItemInDOM(chatId, updatedChat);
+            moveChatToTop(chatId);
+        } else {
+            // Если чата нет в списке, добавляем его
+            const newChat = {
+                id: chatId,
+                name: chatInfo?.name || 'Новый чат',
+                last_message: lastMessage.content,
+                last_message_time: lastMessage.sent_at,
+                last_message_type: lastMessage.is_image ? 'image' : 'text',
+                unread_count: messages.length,
+                participants: chatInfo?.participants || [],
+                has_avatar_photo: chatInfo?.avatar_url ? true : false,
+                avatar_background: chatInfo?.avatar_background || '#0088cc'
+            };
+            
+            currentChatsList.unshift(newChat);
+            renderChats(currentChatsList);
+        }
+        
+        // Показываем уведомление (опционально)
+        if (messages.length > 0 && !document.hasFocus()) {
+            showNotification(chatInfo?.name || 'Новое сообщение', lastMessage.content);
+        }
+    }
+    
+    // Сохраняем сообщения в IndexedDB
+    const existingMessages = await getMessagesLocal(chatId) || [];
+    const allMessages = [...existingMessages, ...messages.map(msg => ({
+        ...msg,
+        is_me: msg.sender_id === userData.platform_user_id
+    }))];
+    
+    // Убираем дубликаты по id
+    const uniqueMessages = allMessages.filter((msg, index, self) =>
+        index === self.findIndex(m => m.id === msg.id)
+    );
+    
+    await saveMessagesLocal(chatId, uniqueMessages);
+}
+
+// Обработка прочитанных сообщений
+async function handleReadMessages(readMessages) {
+    for (const readMsg of readMessages) {
+        const { message_id, chat_id } = readMsg;
+        
+        // Обновляем статус в текущих сообщениях
+        if (currentChat && currentChat.id == chat_id) {
+            const messageIndex = currentMessages.findIndex(m => m.id == message_id);
+            if (messageIndex !== -1) {
+                currentMessages[messageIndex].is_read = true;
+                
+                // Обновляем UI
+                updateMessageStatusInUI(message_id);
+            }
+        }
+        
+        // Обновляем в локальной базе
+        const localMessages = await getMessagesLocal(chat_id);
+        if (localMessages) {
+            const msgIndex = localMessages.findIndex(m => m.id == message_id);
+            if (msgIndex !== -1) {
+                localMessages[msgIndex].is_read = true;
+                await saveMessagesLocal(chat_id, localMessages);
+            }
+        }
+    }
+}
+
+// Получить информацию о чате
+async function getChatInfo(chatId) {
+    try {
+        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        return data.status === 'success' ? data.chat : null;
+    } catch (error) {
+        console.error('Error getting chat info:', error);
+        return null;
+    }
+}
+
+// Пометить сообщения как прочитанные
+async function markMessagesAsRead(chatId, messageIds) {
+    try {
+        await fetch(`${SERVER_URL}/mark_messages_as_read`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chat_id: chatId,
+                message_ids: messageIds,
+                reader_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+    } catch (error) {
+        console.error('Error marking messages as read:', error);
+    }
+}
+
+// Polling для открытого чата
+function startActiveChatPolling(chatId) {
+    // Останавливаем предыдущий polling
+    if (activeChatPollAbortController) {
+        activeChatPollAbortController.abort();
+    }
+    
+    activeChatPollAbortController = new AbortController();
+    
+    // Функция для polling
+    async function pollActiveChat() {
+        if (!currentChat || currentChat.id !== chatId || !isPollingActive) {
+            return;
+        }
+        
+        try {
+            const lastMessageId = currentMessages.length > 0 
+                ? Math.max(...currentMessages.map(m => m.id))
+                : 0;
+            
+            const response = await fetch(`${SERVER_URL}/check_message_updates`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    platform_user_id: userData.platform_user_id,
+                    last_message_id: lastMessageId
+                }),
+                credentials: 'include',
+                signal: activeChatPollAbortController.signal
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === 'success' && data.has_updates) {
+                if (data.new_messages && data.new_messages.length > 0) {
+                    // Добавляем новые сообщения
+                    currentMessages = [...currentMessages, ...data.new_messages];
+                    
+                    // Рендерим новые сообщения
+                    data.new_messages.forEach(msg => {
+                        if (!msg.is_me) {
+                            renderMessage(msg);
+                        }
+                    });
+                    
+                    // Сохраняем в локальную базу
+                    saveMessagesLocal(chatId, currentMessages);
+                    
+                    // Прокручиваем к последнему сообщению
+                    const { messagesContainer } = getActiveElements();
+                    setTimeout(() => {
+                        if (messagesContainer) {
+                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        }
+                    }, 100);
+                }
+                
+                if (data.read_messages && data.read_messages.length > 0) {
+                    // Обновляем статусы прочтения
+                    data.read_messages.forEach(messageId => {
+                        const msgIndex = currentMessages.findIndex(m => m.id === messageId);
+                        if (msgIndex !== -1) {
+                            currentMessages[msgIndex].is_read = true;
+                            updateMessageStatusInUI(messageId);
+                        }
+                    });
+                }
+            }
+            
+            // Рекурсивный вызов с задержкой
+            if (currentChat && currentChat.id === chatId) {
+                setTimeout(pollActiveChat, 1000);
+            }
+            
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Active chat polling error:', error);
+                // Перезапускаем polling через 2 секунды при ошибке
+                if (currentChat && currentChat.id === chatId) {
+                    setTimeout(pollActiveChat, 2000);
+                }
+            }
+        }
+    }
+    
+    // Запускаем polling
+    pollActiveChat();
+}
+
+// Polling для количества непрочитанных сообщений
+function startUnreadCountPolling() {
+    if (unreadPollInterval) {
+        clearInterval(unreadPollInterval);
+    }
+    
+    unreadPollInterval = setInterval(async () => {
+        if (!isPollingActive || !userData || !userData.platform_user_id) return;
+        
+        try {
+            const response = await fetch(`${SERVER_URL}/get_unread_counts`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === 'success' && data.unread_counts) {
+                // Обновляем счетчики непрочитанных в списке чатов
+                Object.entries(data.unread_counts).forEach(([chatId, counts]) => {
+                    const chatIndex = currentChatsList.findIndex(chat => chat.id == chatId);
+                    if (chatIndex !== -1) {
+                        // Обновляем только если счетчик изменился
+                        if (currentChatsList[chatIndex].unread_count !== counts.unread_count) {
+                            currentChatsList[chatIndex].unread_count = counts.unread_count;
+                            currentChatsList[chatIndex].last_message_time = counts.last_message_time;
+                            
+                            updateChatItemInDOM(chatId, {
+                                unread_count: counts.unread_count
+                            });
+                            
+                            // Если это текущий открытый чат, обновляем сообщения
+                            if (currentChat && currentChat.id == chatId && counts.unread_count > 0) {
+                                // Загружаем новые сообщения
+                                loadMessagesForCurrentChat();
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Unread count polling error:', error);
+        }
+    }, 3000); // Проверяем каждые 3 секунды
+}
+
+// Функция для загрузки сообщений текущего чата
+async function loadMessagesForCurrentChat() {
+    if (!currentChat || !currentChat.id) return;
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_messages`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chat_id: currentChat.id,
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentMessages = data.messages;
+            renderMessages(currentMessages);
+            saveMessagesLocal(currentChat.id, currentMessages);
+            
+            // Помечаем все как прочитанные
+            markAllMessagesAsRead(currentChat.id);
+        }
+    } catch (error) {
+        console.error('Error loading messages:', error);
+    }
+}
+
+// Показать уведомление (опционально)
+function showNotification(title, body) {
+    if (!("Notification" in window)) return;
+    
+    if (Notification.permission === "granted") {
+        new Notification(title, { body, icon: '/favicon.ico' });
+    } else if (Notification.permission !== "denied") {
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+                new Notification(title, { body, icon: '/favicon.ico' });
+            }
+        });
+    }
+}
 
 
 
@@ -4373,6 +4834,22 @@ async function sendMessage() {
         
         // Добавляем сообщение в текущий список
         currentMessages = [...currentMessages, newMessage];
+
+            if (!currentChat.is_temp) {
+                // Обновляем кэш чатов
+                const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+                if (chatIndex !== -1) {
+                    currentChatsList[chatIndex].last_message = messageContent;
+                    currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
+                    currentChatsList[chatIndex].unread_count = 0;
+                    
+                    // Перемещаем чат в начало списка
+                    const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+                    currentChatsList.unshift(updatedChat);
+                    moveChatToTop(currentChat.id);
+                }
+            }
+            
         
         // Обновляем UI
         noMessages.style.display = 'none';
@@ -4598,7 +5075,8 @@ async function openChat(chatId) {
         if (chatData.status !== 'success') {
             throw new Error(chatData.error || 'Не удалось загрузить чат');
         }
-        
+
+        startActiveChatPolling(chatId);
         currentChat = chatData.chat;
         
         if (!currentChat) {
@@ -4849,6 +5327,11 @@ function closeChat() {
         openChatAbortController = null;
     }
     
+
+    if (activeChatPollAbortController) {
+        activeChatPollAbortController.abort();
+        activeChatPollAbortController = null;
+    }
     isOpeningChat = false;
     
     console.log('Chat closed successfully');
@@ -5181,7 +5664,13 @@ async function initializePage() {
         loadUserData(),
         loadChats()
     ]);
-    
+
+        // Запускаем polling системы
+    startMessagePolling();
+    startUnreadCountPolling();
+    startActivityPolling(); // уже существует
+
+
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
     const openChatName = sessionStorage.getItem('openChatName');
@@ -5336,6 +5825,34 @@ imageInput.addEventListener('change', handleImageSelection);
         e.preventDefault();
     });
 
+
+
+
+
+    window.addEventListener('beforeunload', () => {
+        isPollingActive = false;
+        if (messagePollInterval) clearInterval(messagePollInterval);
+        if (chatPollInterval) clearInterval(chatPollInterval);
+        if (unreadPollInterval) clearInterval(unreadPollInterval);
+        if (activeChatPollAbortController) {
+            activeChatPollAbortController.abort();
+        }
+    });
+
+
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            isPollingActive = true;
+            // Принудительно проверяем обновления
+            if (userData && userData.platform_user_id) {
+                lastCheckTime = new Date(Date.now() - 60000).toISOString(); // Проверим последние 60 секунд
+            }
+        } else {
+            isPollingActive = false;
+        }
+    });
+    
     
 
     // Обновление статусов при возвращении на вкладку
