@@ -5107,17 +5107,27 @@ function initMessageStream() {
 }
 
 function handleIncomingMessage(chatId, message) {
+    console.log('Incoming message via SSE:', message);
+    
     // 1. Если этот чат сейчас открыт, добавляем сообщение в окно
-    if (currentChatId === chatId) {
+    // Используем строковое сравнение на случай разных типов ID
+    if (String(currentChatId) === String(chatId)) {
         // Проверяем, нет ли уже такого сообщения (чтобы не дублировать свои)
-        if (!currentMessages.some(m => m.id === message.id)) {
+        if (!currentMessages.some(m => String(m.id) === String(message.id))) {
             message.is_me = message.sender_id === userData.platform_user_id;
             currentMessages.push(message);
             
             const { messagesContainer } = getActiveElements();
-            const messageElement = createMessageElement(message);
-            messagesContainer.appendChild(messageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            if (messagesContainer) {
+                const messageElement = createMessageElement(message);
+                messagesContainer.appendChild(messageElement);
+                
+                // Плавная прокрутка вниз
+                messagesContainer.scrollTo({
+                    top: messagesContainer.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }
             
             // Если сообщение не от нас, помечаем как прочитанное
             if (!message.is_me) {
@@ -5131,21 +5141,32 @@ function handleIncomingMessage(chatId, message) {
 }
 
 function updateChatInList(chatId, message) {
-    const chat = currentChatsList.find(c => c.id === chatId);
-    if (chat) {
+    const chatIndex = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+    
+    if (chatIndex !== -1) {
+        const chat = currentChatsList[chatIndex];
         chat.last_message = message.content;
         chat.last_message_time = message.sent_at;
         chat.last_message_sender_id = message.sender_id;
+        chat.is_image = message.is_image;
         
-        if (currentChatId !== chatId && message.sender_id !== userData.platform_user_id) {
-            chat.unread_count = (chat.unread_count || 0) + 1;
+        if (String(currentChatId) !== String(chatId) && message.sender_id !== userData.platform_user_id) {
+            chat.unread_count = (parseInt(chat.unread_count) || 0) + 1;
         }
         
-        // Перерисовываем список чатов
-        renderChatsList();
+        // Перемещаем чат наверх списка
+        currentChatsList.splice(chatIndex, 1);
+        currentChatsList.unshift(chat);
+        
+        // Перерисовываем список чатов (используем renderChats, так как renderChatsList может не существовать)
+        if (typeof renderChats === 'function') {
+            renderChats(currentChatsList);
+        }
     } else {
-        // Если чата нет в списке (например, новое сообщение от нового контакта), загружаем список заново
-        loadChats();
+        // Если чата нет в списке, загружаем список заново
+        if (typeof loadChats === 'function') {
+            loadChats(true);
+        }
     }
 }
 
