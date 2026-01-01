@@ -4588,22 +4588,25 @@ async function openChat(chatId) {
         
         chatTitle.textContent = currentChat.name || 'Новый чат';
         
-        // Получаем статус участника чата
-        const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        // Получаем статус участника чата - ТОЛЬКО если есть participants
         let statusText = 'был(а) недавно';
         let isOnline = false;
 
-        if (otherParticipant) {
-            const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-            const userActivity = activityData[otherParticipant.platform_user_id];
+        if (currentChat.participants && currentChat.participants.length > 0) {
+            const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             
-            if (userActivity) {
-                if (userActivity.is_online) {
-                    statusText = 'В сети';
-                    isOnline = true;
-                } else {
-                    statusText = formatLastSeen(userActivity.last_online);
-                    isOnline = false;
+            if (otherParticipant) {
+                const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+                const userActivity = activityData[otherParticipant.platform_user_id];
+                
+                if (userActivity) {
+                    if (userActivity.is_online) {
+                        statusText = 'В сети';
+                        isOnline = true;
+                    } else {
+                        statusText = formatLastSeen(userActivity.last_online);
+                        isOnline = false;
+                    }
                 }
             }
         }
@@ -4690,16 +4693,19 @@ async function openChat(chatId) {
         }
 
         // ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем только счетчик непрочитанных сообщений
-        updateChatItemInDOM(chatId, {
-            last_message: currentChat.last_message,
-            last_message_time: currentChat.last_message_time,
-            unread_count: 0
-        });
+        // НЕ обновляем last_message и last_message_time, чтобы чат не поднимался вверх
+        if (currentChat) { // Проверяем, что currentChat существует
+            updateChatItemInDOM(chatId, {
+                last_message: currentChat.last_message, // Сохраняем существующее
+                last_message_time: currentChat.last_message_time, // Сохраняем существующее
+                unread_count: 0 // Только сбрасываем счетчик
+            });
 
-        // Обновляем кэш чатов - только счетчик непрочитанных
-        const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-        if (chatIndex !== -1) {
-            currentChatsList[chatIndex].unread_count = 0;
+            // Обновляем кэш чатов - только счетчик непрочитанных
+            const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
+            if (chatIndex !== -1) {
+                currentChatsList[chatIndex].unread_count = 0;
+            }
         }
         
     } catch (error) {
@@ -4716,6 +4722,9 @@ async function openChat(chatId) {
         if (error.message && !error.message.includes('fetch') && !error.message.includes('network')) {
             showMessage('Ошибка загрузки чата: ' + error.message, 'error');
         }
+        
+        // Если возникла ошибка, закрываем чат
+        closeChat();
     } finally {
         isOpeningChat = false;
         openChatAbortController = null;
@@ -4729,17 +4738,21 @@ async function openChat(chatId) {
     
     updateChatWallpaper();
     applyWallpaper();
-    window.currentChat = chatData;
+    
+    // Сохраняем данные чата только если они существуют
+    if (chatData && chatData.chat) {
+        window.currentChat = chatData.chat;
+    }
 }
 
 
 function closeChat() {
-    console.log('closeChat() called'); // Логирование для отладки
+    console.log('closeChat() called');
+    
+    const { chatModal, messagesContainer, noMessages } = getActiveElements();
 
-    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-
-    // Проверка на наличие элементов (добавлено для надежности)
-    if (!chatModal || !messagesContainer) {
+    // Проверка на наличие элементов
+    if (!chatModal || !messagesContainer || !noMessages) {
         console.error('closeChat(): Required elements not found');
         return;
     }
@@ -4757,27 +4770,20 @@ function closeChat() {
     noMessages.style.display = 'block';
     noMessages.textContent = 'Сообщений пока нет...';
 
-    chatTitle.textContent = '';
-    chatStatus.textContent = '';
-    chatAvatar.style.backgroundImage = '';
-    chatAvatar.style.backgroundColor = '';
-    chatAvatar.textContent = '';
-
     // Hide chat modal
     if (isDesktop) {
         chatModal.style.display = 'none';
-        desktopPlaceholder.style.display = 'flex';
+        if (desktopPlaceholder) desktopPlaceholder.style.display = 'flex';
     } else {
         chatModal.classList.remove('active');
-        document.body.style.overflow = ''; // Восстанавливаем скролл
+        document.body.style.overflow = '';
     }
 
     // Очищаем глобальную переменную
     window.currentChat = null;
-
-    console.log('Chat closed successfully'); // Логирование для подтверждения
+    
+    console.log('Chat closed successfully');
 }
-
 
 async function updateChatInList(chatId, updates) {
     try {
