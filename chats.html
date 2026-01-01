@@ -2611,7 +2611,7 @@ async function refreshOnlineStatuses() {
     // Обновляем статусы в списке чатов
     await updateChatStatuses();
     
-    // Обновляем статус в открытом чате
+    // Обновляем статус в открытом чате - ТОЛЬКО если чат существует
     const { chatModal } = getActiveElements();
     
     if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
@@ -4509,6 +4509,21 @@ async function openChat(chatId) {
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
+    // Проверяем, что все элементы существуют
+    if (!chatModal || !chatAvatar || !chatTitle || !chatStatus || !messagesContainer || !noMessages) {
+        console.error('openChat(): Required elements not found');
+        isOpeningChat = false;
+        return;
+    }
+    
+    // Сначала закрываем текущий чат, если он открыт
+    if (currentChat) {
+        // Не вызываем full closeChat(), чтобы не скрывать UI
+        currentChat = null;
+        currentMessages = [];
+        messagesContainer.innerHTML = '';
+    }
+    
     // 0. Обновляем заголовок из кэша списка чатов (если есть) - МОМЕНТАЛЬНО
     const cachedChat = currentChatsList.find(c => c.id === chatId);
     if (cachedChat) {
@@ -4548,7 +4563,7 @@ async function openChat(chatId) {
             
             // Показываем чат сразу
             if (isDesktop) {
-                desktopPlaceholder.style.display = 'none';
+                if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
                 chatModal.style.display = 'flex';
             } else {
                 chatModal.classList.add('active');
@@ -4586,6 +4601,10 @@ async function openChat(chatId) {
         
         currentChat = chatData.chat;
         
+        if (!currentChat) {
+            throw new Error('Chat data is null');
+        }
+        
         chatTitle.textContent = currentChat.name || 'Новый чат';
         
         // Получаем статус участника чата - ТОЛЬКО если есть participants
@@ -4620,7 +4639,7 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
-        // Обновление аватара (уже установленного из кэша, но на случай изменений)
+        // Обновление аватара
         if (currentChat.participants && currentChat.participants.length > 0) {
             const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
@@ -4678,7 +4697,7 @@ async function openChat(chatId) {
         
         if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
             if (isDesktop) {
-                desktopPlaceholder.style.display = 'none';
+                if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
                 chatModal.style.display = 'flex';
             } else {
                 chatModal.classList.add('active');
@@ -4692,16 +4711,15 @@ async function openChat(chatId) {
             }, 100);
         }
 
-        // ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем только счетчик непрочитанных сообщений
-        // НЕ обновляем last_message и last_message_time, чтобы чат не поднимался вверх
-        if (currentChat) { // Проверяем, что currentChat существует
+        // Обновляем счетчик непрочитанных сообщений
+        if (currentChat) {
             updateChatItemInDOM(chatId, {
-                last_message: currentChat.last_message, // Сохраняем существующее
-                last_message_time: currentChat.last_message_time, // Сохраняем существующее
-                unread_count: 0 // Только сбрасываем счетчик
+                last_message: currentChat.last_message || '',
+                last_message_time: currentChat.last_message_time || '',
+                unread_count: 0
             });
 
-            // Обновляем кэш чатов - только счетчик непрочитанных
+            // Обновляем кэш чатов
             const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex].unread_count = 0;
@@ -4711,49 +4729,54 @@ async function openChat(chatId) {
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('Fetch aborted - user switched chats quickly');
-            // НЕ ПОКАЗЫВАЕМ ОШИБКУ если запрос был прерван (пользователь быстро переключил чат)
+            // Просто выходим, не показываем ошибку и не закрываем чат
             return;
         }
         
         console.error('Error opening chat:', error);
         
-        // ТОЛЬКО в серьезных случаях показываем ошибку
-        // НЕ показываем ошибку при обычных сбоях соединения или прерываниях
-        if (error.message && !error.message.includes('fetch') && !error.message.includes('network')) {
-            showMessage('Ошибка загрузки чата: ' + error.message, 'error');
+        // НЕ вызываем closeChat() здесь - это вызывает проблемы
+        // Вместо этого просто сбрасываем состояние и показываем плейсхолдер
+        currentChat = null;
+        currentMessages = [];
+        
+        if (messagesContainer) messagesContainer.innerHTML = '';
+        if (noMessages) {
+            noMessages.style.display = 'block';
+            noMessages.textContent = 'Не удалось загрузить чат';
         }
         
-        // Если возникла ошибка, закрываем чат
-        closeChat();
+        // На десктопе показываем плейсхолдер
+        if (isDesktop) {
+            if (chatModal) chatModal.style.display = 'none';
+            if (desktopPlaceholder) desktopPlaceholder.style.display = 'flex';
+        }
+        
+        // На мобильных просто закрываем чат без ошибок
+        if (!isDesktop) {
+            if (chatModal) chatModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        
     } finally {
         isOpeningChat = false;
-        openChatAbortController = null;
+        // Не обнуляем openChatAbortController здесь, чтобы он мог быть использован для отмены
     }
 
-    window.addEventListener('resize', () => {
-        if (!isDesktop && currentChat) {
-            setupMobileChatHeight();
-        }
-    });
-    
     updateChatWallpaper();
     applyWallpaper();
-    
-    // Сохраняем данные чата только если они существуют
-    if (chatData && chatData.chat) {
-        window.currentChat = chatData.chat;
-    }
 }
+
 
 
 function closeChat() {
     console.log('closeChat() called');
     
-    const { chatModal, messagesContainer, noMessages } = getActiveElements();
+    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
     // Проверка на наличие элементов
-    if (!chatModal || !messagesContainer || !noMessages) {
-        console.error('closeChat(): Required elements not found');
+    if (!chatModal) {
+        console.error('closeChat(): chatModal not found');
         return;
     }
 
@@ -4761,14 +4784,22 @@ function closeChat() {
     currentChat = null;
     currentMessages = [];
 
-    // Обновляем обои (если нужно)
-    updateChatWallpaper();
-    applyWallpaper();
-
-    // Clear UI
-    messagesContainer.innerHTML = '';
-    noMessages.style.display = 'block';
-    noMessages.textContent = 'Сообщений пока нет...';
+    // Очищаем UI только если элементы существуют
+    if (chatAvatar) {
+        chatAvatar.style.backgroundImage = '';
+        chatAvatar.style.backgroundColor = '';
+        chatAvatar.textContent = '';
+    }
+    
+    if (chatTitle) chatTitle.textContent = '';
+    if (chatStatus) chatStatus.textContent = '';
+    
+    if (messagesContainer) messagesContainer.innerHTML = '';
+    
+    if (noMessages) {
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Сообщений пока нет...';
+    }
 
     // Hide chat modal
     if (isDesktop) {
@@ -4782,8 +4813,18 @@ function closeChat() {
     // Очищаем глобальную переменную
     window.currentChat = null;
     
+    // Отменяем все активные запросы
+    if (openChatAbortController) {
+        openChatAbortController.abort();
+        openChatAbortController = null;
+    }
+    
+    isOpeningChat = false;
+    
     console.log('Chat closed successfully');
 }
+
+
 
 async function updateChatInList(chatId, updates) {
     try {
