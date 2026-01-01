@@ -34,6 +34,7 @@
     
     <!-- Stylesheets -->
     <script src="tailwind.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <link rel="stylesheet" href="fontawesome-free-6.7.2-web/css/all.min.css">
 
 <style>
@@ -2213,6 +2214,119 @@ input, textarea {
     <script>
     
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
+        let socket;
+
+        function initWebSocket() {
+            if (!userData || !userData.platform_user_id) return;
+            
+            socket = io(SERVER_URL, {
+                transports: ['websocket'],
+                upgrade: false
+            });
+
+            socket.on('connect', () => {
+                console.log('Connected to WebSocket');
+                socket.emit('join', { user_id: userData.platform_user_id });
+                if (currentChat) {
+                    socket.emit('join', { chat_id: currentChat.id });
+                }
+            });
+
+            socket.on('new_message', async (message) => {
+                console.log('New message received:', message);
+                
+                // 1. Если открыт этот чат, добавляем сообщение в UI
+                if (currentChat && currentChat.id === message.chat_id) {
+                    // Проверка на дубликаты
+                    if (!currentMessages.some(m => m.id === message.id)) {
+                        const isMe = message.sender_id === userData.platform_user_id;
+                        const msgForUI = {
+                            ...message,
+                            is_me: isMe,
+                            sender_name: message.sender_name,
+                            sender_avatar: message.sender_avatar,
+                            sender_avatar_background: message.sender_avatar_background
+                        };
+                        
+                        currentMessages.push(msgForUI);
+                        renderMessages(currentMessages);
+                        
+                        const { messagesContainer } = getActiveElements();
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        
+                        // Помечаем как прочитанное на сервере
+                        if (!isMe) {
+                            markMessageAsRead(message.chat_id);
+                        }
+                    }
+                } else {
+                    // 2. Если чат не открыт, обновляем счетчик непрочитанных в списке
+                    const chatIndex = currentChatsList.findIndex(c => c.id === message.chat_id);
+                    if (chatIndex !== -1) {
+                        currentChatsList[chatIndex].unread_count = (currentChatsList[chatIndex].unread_count || 0) + 1;
+                        currentChatsList[chatIndex].last_message = message.content;
+                        currentChatsList[chatIndex].last_message_time = message.sent_at;
+                        
+                        // Перемещаем наверх
+                        const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+                        currentChatsList.unshift(updatedChat);
+                        
+                        renderChats(currentChatsList);
+                        saveChatsLocal(currentChatsList);
+                    } else {
+                        // Если чата нет в списке, перезагружаем список
+                        performFullChatsReload();
+                    }
+                }
+            });
+
+            socket.on('chat_update', (data) => {
+                console.log('Chat update received:', data);
+                const chatIndex = currentChatsList.findIndex(c => c.id === data.chat_id);
+                if (chatIndex !== -1) {
+                    currentChatsList[chatIndex].last_message = data.last_message;
+                    currentChatsList[chatIndex].last_message_time = data.last_message_time;
+                    
+                    // Перемещаем наверх
+                    const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+                    currentChatsList.unshift(updatedChat);
+                    
+                    renderChats(currentChatsList);
+                    saveChatsLocal(currentChatsList);
+                } else {
+                    performFullChatsReload();
+                }
+            });
+
+            socket.on('messages_read', (data) => {
+                console.log('Messages read in chat:', data.chat_id);
+                if (currentChat && currentChat.id === data.chat_id) {
+                    // Обновляем галочки у всех моих сообщений
+                    currentMessages.forEach(m => {
+                        if (m.sender_id === userData.platform_user_id) {
+                            m.is_read = true;
+                        }
+                    });
+                    renderMessages(currentMessages);
+                }
+            });
+        }
+
+        async function markMessageAsRead(chatId) {
+            try {
+                await fetch(`${SERVER_URL}/mark_as_read`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        user_id: userData.platform_user_id
+                    }),
+                    credentials: 'include'
+                });
+            } catch (e) {
+                console.error('Error marking as read:', e);
+            }
+        }
 // --- IndexedDB Logic for Local Caching ---
 const DB_NAME = 'VuntgramDB';
 const DB_VERSION = 1;
@@ -4518,11 +4632,13 @@ async function openChat(chatId) {
     
     // Сначала закрываем текущий чат, если он открыт
     if (currentChat) {
-        // Не вызываем full closeChat(), чтобы не скрывать UI
+        if (socket) socket.emit('leave', { chat_id: currentChat.id });
         currentChat = null;
         currentMessages = [];
         messagesContainer.innerHTML = '';
     }
+    
+    if (socket) socket.emit('join', { chat_id: chatId, user_id: userData.platform_user_id });
     
     // 0. Обновляем заголовок из кэша списка чатов (если есть) - МОМЕНТАЛЬНО
     const cachedChat = currentChatsList.find(c => c.id === chatId);
@@ -4801,6 +4917,10 @@ async function openChat(chatId) {
 
 function closeChat() {
     console.log('closeChat() called');
+    
+    if (currentChat && socket) {
+        socket.emit('leave', { chat_id: currentChat.id });
+    }
     
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
@@ -5181,6 +5301,8 @@ async function initializePage() {
         loadUserData(),
         loadChats()
     ]);
+    
+    initWebSocket();
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
