@@ -2359,6 +2359,214 @@ let openChatAbortController = null; // Flag to prevent multiple chat openings
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        let messagePollInterval;
+        let currentLastMessageId = 0;
+        let isPolling = false;
+
+// Функция для получения ID последнего сообщения
+function getLastMessageId() {
+    if (currentMessages && currentMessages.length > 0) {
+        return Math.max(...currentMessages.map(msg => msg.id));
+    }
+    return 0;
+}
+
+// Функция для опроса новых сообщений
+function startMessagePolling() {
+    // Останавливаем предыдущий интервал если есть
+    if (messagePollInterval) {
+        clearInterval(messagePollInterval);
+    }
+    
+    if (!currentChat) return;
+    
+    // Обновляем ID последнего сообщения
+    currentLastMessageId = getLastMessageId();
+    
+    // Начинаем опрос каждые 2 секунды
+    messagePollInterval = setInterval(async () => {
+        if (!currentChat || isPolling) return;
+        
+        await pollForNewMessages();
+    }, 2000);
+}
+
+// Остановка опроса
+function stopMessagePolling() {
+    if (messagePollInterval) {
+        clearInterval(messagePollInterval);
+        messagePollInterval = null;
+    }
+}
+
+// Функция опроса новых сообщений
+async function pollForNewMessages() {
+    if (!currentChat || !currentChat.id || isPolling) return;
+    
+    isPolling = true;
+    
+    try {
+        const response = await fetch(`${SERVER_URL}/get_new_messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: currentChat.id,
+                platform_user_id: userData.platform_user_id,
+                last_message_id: currentLastMessageId
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.messages && data.messages.length > 0) {
+            console.log(`Received ${data.messages.length} new messages`);
+            
+            // Обрабатываем новые сообщения
+            await processNewMessages(data.messages);
+            
+            // Обновляем ID последнего сообщения
+            if (data.last_message_id > currentLastMessageId) {
+                currentLastMessageId = data.last_message_id;
+            }
+        }
+        
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('Error polling for new messages:', error);
+        }
+    } finally {
+        isPolling = false;
+    }
+}
+
+
+
+function setupVisibilityHandlers() {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            // При возвращении на вкладку сразу проверяем новые сообщения
+            if (currentChat) {
+                setTimeout(() => {
+                    pollForNewMessages();
+                }, 500);
+            }
+        } else {
+            // При скрытии вкладки останавливаем интенсивный опрос
+            if (messagePollInterval) {
+                clearInterval(messagePollInterval);
+                messagePollInterval = null;
+            }
+        }
+    });
+    
+    window.addEventListener('focus', () => {
+        if (currentChat) {
+            setTimeout(() => {
+                pollForNewMessages();
+                startMessagePolling();
+            }, 500);
+        }
+    });
+    
+    window.addEventListener('blur', () => {
+        // При потере фокуса можно уменьшить частоту опроса
+        if (messagePollInterval) {
+            clearInterval(messagePollInterval);
+            // Перезапускаем с увеличенным интервалом
+            messagePollInterval = setInterval(async () => {
+                if (currentChat) {
+                    await pollForNewMessages();
+                }
+            }, 5000); // 5 секунд вместо 2
+        }
+    });
+}
+
+
+
+// Обработка новых сообщений
+async function processNewMessages(newMessages) {
+    if (!newMessages || newMessages.length === 0) return;
+    
+    const { messagesContainer, noMessages } = getActiveElements();
+    
+    // Фильтруем сообщения, которые уже есть в currentMessages (для предотвращения дублирования)
+    const existingMessageIds = new Set(currentMessages.map(msg => msg.id));
+    const trulyNewMessages = newMessages.filter(msg => !existingMessageIds.has(msg.id));
+    
+    if (trulyNewMessages.length === 0) return;
+    
+    console.log(`Adding ${trulyNewMessages.length} truly new messages`);
+    
+    // Добавляем новые сообщения в текущий список
+    currentMessages = [...currentMessages, ...trulyNewMessages];
+    
+    // Сохраняем в локальное хранилище
+    if (currentChat && currentChat.id) {
+        await saveMessagesLocal(currentChat.id, currentMessages);
+    }
+    
+    // Обновляем UI
+    if (noMessages && noMessages.style.display === 'block') {
+        noMessages.style.display = 'none';
+    }
+    
+    // Отображаем новые сообщения
+    trulyNewMessages.forEach(message => {
+        renderMessage(message);
+    });
+    
+    // Если пользователь находится внизу чата или рядом, прокручиваем к новому сообщению
+    const scrollPosition = messagesContainer.scrollTop;
+    const scrollHeight = messagesContainer.scrollHeight;
+    const clientHeight = messagesContainer.clientHeight;
+    
+    // Прокручиваем если пользователь находится в пределах 200px от нижней границы
+    const scrollThreshold = 200;
+    if (scrollHeight - (scrollPosition + clientHeight) <= scrollThreshold) {
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 100);
+    }
+    
+    // Обновляем список чатов (последнее сообщение)
+    if (currentChat && !currentChat.is_temp) {
+        const lastMessage = trulyNewMessages[trulyNewMessages.length - 1];
+        let lastMessageText = lastMessage.content;
+        
+        if (lastMessage.is_image || isImageUrl(lastMessage.content)) {
+            lastMessageText = '📷 Фото';
+        }
+        
+        updateChatItemInDOM(currentChat.id, {
+            last_message: lastMessageText,
+            last_message_time: lastMessage.sent_at,
+            unread_count: 0,
+            last_message_type: lastMessage.is_image ? 'image' : 'text'
+        });
+        
+        // Обновляем кэш чатов
+        const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+        if (chatIndex !== -1) {
+            currentChatsList[chatIndex].last_message = lastMessageText;
+            currentChatsList[chatIndex].last_message_time = lastMessage.sent_at;
+            currentChatsList[chatIndex].last_message_type = lastMessage.is_image ? 'image' : 'text';
+            currentChatsList[chatIndex].unread_count = 0;
+            
+            // Перемещаем чат в начало списка
+            const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+            currentChatsList.unshift(updatedChat);
+            moveChatToTop(currentChat.id);
+        }
+    }
+    
+    // Помечаем сообщения как прочитанные
+    if (currentChat && currentChat.id) {
+        await markAllMessagesAsRead(currentChat.id);
+    }
+}
+
 
 
 
@@ -2913,7 +3121,10 @@ async function sendImageMessage(file) {
         };
         
         currentMessages = [...currentMessages, newMessage];
-        renderMessages(currentMessages);
+        renderMessage(newMessage);
+        
+        // Обновляем ID последнего сообщения
+        currentLastMessageId = Math.max(currentLastMessageId, newMessage.id);
         
         // Обновляем информацию о чате в списке (только для существующих чатов)
         if (!currentChat.is_temp) {
@@ -4317,10 +4528,7 @@ async function sendMessage() {
             if (data.status !== 'success') {
                 throw new Error(data.error || 'Не удалось создать чат');
             }
-            
-            // Обновляем текущий чат
-            currentChat.id = data.chat_id;
-            currentChat.is_temp = false;
+
             
             // ВМЕСТО loadChats() - добавляем новый чат в список
             const newChat = {
@@ -4371,17 +4579,21 @@ async function sendMessage() {
             is_me: true
         };
         
-        // Добавляем сообщение в текущий список
-        currentMessages = [...currentMessages, newMessage];
-        
-        // Обновляем UI
-        noMessages.style.display = 'none';
-        renderMessages(currentMessages);
-        
-        // Прокручиваем к последнему сообщению
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
+            currentMessages = [...currentMessages, newMessage];
+            noMessages.style.display = 'none';
+            renderMessage(newMessage);
+            
+            // Прокручиваем к последнему сообщению
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 50);
+            
+            // Обновляем ID последнего сообщения
+            currentLastMessageId = Math.max(currentLastMessageId, newMessage.id);
+            
+            // Обновляем текущий чат
+            currentChat.id = data.chat_id;
+            currentChat.is_temp = false;
         
         // Обновляем информацию о чате в списке (только для существующих чатов)
         if (!currentChat.is_temp) {
@@ -4793,6 +5005,18 @@ async function openChat(chatId) {
         // Не обнуляем openChatAbortController здесь, чтобы он мог быть использован для отмены
     }
 
+
+    if (currentChat && currentChat.id) {
+        // Останавливаем предыдущий опрос
+        stopMessagePolling();
+        
+        // Начинаем опрос для нового чата
+        setTimeout(() => {
+            startMessagePolling();
+        }, 1000);
+    }
+    
+
     updateChatWallpaper();
     applyWallpaper();
 }
@@ -4848,6 +5072,8 @@ function closeChat() {
         openChatAbortController.abort();
         openChatAbortController = null;
     }
+
+    stopMessagePolling();
     
     isOpeningChat = false;
     
@@ -5321,6 +5547,7 @@ imageInput.addEventListener('change', handleImageSelection);
     // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
     setupKeyboardDetection();
+    setupVisibilityHandlers();
   
     
     // Запрет масштабирования жестами
