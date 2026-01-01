@@ -5078,98 +5078,6 @@ function updateAllMessageStatusesInUI() {
 }
 
 
-let messageEventSource = null;
-
-function initMessageStream() {
-    if (messageEventSource) {
-        messageEventSource.close();
-    }
-
-    const url = `${SERVER_URL}/stream_messages?platform_user_id=${userData.platform_user_id}`;
-    messageEventSource = new EventSource(url);
-
-    messageEventSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'new_message') {
-            handleIncomingMessage(data.chat_id, data.message);
-        } else if (data.type === 'connected') {
-            console.log('SSE connected');
-        }
-    };
-
-    messageEventSource.onerror = function(err) {
-        console.error('SSE error:', err);
-        messageEventSource.close();
-        // Попытка переподключения через 5 секунд
-        setTimeout(initMessageStream, 5000);
-    };
-}
-
-function handleIncomingMessage(chatId, message) {
-    console.log('Incoming message via SSE:', message);
-    
-    // 1. Если этот чат сейчас открыт, добавляем сообщение в окно
-    // Используем строковое сравнение на случай разных типов ID
-    if (String(currentChatId) === String(chatId)) {
-        // Проверяем, нет ли уже такого сообщения (чтобы не дублировать свои)
-        if (!currentMessages.some(m => String(m.id) === String(message.id))) {
-            message.is_me = message.sender_id === userData.platform_user_id;
-            currentMessages.push(message);
-            
-            const { messagesContainer } = getActiveElements();
-            if (messagesContainer) {
-                const messageElement = createMessageElement(message);
-                messagesContainer.appendChild(messageElement);
-                
-                // Плавная прокрутка вниз
-                messagesContainer.scrollTo({
-                    top: messagesContainer.scrollHeight,
-                    behavior: 'smooth'
-                });
-            }
-            
-            // Если сообщение не от нас, помечаем как прочитанное
-            if (!message.is_me) {
-                markMessageAsRead(message.id);
-            }
-        }
-    }
-
-    // 2. Обновляем список чатов (последнее сообщение и счетчик)
-    updateChatInList(chatId, message);
-}
-
-function updateChatInList(chatId, message) {
-    const chatIndex = currentChatsList.findIndex(c => String(c.id) === String(chatId));
-    
-    if (chatIndex !== -1) {
-        const chat = currentChatsList[chatIndex];
-        chat.last_message = message.content;
-        chat.last_message_time = message.sent_at;
-        chat.last_message_sender_id = message.sender_id;
-        chat.is_image = message.is_image;
-        
-        if (String(currentChatId) !== String(chatId) && message.sender_id !== userData.platform_user_id) {
-            chat.unread_count = (parseInt(chat.unread_count) || 0) + 1;
-        }
-        
-        // Перемещаем чат наверх списка
-        currentChatsList.splice(chatIndex, 1);
-        currentChatsList.unshift(chat);
-        
-        // Перерисовываем список чатов (используем renderChats, так как renderChatsList может не существовать)
-        if (typeof renderChats === 'function') {
-            renderChats(currentChatsList);
-        }
-    } else {
-        // Если чата нет в списке, загружаем список заново
-        if (typeof loadChats === 'function') {
-            loadChats(true);
-        }
-    }
-}
-
 async function updateChatStatuses() {
     if (!currentChatsList || currentChatsList.length === 0) {
         return;
@@ -5368,9 +5276,6 @@ if (attachButton) {
 // Обработчик выбора изображений
 imageInput.addEventListener('change', handleImageSelection);
 
-
-    // Инициализация SSE для получения сообщений в реальном времени
-    initMessageStream();
 
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
