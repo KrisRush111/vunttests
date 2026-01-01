@@ -2210,13 +2210,9 @@ input, textarea {
 
 
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <script>
     
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
-        const SOCKET_URL = SERVER_URL; // Socket.IO будет использовать тот же URL
-
-        let socket;
 // --- IndexedDB Logic for Local Caching ---
 const DB_NAME = 'VuntgramDB';
 const DB_VERSION = 1;
@@ -2363,161 +2359,6 @@ let openChatAbortController = null; // Flag to prevent multiple chat openings
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
-
-        // --- SOCKET.IO LOGIC ---
-        function initializeSocketIO() {
-            if (socket && socket.connected) {
-                return;
-            }
-
-            socket = io(SOCKET_URL, {
-                transports: ['websocket', 'polling'],
-                withCredentials: true,
-                autoConnect: false // Управляем подключением вручную
-            });
-
-            socket.on('connect', () => {
-                console.log('Socket.IO connected. SID:', socket.id);
-                // Отправляем ID пользователя, как только соединение установлено
-                if (userData.platform_user_id) {
-                    socket.emit('set_user_id', { user_id: userData.platform_user_id });
-                }
-            });
-
-            socket.on('disconnect', (reason) => {
-                console.log('Socket.IO disconnected:', reason);
-            });
-
-            socket.on('connect_error', (error) => {
-                console.error('Socket.IO connection error:', error);
-            });
-
-            socket.on('user_id_set', (data) => {
-                console.log('User ID set on server:', data.user_id);
-            });
-
-            socket.on('new_message', handleNewMessage);
-            socket.on('read_status_update', handleReadStatusUpdate);
-            socket.on('user_joined_chat', handleUserJoinedChat);
-            socket.on('user_left_chat', handleUserLeftChat);
-            socket.on('message_error', (data) => {
-                console.error('Server message error:', data.error);
-                showMessage('Ошибка отправки сообщения: ' + data.error, 'error');
-            });
-
-            socket.connect();
-        }
-
-        function handleNewMessage(message) {
-            console.log('Received new message:', message);
-            const chatId = message.chat_id;
-
-            // 1. Обновление списка чатов (поднятие чата вверх)
-            // Ищем чат в текущем списке
-            const chatIndex = currentChatsList.findIndex(c => c.id == chatId);
-            if (chatIndex !== -1) {
-                const chatToUpdate = currentChatsList[chatIndex];
-                // Обновляем последнее сообщение и время
-                chatToUpdate.last_message = message.content;
-                chatToUpdate.last_message_time = message.sent_at;
-                chatToUpdate.last_message_is_read = message.is_read;
-                chatToUpdate.last_message_is_image = message.is_image;
-                chatToUpdate.last_message_is_me = message.is_me;
-
-                // Если это не наше сообщение и чат не открыт, увеличиваем счетчик непрочитанных
-                if (!message.is_me && currentChat?.id != chatId) {
-                    chatToUpdate.unread_count = (chatToUpdate.unread_count || 0) + 1;
-                }
-
-                // Удаляем из текущей позиции и вставляем в начало
-                currentChatsList.splice(chatIndex, 1);
-                currentChatsList.unshift(chatToUpdate);
-
-                // Перерисовываем список чатов
-                renderChatsList(currentChatsList);
-            } else {
-                // Если чата нет в списке (например, новый чат), нужно запросить его с сервера
-                // Для простоты пока просто перезагрузим список чатов
-                loadChats();
-            }
-
-            // 2. Обновление открытого чата
-            if (currentChat && currentChat.id == chatId) {
-                // Добавляем сообщение в контейнер
-                const { messagesContainer } = getActiveElements();
-                const messageElement = createMessageElement(message);
-                messagesContainer.appendChild(messageElement);
-                scrollToBottom(messagesContainer);
-
-                // Если сообщение не наше, отправляем статус "прочитано"
-                if (!message.is_me) {
-                    // Отправляем mark_read на сервер
-                    socket.emit('mark_read', {
-                        chat_id: chatId,
-                        user_id: userData.platform_user_id,
-                        message_id: message.id
-                    });
-                    // Обнуляем счетчик непрочитанных в кэше и на UI
-                    const chatElement = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-                    if (chatElement) {
-                        const unreadBadge = chatElement.querySelector('.unread-badge');
-                        if (unreadBadge) {
-                            unreadBadge.textContent = '0';
-                            unreadBadge.classList.add('hidden');
-                        }
-                    }
-                    if (chatIndex !== -1) {
-                        currentChatsList[0].unread_count = 0;
-                    }
-                }
-            }
-        }
-
-        function handleReadStatusUpdate(data) {
-            console.log('Received read status update:', data);
-            const chatId = data.chat_id;
-            const messageId = data.message_id;
-            const isRead = data.is_read;
-
-            if (currentChat && currentChat.id == chatId) {
-                // Обновляем все сообщения в открытом чате до messageId
-                const { messagesContainer } = getActiveElements();
-                const messageElements = messagesContainer.querySelectorAll('.message-bubble.my-message');
-
-                messageElements.forEach(el => {
-                    const msgId = parseInt(el.dataset.messageId);
-                    if (msgId <= messageId) {
-                        const readStatusIcon = el.querySelector('.read-status-icon');
-                        if (readStatusIcon) {
-                            // Меняем иконку на двойную галочку
-                            readStatusIcon.classList.remove('fa-check');
-                            readStatusIcon.classList.add('fa-check-double');
-                            readStatusIcon.classList.add('text-telegram-blue');
-                        }
-                    }
-                });
-            }
-
-            // Обновляем кэш сообщений (если он есть)
-            // В данной реализации мы не храним все сообщения в кэше, только список чатов.
-            // Если нужно, можно добавить логику обновления кэша сообщений.
-        }
-
-        function handleUserJoinedChat(data) {
-            console.log(`User ${data.user_id} joined chat ${data.chat_id}`);
-            // Здесь можно обновить статус "онлайн" или "печатает"
-            if (currentChat && currentChat.id == data.chat_id) {
-                // Логика обновления статуса собеседника
-            }
-        }
-
-        function handleUserLeftChat(data) {
-            console.log(`User ${data.user_id} left chat ${data.chat_id}`);
-            // Здесь можно обновить статус "был(а) в сети..."
-            if (currentChat && currentChat.id == data.chat_id) {
-                // Логика обновления статуса собеседника
-            }
-        }
 
 
 
@@ -3129,11 +2970,11 @@ function renderMessage(message) {
     if (message.is_me) {
         const isRead = message.is_read;
         statusIcons = `
-	        <div class="message-status">
-	            <div class="status-icons">
-	                <i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i>
-	            </div>
-	        </div>
+            <div class="message-status">
+                <div class="status-icons">
+                    <i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i>
+                </div>
+            </div>
         `;
     }
     
@@ -4450,48 +4291,17 @@ async function sendMessage() {
     const content = messageInput.value.trim();
     
     if (!content || !currentChat) return;
-    if (isSendingMessage || !socket || !socket.connected) return;
     
     sendMessageButton.disabled = true;
     isSendingMessage = true;
     
-    // Сохраняем контент перед очисткой
-    const messageContent = content;
-    messageInput.value = '';
-    
     try {
-        let chatId = currentChat.id;
-        let isTemp = currentChat.is_temp;
-
-        // 1. Создаем временное сообщение для UI
-        const tempMessage = {
-            id: Date.now(), // Временный ID
-            chat_id: chatId,
-            sender_id: userData.platform_user_id,
-            content: messageContent,
-            sent_at: new Date().toISOString(),
-            is_read: false,
-            sender_name: userData.nickname,
-            sender_avatar: userData.avatar_url,
-            sender_avatar_background: userData.avatar_background,
-            is_me: true,
-            is_sending: true // Флаг, что сообщение отправляется
-        };
-
-        // Добавляем сообщение в текущий список
-        currentMessages = [...currentMessages, tempMessage];
+        // Сохраняем контент перед очисткой
+        const messageContent = content;
+        messageInput.value = '';
         
-        // Обновляем UI
-        noMessages.style.display = 'none';
-        renderMessages(currentMessages);
-        
-        // Прокручиваем к последнему сообщению
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
-
         // Если это временный чат, сначала создаем его
-        if (isTemp) {
+        if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -4511,7 +4321,6 @@ async function sendMessage() {
             // Обновляем текущий чат
             currentChat.id = data.chat_id;
             currentChat.is_temp = false;
-            chatId = data.chat_id; // Обновляем chatId
             
             // ВМЕСТО loadChats() - добавляем новый чат в список
             const newChat = {
@@ -4531,70 +4340,75 @@ async function sendMessage() {
             updateChatItemInDOM(data.chat_id, newChat);
         }
         
-        // 2. Отправляем через Socket.IO
-        socket.emit('send_message', {
-            chat_id: chatId,
+        // Отправляем сообщение
+        const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: currentChat.id,
+                sender_id: userData.platform_user_id,
+                content: messageContent
+            }),
+            credentials: 'include'
+        });
+        
+        const messageData = await messageResponse.json();
+        
+        if (messageData.status !== 'success') {
+            throw new Error(messageData.error || 'Не удалось отправить сообщение');
+        }
+        
+        // Создаем новое сообщение для UI
+        const newMessage = {
+            id: messageData.message_id,
             sender_id: userData.platform_user_id,
             content: messageContent,
-            is_image: false // Предполагаем, что это текстовое сообщение
-        }, (response) => {
-            // Этот колбэк вызывается, если сервер возвращает ошибку
-            if (response && response.status === 'error') {
-                console.error('Socket.IO send_message error:', response.error);
-                showMessage('Ошибка отправки сообщения: ' + response.error, 'error');
-                // Удаляем временное сообщение из UI и кэша
-                const tempEl = messagesContainer.querySelector(`[data-message-id="${tempMessage.id}"]`);
-                if (tempEl) tempEl.remove();
-                currentMessages = currentMessages.filter(m => m.id !== tempMessage.id);
-            } else if (response && response.status === 'success') {
-                // Обновляем временный ID на реальный ID сообщения
-                const tempEl = messagesContainer.querySelector(`[data-message-id="${tempMessage.id}"]`);
-                if (tempEl) {
-                    tempEl.dataset.messageId = response.message_id;
-                    const timeElement = tempEl.querySelector('.message-time');
-                    if (timeElement) {
-                        timeElement.textContent = formatTime(response.sent_at);
-                    }
-                    // Удаляем иконку "часы"
-                    const statusIcon = tempEl.querySelector('.read-status-icon');
-                    if (statusIcon) {
-                        statusIcon.classList.remove('fa-clock', 'text-yellow-500');
-                        statusIcon.classList.add('fa-check', 'text-gray-400', 'dark:text-gray-500');
-                    }
-                }
-                // Обновляем кэш сообщений
-                const msgIndex = currentMessages.findIndex(m => m.id === tempMessage.id);
-                if (msgIndex !== -1) {
-                    currentMessages[msgIndex].id = response.message_id;
-                    currentMessages[msgIndex].sent_at = response.sent_at;
-                    delete currentMessages[msgIndex].is_sending;
-                }
-            }
-        });
+            sent_at: new Date().toISOString(),
+            is_read: false,
+            sender_name: userData.nickname,
+            sender_avatar: userData.avatar_url,
+            sender_avatar_background: userData.avatar_background,
+            is_me: true
+        };
         
-        // Обновляем информацию о чате в списке
-        updateChatItemInDOM(chatId, {
-            last_message: messageContent,
-            last_message_time: tempMessage.sent_at,
-            unread_count: 0
-        });
+        // Добавляем сообщение в текущий список
+        currentMessages = [...currentMessages, newMessage];
         
-        // Обновляем данные в кэше чатов
-        const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-        if (chatIndex !== -1) {
-            currentChatsList[chatIndex].last_message = messageContent;
-            currentChatsList[chatIndex].last_message_time = tempMessage.sent_at;
-            currentChatsList[chatIndex].unread_count = 0;
+        // Обновляем UI
+        noMessages.style.display = 'none';
+        renderMessages(currentMessages);
+        
+        // Прокручиваем к последнему сообщению
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 50);
+        
+        // Обновляем информацию о чате в списке (только для существующих чатов)
+        if (!currentChat.is_temp) {
+            updateChatItemInDOM(currentChat.id, {
+                last_message: messageContent,
+                last_message_time: newMessage.sent_at,
+                unread_count: 0
+            });
             
-            // Перемещаем чат в начало списка
-            const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
-            currentChatsList.unshift(updatedChat);
-            moveChatToTop(chatId);
+            // Обновляем данные в кэше чатов
+            const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+            if (chatIndex !== -1) {
+                currentChatsList[chatIndex].last_message = messageContent;
+                currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
+                currentChatsList[chatIndex].unread_count = 0;
+                
+                // Перемещаем чат в начало списка
+                const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+                currentChatsList.unshift(updatedChat);
+                moveChatToTop(currentChat.id);
+            }
         }
         
         // Фокусируемся на поле ввода после успешной отправки
         setTimeout(() => {
             messageInput.focus();
+            isSendingMessage = false;
         }, 100);
         
     } catch (error) {
@@ -4603,6 +4417,7 @@ async function sendMessage() {
         
         // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
+        isSendingMessage = false;
         
         // Показываем "нет сообщений" если сообщений действительно нет
         if (currentMessages.length === 0) {
@@ -4610,7 +4425,6 @@ async function sendMessage() {
         }
     } finally {
         sendMessageButton.disabled = false;
-        isSendingMessage = false;
     }
 }
 
@@ -4897,19 +4711,7 @@ async function openChat(chatId) {
                 saveMessagesLocal(chatId, currentMessages);
             }
             
-            // 5. Пометка о прочтении
-            // Находим ID последнего сообщения
-            if (currentMessages.length > 0) {
-                const lastMessageId = currentMessages[currentMessages.length - 1].id;
-                // Отправляем mark_read на сервер через Socket.IO
-                if (socket && socket.connected) {
-                    socket.emit('mark_read', {
-                        chat_id: chatId,
-                        user_id: userData.platform_user_id,
-                        message_id: lastMessageId
-                    });
-                }
-            }
+            markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
                 noMessages.style.display = 'block';
@@ -4993,11 +4795,6 @@ async function openChat(chatId) {
 
     updateChatWallpaper();
     applyWallpaper();
-
-    // 6. Присоединение к комнаме Socket.IO
-    if (socket && socket.connected) {
-        socket.emit('join_chat', { chat_id: chatId });
-    }
 }
 
 
@@ -5005,11 +4802,6 @@ async function openChat(chatId) {
 function closeChat() {
     console.log('closeChat() called');
     
-    // 1. Отправка события "покинуть чат"
-    if (currentChat && socket && socket.connected) {
-        socket.emit('leave_chat', { chat_id: currentChat.id });
-    }
-
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
     // Проверка на наличие элементов
@@ -5385,9 +5177,10 @@ async function initializePage() {
     }
 
     // Параллельная загрузка данных без индикаторов
-    await loadUserData();
-    initializeSocketIO(); // Инициализация Socket.IO после загрузки данных пользователя
-    await loadChats();
+    await Promise.all([
+        loadUserData(),
+        loadChats()
+    ]);
     
     // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
