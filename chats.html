@@ -4639,38 +4639,48 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
-
-        // Обновление аватара
+        // Загрузка аватара
         if (currentChat.participants && currentChat.participants.length > 0) {
             const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
                 const userId = otherParticipant.platform_user_id;
                 const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
                 const bgColor = currentChat.avatar_background || getRandomColor();
-                const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
                 
-                // Сначала устанавливаем градиент и буквы
-                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                chatAvatar.style.backgroundImage = '';
-                chatAvatar.textContent = initials;
+                // Пробуем загрузить аватар для участника чата
+                const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
+                const img = new Image();
                 
-                // Если есть аватарка, пытаемся загрузить
-                if (currentChat.has_avatar_photo) {
-                    const img = new Image();
-                    img.onload = function() {
-                        chatAvatar.style.backgroundImage = `url(${avatarUrl})`;
-                        chatAvatar.style.backgroundSize = 'cover';
-                        chatAvatar.style.backgroundPosition = 'center';
-                        chatAvatar.textContent = '';
-                    };
-                    img.onerror = function() {
-                        // Если не загрузилось, оставляем градиент и буквы
-                        chatAvatar.style.backgroundImage = '';
-                        chatAvatar.textContent = initials;
-                    };
-                    img.src = avatarUrl;
-                }
+                img.onload = function() {
+                    // Аватар успешно загружен - только картинка
+                    chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+                    chatAvatar.textContent = '';
+                };
+                
+                img.onerror = function() {
+                    // Аватар не загрузился - только градиент
+                    chatAvatar.style.background = bgColor ? 
+                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                        'linear-gradient(135deg, #0088cc, #40a7e3)';
+                    chatAvatar.textContent = initials;
+                };
+                
+                img.src = avatarUrl;
+            } else {
+                // Если нет другого участника
+                const bgColor = currentChat.avatar_background || getRandomColor();
+                chatAvatar.style.background = bgColor ? 
+                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                    'linear-gradient(135deg, #0088cc, #40a7e3)';
+                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
             }
+        } else {
+            // Если нет участников
+            const bgColor = currentChat.avatar_background || getRandomColor();
+            chatAvatar.style.background = bgColor ? 
+                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
+                'linear-gradient(135deg, #0088cc, #40a7e3)';
+            chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
         // 2. Загружаем с сервера только если нет локальных или для обновления в фоне
