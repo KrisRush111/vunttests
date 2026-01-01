@@ -3884,18 +3884,34 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
     
     // Сначала ставим инициалы и фон
-    avatarElement.style.background = bgColor ? 
+    const gradientBg = bgColor ? 
         `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
         'linear-gradient(135deg, #0088cc, #40a7e3)';
+    
+    avatarElement.style.background = gradientBg;
     avatarElement.textContent = initials;
 
     const img = new Image();
+    
     img.onload = function() {
-        // Если картинка загрузилась, ставим её фоном и убираем текст
-        avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-        avatarElement.textContent = '';
+        // Проверяем, действительно ли изображение загрузилось (не пустое)
+        if (this.naturalWidth === 0 || this.naturalHeight === 0) {
+            // Изображение пустое, оставляем инициалы
+            avatarElement.style.background = gradientBg;
+            avatarElement.textContent = initials;
+        } else {
+            // Если картинка загрузилась, ставим её фоном и убираем текст
+            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat, ${gradientBg}`;
+            avatarElement.textContent = '';
+        }
     };
-    // Если ошибка, инициалы уже на месте
+    
+    img.onerror = function() {
+        // Если ошибка загрузки, оставляем инициалы
+        avatarElement.style.background = gradientBg;
+        avatarElement.textContent = initials;
+    };
+    
     img.src = avatarUrl;
 }
 
