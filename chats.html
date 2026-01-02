@@ -3742,7 +3742,7 @@ async function renderChats(chats) {
         }
 
         chatItem.innerHTML = `
-            <div class="chat-avatar" style="background: ${avatarStyle}">
+            <div class="chat-avatar" style="background: ${avatarStyle}" data-user-id="${otherParticipant ? otherParticipant.platform_user_id : ''}">
                 ${initials}
             </div>
             <div class="chat-info">
@@ -3758,8 +3758,8 @@ async function renderChats(chats) {
             ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
         `;
         
-        if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-            loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
+        if (chat.has_avatar_photo && otherParticipant) {
+            loadChatAvatar(chatItem.querySelector('.chat-avatar'), otherParticipant.platform_user_id, initials, bgColor);
         }
         
         chatItem.addEventListener('click', (e) => {
@@ -3885,6 +3885,11 @@ function getRussianNoun(number, forms) {
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
     
+    // Если аватарка уже установлена (например, из кэша), не перерисовываем её
+    if (avatarElement.style.background.includes(avatarUrl)) {
+        return;
+    }
+
     // Сначала ставим инициалы и фон
     avatarElement.style.background = bgColor ? 
         `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
@@ -4536,9 +4541,11 @@ async function openChat(chatId) {
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
             const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
-            // Мгновенно устанавливаем фон
-            chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.textContent = '';
+            // Мгновенно устанавливаем фон, только если он еще не установлен
+            if (!chatAvatar.style.background.includes(avatarUrl)) {
+                chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                chatAvatar.textContent = '';
+            }
             
             // Также мгновенно обновляем статус из кэша, если он там есть
             const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
