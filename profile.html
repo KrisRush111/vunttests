@@ -2433,41 +2433,6 @@ input:checked + .toggle-slider:before {
 
 
 
-// Сохраняем кэш при уходе со страницы
-window.addEventListener('beforeunload', () => {
-    if (window.userData && window.userData.platform_user_id) {
-        // Сохраняем факт активности на платформе
-        fetch(`${SERVER_URL}/cache_chats`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                platform_user_id: window.userData.platform_user_id,
-                chats: [],
-                cache_key: `activity_${Date.now()}`,
-                activity_only: true
-            }),
-            credentials: 'include',
-            keepalive: true
-        }).catch(() => {});
-    }
-});
-
-// Обновляем активность каждые 30 секунд
-setInterval(() => {
-    if (window.userData && window.userData.platform_user_id) {
-        fetch(`${SERVER_URL}/cache_chats`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                platform_user_id: window.userData.platform_user_id,
-                chats: [],
-                cache_key: `activity_${Date.now()}`,
-                activity_only: true
-            }),
-            credentials: 'include'
-        }).catch(() => {});
-    }
-}, 30000);
 
 
 
@@ -3292,6 +3257,7 @@ window.addEventListener("beforeunload", () => {
                 if (userData) {
                     userData.has_avatar = true;
                     sessionStorage.setItem('userData', JSON.stringify(userData));
+                    localStorage.setItem('userData', JSON.stringify(userData));
                 }
             };
             
@@ -3485,6 +3451,7 @@ window.addEventListener("beforeunload", () => {
                         has_avatar: data.user.has_avatar
                     };
                     sessionStorage.setItem('userData', JSON.stringify(userData));
+                    localStorage.setItem('userData', JSON.stringify(userData));
                     return true;
                 } else {
                     throw new Error(data.error || 'Ошибка загрузки данных');
@@ -3770,24 +3737,29 @@ function updateProfileUI() {
 
        
         async function loadProfileData() {
-            // Removed showLoading call
+            // 1. Сначала мгновенно отображаем данные из кэша
+            const cachedData = localStorage.getItem('userData');
+            if (cachedData) {
+                userData = JSON.parse(cachedData);
+                updateProfileUI();
+            }
+
             try {
+                // 2. Затем обновляем данные с сервера в фоне
                 const dataUpdated = await fetchUserData();
                 
-                if (!dataUpdated) {
-                    console.warn('Using cached data from sessionStorage');
+                if (dataUpdated) {
+                    // Если данные обновились, перерисовываем UI
+                    updateProfileUI();
                 }
-                
-                updateProfileUI();
             } catch (error) {
                 console.error('Profile loading error:', error);
-                showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
-                
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 5000);
-            } finally {
-                // Removed hideLoading call
+                if (!cachedData) {
+                    showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 5000);
+                }
             }
         }
 
