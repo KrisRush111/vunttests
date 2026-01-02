@@ -3257,7 +3257,6 @@ window.addEventListener("beforeunload", () => {
                 if (userData) {
                     userData.has_avatar = true;
                     sessionStorage.setItem('userData', JSON.stringify(userData));
-                    localStorage.setItem('userData', JSON.stringify(userData));
                 }
             };
             
@@ -3451,7 +3450,6 @@ window.addEventListener("beforeunload", () => {
                         has_avatar: data.user.has_avatar
                     };
                     sessionStorage.setItem('userData', JSON.stringify(userData));
-                    localStorage.setItem('userData', JSON.stringify(userData));
                     return true;
                 } else {
                     throw new Error(data.error || 'Ошибка загрузки данных');
@@ -3737,29 +3735,24 @@ function updateProfileUI() {
 
        
         async function loadProfileData() {
-            // 1. Сначала мгновенно отображаем данные из кэша
-            const cachedData = localStorage.getItem('userData');
-            if (cachedData) {
-                userData = JSON.parse(cachedData);
-                updateProfileUI();
-            }
-
+            // Removed showLoading call
             try {
-                // 2. Затем обновляем данные с сервера в фоне
                 const dataUpdated = await fetchUserData();
                 
-                if (dataUpdated) {
-                    // Если данные обновились, перерисовываем UI
-                    updateProfileUI();
+                if (!dataUpdated) {
+                    console.warn('Using cached data from sessionStorage');
                 }
+                
+                updateProfileUI();
             } catch (error) {
                 console.error('Profile loading error:', error);
-                if (!cachedData) {
-                    showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 5000);
-                }
+                showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
+                
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 5000);
+            } finally {
+                // Removed hideLoading call
             }
         }
 
