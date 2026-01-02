@@ -3244,15 +3244,21 @@ window.addEventListener("beforeunload", () => {
 
  
         function loadAvatar(element, userId) {
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-            const img = new Image();
+            // Убираем ?t=... для обычного отображения, чтобы браузер использовал кэш
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
             
+            // Если аватарка уже установлена (например, из кэша), не перерисовываем её, чтобы не было мерцания
+            if (element.style.backgroundImage.includes(avatarUrl)) {
+                return;
+            }
+
+            const img = new Image();
             img.onload = function() {
                 element.style.backgroundImage = `url(${avatarUrl})`;
                 element.style.backgroundSize = 'cover';
                 element.style.backgroundPosition = 'center';
                 element.textContent = '';
-                element.style.backgroundColor = ''; // Remove solid background if image loads
+                element.style.backgroundColor = '';
                 
                 if (userData) {
                     userData.has_avatar = true;
@@ -3262,7 +3268,6 @@ window.addEventListener("beforeunload", () => {
             };
             
             img.onerror = function() {
-                console.error('Failed to load avatar from server, generating background.');
                 if (userData) {
                     setAvatarBackground(
                         element,
