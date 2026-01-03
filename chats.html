@@ -2251,33 +2251,58 @@ input, textarea {
     }
 }
 
-/* Desktop Profile Media Query */
+/* Обновленные стили для профиля на десктопе */
 @media (min-width: 768px) {
     .profile-modal.desktop-profile {
         position: static;
         display: none;
         flex: 1;
         height: 100%;
-        padding: 12px;
+        padding: 0;
         overflow-y: auto;
         background-color: var(--telegram-secondary-bg);
         z-index: 1;
         animation: none;
         transform: none;
+        width: 100%;
     }
 
     .profile-modal.desktop-profile.visible {
         display: flex;
         flex-direction: column;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: var(--telegram-secondary-bg);
+        z-index: 100;
     }
 
-    .desktop-profile .action-button-icon {
-        box-shadow: 0 4px 15px rgba(36, 129, 204, 0.3);
+    .desktop-profile .profile-modal-content {
+        width: 100%;
+        max-width: 480px;
+        margin: 0 auto;
+        background: transparent;
+        animation: none;
+        padding: 0;
+        height: 100%;
+        overflow-y: auto;
     }
-    
-    .desktop-profile .action-button:hover .action-button-icon {
-        transform: translateY(-4px) scale(1.1);
-        box-shadow: 0 6px 20px rgba(36, 129, 204, 0.4);
+
+    /* Скрываем кнопку "Назад" в десктоп версии профиля */
+    .desktop-profile .profile-back-button {
+        display: flex !important;
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 10;
+    }
+
+    /* Когда профиль открыт, скрываем чат и плейсхолдер */
+    .profile-modal.desktop-profile.visible ~ .chat-modal,
+    .profile-modal.desktop-profile.visible ~ .desktop-placeholder {
+        display: none !important;
     }
 }
 
@@ -5195,12 +5220,31 @@ function closePhotoViewer() {
 let currentViewedUser = null;
 
 function openProfileModal(userId) {
-    const profileModal = isDesktop ? document.getElementById('profileModalDesktop') : document.getElementById('profileModalMobile');
-    
     if (isDesktop) {
+        const profileModal = document.getElementById('profileModalDesktop');
+        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+        const chatModalDesktop = document.getElementById('chatModalDesktop');
+        
+        // Скрываем плейсхолдер и чат
+        if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
+        if (chatModalDesktop) chatModalDesktop.style.display = 'none';
+        
+        // Показываем профиль на весь экран
         profileModal.style.display = 'flex';
         profileModal.classList.add('visible');
+        
+        // Делаем профиль видимым над всем
+        profileModal.style.position = 'absolute';
+        profileModal.style.top = '0';
+        profileModal.style.left = '0';
+        profileModal.style.right = '0';
+        profileModal.style.bottom = '0';
+        profileModal.style.zIndex = '100';
+        profileModal.style.backgroundColor = 'var(--telegram-secondary-bg)';
+        
     } else {
+        // Мобильная версия остается без изменений
+        const profileModal = document.getElementById('profileModalMobile');
         document.body.classList.add('modal-open');
         profileModal.classList.add('active');
     }
@@ -5209,12 +5253,37 @@ function openProfileModal(userId) {
 }
 
 function closeProfileModal() {
-    const profileModal = isDesktop ? document.getElementById('profileModalDesktop') : document.getElementById('profileModalMobile');
-    
     if (isDesktop) {
+        const profileModal = document.getElementById('profileModalDesktop');
+        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+        const chatModalDesktop = document.getElementById('chatModalDesktop');
+        
+        // Скрываем профиль
         profileModal.style.display = 'none';
         profileModal.classList.remove('visible');
+        
+        // Сбрасываем стили
+        profileModal.style.position = '';
+        profileModal.style.top = '';
+        profileModal.style.left = '';
+        profileModal.style.right = '';
+        profileModal.style.bottom = '';
+        profileModal.style.zIndex = '';
+        profileModal.style.backgroundColor = '';
+        
+        // Показываем плейсхолдер если чат не открыт
+        if (chatModalDesktop && chatModalDesktop.style.display !== 'flex') {
+            if (desktopPlaceholder) desktopPlaceholder.style.display = 'flex';
+        }
+        
+        // Если был открыт чат, показываем его
+        if (chatModalDesktop && chatModalDesktop.style.display === 'flex') {
+            chatModalDesktop.style.display = 'flex';
+        }
+        
     } else {
+        // Мобильная версия остается без изменений
+        const profileModal = document.getElementById('profileModalMobile');
         document.body.classList.remove('modal-open');
         profileModal.classList.remove('active');
     }
@@ -6379,6 +6448,14 @@ if (attachButton) {
 imageInput.addEventListener('change', handleImageSelection);
 
 
+if (profileBackButtonDesktop) {
+    profileBackButtonDesktop.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeProfileModal();
+    });
+}
+
     // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
         const { chatModal } = getActiveElements();
@@ -6503,6 +6580,32 @@ imageInput.addEventListener('change', handleImageSelection);
         clearInterval(statusUpdateInterval);
         sendOfflineStatus();
     });
+
+    // Добавьте эти обработчики в функцию initializePage():
+
+    if (chatTitleContainerDesktop) {
+        chatTitleContainerDesktop.style.cursor = 'pointer';
+        chatTitleContainerDesktop.addEventListener('click', () => {
+            if (currentChat && currentChat.participants) {
+                const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) {
+                    openProfileModal(otherParticipant.platform_user_id);
+                }
+            }
+        });
+    }
+
+    if (chatAvatarDesktop) {
+        chatAvatarDesktop.style.cursor = 'pointer';
+        chatAvatarDesktop.addEventListener('click', () => {
+            if (currentChat && currentChat.participants) {
+                const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) {
+                    openProfileModal(otherParticipant.platform_user_id);
+                }
+            }
+        });
+    }
     
     // Обработчики для дополнительных кнопок
     const menuButton = document.querySelector('.menu-button');
