@@ -3518,11 +3518,10 @@ function openImageModal(imageUrl, messageIndex = 0) {
         async function loadUserData() {
             
             try {
-                const cachedData = sessionStorage.getItem('userData') || localStorage.getItem('userData');
+                const cachedData = sessionStorage.getItem('userData');
                 if (cachedData) {
                     userData = JSON.parse(cachedData);
-                    // Не возвращаем true сразу, чтобы позволить фоновое обновление если нужно, 
-                    // но для chats.html обычно достаточно кэша при старте
+                    return true;
                 }
                 
                 const response = await fetch(`${SERVER_URL}/get_user_data`, {
@@ -3541,7 +3540,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
                 if (data.status === 'success') {
                     userData = data.user;
                     sessionStorage.setItem('userData', JSON.stringify(userData));
-                    localStorage.setItem('userData', JSON.stringify(userData));
             return true;
         }
         return false;
@@ -5178,13 +5176,7 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    // 1. Сначала загружаем данные из кэша для мгновенного отображения
-    const cachedUser = localStorage.getItem('userData');
-    if (cachedUser) {
-        userData = JSON.parse(cachedUser);
-    }
-
-    // 2. Параллельная загрузка данных без индикаторов
+    // Параллельная загрузка данных без индикаторов
     await Promise.all([
         loadUserData(),
         loadChats()
