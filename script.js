@@ -1,4 +1,4 @@
-const SERVER_URL = 'сервертут';
+const SERVER_URL = 'https://vuntserver-479v.onrender.com';
         
         let userData = null; 
         let wallpaperState = {
