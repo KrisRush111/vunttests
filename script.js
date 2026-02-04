@@ -182,43 +182,43 @@ const WALLPAPERS = [
     {
         id: 'default',
         name: 'Системные',
-        url: 'фон.webp',
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон.webp',
         isDefault: true
     },
     {
         id: 'wall1',
         name: 'Фиолетовые',
-        url: 'фон3.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон3.webp'
     },
     {
         id: 'wall6',
         name: 'фиолетово-розовые',
-        url: 'фон8.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон8.webp'
     },
     {
         id: 'wall2',
         name: 'Светлые',
-        url: 'фон4.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон4.webp'
     },
     {
         id: 'wall5',
         name: 'сине-зелёные',
-        url: 'фон7.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон7.webp'
     },
     {
         id: 'wall3',
         name: 'зелёно-розовые',
-        url: 'фон5.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон5.webp'
     },
     {
         id: 'wall4',
         name: 'Темные',
-        url: 'фон6.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон6.webp'
     },
     {
         id: 'wall7',
         name: 'жёлто-зелёные',
-        url: 'фон9.webp'
+        url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон9.webp'
     }
 ];
 
@@ -1730,6 +1730,6 @@ window.addEventListener('beforeunload', function() {
             is_online: false
         })], {type: 'application/json'});
         
-        navigator.sendBeacon('https://vuntserver.onrender.com/update_activity', data);
+        navigator.sendBeacon('https://vuntserver-479v.onrender.com/update_activity', data);
     }
 });
