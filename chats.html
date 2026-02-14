@@ -760,7 +760,6 @@ input, textarea {
         word-wrap: break-word;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         opacity: 0;
-        background-color: 3, 22, 31;
         transform: translateY(10px);
         transition: opacity 0.3s ease, transform 0.3s ease;
     }
@@ -2120,7 +2119,7 @@ input, textarea {
 
     <!-- ПРОКРУЧИВАЕМЫЙ КОНТЕНТ -->
     <div class="chats-content">
-        <div id="noChatsMobile" class="no-chats">Нет чатов</div>
+        <div id="noChatsMobile" class="no-chats">Нет чатов :(</div>
         <div id="chatsListMobile">
             <!-- Список чатов будет добавляться сюда -->
         </div>
@@ -2211,16 +2210,18 @@ input, textarea {
 
 
 
-    <script>
+       <script>
     
-        const SERVER_URL = 'https://vuntserver-479v.onrender.com';
-// --- IndexedDB Logic for Local Caching ---
+const SERVER_URL = 'https://vuntserver-479v.onrender.com';
+
 const DB_NAME = 'VuntgramDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_CHATS = 'chats';
 const STORE_MESSAGES = 'messages';
+const STORE_METADATA = 'metadata';
 
 let db;
+let pendingUpdates = new Map();
 
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -2228,11 +2229,19 @@ function initDB() {
 
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
+            
             if (!db.objectStoreNames.contains(STORE_CHATS)) {
-                db.createObjectStore(STORE_CHATS, { keyPath: 'id' });
+                const chatStore = db.createObjectStore(STORE_CHATS, { keyPath: 'id' });
+                chatStore.createIndex('last_message_time', 'last_message_time', { unique: false });
             }
+            
             if (!db.objectStoreNames.contains(STORE_MESSAGES)) {
-                db.createObjectStore(STORE_MESSAGES, { keyPath: 'chat_id' });
+                const msgStore = db.createObjectStore(STORE_MESSAGES, { keyPath: 'chat_id' });
+                msgStore.createIndex('timestamp', 'timestamp', { unique: false });
+            }
+            
+            if (!db.objectStoreNames.contains(STORE_METADATA)) {
+                db.createObjectStore(STORE_METADATA, { keyPath: 'key' });
             }
         };
 
@@ -2252,10 +2261,18 @@ async function saveChatsLocal(chats) {
     if (!db) await initDB();
     const tx = db.transaction(STORE_CHATS, 'readwrite');
     const store = tx.objectStore(STORE_CHATS);
-    // Clear old chats and save new ones
+    
     store.clear();
-    chats.forEach(chat => store.put(chat));
-    return tx.complete;
+    chats.forEach(chat => store.put({
+        ...chat,
+        _cached_at: Date.now()
+    }));
+    
+    const metaTx = db.transaction(STORE_METADATA, 'readwrite');
+    const metaStore = metaTx.objectStore(STORE_METADATA);
+    metaStore.put({ key: 'last_chats_sync', value: Date.now() });
+    
+    return Promise.all([tx.complete, metaTx.complete]);
 }
 
 async function getChatsLocal() {
@@ -2264,7 +2281,16 @@ async function getChatsLocal() {
         const tx = db.transaction(STORE_CHATS, 'readonly');
         const store = tx.objectStore(STORE_CHATS);
         const request = store.getAll();
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+            const chats = request.result;
+            chats.sort((a, b) => {
+                const timeA = new Date(a.last_message_time || 0).getTime();
+                const timeB = new Date(b.last_message_time || 0).getTime();
+                return timeB - timeA;
+            });
+            resolve(chats);
+        };
+        request.onerror = () => resolve([]);
     });
 }
 
@@ -2272,7 +2298,12 @@ async function saveMessagesLocal(chatId, messages) {
     if (!db) await initDB();
     const tx = db.transaction(STORE_MESSAGES, 'readwrite');
     const store = tx.objectStore(STORE_MESSAGES);
-    store.put({ chat_id: chatId, messages: messages, timestamp: Date.now() });
+    store.put({ 
+        chat_id: chatId, 
+        messages: messages, 
+        timestamp: Date.now(),
+        _version: messages.length 
+    });
     return tx.complete;
 }
 
@@ -2282,7 +2313,15 @@ async function getMessagesLocal(chatId) {
         const tx = db.transaction(STORE_MESSAGES, 'readonly');
         const store = tx.objectStore(STORE_MESSAGES);
         const request = store.get(chatId);
-        request.onsuccess = () => resolve(request.result ? request.result.messages : null);
+        request.onsuccess = () => {
+            const data = request.result;
+            if (data && (Date.now() - data.timestamp) < 3600000) {
+                resolve(data.messages);
+            } else {
+                resolve(null);
+            }
+        };
+        request.onerror = () => resolve(null);
     });
 }
 
@@ -2294,81 +2333,81 @@ async function updateLocalChat(chatId, updates) {
     request.onsuccess = () => {
         const chat = request.result;
         if (chat) {
-            Object.assign(chat, updates);
+            Object.assign(chat, updates, { _cached_at: Date.now() });
             store.put(chat);
         }
     };
 }
-// --- End of IndexedDB Logic ---
 
-        
-        const messageBox = document.getElementById('messageBox');
-        const contactsModal = document.getElementById('contactsModal');
-        const modalOverlay = document.getElementById('modalOverlay');
-        const closeContacts = document.getElementById('closeContacts');
-        const contactsList = document.getElementById('contactsList');
-        const contactsSearchInput = document.getElementById('contactsSearchInput');
+async function getSyncTimestamp() {
+    if (!db) await initDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(STORE_METADATA, 'readonly');
+        const store = tx.objectStore(STORE_METADATA);
+        const request = store.get('last_chats_sync');
+        request.onsuccess = () => {
+            resolve(request.result ? request.result.value : 0);
+        };
+        request.onerror = () => resolve(0);
+    });
+}
 
+const messageBox = document.getElementById('messageBox');
+const contactsModal = document.getElementById('contactsModal');
+const modalOverlay = document.getElementById('modalOverlay');
+const closeContacts = document.getElementById('closeContacts');
+const contactsList = document.getElementById('contactsList');
+const contactsSearchInput = document.getElementById('contactsSearchInput');
 
-        const desktopSidebar = document.querySelector('.desktop-sidebar');
-        const desktopContent = document.querySelector('.desktop-content');
-        const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-        const addChatButtonDesktop = document.getElementById('addChatButtonDesktop');
-        const searchInputDesktop = document.getElementById('searchInputDesktop');
-        const noChatsDesktop = document.getElementById('noChatsDesktop');
-        const chatsListDesktop = document.getElementById('chatsListDesktop');
-        const chatModalDesktop = document.getElementById('chatModalDesktop');
-        const chatAvatarDesktop = document.getElementById('chatAvatarDesktop');
-        const chatTitleDesktop = document.getElementById('chatTitleDesktop');
-        const chatStatusDesktop = document.getElementById('chatStatusDesktop');
-        const messagesContainerDesktop = document.getElementById('messagesContainerDesktop');
-        const noMessagesDesktop = document.getElementById('noMessagesDesktop');
-        const messageInputDesktop = document.getElementById('messageInputDesktop');
-        const sendMessageButtonDesktop = document.getElementById('sendMessageButtonDesktop');
-        const desktopOnlyNav = document.querySelector('.desktop-only-nav');
+const desktopSidebar = document.querySelector('.desktop-sidebar');
+const desktopContent = document.querySelector('.desktop-content');
+const desktopPlaceholder = document.getElementById('desktopPlaceholder');
+const addChatButtonDesktop = document.getElementById('addChatButtonDesktop');
+const searchInputDesktop = document.getElementById('searchInputDesktop');
+const noChatsDesktop = document.getElementById('noChatsDesktop');
+const chatsListDesktop = document.getElementById('chatsListDesktop');
+const chatModalDesktop = document.getElementById('chatModalDesktop');
+const chatAvatarDesktop = document.getElementById('chatAvatarDesktop');
+const chatTitleDesktop = document.getElementById('chatTitleDesktop');
+const chatStatusDesktop = document.getElementById('chatStatusDesktop');
+const messagesContainerDesktop = document.getElementById('messagesContainerDesktop');
+const noMessagesDesktop = document.getElementById('noMessagesDesktop');
+const messageInputDesktop = document.getElementById('messageInputDesktop');
+const sendMessageButtonDesktop = document.getElementById('sendMessageButtonDesktop');
+const desktopOnlyNav = document.querySelector('.desktop-only-nav');
 
+const mobileChatsContainer = document.querySelector('.chats-container.mobile-only');
+const addChatButtonMobile = document.getElementById('addChatButtonMobile');
+const searchInputMobile = document.getElementById('searchInputMobile');
+const noChatsMobile = document.getElementById('noChatsMobile');
+const chatsListMobile = document.getElementById('chatsListMobile');
+const chatModalMobile = document.getElementById('chatModalMobile');
+const backToChatsMobile = document.getElementById('backToChatsMobile');
+const chatAvatarMobile = document.getElementById('chatAvatarMobile');
+const chatTitleMobile = document.getElementById('chatTitleMobile');
+const chatStatusMobile = document.getElementById('chatStatusMobile');
+const messagesContainerMobile = document.getElementById('messagesContainerMobile');
+const noMessagesMobile = document.getElementById('noMessagesMobile');
+const messageInputMobile = document.getElementById('messageInputMobile');
+const sendMessageButtonMobile = document.getElementById('sendMessageButtonMobile');
+const mobileOnlyNav = document.querySelector('.mobile-only-nav');
 
-        const mobileChatsContainer = document.querySelector('.chats-container.mobile-only');
-        const addChatButtonMobile = document.getElementById('addChatButtonMobile');
-        const searchInputMobile = document.getElementById('searchInputMobile');
-        const noChatsMobile = document.getElementById('noChatsMobile');
-        const chatsListMobile = document.getElementById('chatsListMobile');
-        const chatModalMobile = document.getElementById('chatModalMobile');
-        const backToChatsMobile = document.getElementById('backToChatsMobile');
-        const chatAvatarMobile = document.getElementById('chatAvatarMobile');
-        const chatTitleMobile = document.getElementById('chatTitleMobile');
-        const chatStatusMobile = document.getElementById('chatStatusMobile');
-        const messagesContainerMobile = document.getElementById('messagesContainerMobile');
-        const noMessagesMobile = document.getElementById('noMessagesMobile');
-        const messageInputMobile = document.getElementById('messageInputMobile');
-        const sendMessageButtonMobile = document.getElementById('sendMessageButtonMobile');
-        const mobileOnlyNav = document.querySelector('.mobile-only-nav');
-        
+const imageInput = document.getElementById('imageInput');
+const attachButtonDesktop = document.getElementById('attachButtonDesktop');
+const attachButtonMobile = document.getElementById('attachButtonMobile');
 
-        const imageInput = document.getElementById('imageInput');
-        const attachButtonDesktop = document.getElementById('attachButtonDesktop');
-        const attachButtonMobile = document.getElementById('attachButtonMobile');
+let userData = {};
+let currentChat = null;
+let currentMessages = [];
+let isDesktop = window.matchMedia("(min-width: 768px)").matches;
+let isOpeningChat = false;
+let openChatAbortController = null;
+let currentChatsList = [];
+let activityPollInterval;
+let currentActivityData = {};
+let isSendingMessage = false;
+let lastRenderedChatsJson = '';
 
-        let userData = {};
-        let currentChat = null;
-        let currentMessages = [];
-        let isDesktop = window.matchMedia("(min-width: 768px)").matches;
-        let isOpeningChat = false;
-let openChatAbortController = null; // Flag to prevent multiple chat openings
-        let currentChatsList = []; // Кэш списка чатов
-        // В разделе с другими глобальными переменными добавьте:
-        let activityPollInterval;
-        let currentActivityData = {};
-        let isSendingMessage = false;
-
-
-
-        
-
-
-
-
-        // Конфигурация обоев (должна совпадать с profile.html)
 const WALLPAPERS = [
     {
         id: 'default',
@@ -2413,24 +2452,20 @@ const WALLPAPERS = [
     }
 ];
 
-// Состояние обоев
 let wallpaperState = {
     enabled: false,
     selectedWallpaper: 'default'
 };
 
-// Инициализация системы обоев
 function initializeWallpaperSystem() {
     loadWallpaperSettings();
     applyWallpaper();
     setupWallpaperBroadcastListener();
     
-    // Применяем обои при изменении ориентации/размера
     window.addEventListener('resize', () => {
         applyWallpaper();
     });
     
-    // Обновляем обои при возвращении на вкладку
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
             setTimeout(applyWallpaper, 100);
@@ -2438,7 +2473,6 @@ function initializeWallpaperSystem() {
     });
 }
 
-// Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
     const saved = localStorage.getItem('vuntgram_wallpaper');
     if (saved) {
@@ -2449,8 +2483,6 @@ function loadWallpaperSettings() {
                 selectedWallpaper: parsed.selectedWallpaper || 'default'
             };
         } catch (e) {
-            console.error('Error loading wallpaper settings:', e);
-            // Используем настройки по умолчанию
             wallpaperState = {
                 enabled: false,
                 selectedWallpaper: 'default'
@@ -2463,24 +2495,18 @@ function applyWallpaper() {
     const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
     
     if (!selectedWallpaper) {
-        console.error('Selected wallpaper not found, using default');
         wallpaperState.selectedWallpaper = 'default';
         return;
     }
     
-    console.log('Applying wallpaper:', wallpaperState.selectedWallpaper, 'enabled:', wallpaperState.enabled);
-    
-    // Устанавливаем CSS переменную
     document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
     
-    // Получаем все необходимые элементы
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     const chatModalDesktop = document.getElementById('chatModalDesktop');
     const chatModalMobile = document.getElementById('chatModalMobile');
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     
     if (wallpaperState.enabled) {
-        // Для десктопа - обои везде
         if (!isMobile) {
             document.body.classList.add('wallpaper-enabled');
             document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
@@ -2490,7 +2516,6 @@ function applyWallpaper() {
             document.body.style.backgroundAttachment = 'fixed';
         }
         
-        // Для десктоп плейсхолдера
         if (desktopPlaceholder && !isMobile) {
             desktopPlaceholder.classList.add('wallpaper-enabled');
             desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
@@ -2499,7 +2524,6 @@ function applyWallpaper() {
             desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
         }
         
-        // Для десктоп чата
         if (chatModalDesktop && !isMobile) {
             chatModalDesktop.classList.add('wallpaper-enabled');
             chatModalDesktop.style.backgroundImage = `url('${selectedWallpaper.url}')`;
@@ -2508,7 +2532,6 @@ function applyWallpaper() {
             chatModalDesktop.style.backgroundRepeat = 'no-repeat';
         }
         
-        // Для мобильного чата - обои только в открытом чате
         if (chatModalMobile && isMobile) {
             chatModalMobile.classList.add('wallpaper-enabled');
             chatModalMobile.style.backgroundImage = `url('${selectedWallpaper.url}')`;
@@ -2517,7 +2540,6 @@ function applyWallpaper() {
             chatModalMobile.style.backgroundRepeat = 'no-repeat';
         }
     } else {
-        // Убираем обои со всех элементов
         document.body.classList.remove('wallpaper-enabled');
         document.body.style.backgroundImage = '';
         document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
@@ -2542,25 +2564,20 @@ function applyWallpaper() {
     }
 }
 
-// Слушатель для обновлений обоев из других вкладок (например, из profile.html)
 function setupWallpaperBroadcastListener() {
     if (typeof BroadcastChannel !== 'undefined') {
         try {
             const channel = new BroadcastChannel('vuntgram_wallpaper');
             channel.addEventListener('message', (event) => {
                 if (event.data.type === 'wallpaper_update') {
-                    console.log('Received wallpaper update from other tab');
                     wallpaperState = {
                         enabled: event.data.data.enabled,
                         selectedWallpaper: event.data.data.selectedWallpaper
                     };
-                    
-                    // Применяем новые обои
                     applyWallpaper();
                 }
             });
             
-            // Закрываем канал при выгрузке страницы
             window.addEventListener('beforeunload', () => {
                 channel.close();
             });
@@ -2570,7 +2587,6 @@ function setupWallpaperBroadcastListener() {
     }
 }
 
-// Функция для обновления обоев при открытии/закрытии чата
 function updateChatWallpaper() {
     const chatModalDesktop = document.getElementById('chatModalDesktop');
     const chatModalMobile = document.getElementById('chatModalMobile');
@@ -2592,27 +2608,19 @@ function updateChatWallpaper() {
     }
 }
 
-
-
-
-        // Добавьте эту функцию после других функций
 function startActivityPolling() {
-    // Останавливаем предыдущий интервал если есть
     if (activityPollInterval) {
         clearInterval(activityPollInterval);
     }
     
-    // Опрашиваем статусы каждые 10 секунд
     activityPollInterval = setInterval(async () => {
         await refreshOnlineStatuses();
     }, 10000);
 }
 
 async function refreshOnlineStatuses() {
-    // Обновляем статусы в списке чатов
     await updateChatStatuses();
     
-    // Обновляем статус в открытом чате - ТОЛЬКО если чат существует
     const { chatModal } = getActiveElements();
     
     if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
@@ -2638,8 +2646,6 @@ async function refreshOnlineStatuses() {
     }
 }
 
-
-
 function adjustTimeToMoscow(timestamp) {
     if (!timestamp) return null;
     const date = new Date(timestamp);
@@ -2647,12 +2653,10 @@ function adjustTimeToMoscow(timestamp) {
     return date.toISOString();
 }
 
-
 function formatChatListTime(timestamp) {
     if (!timestamp) return ''; 
     
     const date = new Date(timestamp);
-   
     date.setHours(date.getHours() + 3);
     
     return date.toLocaleTimeString('ru-RU', { 
@@ -2660,9 +2664,6 @@ function formatChatListTime(timestamp) {
         minute: '2-digit'
     });
 }
-
-
-
 
 function adjustColor(hex, percent) {
     const num = parseInt(hex.replace("#", ""), 16);
@@ -2679,23 +2680,17 @@ function adjustColor(hex, percent) {
     ).toString(16).slice(1)}`;
 }
 
-
-
+function formatChatMessageTime(timestamp) {
+    if (!timestamp) return 'только что';
     
-    function formatChatMessageTime(timestamp) {
-        if (!timestamp) return 'только что';
-        
-        const date = new Date(timestamp);
+    const date = new Date(timestamp);
+    date.setHours(date.getHours() + 3); 
     
-        date.setHours(date.getHours() + 3); 
-        
-        return date.toLocaleTimeString('ru-RU', { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        });
-    }
-    
-
+    return date.toLocaleTimeString('ru-RU', { 
+        hour: '2-digit', 
+        minute: '2-digit'
+    });
+}
 
 function formatChatMessageTime(timestamp) {
     if (!timestamp) return 'только что';
@@ -2707,14 +2702,11 @@ function formatChatMessageTime(timestamp) {
     });
 }
 
-
-
 function formatDateHeader(timestamp) {
     if (!timestamp) return '';
     
     const date = new Date(timestamp);
     const now = new Date();
-    
 
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
@@ -2722,10 +2714,8 @@ function formatDateHeader(timestamp) {
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     
-   
     const messageDate = new Date(date);
     messageDate.setHours(0, 0, 0, 0);
-    
 
     if (messageDate.getTime() === today.getTime()) {
         return 'Сегодня';
@@ -2741,8 +2731,6 @@ function formatDateHeader(timestamp) {
         return `${day} ${month}`;
     }
 }
-
-      
 
 function getActiveElements() {
     if (isDesktop) {
@@ -2784,22 +2772,15 @@ function getActiveElements() {
     }
 }
 
-   
-        
-       
-        function showMessage(message, type = 'error') {
-            messageBox.textContent = message;
-            messageBox.className = `message-box ${type}`;
-            messageBox.style.display = 'block';
-            setTimeout(() => {
-                messageBox.style.display = 'none';
-            }, 5000);
-        }
-        
+function showMessage(message, type = 'error') {
+    messageBox.textContent = message;
+    messageBox.className = `message-box ${type}`;
+    messageBox.style.display = 'block';
+    setTimeout(() => {
+        messageBox.style.display = 'none';
+    }, 5000);
+}
 
-
-
-        // Функция обработки выбора изображений
 function handleImageSelection(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -2811,7 +2792,6 @@ function handleImageSelection(event) {
         }
     }
     
-    // Сбрасываем input для возможности выбора тех же файлов снова
     event.target.value = '';
 }
 
@@ -2822,7 +2802,6 @@ async function sendImageMessage(file) {
     const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
     
     try {
-        // Создаем временное сообщение для отображения загрузки
         const tempMessageId = `temp_${Date.now()}`;
         const tempMessage = {
             id: tempMessageId,
@@ -2839,13 +2818,11 @@ async function sendImageMessage(file) {
         noMessages.style.display = 'none';
         renderMessages(currentMessages);
         
-        // Подготавливаем форму для отправки
         const formData = new FormData();
         formData.append('chat_id', currentChat.id);
         formData.append('sender_id', userData.platform_user_id);
         formData.append('image', file);
         
-        // Если это временный чат, сначала создаем его
         let actualChatId = currentChat.id;
         if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
@@ -2868,7 +2845,6 @@ async function sendImageMessage(file) {
             currentChat.id = data.chat_id;
             currentChat.is_temp = false;
             
-            // ВМЕСТО loadChats() - добавляем новый чат в список
             const newChat = {
                 id: data.chat_id,
                 name: currentChat.name,
@@ -2881,13 +2857,10 @@ async function sendImageMessage(file) {
                 last_message_type: 'image'
             };
             
-            // Добавляем в начало списка чатов
             currentChatsList.unshift(newChat);
-            // Обновляем DOM только для этого чата
             updateChatItemInDOM(data.chat_id, newChat);
         }
         
-        // Отправляем изображение с правильным chat_id
         const messageResponse = await fetch(`${SERVER_URL}/send_image_message`, {
             method: 'POST',
             body: formData,
@@ -2900,7 +2873,6 @@ async function sendImageMessage(file) {
             throw new Error(messageData.error || 'Не удалось отправить изображение');
         }
         
-        // Удаляем временное сообщение и добавляем настоящее
         currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
         
         const newMessage = {
@@ -2916,7 +2888,6 @@ async function sendImageMessage(file) {
         currentMessages = [...currentMessages, newMessage];
         renderMessages(currentMessages);
         
-        // Обновляем информацию о чате в списке (только для существующих чатов)
         if (!currentChat.is_temp) {
             updateChatItemInDOM(currentChat.id, {
                 last_message: '📷 Фото',
@@ -2925,7 +2896,6 @@ async function sendImageMessage(file) {
                 last_message_type: 'image'
             });
             
-            // Обновляем данные в кэше чатов
             const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex].last_message = '📷 Фото';
@@ -2933,14 +2903,12 @@ async function sendImageMessage(file) {
                 currentChatsList[chatIndex].last_message_type = 'image';
                 currentChatsList[chatIndex].unread_count = 0;
                 
-                // Перемещаем чат в начало списка
                 const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                 currentChatsList.unshift(updatedChat);
                 moveChatToTop(currentChat.id);
             }
         }
         
-        // Прокручиваем к последнему сообщению
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
@@ -2949,7 +2917,6 @@ async function sendImageMessage(file) {
         console.error('Error sending image:', error);
         showMessage('Ошибка отправки изображения: ' + error.message, 'error');
         
-        // Удаляем временное сообщение об ошибке
         currentMessages = currentMessages.filter(msg => !msg.is_uploading);
         renderMessages(currentMessages);
     } finally {
@@ -2982,7 +2949,6 @@ function renderMessage(message) {
     let messageContent = '';
     
     if (message.is_image || (message.content && isImageUrl(message.content))) {
-        // Находим индекс этого изображения среди всех изображений чата
         const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
         const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
         
@@ -3001,7 +2967,6 @@ function renderMessage(message) {
             </div>
         `;
         
-        // Добавляем класс для сообщений с изображениями
         messageElement.classList.add('message-with-image');
         
     } else {
@@ -3027,38 +2992,27 @@ function renderMessage(message) {
 }
 
 function loadImageWithNaturalSize(imgElement, imageUrl) {
-    // Убираем кэширование размеров, чтобы изображение всегда отображалось в оригинальном размере (пропорционально масштабированном, если выходит за границы)
-    // и не укорачивалось после перезагрузки страницы.
-    
     const tempImg = new Image();
     tempImg.onload = function() {
-        // После загрузки устанавливаем стиль: max-width 100% для предотвращения выхода за границы контейнера,
-        // height auto для сохранения пропорций. Это работает для всех изображений без фиксированных размеров.
         const style = 'max-width: 100%; height: auto;';
         applyImageStyles(imgElement, style);
     };
     
     tempImg.onerror = function() {
-        // При ошибке используем тот же стиль для консистентности
         const style = 'max-width: 100%; height: auto;';
         applyImageStyles(imgElement, style);
     };
     tempImg.src = imageUrl;
 }
 
-
 function calculateImageStyle(width, height) {
-    // Устанавливаем универсальный стиль: максимальная ширина 100% (чтобы не выходить за границы контейнера),
-    // высота авто (сохраняет пропорции). Это работает для всех изображений.
     return 'max-width: 100%; height: auto;';
 }
 
 function applyImageStyles(imgElement, style) {
-    // Применяем стиль напрямую, без фиксированных размеров
     imgElement.style.cssText += style;
     imgElement.style.opacity = '1';
 }
-
 
 function isImageUrl(url) {
     if (typeof url !== 'string') return false;
@@ -3073,12 +3027,10 @@ function isImageUrl(url) {
     
     const lowerUrl = url.toLowerCase();
     
-    // Проверяем расширения файлов
     if (imageExtensions.some(ext => lowerUrl.includes(ext))) {
         return true;
     }
     
-    // Проверяем паттерны Cloudinary и data URLs
     if (imagePatterns.some(pattern => lowerUrl.includes(pattern))) {
         return true;
     }
@@ -3086,7 +3038,6 @@ function isImageUrl(url) {
     return false;
 }
 
-// Функция для экранирования HTML (безопасность)
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -3094,22 +3045,18 @@ function escapeHtml(text) {
 }
 
 function openImageModal(imageUrl, messageIndex = 0) {
-    // Находим все изображения в текущем чате для навигации
     const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
     const currentIndex = messageIndex;
     const totalImages = imageMessages.length;
 
-    // Создаем модальное окно для просмотра изображения
     const modal = document.createElement('div');
     modal.className = 'image-modal-overlay';
     
-    // Переменные для управления зумом
     let scale = 1;
     let isDragging = false;
     let startX, startY, translateX = 0, translateY = 0;
     let lastTouchDistance = null;
 
-    // Шапка модального окна
     const header = document.createElement('div');
     header.style.cssText = `
         display: flex;
@@ -3123,7 +3070,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         position: relative;
     `;
 
-    // Кнопка назад
     const backButton = document.createElement('button');
     backButton.innerHTML = '←';
     backButton.style.cssText = `
@@ -3136,7 +3082,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         padding: 8px;
     `;
 
-    // Заголовок с навигацией
     const title = document.createElement('div');
     title.style.cssText = `
         flex: 1;
@@ -3145,7 +3090,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
     `;
     title.textContent = `${currentIndex + 1} из ${totalImages}`;
 
-    // Кнопка сброса зума
     const resetZoomButton = document.createElement('button');
     resetZoomButton.innerHTML = '↺';
     resetZoomButton.style.cssText = `
@@ -3173,21 +3117,18 @@ function openImageModal(imageUrl, messageIndex = 0) {
     header.appendChild(title);
     header.appendChild(resetZoomButton);
 
-    // Контейнер для изображения
     const imageContainer = document.createElement('div');
     imageContainer.className = 'image-modal-content';
 
     const img = document.createElement('img');
     img.src = imageUrl;
     img.className = 'zoomable-image';
-    img.draggable = false; // Отключаем стандартный drag
+    img.draggable = false;
 
-    // Индикатор зума
     const zoomIndicator = document.createElement('div');
     zoomIndicator.className = 'zoom-indicator';
     zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
 
-    // Элементы управления зумом
     const zoomControls = document.createElement('div');
     zoomControls.className = 'zoom-controls';
 
@@ -3204,7 +3145,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
     zoomControls.appendChild(zoomInButton);
     zoomControls.appendChild(zoomOutButton);
 
-    // Кнопки навигации
     const prevButton = document.createElement('button');
     prevButton.innerHTML = '←';
     prevButton.style.cssText = `
@@ -3232,7 +3172,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
     nextButton.innerHTML = '→';
     nextButton.style.cssText = `
         position: absolute;
-        right: 80px; /* Сдвигаем чтобы не перекрывать кнопки зума */
+        right: 80px;
         top: 50%;
         transform: translateY(-50%);
         background: rgba(255, 255, 255, 0.2);
@@ -3251,7 +3191,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         z-index: 10001;
     `;
 
-    // Футер с информацией
     const footer = document.createElement('div');
     footer.style.cssText = `
         padding: 16px;
@@ -3262,19 +3201,16 @@ function openImageModal(imageUrl, messageIndex = 0) {
         font-size: 14px;
     `;
 
-    // Получаем информацию о текущем сообщении
     const currentMessage = imageMessages[currentIndex];
     if (currentMessage) {
         const time = formatChatMessageTime(currentMessage.sent_at);
         footer.textContent = `${time}`;
     }
 
-    // Функции для управления зумом
     function updateTransform() {
         img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
         zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
         
-        // Показываем индикатор при зуме
         if (scale > 1) {
             zoomIndicator.classList.add('show');
             resetZoomButton.style.display = 'block';
@@ -3315,12 +3251,10 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }, 1000);
     }
 
-    // Обработчики для кнопок зума
     zoomInButton.addEventListener('click', zoomIn);
     zoomOutButton.addEventListener('click', zoomOut);
     resetZoomButton.addEventListener('click', resetZoom);
 
-    // Обработчики для колесика мыши
     imageContainer.addEventListener('wheel', (e) => {
         e.preventDefault();
         if (e.deltaY < 0) {
@@ -3330,7 +3264,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }
     });
 
-    // Обработчики для drag (перетаскивания)
     imageContainer.addEventListener('mousedown', (e) => {
         if (scale <= 1) return;
         
@@ -3354,7 +3287,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         img.style.cursor = scale > 1 ? 'grab' : 'default';
     });
 
-    // Обработчики для мультитач (зум пальцами)
     imageContainer.addEventListener('touchstart', (e) => {
         if (e.touches.length === 2) {
             e.preventDefault();
@@ -3404,10 +3336,8 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }
     });
 
-    // Двойной клик для сброса зума
     img.addEventListener('dblclick', resetZoom);
 
-    // Добавляем элементы в контейнеры
     imageContainer.appendChild(img);
     imageContainer.appendChild(zoomIndicator);
     imageContainer.appendChild(zoomControls);
@@ -3427,7 +3357,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
             title.textContent = `${newIndex + 1} из ${totalImages}`;
             img.src = newMessage.content;
             
-            // Сбрасываем зум при смене изображения
             resetZoom();
             
             const time = formatChatMessageTime(newMessage.sent_at);
@@ -3460,7 +3389,6 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }
     });
 
-    // Свайпы для навигации
     imageContainer.addEventListener('touchstart', handleTouchStart);
     
     let touchStartX = 0;
@@ -3472,7 +3400,7 @@ function openImageModal(imageUrl, messageIndex = 0) {
     }
     
     imageContainer.addEventListener('touchend', function touchEnd(e) {
-        if (scale > 1) return; // Не навигируем если увеличен
+        if (scale > 1) return;
         
         const endX = e.changedTouches[0].clientX;
         const diffX = touchStartX - endX;
@@ -3509,38 +3437,34 @@ function openImageModal(imageUrl, messageIndex = 0) {
         }
     });
 
-    // Инициализация
     resetZoomButton.style.display = 'none';
     updateTransform();
 }
 
-
-       
-        async function loadUserData() {
-            
-            try {
-                const cachedData = sessionStorage.getItem('userData');
-                if (cachedData) {
-                    userData = JSON.parse(cachedData);
-                    return true;
-                }
-                
-                const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id 
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    userData = data.user;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
+async function loadUserData() {
+    try {
+        const cachedData = sessionStorage.getItem('userData');
+        if (cachedData) {
+            userData = JSON.parse(cachedData);
+            return true;
+        }
+        
+        const response = await fetch(`${SERVER_URL}/get_user_data`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id 
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            userData = data.user;
+            sessionStorage.setItem('userData', JSON.stringify(userData));
             return true;
         }
         return false;
@@ -3549,24 +3473,16 @@ function openImageModal(imageUrl, messageIndex = 0) {
         return false;
     }
 }
-        
-     
+
 async function loadChats(forceReload = false) {
-    // Эта функция теперь вызывается ТОЛЬКО при:
-    // 1. Первоначальной загрузке страницы (forceReload = false)
-    // 2. Явном требовании перезагрузить все чаты (forceReload = true)
-    
     if (forceReload) {
-        // Полная перезагрузка только если явно запрошено
         await performFullChatsReload();
     } else {
-        // При обычном вызове - интеллектуальное обновление
         await performSmartChatsUpdate();
     }
 }
 
 async function performFullChatsReload() {
-    // Полная перезагрузка всех чатов (редкий случай)
     const { chatsList, noChats } = getActiveElements();
     
     try {
@@ -3599,14 +3515,9 @@ async function performFullChatsReload() {
     }
 }
 
-
-let lastRenderedChatsJson = '';
-
 async function performSmartChatsUpdate() {
-    // 1. Сначала пробуем загрузить из локальной базы
     const localChats = await getChatsLocal();
     if (localChats && localChats.length > 0) {
-        console.log('Loaded chats from local storage');
         currentChatsList = sortChats(localChats);
         const chatsJson = JSON.stringify(currentChatsList);
         if (chatsJson !== lastRenderedChatsJson) {
@@ -3615,8 +3526,7 @@ async function performSmartChatsUpdate() {
         }
     }
     
-    // 2. Запрашиваем свежие данные с сервера
-    await performFullChatsReload();
+    performFullChatsReload();
 }
 
 function sortChats(chats) {
@@ -3627,11 +3537,7 @@ function sortChats(chats) {
     });
 }
 
-        
-       
-
-       async function updateSingleChat(chatId) {
-    // Обновляет только один конкретный чат в списке
+async function updateSingleChat(chatId) {
     try {
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
@@ -3646,7 +3552,6 @@ function sortChats(chats) {
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Находим и обновляем чат в currentChatsList
             const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex] = data.chat;
@@ -3654,7 +3559,6 @@ function sortChats(chats) {
                 currentChatsList.unshift(data.chat);
             }
             
-            // Обновляем DOM
             updateChatItemInDOM(chatId, data.chat);
             moveChatToTop(chatId);
         }
@@ -3663,7 +3567,6 @@ function sortChats(chats) {
     }
 }
 
-// Найдите функцию renderChats и внутри неё измените строку с last_message
 async function renderChats(chats) {
     const { chatsList, noChats } = getActiveElements();
     chatsList.innerHTML = '';
@@ -3675,7 +3578,6 @@ async function renderChats(chats) {
     
     noChats.style.display = 'none';
     
-    // Получаем статусы активности для всех пользователей в чатах
     const userIds = [];
     chats.forEach(chat => {
         if (chat.participants && chat.participants.length > 0) {
@@ -3700,10 +3602,8 @@ async function renderChats(chats) {
         
         const bgColor = chat.avatar_background || getRandomColor();
 
-        // Находим участника чата (исключая текущего пользователя)
         const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         
-        // Статус по умолчанию
         let statusText = 'был(а) недавно';
         let isOnline = false;
 
@@ -3718,12 +3618,10 @@ async function renderChats(chats) {
                     isOnline = false;
                 }
             } else {
-                // Если данных о активности нет, считаем что пользователь не в сети
                 statusText = 'был(а) недавно';
                 isOnline = false;
             }
         } else {
-            // Если нет другого участника
             statusText = '';
             isOnline = false;
         }
@@ -3732,10 +3630,8 @@ async function renderChats(chats) {
             `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
             'linear-gradient(135deg, #0088cc, #40a7e3)';
 
-        // ИЗМЕНЕНИЕ: Проверяем, является ли последнее сообщение изображением
         let lastMessageText = chat.last_message || '';
         
-        // Если сообщение содержит URL изображения или помечено как изображение
         if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') {
             lastMessageText = '📷 Фото';
         }
@@ -3769,7 +3665,6 @@ async function renderChats(chats) {
         chatsList.appendChild(chatItem);
     });
 }
-
 
 async function updateUserActivity(isOnline = true) {
     if (!userData || !userData.platform_user_id) {
@@ -3816,9 +3711,6 @@ async function sendOfflineStatus() {
     }
 }
 
-
-
-
 async function getUsersActivityStatus(userIds) {
     try {
         const response = await fetch(`${SERVER_URL}/get_activity_status`, {
@@ -3842,8 +3734,6 @@ async function getUsersActivityStatus(userIds) {
         return {};
     }
 }
-
-
 
 function formatLastSeen(lastOnline) {
     if (!lastOnline) return 'в сети';
@@ -3879,12 +3769,10 @@ function getRussianNoun(number, forms) {
     if (n1 === 1) return forms[0];
     return forms[2];
 }
-        
-        
+
 function loadChatAvatar(avatarElement, userId, initials, bgColor) {
     const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
     
-    // Сначала ставим инициалы и фон
     avatarElement.style.background = bgColor ? 
         `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
         'linear-gradient(135deg, #0088cc, #40a7e3)';
@@ -3892,89 +3780,71 @@ function loadChatAvatar(avatarElement, userId, initials, bgColor) {
 
     const img = new Image();
     img.onload = function() {
-        // Если картинка загрузилась, ставим её фоном и убираем текст
         avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
         avatarElement.textContent = '';
     };
-    // Если ошибка, инициалы уже на месте
     img.src = avatarUrl;
 }
 
+function getRandomColor() {
+    const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
+    return colors[Math.floor(Math.random() * colors.length)];
+}
 
+function showContactsModal() {
+    contactsModal.classList.add('active');
+    modalOverlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    loadContacts();
+}
+
+function hideContactsModal() {
+    contactsModal.classList.remove('active');
+    modalOverlay.classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+async function loadContacts() {
+    contactsList.innerHTML = '';
     
-        function getRandomColor() {
-            const colors = ['#0088cc', '#4CAF50', '#FF5252', '#9C27B0', '#FFC107', '#00BCD4', '#FF9800'];
-            return colors[Math.floor(Math.random() * colors.length)];
-        }
+    try {
+        const response = await fetch(`${SERVER_URL}/get_friends`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                platform_user_id: userData.platform_user_id
+            }),
+            credentials: 'include'
+        });
         
-  
-        function showContactsModal() {
-            contactsModal.classList.add('active');
-            modalOverlay.classList.add('active');
-            document.body.style.overflow = 'hidden';
-            loadContacts();
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            renderContacts(data.friends);
+        } else {
+            throw new Error(data.error || 'Не удалось загрузить контакты');
         }
-
-
-        function hideContactsModal() {
-            contactsModal.classList.remove('active');
-            modalOverlay.classList.remove('active');
-            document.body.style.overflow = '';
-        }
-
-      
-        async function loadContacts() {
-            contactsList.innerHTML = '';
-            
-            try {
-                const response = await fetch(`${SERVER_URL}/get_friends`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id
-                    }),
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    renderContacts(data.friends);
-                } else {
-                    throw new Error(data.error || 'Не удалось загрузить контакты');
-                }
-            } catch (error) {
-                console.error('Error loading contacts:', error);
-                showMessage('Ошибка загрузки контактов', 'error');
-            }
-        }
-
-
-
-
-
-
-
+    } catch (error) {
+        console.error('Error loading contacts:', error);
+        showMessage('Ошибка загрузки контактов', 'error');
+    }
+}
 
 function setupMobileChatHeight() {
     if (!isDesktop) {
         const { messagesContainer } = getActiveElements();
         
-        // УБЕРИТЕ все фиксированные высоты - пусть браузер сам рассчитывает
         messagesContainer.style.height = '';
         messagesContainer.style.maxHeight = '';
         messagesContainer.style.minHeight = '';
         
-        // Просто гарантируем flex-растяжение
         messagesContainer.style.flex = '1 1 auto';
         messagesContainer.style.overflowY = 'auto';
     }
 }
 
-
-        // Добавьте эту функцию для отладки
 async function debugActivityStatus(userId) {
     try {
         const response = await fetch(`${SERVER_URL}/get_activity_status`, {
@@ -3997,16 +3867,12 @@ async function debugActivityStatus(userId) {
     }
 }
 
-
-
-   
 async function renderContacts(contacts) {
     if (!contacts || contacts.length === 0) {
         contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
         return;
     }
 
-    // Получаем статусы активности для всех контактов
     const userIds = contacts.map(contact => contact.platform_user_id);
     const activityData = await getUsersActivityStatus(userIds);
 
@@ -4020,8 +3886,7 @@ async function renderContacts(contacts) {
         
         const bgColor = contact.avatar_background || getRandomColor();
 
-        // Получаем статус контакта
-        const userActivity = activityData[contact.platform_user_id]; // ДОБАВЬТЕ ЭТУ СТРОКУ!
+        const userActivity = activityData[contact.platform_user_id];
         let statusText = 'был(а) недавно';
         let isOnline = false;
 
@@ -4034,7 +3899,6 @@ async function renderContacts(contacts) {
                 isOnline = false;
             }
         } else {
-            // Если данных о активности нет
             statusText = 'был(а) недавно';
             isOnline = false;
         }
@@ -4086,8 +3950,6 @@ function loadContactAvatar(avatarElement, userId, initials, bgColor) {
     img.src = avatarUrl;
 }
 
-
-      
 async function createChatWithContact(contact) {
     if (isOpeningChat) return;
     isOpeningChat = true;
@@ -4111,13 +3973,10 @@ async function createChatWithContact(contact) {
             throw new Error(data.error || 'Не удалось проверить чат');
         }
 
-        // Сразу скрываем модальное окно контактов
         hideContactsModal();
         
-        // Небольшая задержка для плавности анимации
         setTimeout(async () => {
             if (!data.is_new) {
-                // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
                 const existingChat = currentChatsList.find(chat => chat.id === data.chat_id);
                 if (existingChat) {
                     await openChat(data.chat_id);
@@ -4125,7 +3984,6 @@ async function createChatWithContact(contact) {
                     await openChat(data.chat_id);
                 }
             } else {
-                // СОЗДАЕМ НОВЫЙ ВРЕМЕННЫЙ ЧАТ
                 const tempChat = {
                     id: `temp_${Date.now()}`,
                     is_group: false,
@@ -4141,16 +3999,12 @@ async function createChatWithContact(contact) {
                     real_contact_id: contact.platform_user_id
                 };
                 
-                // Добавляем временный чат в начало списка
                 currentChatsList.unshift(tempChat);
                 
-                // Обновляем DOM - добавляем новый чат в список
                 updateChatItemInDOM(tempChat.id, tempChat);
                 
-                // ОТКРЫВАЕМ ВРЕМЕННЫЙ ЧАТ
                 openTempChat(tempChat);
                 
-                // Автоматически фокусируемся на поле ввода
                 setTimeout(() => {
                     const { messageInput } = getActiveElements();
                     if (messageInput) {
@@ -4167,7 +4021,6 @@ async function createChatWithContact(contact) {
         }
         console.error('Error opening chat:', error);
         
-        // ТОЛЬКО в серьезных случаях показываем ошибку
         if (error.message && !error.message.includes('fetch') && !error.message.includes('network')) {
             showMessage('Ошибка загрузки чата: ' + error.message, 'error');
         }
@@ -4175,7 +4028,6 @@ async function createChatWithContact(contact) {
         isOpeningChat = false;
     }
 }
-
 
 function openTempChat(tempChat) {
     if (!tempChat || !tempChat.id) {
@@ -4197,7 +4049,6 @@ function openTempChat(tempChat) {
         return;
     }
     
-    // 0. Обновляем заголовок из кэша списка чатов (если есть)
     const cachedChat = currentChatsList.find(c => c.id === tempChat.id);
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
@@ -4206,37 +4057,31 @@ function openTempChat(tempChat) {
         chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
         chatAvatar.textContent = initials;
     } else {
-        // Если нет в кэше, используем данные из tempChat
         chatTitle.textContent = tempChat.name || 'Новый чат';
     }
     
     currentChat = tempChat;
     
-    // Apply changing class for animation
     if (chatModal.classList.contains('changing')) {
         setTimeout(() => {
             chatModal.classList.remove('changing');
         }, 300);
     }
 
-    // Устанавливаем значения
     if (chatTitle) chatTitle.textContent = tempChat.name || 'Новый чат';
     if (chatStatus) chatStatus.textContent = 'был(а) недавно';
     
-    // Настраиваем аватар
     if (chatAvatar) {
         const initials = tempChat.initials || (tempChat.name ? tempChat.name[0].toUpperCase() : '?');
         const bgColor = tempChat.avatar_background || '#0088cc';
         
-        // Сначала показываем инициалы и фон
         chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
         chatAvatar.style.backgroundImage = '';
         chatAvatar.textContent = initials;
         
-        // Пытаемся загрузить аватар если есть фото
         if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
             const userId = tempChat.participants[0].platform_user_id;
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
             const img = new Image();
             
             img.onload = function() {
@@ -4247,7 +4092,6 @@ function openTempChat(tempChat) {
             };
             
             img.onerror = function() {
-                // Если не загрузилось, оставляем инициалы
                 chatAvatar.style.backgroundImage = '';
                 chatAvatar.textContent = initials;
                 chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
@@ -4257,7 +4101,6 @@ function openTempChat(tempChat) {
         }
     }
     
-    // Очищаем сообщения и показываем приветствие
     if (messagesContainer) {
         messagesContainer.innerHTML = '';
     }
@@ -4267,10 +4110,8 @@ function openTempChat(tempChat) {
         noMessages.textContent = 'Напишите сообщение, чтобы начать чат';
     }
     
-    // Сбрасываем текущие сообщения
     currentMessages = [];
     
-    // Открываем чат в зависимости от платформы
     if (isDesktop) {
         if (desktopPlaceholder) {
             desktopPlaceholder.style.display = 'none';
@@ -4286,7 +4127,6 @@ function openTempChat(tempChat) {
     }
 }
 
-
 async function sendMessage() {
     const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
     const content = messageInput.value.trim();
@@ -4297,11 +4137,9 @@ async function sendMessage() {
     isSendingMessage = true;
     
     try {
-        // Сохраняем контент перед очисткой
         const messageContent = content;
         messageInput.value = '';
         
-        // Если это временный чат, сначала создаем его
         if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
                 method: 'POST',
@@ -4319,11 +4157,9 @@ async function sendMessage() {
                 throw new Error(data.error || 'Не удалось создать чат');
             }
             
-            // Обновляем текущий чат
             currentChat.id = data.chat_id;
             currentChat.is_temp = false;
             
-            // ВМЕСТО loadChats() - добавляем новый чат в список
             const newChat = {
                 id: data.chat_id,
                 name: currentChat.name,
@@ -4335,13 +4171,10 @@ async function sendMessage() {
                 avatar_background: currentChat.avatar_background
             };
             
-            // Добавляем в начало списка чатов
             currentChatsList.unshift(newChat);
-            // Обновляем DOM только для этого чата
             updateChatItemInDOM(data.chat_id, newChat);
         }
         
-        // Отправляем сообщение
         const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4359,7 +4192,6 @@ async function sendMessage() {
             throw new Error(messageData.error || 'Не удалось отправить сообщение');
         }
         
-        // Создаем новое сообщение для UI
         const newMessage = {
             id: messageData.message_id,
             sender_id: userData.platform_user_id,
@@ -4372,19 +4204,15 @@ async function sendMessage() {
             is_me: true
         };
         
-        // Добавляем сообщение в текущий список
         currentMessages = [...currentMessages, newMessage];
         
-        // Обновляем UI
         noMessages.style.display = 'none';
         renderMessages(currentMessages);
         
-        // Прокручиваем к последнему сообщению
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
         
-        // Обновляем информацию о чате в списке (только для существующих чатов)
         if (!currentChat.is_temp) {
             updateChatItemInDOM(currentChat.id, {
                 last_message: messageContent,
@@ -4392,21 +4220,18 @@ async function sendMessage() {
                 unread_count: 0
             });
             
-            // Обновляем данные в кэше чатов
             const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex].last_message = messageContent;
                 currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
                 currentChatsList[chatIndex].unread_count = 0;
                 
-                // Перемещаем чат в начало списка
                 const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                 currentChatsList.unshift(updatedChat);
                 moveChatToTop(currentChat.id);
             }
         }
         
-        // Фокусируемся на поле ввода после успешной отправки
         setTimeout(() => {
             messageInput.focus();
             isSendingMessage = false;
@@ -4416,11 +4241,9 @@ async function sendMessage() {
         console.error('Error sending message:', error);
         showMessage('Ошибка отправки сообщения: ' + error.message, 'error');
         
-        // Восстанавливаем текст в поле ввода при ошибке
         messageInput.value = content;
         isSendingMessage = false;
         
-        // Показываем "нет сообщений" если сообщений действительно нет
         if (currentMessages.length === 0) {
             noMessages.style.display = 'block';
         }
@@ -4429,42 +4252,32 @@ async function sendMessage() {
     }
 }
 
-// Функция для закрытия клавиатуры при клике вне поля ввода
 function setupKeyboardHandlers() {
     const { messagesContainer, messageInput } = getActiveElements();
     
-    // Закрытие клавиатуры при клике на сообщения
     messagesContainer.addEventListener('click', (e) => {
         if (!e.target.closest('.message-input-container')) {
             messageInput.blur();
         }
     });
     
-    // Предотвращение закрытия при клике на поле ввода
     messageInput.addEventListener('click', (e) => {
         e.stopPropagation();
     });
-    
-    // Обработка потери фокуса
-    messageInput.addEventListener('blur', () => {
-        // Не делаем ничего - клавиатура закроется сама
-    });
 }
-
-
 
 function setupKeyboardDetection() {
     if (isDesktop) return;
 
     const { messageInput, chatModal } = getActiveElements();
     let keyboardShown = false;
-    let isSendingMessage = false; // Добавляем флаг отправки сообщения
+    let isSendingMessage = false;
 
     function adjustInputPosition(keyboardOpen) {
         const { messageInputContainer, messagesContainer } = getActiveElements();
         if (!messageInputContainer) return;
 
-        if (keyboardOpen && !isSendingMessage) { // Не меняем позицию при отправке
+        if (keyboardOpen && !isSendingMessage) {
             messageInputContainer.style.bottom = '8px';
             messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
             setTimeout(() => {
@@ -4478,28 +4291,22 @@ function setupKeyboardDetection() {
         }
     }
 
-    // Обработка открытия клавиатуры
     messageInput.addEventListener('focus', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
+        if (isSendingMessage) return;
         keyboardShown = true;
         setTimeout(() => {
             adjustInputPosition(true);
         }, 100);
     });
 
-    // Обработка закрытия клавиатуры
     messageInput.addEventListener('blur', () => {
-        if (isSendingMessage) return; // Игнорируем при отправке
+        if (isSendingMessage) return;
         keyboardShown = false;
         adjustInputPosition(false);
     });
 }
 
-
-
-       
 async function openChat(chatId) {
-    // Отменяем предыдущий запрос, если он есть
     if (openChatAbortController) {
         openChatAbortController.abort();
     }
@@ -4510,22 +4317,18 @@ async function openChat(chatId) {
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
     
-    // Проверяем, что все элементы существуют
     if (!chatModal || !chatAvatar || !chatTitle || !chatStatus || !messagesContainer || !noMessages) {
         console.error('openChat(): Required elements not found');
         isOpeningChat = false;
         return;
     }
     
-    // Сначала закрываем текущий чат, если он открыт
     if (currentChat) {
-        // Не вызываем full closeChat(), чтобы не скрывать UI
         currentChat = null;
         currentMessages = [];
         messagesContainer.innerHTML = '';
     }
     
-    // 0. Обновляем заголовок из кэша списка чатов (если есть) - МОМЕНТАЛЬНО
     const cachedChat = currentChatsList.find(c => c.id === chatId);
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
@@ -4535,11 +4338,9 @@ async function openChat(chatId) {
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
             const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
-            // Мгновенно устанавливаем фон
             chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
             chatAvatar.textContent = '';
             
-            // Также мгновенно обновляем статус из кэша, если он там есть
             const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
             if (statusElement) {
                 chatStatus.innerHTML = statusElement.innerHTML;
@@ -4552,17 +4353,14 @@ async function openChat(chatId) {
     }
 
     try {
-        // 1. Сначала пробуем загрузить сообщения из локальной базы
         const localMessages = await getMessagesLocal(chatId);
         let hasLocalMessages = false;
         if (localMessages && localMessages.length > 0) {
-            console.log('Loaded messages from local storage');
             currentMessages = localMessages;
             renderMessages(currentMessages);
             noMessages.style.display = 'none';
             hasLocalMessages = true;
             
-            // Показываем чат сразу
             if (isDesktop) {
                 if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
                 chatModal.style.display = 'flex';
@@ -4571,7 +4369,6 @@ async function openChat(chatId) {
                 document.body.style.overflow = 'hidden';
             }
 
-            // Прокручиваем вниз сразу
             setTimeout(() => {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }, 10);
@@ -4608,7 +4405,6 @@ async function openChat(chatId) {
         
         chatTitle.textContent = currentChat.name || 'Новый чат';
         
-        // Получаем статус участника чата - ТОЛЬКО если есть participants
         let statusText = 'был(а) недавно';
         let isOnline = false;
 
@@ -4631,7 +4427,6 @@ async function openChat(chatId) {
             }
         }
 
-        // Обновляем статус в заголовке чата
         if (isOnline) {
             chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
             chatStatus.classList.add('online');
@@ -4640,7 +4435,6 @@ async function openChat(chatId) {
             chatStatus.classList.remove('online');
         }
         
-        // Загрузка аватара
         if (currentChat.participants && currentChat.participants.length > 0) {
             const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
@@ -4648,18 +4442,15 @@ async function openChat(chatId) {
                 const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
                 const bgColor = currentChat.avatar_background || getRandomColor();
                 
-                // Пробуем загрузить аватар для участника чата
                 const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
                 const img = new Image();
                 
                 img.onload = function() {
-                    // Аватар успешно загружен - только картинка
                     chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
                     chatAvatar.textContent = '';
                 };
                 
                 img.onerror = function() {
-                    // Аватар не загрузился - только градиент
                     chatAvatar.style.background = bgColor ? 
                         `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
                         'linear-gradient(135deg, #0088cc, #40a7e3)';
@@ -4668,7 +4459,6 @@ async function openChat(chatId) {
                 
                 img.src = avatarUrl;
             } else {
-                // Если нет другого участника
                 const bgColor = currentChat.avatar_background || getRandomColor();
                 chatAvatar.style.background = bgColor ? 
                     `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
@@ -4676,7 +4466,6 @@ async function openChat(chatId) {
                 chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
             }
         } else {
-            // Если нет участников
             const bgColor = currentChat.avatar_background || getRandomColor();
             chatAvatar.style.background = bgColor ? 
                 `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
@@ -4684,7 +4473,6 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
-        // 2. Загружаем с сервера только если нет локальных или для обновления в фоне
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -4703,7 +4491,6 @@ async function openChat(chatId) {
         if (messagesData.status === 'success') {
             const serverMessages = messagesData.messages;
             
-            // Сравниваем с локальными, чтобы избежать лишней перерисовки
             const messagesChanged = JSON.stringify(serverMessages) !== JSON.stringify(currentMessages);
             
             if (messagesChanged || !hasLocalMessages) {
@@ -4742,7 +4529,6 @@ async function openChat(chatId) {
             }, 100);
         }
 
-        // Обновляем счетчик непрочитанных сообщений
         if (currentChat) {
             updateChatItemInDOM(chatId, {
                 last_message: currentChat.last_message || '',
@@ -4750,7 +4536,6 @@ async function openChat(chatId) {
                 unread_count: 0
             });
 
-            // Обновляем кэш чатов
             const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex].unread_count = 0;
@@ -4760,14 +4545,11 @@ async function openChat(chatId) {
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('Fetch aborted - user switched chats quickly');
-            // Просто выходим, не показываем ошибку и не закрываем чат
             return;
         }
         
         console.error('Error opening chat:', error);
         
-        // НЕ вызываем closeChat() здесь - это вызывает проблемы
-        // Вместо этого просто сбрасываем состояние и показываем плейсхолдер
         currentChat = null;
         currentMessages = [];
         
@@ -4777,13 +4559,11 @@ async function openChat(chatId) {
             noMessages.textContent = 'Не удалось загрузить чат';
         }
         
-        // На десктопе показываем плейсхолдер
         if (isDesktop) {
             if (chatModal) chatModal.style.display = 'none';
             if (desktopPlaceholder) desktopPlaceholder.style.display = 'flex';
         }
         
-        // На мобильных просто закрываем чат без ошибок
         if (!isDesktop) {
             if (chatModal) chatModal.classList.remove('active');
             document.body.style.overflow = '';
@@ -4791,31 +4571,25 @@ async function openChat(chatId) {
         
     } finally {
         isOpeningChat = false;
-        // Не обнуляем openChatAbortController здесь, чтобы он мог быть использован для отмены
     }
 
     updateChatWallpaper();
     applyWallpaper();
 }
 
-
-
 function closeChat() {
     console.log('closeChat() called');
     
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
-    // Проверка на наличие элементов
     if (!chatModal) {
         console.error('closeChat(): chatModal not found');
         return;
     }
 
-
     currentChat = null;
     currentMessages = [];
 
-    // Очищаем UI только если элементы существуют
     if (chatAvatar) {
         chatAvatar.style.backgroundImage = '';
         chatAvatar.style.backgroundColor = '';
@@ -4832,7 +4606,6 @@ function closeChat() {
         noMessages.textContent = 'Сообщений пока нет...';
     }
 
-
     if (isDesktop) {
         chatModal.style.display = 'none';
         if (desktopPlaceholder) desktopPlaceholder.style.display = 'flex';
@@ -4841,10 +4614,8 @@ function closeChat() {
         document.body.style.overflow = '';
     }
 
-    // Очищаем глобальную переменную
     window.currentChat = null;
     
-    // Отменяем все активные запросы
     if (openChatAbortController) {
         openChatAbortController.abort();
         openChatAbortController = null;
@@ -4855,11 +4626,8 @@ function closeChat() {
     console.log('Chat closed successfully');
 }
 
-
-
 async function updateChatInList(chatId, updates) {
     try {
-     
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {
@@ -4876,17 +4644,13 @@ async function updateChatInList(chatId, updates) {
         const data = await response.json();
         
         if (data.status === 'success') {
-       
             updateChatItemInDOM(chatId, data.chat);
-            
-         
             moveChatToTop(chatId);
         }
     } catch (error) {
         console.error('Error updating chat in list:', error);
     }
 }
-
 
 function moveChatToTop(chatId) {
     [chatsListDesktop, chatsListMobile].forEach(list => {
@@ -4899,7 +4663,6 @@ function moveChatToTop(chatId) {
     });
 }
 
-
 function updateChatItemInDOM(chatId, chatData) {
     [chatsListDesktop, chatsListMobile].forEach(list => {
         if (!list) return;
@@ -4910,7 +4673,6 @@ function updateChatItemInDOM(chatId, chatData) {
             const chatTimeEl = chatItem.querySelector('.chat-time');
             
             if (lastMessageEl && chatData.last_message) {
-                // ИЗМЕНЕНИЕ: Проверяем, является ли сообщение изображением
                 let lastMessageText = chatData.last_message;
                 if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') {
                     lastMessageText = '📷 Фото';
@@ -4936,17 +4698,13 @@ function updateChatItemInDOM(chatId, chatData) {
                     badge.remove();
                 }
             }
-            
-
         }
     });
 }
 
-
 function renderMessages(messages) {
     const { messagesContainer, noMessages } = getActiveElements();
     
- 
     messagesContainer.innerHTML = '';
     
     if (!messages || messages.length === 0) {
@@ -4985,8 +4743,6 @@ function renderMessages(messages) {
     }, 50);
 }
 
-
-
 async function updateMessageStatus(chatId, messageId) {
     try {
         const response = await fetch(`${SERVER_URL}/mark_as_read`, {
@@ -5005,7 +4761,6 @@ async function updateMessageStatus(chatId, messageId) {
         const data = await response.json();
         
         if (data.status === 'success') {
-         
             updateMessageStatusInUI(messageId);
         }
     } catch (error) {
@@ -5043,14 +4798,12 @@ async function markAllMessagesAsRead(chatId) {
         const data = await response.json();
         
         if (data.status === 'success') {
-           
             currentMessages.forEach(message => {
                 if (!message.is_me) { 
                     message.is_read = true;
                 }
             });
             
-         
             updateAllMessageStatusesInUI();
         }
     } catch (error) {
@@ -5076,7 +4829,6 @@ function updateAllMessageStatusesInUI() {
     });
 }
 
-
 async function updateChatStatuses() {
     if (!currentChatsList || currentChatsList.length === 0) {
         return;
@@ -5097,7 +4849,7 @@ async function updateChatStatuses() {
 
     try {
         const activityData = await getUsersActivityStatus(userIds);
-        currentActivityData = activityData; // Сохраняем данные для использования
+        currentActivityData = activityData;
         
         [chatsListDesktop, chatsListMobile].forEach(list => {
             if (!list) return;
@@ -5131,7 +4883,7 @@ async function updateChatStatuses() {
         console.error('Error updating chat statuses:', error);
     }
 }
-     
+
 async function initializePage() {
     const userDataFromStorage = sessionStorage.getItem('userData');
     if (!userDataFromStorage) {
@@ -5140,16 +4892,15 @@ async function initializePage() {
     }
 
     if (!isDesktop) {
-    // Явно находим кнопку для мобильной версии
-    const mobileBackBtn = document.getElementById('backToChatsMobile');
-    if (mobileBackBtn) {
-        mobileBackBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            closeChat();
-        });
+        const mobileBackBtn = document.getElementById('backToChatsMobile');
+        if (mobileBackBtn) {
+            mobileBackBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                closeChat();
+            });
+        }
     }
-}
     
     userData = JSON.parse(userDataFromStorage);
 
@@ -5157,7 +4908,6 @@ async function initializePage() {
     
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
 
-    // Мгновенная настройка UI без задержек
     if (isDesktop) {
         mobileChatsContainer.style.display = 'none';
         mobileOnlyNav.style.display = 'none';
@@ -5175,13 +4925,11 @@ async function initializePage() {
         chatModalMobile.classList.remove('active'); 
     }
 
-    // Параллельная загрузка данных без индикаторов
     await Promise.all([
         loadUserData(),
         loadChats()
     ]);
     
-    // Обработка открытого чата без задержек
     const openChatId = sessionStorage.getItem('openChatId');
     const openChatName = sessionStorage.getItem('openChatName');
     window.addEventListener('orientationchange', handleOrientationChange);
@@ -5197,10 +4945,8 @@ async function initializePage() {
         sessionStorage.removeItem('openChatId');
         sessionStorage.removeItem('openChatName');
         
-        // Открываем чат сразу без задержки
         openChat(openChatId);
     } else {
-        // Проверяем, есть ли временный чат для открытия (для новых чатов из contacts.html)
         const tempChatContactId = sessionStorage.getItem('tempChatContactId');
         const tempChatName = sessionStorage.getItem('tempChatName');
         
@@ -5208,7 +4954,6 @@ async function initializePage() {
             sessionStorage.removeItem('tempChatContactId');
             sessionStorage.removeItem('tempChatName');
             
-            // Создаем временный чат объект
             const tempChat = {
                 id: `temp_${Date.now()}`,
                 name: tempChatName,
@@ -5218,15 +4963,12 @@ async function initializePage() {
                 avatar_background: '#0088cc'
             };
             
-            // Открываем временный чат
             openTempChat(tempChat);
         }
     }
 
-    // Настройка обработчиков событий
     const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
 
-    // Обработчики для модального окна контактов
     addChatButton.addEventListener('click', (e) => {
         e.preventDefault();
         showContactsModal();
@@ -5239,12 +4981,10 @@ async function initializePage() {
         filterContacts(e.target.value);
     });
 
-    // Обработчики для поиска чатов
     searchInput.addEventListener('input', (e) => {
         filterChats(e.target.value);
     });
 
-    // Обработчики для отправки сообщений
     if (sendMessageButton && messageInput) {
         sendMessageButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
@@ -5253,9 +4993,7 @@ async function initializePage() {
             }
         });
         
-        // Автофокус на поле ввода при открытии чата
         messageInput.addEventListener('focus', () => {
-            // Прокручиваем к нижней части при фокусе на поле ввода
             setTimeout(() => {
                 const { messagesContainer } = getActiveElements();
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -5263,24 +5001,19 @@ async function initializePage() {
         });
     }
 
-// Обработчики для кнопки прикрепления
-const { attachButton } = getActiveElements();
-if (attachButton) {
-    attachButton.addEventListener('click', (e) => {
-        e.preventDefault();
-        imageInput.click();
-    });
-}
+    const { attachButton } = getActiveElements();
+    if (attachButton) {
+        attachButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            imageInput.click();
+        });
+    }
 
-// Обработчик выбора изображений
-imageInput.addEventListener('change', handleImageSelection);
+    imageInput.addEventListener('change', handleImageSelection);
 
-
-    // Обновление статусов каждые 5 секунд
     const statusUpdateInterval = setInterval(async () => {
         const { chatModal } = getActiveElements();
         
-        // Фоновое обновление статусов без блокировки UI
         try {
             await Promise.all([
                 fetch(`${SERVER_URL}/refresh_activity`, {
@@ -5290,7 +5023,6 @@ imageInput.addEventListener('change', handleImageSelection);
                 updateChatStatuses()
             ]);
             
-            // Обновляем статус в открытом чате
             if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
                 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 if (otherParticipant) {
@@ -5317,12 +5049,9 @@ imageInput.addEventListener('change', handleImageSelection);
         }
     }, 5000);
 
-    // Настройка обработчиков клавиатуры
     setupKeyboardHandlers();
     setupKeyboardDetection();
   
-    
-    // Запрет масштабирования жестами
     document.addEventListener('gesturestart', function(e) {
         e.preventDefault();
     });
@@ -5335,9 +5064,6 @@ imageInput.addEventListener('change', handleImageSelection);
         e.preventDefault();
     });
 
-    
-
-    // Обновление статусов при возвращении на вкладку
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
             updateChatStatuses();
@@ -5367,13 +5093,11 @@ imageInput.addEventListener('change', handleImageSelection);
         }
     });
 
-    // Обновление при активации окна
     window.addEventListener('focus', () => {
         updateChatStatuses();
         updateUserActivity(true);
     });
 
-    // Обновление статуса активности
     setTimeout(() => {
         updateUserActivity(true);
     }, 100);
@@ -5382,7 +5106,6 @@ imageInput.addEventListener('change', handleImageSelection);
         updateUserActivity(true);
     }, 30000);
     
-    // Очистка интервалов при закрытии страницы
     window.addEventListener('beforeunload', () => {
         clearInterval(activityInterval);
         clearInterval(statusUpdateInterval);
@@ -5401,15 +5124,12 @@ imageInput.addEventListener('change', handleImageSelection);
         sendOfflineStatus();
     });
     
-    // Обработчики для дополнительных кнопок
     const menuButton = document.querySelector('.menu-button');
     if (menuButton) {
         menuButton.addEventListener('click', () => {
             console.log('Menu button clicked');
-            // Здесь можно добавить функциональность меню
         });
     }
-
 
     const contactsSearchBtn = document.querySelector('.contacts-search-btn');
     if (contactsSearchBtn) {
@@ -5418,7 +5138,6 @@ imageInput.addEventListener('change', handleImageSelection);
         });
     }
 
-    // Настройка высоты для мобильных устройств
     if (!isDesktop) {
         setupMobileChatHeight();
         window.addEventListener('resize', setupMobileChatHeight);
@@ -5426,9 +5145,6 @@ imageInput.addEventListener('change', handleImageSelection);
 
     console.log('Page initialized successfully');
 }
-
-
-
 
 function filterChats(searchTerm) {
     const { chatsList } = getActiveElements();
@@ -5446,14 +5162,12 @@ function filterChats(searchTerm) {
     });
 }
 
-
 function handleOrientationChange() {
     console.log('Orientation changed');
     
     isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
     setTimeout(() => {
-        // Переприменяем обои при изменении ориентации
         applyWallpaper();
         
         if (!isDesktop && currentChat) {
@@ -5482,20 +5196,20 @@ function filterContacts(searchTerm) {
         }
     });
 }
-      
-        document.addEventListener('DOMContentLoaded', initializePage);
-        
-        
-        window.addEventListener('pageshow', (event) => {
-            if (event.persisted) {
-                initializePage();
-            }
-        });
-    </script>
+
+document.addEventListener('DOMContentLoaded', initializePage);
+
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        initializePage();
+    }
+});
+</script>
 
      <script src="activity-tracker.js"></script>
 </body>
 </html>
+
 
 
 
