@@ -2211,95 +2211,9 @@ input, textarea {
 
 
     <script>
+
     
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
-// --- IndexedDB Logic for Local Caching ---
-const DB_NAME = 'VuntgramDB';
-const DB_VERSION = 1;
-const STORE_CHATS = 'chats';
-const STORE_MESSAGES = 'messages';
-
-let db;
-
-function initDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains(STORE_CHATS)) {
-                db.createObjectStore(STORE_CHATS, { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains(STORE_MESSAGES)) {
-                db.createObjectStore(STORE_MESSAGES, { keyPath: 'chat_id' });
-            }
-        };
-
-        request.onsuccess = (event) => {
-            db = event.target.result;
-            resolve(db);
-        };
-
-        request.onerror = (event) => {
-            console.error('IndexedDB error:', event.target.error);
-            reject(event.target.error);
-        };
-    });
-}
-
-async function saveChatsLocal(chats) {
-    if (!db) await initDB();
-    const tx = db.transaction(STORE_CHATS, 'readwrite');
-    const store = tx.objectStore(STORE_CHATS);
-    // Clear old chats and save new ones
-    store.clear();
-    chats.forEach(chat => store.put(chat));
-    return tx.complete;
-}
-
-async function getChatsLocal() {
-    if (!db) await initDB();
-    return new Promise((resolve) => {
-        const tx = db.transaction(STORE_CHATS, 'readonly');
-        const store = tx.objectStore(STORE_CHATS);
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result);
-    });
-}
-
-async function saveMessagesLocal(chatId, messages) {
-    if (!db) await initDB();
-    const tx = db.transaction(STORE_MESSAGES, 'readwrite');
-    const store = tx.objectStore(STORE_MESSAGES);
-    store.put({ chat_id: chatId, messages: messages, timestamp: Date.now() });
-    return tx.complete;
-}
-
-async function getMessagesLocal(chatId) {
-    if (!db) await initDB();
-    return new Promise((resolve) => {
-        const tx = db.transaction(STORE_MESSAGES, 'readonly');
-        const store = tx.objectStore(STORE_MESSAGES);
-        const request = store.get(chatId);
-        request.onsuccess = () => resolve(request.result ? request.result.messages : null);
-    });
-}
-
-async function updateLocalChat(chatId, updates) {
-    if (!db) await initDB();
-    const tx = db.transaction(STORE_CHATS, 'readwrite');
-    const store = tx.objectStore(STORE_CHATS);
-    const request = store.get(chatId);
-    request.onsuccess = () => {
-        const chat = request.result;
-        if (chat) {
-            Object.assign(chat, updates);
-            store.put(chat);
-        }
-    };
-}
-// --- End of IndexedDB Logic ---
-
         
         const messageBox = document.getElementById('messageBox');
         const contactsModal = document.getElementById('contactsModal');
@@ -2353,16 +2267,11 @@ async function updateLocalChat(chatId, updates) {
         let currentMessages = [];
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false;
-let openChatAbortController = null; // Flag to prevent multiple chat openings
-        let currentChatsList = []; // Кэш списка чатов
-        // В разделе с другими глобальными переменными добавьте:
+        let openChatAbortController = null;
+        let currentChatsList = [];
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
-
-
-
-        
 
 
 
@@ -2798,7 +2707,7 @@ function getActiveElements() {
 
 
 
-        // Функция обработки выбора изображений
+// Функция обработки выбора изображений
 function handleImageSelection(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -3550,22 +3459,8 @@ function openImageModal(imageUrl, messageIndex = 0) {
 }
         
      
-async function loadChats(forceReload = false) {
-    // Эта функция теперь вызывается ТОЛЬКО при:
-    // 1. Первоначальной загрузке страницы (forceReload = false)
-    // 2. Явном требовании перезагрузить все чаты (forceReload = true)
-    
-    if (forceReload) {
-        // Полная перезагрузка только если явно запрошено
-        await performFullChatsReload();
-    } else {
-        // При обычном вызове - интеллектуальное обновление
-        await performSmartChatsUpdate();
-    }
-}
-
-async function performFullChatsReload() {
-    // Полная перезагрузка всех чатов (редкий случай)
+// Упрощенная функция загрузки чатов - всегда с сервера
+async function loadChats() {
     const { chatsList, noChats } = getActiveElements();
     
     try {
@@ -3581,12 +3476,7 @@ async function performFullChatsReload() {
         if (data.status === 'success') {
             const sortedChats = sortChats(data.chats);
             currentChatsList = sortedChats;
-            const chatsJson = JSON.stringify(sortedChats);
-            if (chatsJson !== lastRenderedChatsJson) {
-                renderChats(sortedChats);
-                lastRenderedChatsJson = chatsJson;
-            }
-            saveChatsLocal(sortedChats);
+            renderChats(sortedChats);
         } else {
             currentChatsList = [];
             renderChats([]);
@@ -3596,26 +3486,6 @@ async function performFullChatsReload() {
         currentChatsList = [];
         renderChats([]);
     }
-}
-
-
-let lastRenderedChatsJson = '';
-
-async function performSmartChatsUpdate() {
-    // 1. Сначала пробуем загрузить из локальной базы
-    const localChats = await getChatsLocal();
-    if (localChats && localChats.length > 0) {
-        console.log('Loaded chats from local storage');
-        currentChatsList = sortChats(localChats);
-        const chatsJson = JSON.stringify(currentChatsList);
-        if (chatsJson !== lastRenderedChatsJson) {
-            renderChats(currentChatsList);
-            lastRenderedChatsJson = chatsJson;
-        }
-    }
-    
-    // 2. Запрашиваем свежие данные с сервера
-    await performFullChatsReload();
 }
 
 function sortChats(chats) {
@@ -4295,11 +4165,33 @@ async function sendMessage() {
     sendMessageButton.disabled = true;
     isSendingMessage = true;
     
+    // Сохраняем контент и очищаем поле сразу для лучшего UX
+    const messageContent = content;
+    messageInput.value = '';
+    
+    // Создаем временное сообщение для мгновенного отображения
+    const tempMessageId = `temp_${Date.now()}`;
+    const tempMessage = {
+        id: tempMessageId,
+        sender_id: userData.platform_user_id,
+        content: messageContent,
+        sent_at: new Date().toISOString(),
+        is_read: false,
+        is_me: true,
+        is_temp: true
+    };
+    
+    // Добавляем временное сообщение в UI
+    currentMessages = [...currentMessages, tempMessage];
+    noMessages.style.display = 'none';
+    renderMessages(currentMessages);
+    
+    // Прокручиваем вниз
+    setTimeout(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 50);
+    
     try {
-        // Сохраняем контент перед очисткой
-        const messageContent = content;
-        messageInput.value = '';
-        
         // Если это временный чат, сначала создаем его
         if (currentChat.is_temp) {
             const response = await fetch(`${SERVER_URL}/create_chat`, {
@@ -4322,7 +4214,7 @@ async function sendMessage() {
             currentChat.id = data.chat_id;
             currentChat.is_temp = false;
             
-            // ВМЕСТО loadChats() - добавляем новый чат в список
+            // Добавляем новый чат в список
             const newChat = {
                 id: data.chat_id,
                 name: currentChat.name,
@@ -4358,66 +4250,54 @@ async function sendMessage() {
             throw new Error(messageData.error || 'Не удалось отправить сообщение');
         }
         
-        // Создаем новое сообщение для UI
+        // Заменяем временное сообщение на реальное
+        currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
+        
         const newMessage = {
             id: messageData.message_id,
             sender_id: userData.platform_user_id,
             content: messageContent,
-            sent_at: new Date().toISOString(),
+            sent_at: messageData.sent_at || new Date().toISOString(),
             is_read: false,
-            sender_name: userData.nickname,
-            sender_avatar: userData.avatar_url,
-            sender_avatar_background: userData.avatar_background,
             is_me: true
         };
         
-        // Добавляем сообщение в текущий список
         currentMessages = [...currentMessages, newMessage];
-        
-        // Обновляем UI
-        noMessages.style.display = 'none';
         renderMessages(currentMessages);
+        
+        // Обновляем информацию о чате в списке
+        updateChatItemInDOM(currentChat.id, {
+            last_message: messageContent,
+            last_message_time: newMessage.sent_at,
+            unread_count: 0
+        });
+        
+        // Обновляем данные в кэше чатов
+        const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+        if (chatIndex !== -1) {
+            currentChatsList[chatIndex].last_message = messageContent;
+            currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
+            currentChatsList[chatIndex].unread_count = 0;
+            
+            // Перемещаем чат в начало списка
+            const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+            currentChatsList.unshift(updatedChat);
+            moveChatToTop(currentChat.id);
+        }
         
         // Прокручиваем к последнему сообщению
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
         
-        // Обновляем информацию о чате в списке (только для существующих чатов)
-        if (!currentChat.is_temp) {
-            updateChatItemInDOM(currentChat.id, {
-                last_message: messageContent,
-                last_message_time: newMessage.sent_at,
-                unread_count: 0
-            });
-            
-            // Обновляем данные в кэше чатов
-            const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
-            if (chatIndex !== -1) {
-                currentChatsList[chatIndex].last_message = messageContent;
-                currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
-                currentChatsList[chatIndex].unread_count = 0;
-                
-                // Перемещаем чат в начало списка
-                const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
-                currentChatsList.unshift(updatedChat);
-                moveChatToTop(currentChat.id);
-            }
-        }
-        
-        // Фокусируемся на поле ввода после успешной отправки
-        setTimeout(() => {
-            messageInput.focus();
-            isSendingMessage = false;
-        }, 100);
-        
     } catch (error) {
         console.error('Error sending message:', error);
-        showMessage('Ошибка отправки сообщения: ' + error.message, 'error');
         
-        // Восстанавливаем текст в поле ввода при ошибке
-        messageInput.value = content;
-        isSendingMessage = false;
+        // Удаляем временное сообщение
+        currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
+        renderMessages(currentMessages);
+        
+        showMessage('Ошибка отправки сообщения: ' + error.message, 'error');
         
         // Показываем "нет сообщений" если сообщений действительно нет
         if (currentMessages.length === 0) {
@@ -4425,6 +4305,8 @@ async function sendMessage() {
         }
     } finally {
         sendMessageButton.disabled = false;
+        isSendingMessage = false;
+        messageInput.focus();
     }
 }
 
@@ -4551,33 +4433,18 @@ async function openChat(chatId) {
     }
 
     try {
-        // 1. Сначала пробуем загрузить сообщения из локальной базы
-        const localMessages = await getMessagesLocal(chatId);
-        let hasLocalMessages = false;
-        if (localMessages && localMessages.length > 0) {
-            console.log('Loaded messages from local storage');
-            currentMessages = localMessages;
-            renderMessages(currentMessages);
-            noMessages.style.display = 'none';
-            hasLocalMessages = true;
-            
-            // Показываем чат сразу
-            if (isDesktop) {
-                if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
-                chatModal.style.display = 'flex';
-            } else {
-                chatModal.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            }
-
-            // Прокручиваем вниз сразу
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 10);
+        // 1. Показываем пустой чат сразу
+        messagesContainer.innerHTML = '';
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Загрузка...';
+        
+        // Показываем чат сразу
+        if (isDesktop) {
+            if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
+            chatModal.style.display = 'flex';
         } else {
-            messagesContainer.innerHTML = '';
-            noMessages.style.display = 'block';
-            noMessages.textContent = 'Загрузка...';
+            chatModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
         }
 
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
@@ -4683,7 +4550,7 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
-        // 2. Загружаем с сервера только если нет локальных или для обновления в фоне
+        // 2. Загружаем сообщения с сервера
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -4700,39 +4567,21 @@ async function openChat(chatId) {
         const messagesData = await messagesResponse.json();
         
         if (messagesData.status === 'success') {
-            const serverMessages = messagesData.messages;
+            currentMessages = messagesData.messages || [];
+            renderMessages(currentMessages);
             
-            // Сравниваем с локальными, чтобы избежать лишней перерисовки
-            const messagesChanged = JSON.stringify(serverMessages) !== JSON.stringify(currentMessages);
-            
-            if (messagesChanged || !hasLocalMessages) {
-                currentMessages = serverMessages;
-                renderMessages(currentMessages);
-                saveMessagesLocal(chatId, currentMessages);
-            }
-            
-            markAllMessagesAsRead(chatId);
-        
             if (currentMessages.length === 0) {
                 noMessages.style.display = 'block';
                 noMessages.textContent = 'Сообщений пока нет...';
             } else {
                 noMessages.style.display = 'none';
             }
-        } else if (!hasLocalMessages) {
+            
+            markAllMessagesAsRead(chatId);
+        } else {
             currentMessages = [];
             noMessages.style.display = 'block';
             noMessages.textContent = 'Сообщений пока нет...';
-        }
-        
-        if (!chatModal.classList.contains('active') && chatModal.style.display !== 'flex') {
-            if (isDesktop) {
-                if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
-                chatModal.style.display = 'flex';
-            } else {
-                chatModal.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            }
         }
         
         if (currentMessages.length > 0) {
@@ -4759,14 +4608,11 @@ async function openChat(chatId) {
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('Fetch aborted - user switched chats quickly');
-            // Просто выходим, не показываем ошибку и не закрываем чат
             return;
         }
         
         console.error('Error opening chat:', error);
         
-        // НЕ вызываем closeChat() здесь - это вызывает проблемы
-        // Вместо этого просто сбрасываем состояние и показываем плейсхолдер
         currentChat = null;
         currentMessages = [];
         
@@ -4790,7 +4636,6 @@ async function openChat(chatId) {
         
     } finally {
         isOpeningChat = false;
-        // Не обнуляем openChatAbortController здесь, чтобы он мог быть использован для отмены
     }
 
     updateChatWallpaper();
@@ -5493,7 +5338,6 @@ function filterContacts(searchTerm) {
             }
         });
     </script>
-
      <script src="activity-tracker.js"></script>
 </body>
 </html>
