@@ -63,8 +63,8 @@
         --telegram-destructive: #ee686f;
         --telegram-success: #00c73c;
         --desktop-sidebar-width: 340px;
-        --my-message-gradient: linear-gradient(135deg, #9501ff, #1b1b1b);
-        --their-message-gradient: linear-gradient(135deg, #181818, #202020);
+        --my-message-gradient: linear-gradient(135deg, #9501ff, #a043fd);
+        --their-message-gradient: linear-gradient(135deg, #f5f5f5, #e0e0e0);
         --wallpaper-url: url('фон.webp');
     }
 
@@ -957,7 +957,7 @@ input, textarea {
         color: var(--telegram-hint);
         font-size: 10px;
         font-weight: 500;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
         padding: 8px 12px;
         border-radius: 12px;
         min-width: 60px;
@@ -966,11 +966,11 @@ input, textarea {
     .nav-item i {
         font-size: 22px;
         margin-bottom: 2px;
-        transition: all 0.3s
+        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
 
     .nav-item span {
-        transition: all 0.5s ease;
+        transition: all 0.2s ease;
     }
 
     .nav-item.active {
@@ -982,18 +982,7 @@ input, textarea {
     }
 
     .nav-item:hover i {
-        transform: scale(1.1);
-        border-radius: 20px;
-        background: rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        display: flex;
-        justify-content: center;
-        width: 110px;
-        height: 40px;
-        padding-top: 7px;
-        
+        transform: translateY(-2px) scale(1.1);
     }
 
     .nav-item:active {
@@ -1627,10 +1616,10 @@ input, textarea {
     max-width: 380px; /* Уменьшил максимальную ширину */
     width: 85%; /* Уменьшил процент ширины */
     /* ИЗМЕНЕНИЯ: увеличиваем прозрачность и делаем единый стиль */
-    background: rgba(48, 48, 48, 0.158); /* Более прозрачный белый */
+    background: rgba(255, 255, 255, 0.50); /* Более прозрачный белый */
     backdrop-filter: blur(20px); /* Увеличиваем размытие для водянистости */
     -webkit-backdrop-filter: blur(20px); /* Для Safari */
-    border: 1px solid rgba(255, 255, 255, 0.075); /* Полупрозрачная граница */
+    border: 1px solid rgba(255, 255, 255, 0.3); /* Полупрозрачная граница */
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Легкая тень для объема */
 }
 
@@ -1643,7 +1632,7 @@ input, textarea {
     color: #000;
     border-radius: 0;
     /* ДОБАВЛЯЕМ: прозрачный фон для поля ввода */
-    
+    background: transparent;
 }
 
 .send-button {
@@ -2223,10 +2212,92 @@ input, textarea {
 
     <script>
     
-
-    
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
-// Локальное кэширование отключено
+// --- IndexedDB Logic for Local Caching ---
+const DB_NAME = 'VuntgramDB';
+const DB_VERSION = 1;
+const STORE_CHATS = 'chats';
+const STORE_MESSAGES = 'messages';
+
+let db;
+
+function initDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_CHATS)) {
+                db.createObjectStore(STORE_CHATS, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(STORE_MESSAGES)) {
+                db.createObjectStore(STORE_MESSAGES, { keyPath: 'chat_id' });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            resolve(db);
+        };
+
+        request.onerror = (event) => {
+            console.error('IndexedDB error:', event.target.error);
+            reject(event.target.error);
+        };
+    });
+}
+
+async function saveChatsLocal(chats) {
+    if (!db) await initDB();
+    const tx = db.transaction(STORE_CHATS, 'readwrite');
+    const store = tx.objectStore(STORE_CHATS);
+    // Clear old chats and save new ones
+    store.clear();
+    chats.forEach(chat => store.put(chat));
+    return tx.complete;
+}
+
+async function getChatsLocal() {
+    if (!db) await initDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(STORE_CHATS, 'readonly');
+        const store = tx.objectStore(STORE_CHATS);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+    });
+}
+
+async function saveMessagesLocal(chatId, messages) {
+    if (!db) await initDB();
+    const tx = db.transaction(STORE_MESSAGES, 'readwrite');
+    const store = tx.objectStore(STORE_MESSAGES);
+    store.put({ chat_id: chatId, messages: messages, timestamp: Date.now() });
+    return tx.complete;
+}
+
+async function getMessagesLocal(chatId) {
+    if (!db) await initDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readonly');
+        const store = tx.objectStore(STORE_MESSAGES);
+        const request = store.get(chatId);
+        request.onsuccess = () => resolve(request.result ? request.result.messages : null);
+    });
+}
+
+async function updateLocalChat(chatId, updates) {
+    if (!db) await initDB();
+    const tx = db.transaction(STORE_CHATS, 'readwrite');
+    const store = tx.objectStore(STORE_CHATS);
+    const request = store.get(chatId);
+    request.onsuccess = () => {
+        const chat = request.result;
+        if (chat) {
+            Object.assign(chat, updates);
+            store.put(chat);
+        }
+    };
+}
 // --- End of IndexedDB Logic ---
 
         
@@ -3479,7 +3550,22 @@ function openImageModal(imageUrl, messageIndex = 0) {
 }
         
      
-async function loadChats() {
+async function loadChats(forceReload = false) {
+    // Эта функция теперь вызывается ТОЛЬКО при:
+    // 1. Первоначальной загрузке страницы (forceReload = false)
+    // 2. Явном требовании перезагрузить все чаты (forceReload = true)
+    
+    if (forceReload) {
+        // Полная перезагрузка только если явно запрошено
+        await performFullChatsReload();
+    } else {
+        // При обычном вызове - интеллектуальное обновление
+        await performSmartChatsUpdate();
+    }
+}
+
+async function performFullChatsReload() {
+    // Полная перезагрузка всех чатов (редкий случай)
     const { chatsList, noChats } = getActiveElements();
     
     try {
@@ -3495,7 +3581,12 @@ async function loadChats() {
         if (data.status === 'success') {
             const sortedChats = sortChats(data.chats);
             currentChatsList = sortedChats;
-            renderChats(sortedChats);
+            const chatsJson = JSON.stringify(sortedChats);
+            if (chatsJson !== lastRenderedChatsJson) {
+                renderChats(sortedChats);
+                lastRenderedChatsJson = chatsJson;
+            }
+            saveChatsLocal(sortedChats);
         } else {
             currentChatsList = [];
             renderChats([]);
@@ -3505,6 +3596,26 @@ async function loadChats() {
         currentChatsList = [];
         renderChats([]);
     }
+}
+
+
+let lastRenderedChatsJson = '';
+
+async function performSmartChatsUpdate() {
+    // 1. Сначала пробуем загрузить из локальной базы
+    const localChats = await getChatsLocal();
+    if (localChats && localChats.length > 0) {
+        console.log('Loaded chats from local storage');
+        currentChatsList = sortChats(localChats);
+        const chatsJson = JSON.stringify(currentChatsList);
+        if (chatsJson !== lastRenderedChatsJson) {
+            renderChats(currentChatsList);
+            lastRenderedChatsJson = chatsJson;
+        }
+    }
+    
+    // 2. Запрашиваем свежие данные с сервера
+    await performFullChatsReload();
 }
 
 function sortChats(chats) {
@@ -3543,7 +3654,8 @@ function sortChats(chats) {
             }
             
             // Обновляем DOM
-            renderChats(currentChatsList);
+            updateChatItemInDOM(chatId, data.chat);
+            moveChatToTop(chatId);
         }
     } catch (error) {
         console.error('Error updating single chat:', error);
@@ -4271,9 +4383,15 @@ async function sendMessage() {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
         
-        // Обновляем информацию о чате в списке
+        // Обновляем информацию о чате в списке (только для существующих чатов)
         if (!currentChat.is_temp) {
-            // Обновляем данные в списке чатов
+            updateChatItemInDOM(currentChat.id, {
+                last_message: messageContent,
+                last_message_time: newMessage.sent_at,
+                unread_count: 0
+            });
+            
+            // Обновляем данные в кэше чатов
             const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
             if (chatIndex !== -1) {
                 currentChatsList[chatIndex].last_message = messageContent;
@@ -4283,10 +4401,8 @@ async function sendMessage() {
                 // Перемещаем чат в начало списка
                 const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                 currentChatsList.unshift(updatedChat);
+                moveChatToTop(currentChat.id);
             }
-            
-            // Полностью перерисовываем список чатов, чтобы порядок был верным
-            renderChats(currentChatsList);
         }
         
         // Фокусируемся на поле ввода после успешной отправки
@@ -4408,10 +4524,61 @@ async function openChat(chatId) {
         messagesContainer.innerHTML = '';
     }
     
+    // 0. Обновляем заголовок из кэша списка чатов (если есть) - МОМЕНТАЛЬНО
+    const cachedChat = currentChatsList.find(c => c.id === chatId);
+    if (cachedChat) {
+        chatTitle.textContent = cachedChat.name || 'Новый чат';
+        const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
+        const bgColor = cachedChat.avatar_background || '#0088cc';
+        
+        const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
+            // Мгновенно устанавливаем фон
+            chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = '';
+            
+            // Также мгновенно обновляем статус из кэша, если он там есть
+            const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
+            if (statusElement) {
+                chatStatus.innerHTML = statusElement.innerHTML;
+                chatStatus.className = statusElement.className;
+            }
+        } else {
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = initials;
+        }
+    }
+
     try {
-        messagesContainer.innerHTML = '';
-        noMessages.style.display = 'block';
-        noMessages.textContent = 'Загрузка...';
+        // 1. Сначала пробуем загрузить сообщения из локальной базы
+        const localMessages = await getMessagesLocal(chatId);
+        let hasLocalMessages = false;
+        if (localMessages && localMessages.length > 0) {
+            console.log('Loaded messages from local storage');
+            currentMessages = localMessages;
+            renderMessages(currentMessages);
+            noMessages.style.display = 'none';
+            hasLocalMessages = true;
+            
+            // Показываем чат сразу
+            if (isDesktop) {
+                if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
+                chatModal.style.display = 'flex';
+            } else {
+                chatModal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+
+            // Прокручиваем вниз сразу
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 10);
+        } else {
+            messagesContainer.innerHTML = '';
+            noMessages.style.display = 'block';
+            noMessages.textContent = 'Загрузка...';
+        }
 
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
@@ -4516,6 +4683,7 @@ async function openChat(chatId) {
             chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
         }
         
+        // 2. Загружаем с сервера только если нет локальных или для обновления в фоне
         const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: {
@@ -4532,8 +4700,17 @@ async function openChat(chatId) {
         const messagesData = await messagesResponse.json();
         
         if (messagesData.status === 'success') {
-            currentMessages = messagesData.messages;
-            renderMessages(currentMessages);
+            const serverMessages = messagesData.messages;
+            
+            // Сравниваем с локальными, чтобы избежать лишней перерисовки
+            const messagesChanged = JSON.stringify(serverMessages) !== JSON.stringify(currentMessages);
+            
+            if (messagesChanged || !hasLocalMessages) {
+                currentMessages = serverMessages;
+                renderMessages(currentMessages);
+                saveMessagesLocal(chatId, currentMessages);
+            }
+            
             markAllMessagesAsRead(chatId);
         
             if (currentMessages.length === 0) {
@@ -4542,7 +4719,7 @@ async function openChat(chatId) {
             } else {
                 noMessages.style.display = 'none';
             }
-        } else {
+        } else if (!hasLocalMessages) {
             currentMessages = [];
             noMessages.style.display = 'block';
             noMessages.textContent = 'Сообщений пока нет...';
@@ -5320,6 +5497,5 @@ function filterContacts(searchTerm) {
      <script src="activity-tracker.js"></script>
 </body>
 </html>
-
 
 
