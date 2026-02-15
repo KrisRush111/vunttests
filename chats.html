@@ -2261,14 +2261,13 @@ input, textarea {
         const imageInput = document.getElementById('imageInput');
         const attachButtonDesktop = document.getElementById('attachButtonDesktop');
         const attachButtonMobile = document.getElementById('attachButtonMobile');
-
-        let userData = {};
-        let currentChat = null;
         let currentMessages = [];
+        let currentChat = null;
+        let currentChatsList = [];
+        let messagesCache = {}; // Кэш для фоновой предзагрузки сообщений
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false;
         let openChatAbortController = null;
-        let currentChatsList = [];
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
@@ -3460,6 +3459,31 @@ function openImageModal(imageUrl, messageIndex = 0) {
         
      
 // Упрощенная функция загрузки чатов - всегда с сервера
+async function preloadAllMessages(chats) {
+    if (!chats || chats.length === 0) return;
+    
+    // Загружаем сообщения для каждого чата в фоне
+    chats.forEach(async (chat) => {
+        try {
+            const response = await fetch(`${SERVER_URL}/get_messages`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: chat.id,
+                    platform_user_id: userData.platform_user_id
+                }),
+                credentials: 'include'
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                messagesCache[chat.id] = data.messages || [];
+            }
+        } catch (e) {
+            console.warn(`Background preload failed for chat ${chat.id}:`, e);
+        }
+    });
+}
+
 async function loadChats() {
     const { chatsList, noChats } = getActiveElements();
     
@@ -3477,6 +3501,8 @@ async function loadChats() {
             const sortedChats = sortChats(data.chats);
             currentChatsList = sortedChats;
             renderChats(sortedChats);
+            // Фоновая предзагрузка сообщений для всех чатов
+            preloadAllMessages(sortedChats);
         } else {
             currentChatsList = [];
             renderChats([]);
@@ -4433,18 +4459,29 @@ async function openChat(chatId) {
     }
 
     try {
-        // 1. Показываем пустой чат сразу
-        messagesContainer.innerHTML = '';
-        noMessages.style.display = 'block';
-        noMessages.textContent = 'Загрузка...';
-        
-        // Показываем чат сразу
+        // 1. Показываем чат сразу
         if (isDesktop) {
             if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
             chatModal.style.display = 'flex';
         } else {
             chatModal.classList.add('active');
             document.body.style.overflow = 'hidden';
+        }
+
+        // ПРОВЕРКА КЭША: Если сообщения уже есть в кэше, отображаем их мгновенно
+        if (messagesCache[chatId]) {
+            currentMessages = messagesCache[chatId];
+            renderMessages(currentMessages);
+            noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
+            if (currentMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
+            
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 10);
+        } else {
+            messagesContainer.innerHTML = '';
+            noMessages.style.display = 'block';
+            noMessages.textContent = 'Загрузка...';
         }
 
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
@@ -4568,6 +4605,9 @@ async function openChat(chatId) {
         
         if (messagesData.status === 'success') {
             currentMessages = messagesData.messages || [];
+            // Обновляем кэш
+            messagesCache[chatId] = currentMessages;
+            
             renderMessages(currentMessages);
             
             if (currentMessages.length === 0) {
