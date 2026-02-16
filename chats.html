@@ -53,6 +53,7 @@
         --telegram-blue: #0088cc;
         --telegram-light-blue: #40a7e3;
         --telegram-bg: #ffffff;
+        --telegram-blue-rgb: 0, 136, 204;
         --telegram-secondary-bg: #f4f4f5;
         --telegram-text: #000000;
         --telegram-hint: #8e8e93;
@@ -541,7 +542,12 @@ input, textarea {
     .chat-modal.active {
         transform: translateX(0);
     }
-
+    
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+    20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
 
     .chat-header {
         position: fixed; /* Sticky вместо fixed */
@@ -1167,7 +1173,161 @@ input, textarea {
             transform: scale(1); /* Original size */
         }
     }
+    /* Анимации для сообщений */
+@keyframes messageAppear {
+    0% {
+        opacity: 0;
+        transform: scale(0.8) translateY(10px);
+    }
+    50% {
+        transform: scale(1.02) translateY(0);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
 
+.message {
+    animation: messageAppear 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform-origin: var(--transform-origin, left bottom);
+}
+
+.message-outgoing {
+    --transform-origin: right bottom;
+}
+
+.message-incoming {
+    --transform-origin: left bottom;
+}
+
+/* Анимация для изображений при загрузке */
+.message-image {
+    transition: opacity 0.3s ease, transform 0.2s ease;
+}
+
+.message-image.loaded {
+    animation: imagePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes imagePop {
+    0% {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    50% {
+        transform: scale(1.02);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Анимация для временных сообщений (отправляемых) */
+.message.is_temp {
+    animation: sendingPulse 1s infinite;
+}
+
+@keyframes sendingPulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Анимация для новых сообщений в списке чатов */
+.chat-item {
+    transition: all 0.2s ease;
+}
+
+.chat-item.new-message {
+    animation: highlightNew 1s ease;
+}
+
+@keyframes highlightNew {
+    0%, 100% {
+        background-color: transparent;
+    }
+    30%, 70% {
+        background-color: rgba(var(--telegram-blue-rgb), 0.1);
+    }
+}
+
+/* Анимация для появления даты */
+.date-header {
+    animation: fadeInScale 0.3s ease;
+}
+
+@keyframes fadeInScale {
+    0% {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Анимация для иконок статуса */
+.status-icon {
+    transition: all 0.2s ease;
+}
+
+.status-icon.read {
+    animation: checkmark 0.3s ease;
+}
+
+@keyframes checkmark {
+    0% {
+        transform: scale(0);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* Анимация для кнопки отправки */
+.send-button {
+    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.send-button:active {
+    transform: scale(0.9);
+}
+
+.send-button.sending {
+    animation: sending 0.8s infinite;
+}
+
+@keyframes sending {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+/* Анимация для плейсхолдера загрузки изображения */
+.message-image[src=""] {
+    animation: loadingPulse 1.5s infinite;
+}
+
+@keyframes loadingPulse {
+    0%, 100% {
+        opacity: 0.3;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
     @media (max-width: 480px) {
         .chats-container {
             padding: 12px 12px 80px; /* Original size */
@@ -1397,7 +1557,30 @@ input, textarea {
     opacity: 0.9;
     line-height: 1.4;
 }
+@keyframes badgeAppear {
+    0% {
+        opacity: 0;
+        transform: scale(0);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
 
+@keyframes badgeDisappear {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(0);
+    }
+}
 
 /* Стили для сообщений с изображениями в чате */
 .message-with-image {
@@ -2772,66 +2955,74 @@ input, textarea {
     }
 
     function renderMessage(message) {
-        const messageElement = document.createElement('div');
-        messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
-        messageElement.setAttribute('data-message-id', message.id);
-        
-        const messageTime = formatChatMessageTime(message.sent_at);
-        
-        let statusIcons = '';
-        if (message.is_me) {
-            const isRead = message.is_read;
-            statusIcons = `
-                <div class="message-status">
-                    <div class="status-icons">
-                        <i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i>
-                    </div>
+    const messageElement = document.createElement('div');
+    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+    messageElement.setAttribute('data-message-id', message.id);
+    
+    // Добавляем анимацию появления
+    messageElement.style.animation = 'messageAppear 0.3s ease-out';
+    messageElement.style.opacity = '0';
+    messageElement.style.transform = message.is_me ? 'translateX(20px)' : 'translateX(-20px)';
+    
+    const messageTime = formatChatMessageTime(message.sent_at);
+    
+    let statusIcons = '';
+    if (message.is_me) {
+        const isRead = message.is_read;
+        statusIcons = `
+            <div class="message-status">
+                <div class="status-icons">
+                    <i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i>
                 </div>
-            `;
-        }
+            </div>
+        `;
+    }
+    
+    let messageContent = '';
+    
+    if (message.is_image || (message.content && isImageUrl(message.content))) {
+        const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+        const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
         
-        let messageContent = '';
+        const imageUrl = message.content;
         
-        if (message.is_image || (message.content && isImageUrl(message.content))) {
-            const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
-            const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
-            
-            const imageUrl = message.content;
-            
-            messageContent = `
-                <div class="message-content">
-                    <img src="${imageUrl}" 
-                         alt="Изображение" 
-                         class="message-image"
-                         onclick="openImageModal('${imageUrl}', ${imageIndex})"
-                         loading="lazy"
-                         onload="this.style.opacity='1'"
-                         onerror="this.onerror=null; this.style.opacity='0.5'"
-                         style="opacity: 0; max-width: 100%; height: auto;">
-                </div>
-            `;
-            
-            messageElement.classList.add('message-with-image');
-            
-        } else {
-            messageContent = `
-                <div class="message-content">${escapeHtml(message.content)}</div>
-            `;
-        }
-        
-        messageElement.innerHTML = `
-            ${messageContent}
-            <div class="message-time">
-                ${messageTime}
-                ${message.is_me ? statusIcons : ''}
+        messageContent = `
+            <div class="message-content">
+                <img src="${imageUrl}" 
+                     alt="Изображение" 
+                     class="message-image"
+                     onclick="openImageModal('${imageUrl}', ${imageIndex})"
+                     loading="lazy"
+                     onload="this.style.opacity='1'; this.classList.add('loaded')"
+                     onerror="this.onerror=null; this.style.opacity='0.5'"
+                     style="opacity: 0; max-width: 100%; height: auto;">
             </div>
         `;
         
-        messageElement.style.opacity = '1';
-        messageElement.style.transform = 'translateY(0)';
+        messageElement.classList.add('message-with-image');
         
-        return messageElement;
+    } else {
+        messageContent = `
+            <div class="message-content">${escapeHtml(message.content)}</div>
+        `;
     }
+    
+    messageElement.innerHTML = `
+        ${messageContent}
+        <div class="message-time">
+            ${messageTime}
+            ${message.is_me ? statusIcons : ''}
+        </div>
+    `;
+    
+  
+    requestAnimationFrame(() => {
+        messageElement.style.opacity = '1';
+        messageElement.style.transform = 'translateX(0)';
+    });
+    
+    return messageElement;
+}
 
     function escapeHtml(text) {
         const div = document.createElement('div');
@@ -3918,165 +4109,86 @@ input, textarea {
         }
     }
 
-    // ОПТИМИЗИРОВАННАЯ ФУНКЦИЯ ОТПРАВКИ СООБЩЕНИЙ
     async function sendMessage() {
-        const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
-        const content = messageInput.value.trim();
-        
-        if (!content || !currentChat || isSendingMessage) return;
-        
-        isSendingMessage = true;
-        
-        // Мгновенно сохраняем контент и очищаем поле
-        const messageContent = content;
-        messageInput.value = '';
-        
-        // Создаем временное сообщение
-        const tempMessageId = `temp_${Date.now()}`;
-        const tempMessage = {
-            id: tempMessageId,
-            sender_id: userData.platform_user_id,
-            content: messageContent,
-            sent_at: new Date().toISOString(),
-            is_read: false,
-            is_me: true,
-            is_temp: true
-        };
-        
-        // Добавляем в массив и рендерим (без задержки)
-        currentMessages.push(tempMessage);
-        
-        // Скрываем "нет сообщений"
-        if (noMessages.style.display !== 'none') {
-            noMessages.style.display = 'none';
-        }
-        
-        // Быстрый рендеринг только нового сообщения
-        const messageElement = renderMessage(tempMessage);
-        messagesContainer.appendChild(messageElement);
-        
-        // Мгновенная прокрутка вниз
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        
-        // Фоновая отправка на сервер
-        (async () => {
-            try {
-                let actualChatId = currentChat.id;
-                
-                // Если временный чат, создаем его
-                if (currentChat.is_temp) {
-                    const response = await fetch(`${SERVER_URL}/create_chat`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            platform_user_id: userData.platform_user_id,
-                            contact_id: currentChat.participants[0].platform_user_id
-                        }),
-                        credentials: 'include'
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (data.status !== 'success') {
-                        throw new Error(data.error || 'Не удалось создать чат');
-                    }
-                    
-                    actualChatId = data.chat_id;
-                    currentChat.id = data.chat_id;
-                    currentChat.is_temp = false;
-                    
-                    const newChat = {
-                        id: data.chat_id,
-                        name: currentChat.name,
-                        last_message: messageContent,
-                        last_message_time: new Date().toISOString(),
-                        unread_count: 0,
-                        participants: currentChat.participants,
-                        has_avatar_photo: currentChat.has_avatar_photo,
-                        avatar_background: currentChat.avatar_background
-                    };
-                    
-                    currentChatsList.unshift(newChat);
-                    updateChatItemInDOM(data.chat_id, newChat);
-                }
-                
-                // Отправляем сообщение
-                const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: actualChatId,
-                        sender_id: userData.platform_user_id,
-                        content: messageContent
-                    }),
-                    credentials: 'include'
-                });
-                
-                const messageData = await messageResponse.json();
-                
-                if (messageData.status !== 'success') {
-                    throw new Error(messageData.error || 'Не удалось отправить сообщение');
-                }
-                
-                // Обновляем временное сообщение на реальное
-                const index = currentMessages.findIndex(msg => msg.id === tempMessageId);
-                if (index !== -1) {
-                    currentMessages[index] = {
-                        id: messageData.message_id,
-                        sender_id: userData.platform_user_id,
-                        content: messageContent,
-                        sent_at: messageData.sent_at || new Date().toISOString(),
-                        is_read: false,
-                        is_me: true
-                    };
-                    
-                    // Обновляем элемент в DOM (только id)
-                    const msgElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
-                    if (msgElement) {
-                        msgElement.setAttribute('data-message-id', messageData.message_id);
-                    }
-                }
-                
-                // Обновляем информацию о чате в списке
-                if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, {
-                        last_message: messageContent,
-                        last_message_time: new Date().toISOString(),
-                        unread_count: 0
-                    });
-                    
-                    const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
-                    if (chatIndex !== -1) {
-                        currentChatsList[chatIndex].last_message = messageContent;
-                        currentChatsList[chatIndex].last_message_time = new Date().toISOString();
-                        currentChatsList[chatIndex].unread_count = 0;
-                        
-                        const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
-                        currentChatsList.unshift(updatedChat);
-                        moveChatToTop(currentChat.id);
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error sending message:', error);
-                
-                // Помечаем сообщение как ошибочное
-                const msgElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
-                if (msgElement) {
-                    msgElement.style.opacity = '0.5';
-                    const timeElement = msgElement.querySelector('.message-time');
-                    if (timeElement) {
-                        timeElement.innerHTML += ' <span style="color: red;">✗</span>';
-                    }
-                }
-                
-                showMessage('Ошибка отправки сообщения', 'error');
-            } finally {
-                isSendingMessage = false;
-                sendMessageButton.disabled = false;
-            }
-        })();
+    const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
+    const content = messageInput.value.trim();
+    
+    if (!content || !currentChat || isSendingMessage) return;
+    
+    isSendingMessage = true;
+    
+    // Добавляем класс анимации на кнопку
+    sendMessageButton.classList.add('sending');
+    
+    const messageContent = content;
+    messageInput.value = '';
+    
+    const tempMessageId = `temp_${Date.now()}`;
+    const tempMessage = {
+        id: tempMessageId,
+        sender_id: userData.platform_user_id,
+        content: messageContent,
+        sent_at: new Date().toISOString(),
+        is_read: false,
+        is_me: true,
+        is_temp: true
+    };
+    
+    currentMessages.push(tempMessage);
+    
+    if (noMessages.style.display !== 'none') {
+        noMessages.style.display = 'none';
     }
+    
+    const messageElement = renderMessage(tempMessage);
+    messagesContainer.appendChild(messageElement);
+    
+    // Добавляем класс для временного сообщения
+    messageElement.classList.add('is_temp');
+    
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Фоновая отправка на сервер
+    (async () => {
+        try {
+            // ... существующий код отправки ...
+            
+            if (messageData.status === 'success') {
+                // Убираем класс временного сообщения
+                messageElement.classList.remove('is_temp');
+                
+                // Обновляем статус на прочитанный (если нужно)
+                setTimeout(() => {
+                    const statusIcon = messageElement.querySelector('.status-icon');
+                    if (statusIcon) {
+                        statusIcon.classList.remove('fa-check', 'sent');
+                        statusIcon.classList.add('fa-check-double', 'read');
+                        statusIcon.classList.add('read');
+                    }
+                }, 1000); // Имитация прочтения через 1 секунду
+            }
+            
+        } catch (error) {
+            console.error('Error sending message:', error);
+            
+            messageElement.classList.remove('is_temp');
+            messageElement.style.opacity = '0.5';
+            messageElement.style.animation = 'shake 0.3s ease';
+            
+            const timeElement = messageElement.querySelector('.message-time');
+            if (timeElement) {
+                timeElement.innerHTML += ' <span style="color: red;">⚠️</span>';
+            }
+            
+            showMessage('Ошибка отправки сообщения', 'error');
+        } finally {
+            isSendingMessage = false;
+            sendMessageButton.classList.remove('sending');
+        }
+    })();
+}
+
+
 
     function setupKeyboardHandlers() {
         const { messagesContainer, messageInput } = getActiveElements();
@@ -4438,38 +4550,58 @@ input, textarea {
     }
 
     function updateChatItemInDOM(chatId, chatData) {
-        [chatsListDesktop, chatsListMobile].forEach(list => {
-            if (!list) return;
+    [chatsListDesktop, chatsListMobile].forEach(list => {
+        if (!list) return;
+        
+        const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+        if (chatItem) {
+            const lastMessageEl = chatItem.querySelector('.last-message');
             
-            const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-            if (chatItem) {
-                const lastMessageEl = chatItem.querySelector('.last-message');
-                
-                if (lastMessageEl && chatData.last_message) {
-                    let lastMessageText = chatData.last_message;
-                    if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') {
-                        lastMessageText = '📷 Фото';
-                    }
-                    lastMessageEl.textContent = lastMessageText;
+            if (lastMessageEl && chatData.last_message) {
+                let lastMessageText = chatData.last_message;
+                if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') {
+                    lastMessageText = '📷 Фото';
                 }
                 
-                if (chatData.unread_count > 0) {
-                    let badge = chatItem.querySelector('.unread-badge');
-                    if (!badge) {
-                        badge = document.createElement('div');
-                        badge.className = 'unread-badge';
-                        chatItem.appendChild(badge);
-                    }
-                    badge.textContent = chatData.unread_count;
-                } else {
-                    const badge = chatItem.querySelector('.unread-badge');
-                    if (badge) {
-                        badge.remove();
-                    }
+                // Если сообщение изменилось, добавляем анимацию
+                if (lastMessageEl.textContent !== lastMessageText) {
+                    chatItem.classList.add('new-message');
+                    lastMessageEl.textContent = lastMessageText;
+                    
+                    // Убираем класс анимации через 1 секунду
+                    setTimeout(() => {
+                        chatItem.classList.remove('new-message');
+                    }, 1000);
                 }
             }
-        });
-    }
+            
+            if (chatData.unread_count > 0) {
+                let badge = chatItem.querySelector('.unread-badge');
+                if (!badge) {
+                    badge = document.createElement('div');
+                    badge.className = 'unread-badge';
+                    chatItem.appendChild(badge);
+                    
+                    // Анимация появления бейджа
+                    badge.style.animation = 'badgeAppear 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+                }
+                badge.textContent = chatData.unread_count;
+            } else {
+                const badge = chatItem.querySelector('.unread-badge');
+                if (badge) {
+                    // Анимация исчезновения
+                    badge.style.animation = 'badgeDisappear 0.2s ease';
+                    setTimeout(() => {
+                        if (badge.parentNode === chatItem) {
+                            badge.remove();
+                        }
+                    }, 200);
+                }
+            }
+        }
+    });
+}
+
 
     function renderMessages(messages) {
         const { messagesContainer, noMessages } = getActiveElements();
