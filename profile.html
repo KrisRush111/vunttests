@@ -2432,52 +2432,47 @@ input:checked + .toggle-slider:before {
 
 
 
-
-
-
-
-// Конфигурация обоев
 const WALLPAPERS = [
     {
         id: 'default',
         name: 'Системные',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон.jpg',
+        url: 'фон.jpg?t=' + Date.now(), // Добавляем timestamp для избежания кэша
         isDefault: true
     },
     {
         id: 'wall1',
         name: 'Фиолетовые',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон3.jpg'
+        url: 'фон3.jpg?t=' + Date.now()
     },
     {
         id: 'wall6',
         name: 'фиолетово-розовые',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон8.jpg'
+        url: 'фон8.jpg?t=' + Date.now()
     },
     {
         id: 'wall2',
         name: 'Светлые',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон4.jpg'
+        url: 'фон4.jpg?t=' + Date.now()
     },
     {
         id: 'wall5',
         name: 'сине-зелёные',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон7.jpg'
+        url: 'фон7.jpg?t=' + Date.now()
     },
     {
         id: 'wall3',
         name: 'зелёно-розовые',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон5.jpg'
+        url: 'фон5.jpg?t=' + Date.now()
     },
     {
         id: 'wall4',
         name: 'Темные',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон6.jpg'
+        url: 'фон6.jpg?t=' + Date.now()
     },
     {
         id: 'wall7',
         name: 'жёлто-зелёные',
-        url: 'https://cdn.jsdelivr.net/gh/KrisRush111/vunttests@main/фон9.jpg'
+        url: 'фон9.jpg?t=' + Date.now()
     }
 ];
 
@@ -2631,43 +2626,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Сохранение настроек обоев в localStorage
-function saveWallpaperSettings() {
-    const settingsToSave = {
-        enabled: wallpaperState.enabled,
-        selectedWallpaper: wallpaperState.selectedWallpaper
-    };
-    
-    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
-    sessionStorage.setItem('wallpaper_settings', JSON.stringify(settingsToSave));
-    
-    // Уведомляем другие вкладки
-    broadcastWallpaperUpdate();
-}
-
-// Функция для обновления обоев в desktop-placeholder
-function updateDesktopPlaceholderWallpaper() {
-    const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    if (!desktopPlaceholder) return;
-    
-    // Проверяем, виден ли placeholder
-    const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
-    
-    if (wallpaperState.enabled && isPlaceholderVisible) {
-        const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-        if (selectedWallpaper) {
-            desktopPlaceholder.classList.add('wallpaper-enabled');
-            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
-        }
-    } else {
-        desktopPlaceholder.classList.remove('wallpaper-enabled');
-        desktopPlaceholder.style.backgroundImage = '';
-        desktopPlaceholder.style.filter = '';
-        desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
-    }
-}
-
-// Создание сетки обоев - горизонтальная прокрутка
 function createWallpaperGrids() {
     const grids = ['wallpaperGridDesktop', 'wallpaperGridMobile'];
     
@@ -2678,28 +2636,34 @@ function createWallpaperGrids() {
             return;
         }
         
-        // Очищаем сетку
         grid.innerHTML = '';
         
-        // Создаем элементы обоев с горизонтальным расположением
         WALLPAPERS.forEach(wallpaper => {
             const wallpaperItem = document.createElement('div');
             wallpaperItem.className = 'wallpaper-item';
             wallpaperItem.dataset.wallpaperId = wallpaper.id;
+            wallpaperItem.setAttribute('role', 'button');
+            wallpaperItem.setAttribute('tabindex', '0');
             
-            // Устанавливаем начальное состояние выделения
-            if (wallpaper.id === wallpaperState.selectedWallpaper) {
-                wallpaperItem.classList.add('selected');
-            }
+            // Предзагрузка изображения для проверки
+            const img = new Image();
+            img.onload = function() {
+                console.log(`Wallpaper loaded: ${wallpaper.name}`);
+            };
+            img.onerror = function() {
+                console.error(`Failed to load wallpaper: ${wallpaper.url}`);
+                // Если не загрузилось, показываем заглушку
+                wallpaperItem.style.backgroundColor = '#cccccc';
+            };
+            img.src = wallpaper.url.split('?')[0]; // Без timestamp для проверки
             
-            // Для ВСЕХ обоев используем фон, включая системные
             wallpaperItem.innerHTML = `
-                <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}');"></div>
+                <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}'); background-size: cover; background-position: center;"></div>
                 <div class="wallpaper-label">${wallpaper.name}</div>
             `;
             
-            // Добавляем галочку для выбранных обоев
             if (wallpaper.id === wallpaperState.selectedWallpaper) {
+                wallpaperItem.classList.add('selected');
                 const checkmark = document.createElement('div');
                 checkmark.className = 'wallpaper-checkmark';
                 checkmark.innerHTML = '<i class="fas fa-check"></i>';
@@ -2709,11 +2673,8 @@ function createWallpaperGrids() {
             grid.appendChild(wallpaperItem);
         });
     });
-    
-    // Обновление переключателей
-    updateWallpaperControls();
+     updateWallpaperControls();
 }
-
 
 // Обновление элементов управления
 function updateWallpaperControls() {
