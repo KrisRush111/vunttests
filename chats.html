@@ -2269,70 +2269,79 @@ input, textarea {
     let isSendingMessage = false;
     let userData = null;
 
-    // Конфигурация обоев
-    const WALLPAPERS = [
-        {
-            id: 'default',
-            name: 'Системные',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон.webp',
-            isDefault: true
-        },
-        {
-            id: 'wall1',
-            name: 'Фиолетовые',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон3.webp'
-        },
-        {
-            id: 'wall6',
-            name: 'фиолетово-розовые',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон8.webp'
-        },
-        {
-            id: 'wall2',
-            name: 'Светлые',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон4.webp'
-        },
-        {
-            id: 'wall5',
-            name: 'сине-зелёные',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон7.webp'
-        },
-        {
-            id: 'wall3',
-            name: 'зелёно-розовые',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон5.webp'
-        },
-        {
-            id: 'wall4',
-            name: 'Темные',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон6.webp'
-        },
-        {
-            id: 'wall7',
-            name: 'жёлто-зелёные',
-            url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон9.webp'
-        }
-    ];
-
-    let wallpaperState = {
-        enabled: false,
-        selectedWallpaper: 'default'
+    const CACHE = {
+        AVATAR_TTL: 24 * 60 * 60 * 1000,
+        MESSAGES_TTL: 5 * 60 * 1000,
+        CHATS_TTL: 2 * 60 * 1000,
+        STATUS_TTL: 30 * 1000,
+        
+        avatars: new Map(),
+        messages: new Map(),
+        chats: null,
+        chatsTimestamp: null,
+        statuses: new Map(),
+        statusesTimestamp: new Map()
     };
 
-    // Инициализация системы обоев
+    const WALLPAPERS = [
+        { id: 'default', name: 'Системные', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон.webp', isDefault: true },
+        { id: 'wall1', name: 'Фиолетовые', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон3.webp' },
+        { id: 'wall6', name: 'фиолетово-розовые', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон8.webp' },
+        { id: 'wall2', name: 'Светлые', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон4.webp' },
+        { id: 'wall5', name: 'сине-зелёные', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон7.webp' },
+        { id: 'wall3', name: 'зелёно-розовые', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон5.webp' },
+        { id: 'wall4', name: 'Темные', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон6.webp' },
+        { id: 'wall7', name: 'жёлто-зелёные', url: 'https://raw.githubusercontent.com/KrisRush111/vunttests/main/фон9.webp' }
+    ];
+
+    let wallpaperState = { enabled: false, selectedWallpaper: 'default' };
+
+    function setCookie(name, value, days = 7) {
+        const date = new Date();
+        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+        const expires = "; expires=" + date.toUTCString();
+        document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Strict";
+    }
+
+    function getCookie(name) {
+        const nameEQ = name + "=";
+        const ca = document.cookie.split(';');
+        for (let i = 0; i < ca.length; i++) {
+            let c = ca[i];
+            while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+            if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+        }
+        return null;
+    }
+
+    function setCacheItem(key, value, ttl) {
+        const item = { value: value, timestamp: Date.now(), ttl: ttl };
+        localStorage.setItem(key, JSON.stringify(item));
+    }
+
+    function getCacheItem(key) {
+        const itemStr = localStorage.getItem(key);
+        if (!itemStr) return null;
+        try {
+            const item = JSON.parse(itemStr);
+            const now = Date.now();
+            if (now - item.timestamp > item.ttl) {
+                localStorage.removeItem(key);
+                return null;
+            }
+            return item.value;
+        } catch (e) {
+            return null;
+        }
+    }
+
     function initializeWallpaperSystem() {
         loadWallpaperSettings();
         applyWallpaper();
         setupWallpaperBroadcastListener();
-        
-        window.addEventListener('resize', () => {
-            applyWallpaper();
-        });
-        
+        window.addEventListener('resize', () => applyWallpaper());
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                setTimeout(applyWallpaper, 100);
-            }
+            if (document.visibilityState === 'visible') setTimeout(applyWallpaper, 100);
         });
     }
 
@@ -2341,25 +2350,16 @@ input, textarea {
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                wallpaperState = {
-                    enabled: parsed.enabled || false,
-                    selectedWallpaper: parsed.selectedWallpaper || 'default'
-                };
+                wallpaperState = { enabled: parsed.enabled || false, selectedWallpaper: parsed.selectedWallpaper || 'default' };
             } catch (e) {
-                console.error('Error loading wallpaper settings:', e);
-                wallpaperState = {
-                    enabled: false,
-                    selectedWallpaper: 'default'
-                };
+                wallpaperState = { enabled: false, selectedWallpaper: 'default' };
             }
         }
     }
 
     function applyWallpaper() {
         const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-        
         if (!selectedWallpaper) {
-            console.error('Selected wallpaper not found, using default');
             wallpaperState.selectedWallpaper = 'default';
             return;
         }
@@ -2435,21 +2435,12 @@ input, textarea {
                 const channel = new BroadcastChannel('vuntgram_wallpaper');
                 channel.addEventListener('message', (event) => {
                     if (event.data.type === 'wallpaper_update') {
-                        console.log('Received wallpaper update from other tab');
-                        wallpaperState = {
-                            enabled: event.data.data.enabled,
-                            selectedWallpaper: event.data.data.selectedWallpaper
-                        };
+                        wallpaperState = { enabled: event.data.data.enabled, selectedWallpaper: event.data.data.selectedWallpaper };
                         applyWallpaper();
                     }
                 });
-                
-                window.addEventListener('beforeunload', () => {
-                    channel.close();
-                });
-            } catch (e) {
-                console.error('BroadcastChannel listener error:', e);
-            }
+                window.addEventListener('beforeunload', () => channel.close());
+            } catch (e) {}
         }
     }
 
@@ -2458,41 +2449,27 @@ input, textarea {
         const chatModalMobile = document.getElementById('chatModalMobile');
         
         if (wallpaperState.enabled) {
-            if (chatModalDesktop && chatModalDesktop.style.display === 'flex') {
-                chatModalDesktop.classList.add('wallpaper-enabled');
-            }
-            if (chatModalMobile && chatModalMobile.classList.contains('active')) {
-                chatModalMobile.classList.add('wallpaper-enabled');
-            }
+            if (chatModalDesktop && chatModalDesktop.style.display === 'flex') chatModalDesktop.classList.add('wallpaper-enabled');
+            if (chatModalMobile && chatModalMobile.classList.contains('active')) chatModalMobile.classList.add('wallpaper-enabled');
         } else {
-            if (chatModalDesktop) {
-                chatModalDesktop.classList.remove('wallpaper-enabled');
-            }
-            if (chatModalMobile) {
-                chatModalMobile.classList.remove('wallpaper-enabled');
-            }
+            if (chatModalDesktop) chatModalDesktop.classList.remove('wallpaper-enabled');
+            if (chatModalMobile) chatModalMobile.classList.remove('wallpaper-enabled');
         }
     }
 
     function startActivityPolling() {
-        if (activityPollInterval) {
-            clearInterval(activityPollInterval);
-        }
-        
-        activityPollInterval = setInterval(async () => {
-            await refreshOnlineStatuses();
-        }, 10000);
+        if (activityPollInterval) clearInterval(activityPollInterval);
+        activityPollInterval = setInterval(async () => await refreshOnlineStatuses(), 10000);
     }
 
     async function refreshOnlineStatuses() {
         await updateChatStatuses();
-        
         const { chatModal } = getActiveElements();
         
         if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
             const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
-                const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+                const activityData = await getCachedActivityStatus([otherParticipant.platform_user_id]);
                 const userActivity = activityData[otherParticipant.platform_user_id];
                 const chatStatus = getActiveElements().chatStatus;
                 
@@ -2514,15 +2491,9 @@ input, textarea {
 
     function formatChatListTime(timestamp) {
         if (!timestamp) return ''; 
-        
         const date = new Date(timestamp);
-       
         date.setHours(date.getHours() + 3);
-        
-        return date.toLocaleTimeString('ru-RU', { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        });
+        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     }
 
     function adjustColor(hex, percent) {
@@ -2531,53 +2502,28 @@ input, textarea {
         const R = (num >> 16) + amt;
         const G = (num >> 8 & 0x00FF) + amt;
         const B = (num & 0x0000FF) + amt;
-
-        return `#${
-            (0x1000000 +
-            (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-            (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-            (B < 255 ? (B < 1 ? 0 : B) : 255)
-        ).toString(16).slice(1)}`;
+        return `#${(0x1000000 + (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 + (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 + (B < 255 ? (B < 1 ? 0 : B) : 255)).toString(16).slice(1)}`;
     }
 
     function formatChatMessageTime(timestamp) {
         if (!timestamp) return 'только что';
-        
         const date = new Date(timestamp);
-        return date.toLocaleTimeString('ru-RU', { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        });
+        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     }
 
     function formatDateHeader(timestamp) {
         if (!timestamp) return '';
-        
         const date = new Date(timestamp);
         const now = new Date();
+        const today = new Date(now); today.setHours(0, 0, 0, 0);
+        const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+        const messageDate = new Date(date); messageDate.setHours(0, 0, 0, 0);
         
-        const today = new Date(now);
-        today.setHours(0, 0, 0, 0);
+        if (messageDate.getTime() === today.getTime()) return 'Сегодня';
+        if (messageDate.getTime() === yesterday.getTime()) return 'Вчера';
         
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        const messageDate = new Date(date);
-        messageDate.setHours(0, 0, 0, 0);
-        
-        if (messageDate.getTime() === today.getTime()) {
-            return 'Сегодня';
-        } else if (messageDate.getTime() === yesterday.getTime()) {
-            return 'Вчера';
-        } else {
-            const months = [
-                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
-            ];
-            const day = messageDate.getDate();
-            const month = months[messageDate.getMonth()];
-            return `${day} ${month}`;
-        }
+        const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+        return `${messageDate.getDate()} ${months[messageDate.getMonth()]}`;
     }
 
     function getActiveElements() {
@@ -2624,23 +2570,58 @@ input, textarea {
         messageBox.textContent = message;
         messageBox.className = `message-box ${type}`;
         messageBox.style.display = 'block';
-        setTimeout(() => {
-            messageBox.style.display = 'none';
-        }, 3000);
+        setTimeout(() => messageBox.style.display = 'none', 3000);
     }
 
     function handleImageSelection(event) {
         const files = event.target.files;
         if (!files || files.length === 0) return;
-        
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            if (file.type.startsWith('image/')) {
-                sendImageMessage(file);
-            }
+            if (file.type.startsWith('image/')) sendImageMessage(file);
         }
-        
         event.target.value = '';
+    }
+
+    async function getCachedAvatar(userId) {
+        const cacheKey = `avatar_${userId}`;
+        const cached = getCacheItem(cacheKey);
+        if (cached) return cached;
+        try {
+            const response = await fetch(`${SERVER_URL}/avatar/${userId}`, { credentials: 'include' });
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            setCacheItem(cacheKey, url, CACHE.AVATAR_TTL);
+            return url;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function loadChatAvatar(avatarElement, userId, initials, bgColor) {
+        const cacheKey = `avatar_${userId}`;
+        const cached = getCacheItem(cacheKey);
+        
+        avatarElement.style.background = bgColor ? `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 'linear-gradient(135deg, #0088cc, #40a7e3)';
+        avatarElement.textContent = initials;
+
+        if (cached) {
+            avatarElement.style.background = `url(${cached}) center/cover no-repeat`;
+            avatarElement.textContent = '';
+        } else {
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+            const img = new Image();
+            img.onload = function() {
+                avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
+                avatarElement.textContent = '';
+                setCacheItem(cacheKey, avatarUrl, CACHE.AVATAR_TTL);
+            };
+            img.src = avatarUrl;
+        }
+    }
+
+    function loadContactAvatar(avatarElement, userId, initials, bgColor) {
+        loadChatAvatar(avatarElement, userId, initials, bgColor);
     }
 
     async function sendImageMessage(file) {
@@ -2676,18 +2657,12 @@ input, textarea {
                 const response = await fetch(`${SERVER_URL}/create_chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        platform_user_id: userData.platform_user_id,
-                        contact_id: currentChat.participants[0].platform_user_id
-                    }),
+                    body: JSON.stringify({ platform_user_id: userData.platform_user_id, contact_id: currentChat.participants[0].platform_user_id }),
                     credentials: 'include'
                 });
                 
                 const data = await response.json();
-                
-                if (data.status !== 'success') {
-                    throw new Error(data.error || 'Не удалось создать чат');
-                }
+                if (data.status !== 'success') throw new Error(data.error || 'Не удалось создать чат');
                 
                 actualChatId = data.chat_id;
                 currentChat.id = data.chat_id;
@@ -2707,6 +2682,7 @@ input, textarea {
                 
                 currentChatsList.unshift(newChat);
                 updateChatItemInDOM(data.chat_id, newChat);
+                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
             }
             
             const messageResponse = await fetch(`${SERVER_URL}/send_image_message`, {
@@ -2716,10 +2692,7 @@ input, textarea {
             });
             
             const messageData = await messageResponse.json();
-            
-            if (messageData.status !== 'success') {
-                throw new Error(messageData.error || 'Не удалось отправить изображение');
-            }
+            if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
             
             currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
             
@@ -2734,15 +2707,11 @@ input, textarea {
             };
             
             currentMessages = [...currentMessages, newMessage];
+            setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
             renderMessages(currentMessages);
             
             if (!currentChat.is_temp) {
-                updateChatItemInDOM(currentChat.id, {
-                    last_message: '📷 Фото',
-                    last_message_time: newMessage.sent_at,
-                    unread_count: 0,
-                    last_message_type: 'image'
-                });
+                updateChatItemInDOM(currentChat.id, { last_message: '📷 Фото', last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image' });
                 
                 const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
                 if (chatIndex !== -1) {
@@ -2754,15 +2723,14 @@ input, textarea {
                     const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                     currentChatsList.unshift(updatedChat);
                     moveChatToTop(currentChat.id);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 }
             }
             
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
             
         } catch (error) {
-            console.error('Error sending image:', error);
             showMessage('Ошибка отправки изображения: ' + error.message, 'error');
-            
             currentMessages = currentMessages.filter(msg => !msg.is_uploading);
             renderMessages(currentMessages);
         } finally {
@@ -2781,13 +2749,7 @@ input, textarea {
         let statusIcons = '';
         if (message.is_me) {
             const isRead = message.is_read;
-            statusIcons = `
-                <div class="message-status">
-                    <div class="status-icons">
-                        <i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i>
-                    </div>
-                </div>
-            `;
+            statusIcons = `<div class="message-status"><div class="status-icons"><i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i></div></div>`;
         }
         
         let messageContent = '';
@@ -2795,38 +2757,15 @@ input, textarea {
         if (message.is_image || (message.content && isImageUrl(message.content))) {
             const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
             const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
-            
             const imageUrl = message.content;
             
-            messageContent = `
-                <div class="message-content">
-                    <img src="${imageUrl}" 
-                         alt="Изображение" 
-                         class="message-image"
-                         onclick="openImageModal('${imageUrl}', ${imageIndex})"
-                         loading="lazy"
-                         onload="this.style.opacity='1'"
-                         onerror="this.onerror=null; this.style.opacity='0.5'"
-                         style="opacity: 0; max-width: 100%; height: auto;">
-                </div>
-            `;
-            
+            messageContent = `<div class="message-content"><img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;"></div>`;
             messageElement.classList.add('message-with-image');
-            
         } else {
-            messageContent = `
-                <div class="message-content">${escapeHtml(message.content)}</div>
-            `;
+            messageContent = `<div class="message-content">${escapeHtml(message.content)}</div>`;
         }
         
-        messageElement.innerHTML = `
-            ${messageContent}
-            <div class="message-time">
-                ${messageTime}
-                ${message.is_me ? statusIcons : ''}
-            </div>
-        `;
-        
+        messageElement.innerHTML = `${messageContent}<div class="message-time">${messageTime}${message.is_me ? statusIcons : ''}</div>`;
         messageElement.style.opacity = '1';
         messageElement.style.transform = 'translateY(0)';
         
@@ -2841,25 +2780,11 @@ input, textarea {
 
     function isImageUrl(url) {
         if (typeof url !== 'string') return false;
-        
         const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
-        const imagePatterns = [
-            'res.cloudinary.com',
-            'cloudinary.com',
-            '/upload/',
-            'data:image/'
-        ];
-        
+        const imagePatterns = ['res.cloudinary.com', 'cloudinary.com', '/upload/', 'data:image/'];
         const lowerUrl = url.toLowerCase();
-        
-        if (imageExtensions.some(ext => lowerUrl.includes(ext))) {
-            return true;
-        }
-        
-        if (imagePatterns.some(pattern => lowerUrl.includes(pattern))) {
-            return true;
-        }
-        
+        if (imageExtensions.some(ext => lowerUrl.includes(ext))) return true;
+        if (imagePatterns.some(pattern => lowerUrl.includes(pattern))) return true;
         return false;
     }
 
@@ -2877,60 +2802,23 @@ input, textarea {
         let lastTouchDistance = null;
 
         const header = document.createElement('div');
-        header.style.cssText = `
-            display: flex;
-            align-items: center;
-            padding: 16px;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            z-index: 10001;
-            position: relative;
-        `;
+        header.style.cssText = `display: flex; align-items: center; padding: 16px; background: rgba(0, 0, 0, 0.8); color: white; border-bottom: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); z-index: 10001; position: relative;`;
 
         const backButton = document.createElement('button');
         backButton.innerHTML = '←';
-        backButton.style.cssText = `
-            background: none;
-            border: none;
-            color: white;
-            font-size: 20px;
-            margin-right: 16px;
-            cursor: pointer;
-            padding: 8px;
-        `;
+        backButton.style.cssText = `background: none; border: none; color: white; font-size: 20px; margin-right: 16px; cursor: pointer; padding: 8px;`;
 
         const title = document.createElement('div');
-        title.style.cssText = `
-            flex: 1;
-            font-size: 17px;
-            font-weight: 500;
-        `;
+        title.style.cssText = `flex: 1; font-size: 17px; font-weight: 500;`;
         title.textContent = `${currentIndex + 1} из ${totalImages}`;
 
         const resetZoomButton = document.createElement('button');
         resetZoomButton.innerHTML = '↺';
-        resetZoomButton.style.cssText = `
-            background: none;
-            border: none;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            padding: 8px;
-            margin-left: 8px;
-            opacity: 0.7;
-            transition: opacity 0.2s ease;
-        `;
+        resetZoomButton.style.cssText = `background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 8px; margin-left: 8px; opacity: 0.7; transition: opacity 0.2s ease;`;
         resetZoomButton.title = 'Сбросить масштаб';
 
-        resetZoomButton.addEventListener('mouseenter', () => {
-            resetZoomButton.style.opacity = '1';
-        });
-        
-        resetZoomButton.addEventListener('mouseleave', () => {
-            resetZoomButton.style.opacity = '0.7';
-        });
+        resetZoomButton.addEventListener('mouseenter', () => resetZoomButton.style.opacity = '1');
+        resetZoomButton.addEventListener('mouseleave', () => resetZoomButton.style.opacity = '0.7');
 
         header.appendChild(backButton);
         header.appendChild(title);
@@ -2966,65 +2854,17 @@ input, textarea {
 
         const prevButton = document.createElement('button');
         prevButton.innerHTML = '←';
-        prevButton.style.cssText = `
-            position: absolute;
-            left: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            cursor: pointer;
-            display: ${currentIndex > 0 ? 'flex' : 'none'};
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            backdrop-filter: blur(10px);
-            transition: background 0.2s ease;
-            z-index: 10001;
-        `;
+        prevButton.style.cssText = `position: absolute; left: 20px; top: 50%; transform: translateY(-50%); background: rgba(255, 255, 255, 0.2); border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: ${currentIndex > 0 ? 'flex' : 'none'}; align-items: center; justify-content: center; font-size: 20px; backdrop-filter: blur(10px); transition: background 0.2s ease; z-index: 10001;`;
 
         const nextButton = document.createElement('button');
         nextButton.innerHTML = '→';
-        nextButton.style.cssText = `
-            position: absolute;
-            right: 80px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            cursor: pointer;
-            display: ${currentIndex < totalImages - 1 ? 'flex' : 'none'};
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            backdrop-filter: blur(10px);
-            transition: background 0.2s ease;
-            z-index: 10001;
-        `;
+        nextButton.style.cssText = `position: absolute; right: 80px; top: 50%; transform: translateY(-50%); background: rgba(255, 255, 255, 0.2); border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: ${currentIndex < totalImages - 1 ? 'flex' : 'none'}; align-items: center; justify-content: center; font-size: 20px; backdrop-filter: blur(10px); transition: background 0.2s ease; z-index: 10001;`;
 
         const footer = document.createElement('div');
-        footer.style.cssText = `
-            padding: 16px;
-            background: rgba(0, 0, 0, 0.8);
-            color: rgba(255, 255, 255, 0.7);
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            font-size: 14px;
-        `;
+        footer.style.cssText = `padding: 16px; background: rgba(0, 0, 0, 0.8); color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); font-size: 14px;`;
 
         const currentMessage = imageMessages[currentIndex];
-        if (currentMessage) {
-            const time = formatChatMessageTime(currentMessage.sent_at);
-            footer.textContent = `${time}`;
-        }
+        if (currentMessage) footer.textContent = `${formatChatMessageTime(currentMessage.sent_at)}`;
 
         function updateTransform() {
             img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
@@ -3047,10 +2887,7 @@ input, textarea {
 
         function zoomOut() {
             scale = Math.max(scale / 1.5, 1);
-            if (scale === 1) {
-                translateX = 0;
-                translateY = 0;
-            }
+            if (scale === 1) { translateX = 0; translateY = 0; }
             updateTransform();
             showTemporarily(zoomIndicator);
         }
@@ -3065,9 +2902,7 @@ input, textarea {
         function showTemporarily(element) {
             element.classList.add('show');
             clearTimeout(element.hideTimeout);
-            element.hideTimeout = setTimeout(() => {
-                element.classList.remove('show');
-            }, 1000);
+            element.hideTimeout = setTimeout(() => element.classList.remove('show'), 1000);
         }
 
         zoomInButton.addEventListener('click', zoomIn);
@@ -3076,16 +2911,11 @@ input, textarea {
 
         imageContainer.addEventListener('wheel', (e) => {
             e.preventDefault();
-            if (e.deltaY < 0) {
-                zoomIn();
-            } else {
-                zoomOut();
-            }
+            if (e.deltaY < 0) zoomIn(); else zoomOut();
         });
 
         imageContainer.addEventListener('mousedown', (e) => {
             if (scale <= 1) return;
-            
             isDragging = true;
             startX = e.clientX - translateX;
             startY = e.clientY - translateY;
@@ -3094,7 +2924,6 @@ input, textarea {
 
         document.addEventListener('mousemove', (e) => {
             if (!isDragging || scale <= 1) return;
-            
             e.preventDefault();
             translateX = e.clientX - startX;
             translateY = e.clientY - startY;
@@ -3111,10 +2940,7 @@ input, textarea {
                 e.preventDefault();
                 const touch1 = e.touches[0];
                 const touch2 = e.touches[1];
-                lastTouchDistance = Math.hypot(
-                    touch2.clientX - touch1.clientX,
-                    touch2.clientY - touch1.clientY
-                );
+                lastTouchDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
             } else if (e.touches.length === 1 && scale > 1) {
                 const touch = e.touches[0];
                 startX = touch.clientX - translateX;
@@ -3127,10 +2953,7 @@ input, textarea {
                 e.preventDefault();
                 const touch1 = e.touches[0];
                 const touch2 = e.touches[1];
-                const currentDistance = Math.hypot(
-                    touch2.clientX - touch1.clientX,
-                    touch2.clientY - touch1.clientY
-                );
+                const currentDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
 
                 if (lastTouchDistance !== null) {
                     const scaleChange = currentDistance / lastTouchDistance;
@@ -3138,7 +2961,6 @@ input, textarea {
                     updateTransform();
                     showTemporarily(zoomIndicator);
                 }
-                
                 lastTouchDistance = currentDistance;
             } else if (e.touches.length === 1 && scale > 1) {
                 e.preventDefault();
@@ -3150,9 +2972,7 @@ input, textarea {
         });
 
         imageContainer.addEventListener('touchend', (e) => {
-            if (e.touches.length < 2) {
-                lastTouchDistance = null;
-            }
+            if (e.touches.length < 2) lastTouchDistance = null;
         });
 
         img.addEventListener('dblclick', resetZoom);
@@ -3175,15 +2995,10 @@ input, textarea {
             if (newMessage) {
                 title.textContent = `${newIndex + 1} из ${totalImages}`;
                 img.src = newMessage.content;
-                
                 resetZoom();
-                
-                const time = formatChatMessageTime(newMessage.sent_at);
-                footer.textContent = `${time}`;
-                
+                footer.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
                 prevButton.style.display = newIndex > 0 ? 'flex' : 'none';
                 nextButton.style.display = newIndex < totalImages - 1 ? 'flex' : 'none';
-                
                 return newIndex;
             }
             return currentIndex;
@@ -3196,62 +3011,44 @@ input, textarea {
 
         prevButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (currentImageIndex > 0) {
-                currentImageIndex = updateNavigation(currentImageIndex - 1);
-            }
+            if (currentImageIndex > 0) currentImageIndex = updateNavigation(currentImageIndex - 1);
         });
 
         nextButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (currentImageIndex < totalImages - 1) {
-                currentImageIndex = updateNavigation(currentImageIndex + 1);
-            }
+            if (currentImageIndex < totalImages - 1) currentImageIndex = updateNavigation(currentImageIndex + 1);
         });
 
         let touchStartX = 0;
         
         imageContainer.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 1) {
-                touchStartX = e.touches[0].clientX;
-            }
+            if (e.touches.length === 1) touchStartX = e.touches[0].clientX;
         });
         
         imageContainer.addEventListener('touchend', (e) => {
             if (scale > 1) return;
-            
             const endX = e.changedTouches[0].clientX;
             const diffX = touchStartX - endX;
 
             if (Math.abs(diffX) > 50) {
-                if (diffX > 0 && currentImageIndex < totalImages - 1) {
-                    currentImageIndex = updateNavigation(currentImageIndex + 1);
-                } else if (diffX < 0 && currentImageIndex > 0) {
-                    currentImageIndex = updateNavigation(currentImageIndex - 1);
-                }
+                if (diffX > 0 && currentImageIndex < totalImages - 1) currentImageIndex = updateNavigation(currentImageIndex + 1);
+                else if (diffX < 0 && currentImageIndex > 0) currentImageIndex = updateNavigation(currentImageIndex - 1);
             }
         });
 
         modal.addEventListener('click', (e) => {
-            if (e.target === modal && scale === 1) {
-                document.body.removeChild(modal);
-            }
+            if (e.target === modal && scale === 1) document.body.removeChild(modal);
         });
 
         document.addEventListener('keydown', function handleKeydown(e) {
             if (e.key === 'Escape') {
                 document.body.removeChild(modal);
                 document.removeEventListener('keydown', handleKeydown);
-            } else if (e.key === 'ArrowLeft' && currentImageIndex > 0) {
-                currentImageIndex = updateNavigation(currentImageIndex - 1);
-            } else if (e.key === 'ArrowRight' && currentImageIndex < totalImages - 1) {
-                currentImageIndex = updateNavigation(currentImageIndex + 1);
-            } else if (e.key === '0' || e.key === 'Numpad0') {
-                resetZoom();
-            } else if (e.key === '+' || e.key === '=') {
-                zoomIn();
-            } else if (e.key === '-') {
-                zoomOut();
-            }
+            } else if (e.key === 'ArrowLeft' && currentImageIndex > 0) currentImageIndex = updateNavigation(currentImageIndex - 1);
+            else if (e.key === 'ArrowRight' && currentImageIndex < totalImages - 1) currentImageIndex = updateNavigation(currentImageIndex + 1);
+            else if (e.key === '0' || e.key === 'Numpad0') resetZoom();
+            else if (e.key === '+' || e.key === '=') zoomIn();
+            else if (e.key === '-') zoomOut();
         });
 
         resetZoomButton.style.display = 'none';
@@ -3268,12 +3065,8 @@ input, textarea {
             
             const response = await fetch(`${SERVER_URL}/get_user_data`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    platform_user_id: userData.platform_user_id 
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
                 credentials: 'include'
             });
             
@@ -3286,37 +3079,58 @@ input, textarea {
             }
             return false;
         } catch (error) {
-            console.error('Error loading user data:', error);
             return false;
         }
     }
 
-    async function preloadAllMessages(chats) {
+    function preloadAllMessages(chats) {
         if (!chats || chats.length === 0) return;
         
         chats.forEach(async (chat) => {
+            const cacheKey = `messages_${chat.id}`;
+            if (getCacheItem(cacheKey)) return;
+            
             try {
                 const response = await fetch(`${SERVER_URL}/get_messages`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        chat_id: chat.id,
-                        platform_user_id: userData.platform_user_id
-                    }),
+                    body: JSON.stringify({ chat_id: chat.id, platform_user_id: userData.platform_user_id }),
                     credentials: 'include'
                 });
                 const data = await response.json();
                 if (data.status === 'success') {
                     messagesCache[chat.id] = data.messages || [];
+                    setCacheItem(cacheKey, data.messages || [], CACHE.MESSAGES_TTL);
                 }
-            } catch (e) {
-                console.warn(`Background preload failed for chat ${chat.id}:`, e);
-            }
+            } catch (e) {}
         });
     }
 
     async function loadChats() {
+        const cacheKey = 'chats_list';
+        const cached = getCacheItem(cacheKey);
         const { chatsList, noChats } = getActiveElements();
+        
+        if (cached) {
+            const sortedChats = sortChats(cached);
+            currentChatsList = sortedChats;
+            renderChats(sortedChats);
+            preloadAllMessages(sortedChats);
+            
+            fetch(`${SERVER_URL}/get_chats`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({platform_user_id: userData.platform_user_id}),
+                credentials: 'include'
+            }).then(async response => {
+                const data = await response.json();
+                if (data.status === 'success') {
+                    setCacheItem(cacheKey, data.chats, CACHE.CHATS_TTL);
+                }
+            }).catch(() => {});
+            
+            return;
+        }
         
         try {
             const response = await fetch(`${SERVER_URL}/get_chats`, {
@@ -3333,23 +3147,19 @@ input, textarea {
                 currentChatsList = sortedChats;
                 renderChats(sortedChats);
                 preloadAllMessages(sortedChats);
+                setCacheItem(cacheKey, sortedChats, CACHE.CHATS_TTL);
             } else {
                 currentChatsList = [];
                 renderChats([]);
             }
         } catch (error) {
-            console.error('Error loading chats:', error);
             currentChatsList = [];
             renderChats([]);
         }
     }
 
     function sortChats(chats) {
-        return [...chats].sort((a, b) => {
-            const timeA = new Date(a.last_message_time || 0).getTime();
-            const timeB = new Date(b.last_message_time || 0).getTime();
-            return timeB - timeA;
-        });
+        return [...chats].sort((a, b) => new Date(b.last_message_time || 0).getTime() - new Date(a.last_message_time || 0).getTime());
     }
 
     async function updateSingleChat(chatId) {
@@ -3357,10 +3167,7 @@ input, textarea {
             const response = await fetch(`${SERVER_URL}/get_chat_info`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    platform_user_id: userData.platform_user_id
-                }),
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
                 credentials: 'include'
             });
             
@@ -3368,18 +3175,13 @@ input, textarea {
             
             if (data.status === 'success') {
                 const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-                if (chatIndex !== -1) {
-                    currentChatsList[chatIndex] = data.chat;
-                } else {
-                    currentChatsList.unshift(data.chat);
-                }
+                if (chatIndex !== -1) currentChatsList[chatIndex] = data.chat;
+                else currentChatsList.unshift(data.chat);
                 
                 updateChatItemInDOM(chatId, data.chat);
                 moveChatToTop(chatId);
             }
-        } catch (error) {
-            console.error('Error updating single chat:', error);
-        }
+        } catch (error) {}
     }
 
     async function renderChats(chats) {
@@ -3397,14 +3199,12 @@ input, textarea {
         chats.forEach(chat => {
             if (chat.participants && chat.participants.length > 0) {
                 chat.participants.forEach(participant => {
-                    if (participant.platform_user_id !== userData.platform_user_id) {
-                        userIds.push(participant.platform_user_id);
-                    }
+                    if (participant.platform_user_id !== userData.platform_user_id) userIds.push(participant.platform_user_id);
                 });
             }
         });
         
-        const activityData = await getUsersActivityStatus(userIds);
+        const activityData = await getCachedActivityStatus(userIds);
         
         const fragment = document.createDocumentFragment();
         
@@ -3413,10 +3213,7 @@ input, textarea {
             chatItem.className = 'chat-item';
             chatItem.setAttribute('data-chat-id', chat.id);
             
-            const initials = chat.name 
-                ? chat.name.split(' ').map(n => n[0]).join('') 
-                : '?';
-            
+            const initials = chat.name ? chat.name.split(' ').map(n => n[0]).join('') : '?';
             const bgColor = chat.avatar_background || getRandomColor();
 
             const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
@@ -3434,38 +3231,21 @@ input, textarea {
                         statusText = formatLastSeen(userActivity.last_online);
                         isOnline = false;
                     }
-                } else {
-                    statusText = 'был(а) недавно';
-                    isOnline = false;
                 }
-            } else {
-                statusText = '';
-                isOnline = false;
             }
             
-            const avatarStyle = bgColor ?
-                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
-                'linear-gradient(135deg, #0088cc, #40a7e3)';
+            const avatarStyle = bgColor ? `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 'linear-gradient(135deg, #0088cc, #40a7e3)';
 
             let lastMessageText = chat.last_message || '';
             
-            if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') {
-                lastMessageText = '📷 Фото';
-            }
+            if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') lastMessageText = '📷 Фото';
 
             chatItem.innerHTML = `
-                <div class="chat-avatar" style="background: ${avatarStyle}">
-                    ${initials}
-                </div>
+                <div class="chat-avatar" style="background: ${avatarStyle}">${initials}</div>
                 <div class="chat-info">
                     <div class="chat-name">${chat.name || 'Новый чат'}</div>
                     <div class="last-message">${lastMessageText}</div>
-                    <div class="chat-status user-status ${isOnline ? 'online' : ''}">
-                        ${isOnline ? 
-                            '<span class="status-indicator"></span><span class="status-text">В сети</span>' : 
-                            statusText
-                        }
-                    </div>
+                    <div class="chat-status user-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
                 </div>
                 ${chat.unread_count > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
             `;
@@ -3486,72 +3266,69 @@ input, textarea {
     }
 
     async function updateUserActivity(isOnline = true) {
-        if (!userData || !userData.platform_user_id) {
-            console.warn('userData not available for updateUserActivity');
-            return;
-        }
+        if (!userData || !userData.platform_user_id) return;
         try {
             await fetch(`${SERVER_URL}/update_activity`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    platform_user_id: userData.platform_user_id,
-                    is_online: isOnline
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: userData.platform_user_id, is_online: isOnline }),
                 credentials: 'include'
             });
-        } catch (error) {
-            console.error('Error updating activity:', error);
-        }
+        } catch (error) {}
     }
 
     async function sendOfflineStatus() {
         if (userData && userData.platform_user_id) {
             try {
-                const data = {
-                    platform_user_id: userData.platform_user_id,
-                    is_online: false
-                };
-                
                 fetch(`${SERVER_URL}/update_activity`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(data),
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ platform_user_id: userData.platform_user_id, is_online: false }),
                     credentials: 'include',
                     keepalive: true
                 }).catch(() => {});
-            } catch (error) {
-                console.error('Error sending offline status:', error);
-            }
+            } catch (error) {}
         }
     }
 
-    async function getUsersActivityStatus(userIds) {
+    async function getCachedActivityStatus(userIds) {
+        const now = Date.now();
+        const uncachedIds = [];
+        const result = {};
+        
+        userIds.forEach(id => {
+            const cached = CACHE.statuses.get(id);
+            const timestamp = CACHE.statusesTimestamp.get(id);
+            
+            if (cached && timestamp && (now - timestamp < CACHE.STATUS_TTL)) result[id] = cached;
+            else uncachedIds.push(id);
+        });
+        
+        if (uncachedIds.length === 0) return result;
+        
         try {
             const response = await fetch(`${SERVER_URL}/get_activity_status`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    user_ids: userIds
-                }),
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ user_ids: uncachedIds }),
                 credentials: 'include'
             });
 
             const data = await response.json();
             if (data.status === 'success') {
-                return data.activity_data;
+                Object.entries(data.activity_data).forEach(([id, status]) => {
+                    CACHE.statuses.set(id, status);
+                    CACHE.statusesTimestamp.set(id, now);
+                    result[id] = status;
+                });
             }
-            return {};
-        } catch (error) {
-            console.error('Error getting activity status:', error);
-            return {};
-        }
+        } catch (error) {}
+        
+        return result;
+    }
+
+    async function getUsersActivityStatus(userIds) {
+        return await getCachedActivityStatus(userIds);
     }
 
     function formatLastSeen(lastOnline) {
@@ -3564,45 +3341,21 @@ input, textarea {
         const diffHours = Math.floor(diffMs / 3600000);
         const diffDays = Math.floor(diffMs / 86400000);
 
-        if (diffMins < 1) {
-            return 'только что';
-        } else if (diffMins < 60) {
-            return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
-        } else if (diffHours < 10) {
-            return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
-        } else if (diffHours < 24) {
-            return `был(а) в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
-        } else if (diffDays < 2) {
-            return `был(а) вчера в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
-        } else {
-            return `был(а) ${lastSeen.getDate().toString().padStart(2, '0')}.${(lastSeen.getMonth() + 1).toString().padStart(2, '0')}.${lastSeen.getFullYear()}`;
-        }
+        if (diffMins < 1) return 'только что';
+        if (diffMins < 60) return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
+        if (diffHours < 10) return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
+        if (diffHours < 24) return `был(а) в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
+        if (diffDays < 2) return `был(а) вчера в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
+        return `был(а) ${lastSeen.getDate().toString().padStart(2, '0')}.${(lastSeen.getMonth() + 1).toString().padStart(2, '0')}.${lastSeen.getFullYear()}`;
     }
 
     function getRussianNoun(number, forms) {
         number = Math.abs(number) % 100;
         const n1 = number % 10;
-        
         if (number > 10 && number < 20) return forms[2];
         if (n1 > 1 && n1 < 5) return forms[1];
         if (n1 === 1) return forms[0];
         return forms[2];
-    }
-
-    function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-        const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
-        
-        avatarElement.style.background = bgColor ? 
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-        avatarElement.textContent = initials;
-
-        const img = new Image();
-        img.onload = function() {
-            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-            avatarElement.textContent = '';
-        };
-        img.src = avatarUrl;
     }
 
     function getRandomColor() {
@@ -3629,24 +3382,16 @@ input, textarea {
         try {
             const response = await fetch(`${SERVER_URL}/get_friends`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    platform_user_id: userData.platform_user_id
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
                 credentials: 'include'
             });
             
             const data = await response.json();
             
-            if (data.status === 'success') {
-                renderContacts(data.friends);
-            } else {
-                throw new Error(data.error || 'Не удалось загрузить контакты');
-            }
+            if (data.status === 'success') renderContacts(data.friends);
+            else throw new Error(data.error || 'Не удалось загрузить контакты');
         } catch (error) {
-            console.error('Error loading contacts:', error);
             showMessage('Ошибка загрузки контактов', 'error');
         }
     }
@@ -3669,7 +3414,7 @@ input, textarea {
         }
 
         const userIds = contacts.map(contact => contact.platform_user_id);
-        const activityData = await getUsersActivityStatus(userIds);
+        const activityData = await getCachedActivityStatus(userIds);
 
         const fragment = document.createDocumentFragment();
 
@@ -3677,10 +3422,7 @@ input, textarea {
             const contactItem = document.createElement('div');
             contactItem.className = 'contact-item';
             
-            const initials = contact.nickname 
-                ? contact.nickname.split(' ').map(n => n[0]).join('') 
-                : '?';
-            
+            const initials = contact.nickname ? contact.nickname.split(' ').map(n => n[0]).join('') : '?';
             const bgColor = contact.avatar_background || getRandomColor();
 
             const userActivity = activityData[contact.platform_user_id];
@@ -3695,58 +3437,26 @@ input, textarea {
                     statusText = formatLastSeen(userActivity.last_online);
                     isOnline = false;
                 }
-            } else {
-                statusText = 'был(а) недавно';
-                isOnline = false;
             }
 
-            const avatarStyle = bgColor ?
-                `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` :
-                'linear-gradient(135deg, #0088cc, #40a7e3)';
+            const avatarStyle = bgColor ? `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 'linear-gradient(135deg, #0088cc, #40a7e3)';
 
             contactItem.innerHTML = `
-                <div class="contact-avatar" style="background: ${avatarStyle}">
-                    ${initials}
-                </div>
+                <div class="contact-avatar" style="background: ${avatarStyle}">${initials}</div>
                 <div class="contact-info">
                     <div class="contact-name">${contact.nickname || 'Без имени'}</div>
-                    <div class="contact-status ${isOnline ? 'online' : ''}">
-                        ${isOnline ? 
-                            '<span class="status-indicator"></span><span class="status-text">В сети</span>' : 
-                            statusText
-                        }
-                    </div>
+                    <div class="contact-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
                 </div>
             `;
             
-            if (contact.has_avatar_photo) {
-                loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
-            }
+            if (contact.has_avatar_photo) loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
             
-            contactItem.addEventListener('click', () => {
-                createChatWithContact(contact);
-            });
+            contactItem.addEventListener('click', () => createChatWithContact(contact));
             
             fragment.appendChild(contactItem);
         });
         
         contactsList.appendChild(fragment);
-    }
-
-    function loadContactAvatar(avatarElement, userId, initials, bgColor) {
-        const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
-        
-        avatarElement.style.background = bgColor ? 
-            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-            'linear-gradient(135deg, #0088cc, #40a7e3)';
-        avatarElement.textContent = initials;
-
-        const img = new Image();
-        img.onload = function() {
-            avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-            avatarElement.textContent = '';
-        };
-        img.src = avatarUrl;
     }
 
     async function createChatWithContact(contact) {
@@ -3756,31 +3466,21 @@ input, textarea {
         try {
             const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    platform_user_id: userData.platform_user_id,
-                    contact_id: contact.platform_user_id
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: userData.platform_user_id, contact_id: contact.platform_user_id }),
                 credentials: 'include'
             });
 
             const data = await response.json();
             
-            if (data.status !== 'success') {
-                throw new Error(data.error || 'Не удалось проверить чат');
-            }
+            if (data.status !== 'success') throw new Error(data.error || 'Не удалось проверить чат');
 
             hideContactsModal();
             
             if (!data.is_new) {
                 const existingChat = currentChatsList.find(chat => chat.id === data.chat_id);
-                if (existingChat) {
-                    await openChat(data.chat_id);
-                } else {
-                    await openChat(data.chat_id);
-                }
+                if (existingChat) await openChat(data.chat_id);
+                else await openChat(data.chat_id);
             } else {
                 const tempChat = {
                     id: `temp_${Date.now()}`,
@@ -3802,17 +3502,11 @@ input, textarea {
                 openTempChat(tempChat);
                 
                 const { messageInput } = getActiveElements();
-                if (messageInput) {
-                    messageInput.focus();
-                }
+                if (messageInput) messageInput.focus();
             }
             
         } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log('Fetch aborted');
-                return;
-            }
-            console.error('Error opening chat:', error);
+            if (error.name === 'AbortError') return;
             
             if (error.message && !error.message.includes('fetch') && !error.message.includes('network')) {
                 showMessage('Ошибка загрузки чата: ' + error.message, 'error');
@@ -3823,24 +3517,11 @@ input, textarea {
     }
 
     function openTempChat(tempChat) {
-        if (!tempChat || !tempChat.id) {
-            console.error('Invalid tempChat object:', tempChat);
-            return;
-        }
+        if (!tempChat || !tempChat.id) return;
         
-        const { 
-            chatModal, 
-            chatAvatar, 
-            chatTitle, 
-            chatStatus, 
-            messagesContainer, 
-            noMessages 
-        } = getActiveElements();
+        const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
         
-        if (!chatModal) {
-            console.error('Chat modal not found');
-            return;
-        }
+        if (!chatModal) return;
         
         const cachedChat = currentChatsList.find(c => c.id === tempChat.id);
         if (cachedChat) {
@@ -3855,9 +3536,7 @@ input, textarea {
         
         currentChat = tempChat;
         
-        if (chatModal.classList.contains('changing')) {
-            chatModal.classList.remove('changing');
-        }
+        if (chatModal.classList.contains('changing')) chatModal.classList.remove('changing');
 
         if (chatTitle) chatTitle.textContent = tempChat.name || 'Новый чат';
         if (chatStatus) chatStatus.textContent = 'был(а) недавно';
@@ -3892,9 +3571,7 @@ input, textarea {
             }
         }
         
-        if (messagesContainer) {
-            messagesContainer.innerHTML = '';
-        }
+        if (messagesContainer) messagesContainer.innerHTML = '';
         
         if (noMessages) {
             noMessages.style.display = 'block';
@@ -3904,12 +3581,8 @@ input, textarea {
         currentMessages = [];
         
         if (isDesktop) {
-            if (desktopPlaceholder) {
-                desktopPlaceholder.style.display = 'none';
-            }
-            if (chatModal) {
-                chatModal.style.display = 'flex';
-            }
+            if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
+            if (chatModal) chatModal.style.display = 'flex';
         } else {
             if (chatModal) {
                 chatModal.classList.add('active');
@@ -3918,7 +3591,65 @@ input, textarea {
         }
     }
 
-    // ОПТИМИЗИРОВАННАЯ ФУНКЦИЯ ОТПРАВКИ СООБЩЕНИЙ
+    async function loadMessages(chatId) {
+        const cacheKey = `messages_${chatId}`;
+        const cached = getCacheItem(cacheKey);
+        const { messagesContainer, noMessages } = getActiveElements();
+        
+        if (cached) {
+            currentMessages = cached;
+            renderMessages(currentMessages);
+            noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
+            if (currentMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            fetch(`${SERVER_URL}/get_messages`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                credentials: 'include'
+            }).then(async response => {
+                const messagesData = await response.json();
+                if (messagesData.status === 'success') {
+                    currentMessages = messagesData.messages || [];
+                    messagesCache[chatId] = currentMessages;
+                    setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
+                    renderMessages(currentMessages);
+                }
+            }).catch(() => {});
+            
+            return;
+        }
+        
+        try {
+            const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                credentials: 'include'
+            });
+            
+            const messagesData = await messagesResponse.json();
+            
+            if (messagesData.status === 'success') {
+                currentMessages = messagesData.messages || [];
+                messagesCache[chatId] = currentMessages;
+                setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
+                
+                renderMessages(currentMessages);
+                
+                if (currentMessages.length === 0) {
+                    noMessages.style.display = 'block';
+                    noMessages.textContent = 'Сообщений пока нет...';
+                } else {
+                    noMessages.style.display = 'none';
+                }
+                
+                markAllMessagesAsRead(chatId);
+            }
+        } catch (error) {}
+    }
+
     async function sendMessage() {
         const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
         const content = messageInput.value.trim();
@@ -3927,11 +3658,9 @@ input, textarea {
         
         isSendingMessage = true;
         
-        // Мгновенно сохраняем контент и очищаем поле
         const messageContent = content;
         messageInput.value = '';
         
-        // Создаем временное сообщение
         const tempMessageId = `temp_${Date.now()}`;
         const tempMessage = {
             id: tempMessageId,
@@ -3943,43 +3672,28 @@ input, textarea {
             is_temp: true
         };
         
-        // Добавляем в массив и рендерим (без задержки)
         currentMessages.push(tempMessage);
         
-        // Скрываем "нет сообщений"
-        if (noMessages.style.display !== 'none') {
-            noMessages.style.display = 'none';
-        }
+        if (noMessages.style.display !== 'none') noMessages.style.display = 'none';
         
-        // Быстрый рендеринг только нового сообщения
         const messageElement = renderMessage(tempMessage);
         messagesContainer.appendChild(messageElement);
-        
-        // Мгновенная прокрутка вниз
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
         
-        // Фоновая отправка на сервер
         (async () => {
             try {
                 let actualChatId = currentChat.id;
                 
-                // Если временный чат, создаем его
                 if (currentChat.is_temp) {
                     const response = await fetch(`${SERVER_URL}/create_chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            platform_user_id: userData.platform_user_id,
-                            contact_id: currentChat.participants[0].platform_user_id
-                        }),
+                        body: JSON.stringify({ platform_user_id: userData.platform_user_id, contact_id: currentChat.participants[0].platform_user_id }),
                         credentials: 'include'
                     });
                     
                     const data = await response.json();
-                    
-                    if (data.status !== 'success') {
-                        throw new Error(data.error || 'Не удалось создать чат');
-                    }
+                    if (data.status !== 'success') throw new Error(data.error || 'Не удалось создать чат');
                     
                     actualChatId = data.chat_id;
                     currentChat.id = data.chat_id;
@@ -3998,27 +3712,19 @@ input, textarea {
                     
                     currentChatsList.unshift(newChat);
                     updateChatItemInDOM(data.chat_id, newChat);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 }
                 
-                // Отправляем сообщение
                 const messageResponse = await fetch(`${SERVER_URL}/send_message`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: actualChatId,
-                        sender_id: userData.platform_user_id,
-                        content: messageContent
-                    }),
+                    body: JSON.stringify({ chat_id: actualChatId, sender_id: userData.platform_user_id, content: messageContent }),
                     credentials: 'include'
                 });
                 
                 const messageData = await messageResponse.json();
+                if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить сообщение');
                 
-                if (messageData.status !== 'success') {
-                    throw new Error(messageData.error || 'Не удалось отправить сообщение');
-                }
-                
-                // Обновляем временное сообщение на реальное
                 const index = currentMessages.findIndex(msg => msg.id === tempMessageId);
                 if (index !== -1) {
                     currentMessages[index] = {
@@ -4030,20 +3736,14 @@ input, textarea {
                         is_me: true
                     };
                     
-                    // Обновляем элемент в DOM (только id)
                     const msgElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
-                    if (msgElement) {
-                        msgElement.setAttribute('data-message-id', messageData.message_id);
-                    }
+                    if (msgElement) msgElement.setAttribute('data-message-id', messageData.message_id);
                 }
                 
-                // Обновляем информацию о чате в списке
+                setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
+                
                 if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, {
-                        last_message: messageContent,
-                        last_message_time: new Date().toISOString(),
-                        unread_count: 0
-                    });
+                    updateChatItemInDOM(currentChat.id, { last_message: messageContent, last_message_time: new Date().toISOString(), unread_count: 0 });
                     
                     const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
                     if (chatIndex !== -1) {
@@ -4054,20 +3754,16 @@ input, textarea {
                         const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                         currentChatsList.unshift(updatedChat);
                         moveChatToTop(currentChat.id);
+                        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                     }
                 }
                 
             } catch (error) {
-                console.error('Error sending message:', error);
-                
-                // Помечаем сообщение как ошибочное
                 const msgElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
                 if (msgElement) {
                     msgElement.style.opacity = '0.5';
                     const timeElement = msgElement.querySelector('.message-time');
-                    if (timeElement) {
-                        timeElement.innerHTML += ' <span style="color: red;">✗</span>';
-                    }
+                    if (timeElement) timeElement.innerHTML += ' <span style="color: red;">✗</span>';
                 }
                 
                 showMessage('Ошибка отправки сообщения', 'error');
@@ -4082,14 +3778,10 @@ input, textarea {
         const { messagesContainer, messageInput } = getActiveElements();
         
         messagesContainer.addEventListener('click', (e) => {
-            if (!e.target.closest('.message-input-container')) {
-                messageInput.blur();
-            }
+            if (!e.target.closest('.message-input-container')) messageInput.blur();
         });
         
-        messageInput.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
+        messageInput.addEventListener('click', (e) => e.stopPropagation());
     }
 
     function setupKeyboardDetection() {
@@ -4106,9 +3798,7 @@ input, textarea {
                 messageInputContainer.style.bottom = '8px';
                 messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
                 setTimeout(() => {
-                    if (messagesContainer) {
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }
+                    if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }, 100);
             } else {
                 messageInputContainer.style.bottom = '12px';
@@ -4119,9 +3809,7 @@ input, textarea {
         messageInput.addEventListener('focus', () => {
             if (isSendingMessage) return;
             keyboardShown = true;
-            setTimeout(() => {
-                adjustInputPosition(true);
-            }, 100);
+            setTimeout(() => adjustInputPosition(true), 100);
         });
 
         messageInput.addEventListener('blur', () => {
@@ -4132,9 +3820,7 @@ input, textarea {
     }
 
     async function openChat(chatId) {
-        if (openChatAbortController) {
-            openChatAbortController.abort();
-        }
+        if (openChatAbortController) openChatAbortController.abort();
         openChatAbortController = new AbortController();
         const signal = openChatAbortController.signal;
 
@@ -4143,7 +3829,6 @@ input, textarea {
         const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
         
         if (!chatModal || !chatAvatar || !chatTitle || !chatStatus || !messagesContainer || !noMessages) {
-            console.error('openChat(): Required elements not found');
             isOpeningChat = false;
             return;
         }
@@ -4162,9 +3847,7 @@ input, textarea {
             
             const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
             if (otherParticipant) {
-                const avatarUrl = `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
-                chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat, linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                chatAvatar.textContent = '';
+                loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
                 
                 const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
                 if (statusElement) {
@@ -4186,182 +3869,31 @@ input, textarea {
                 document.body.style.overflow = 'hidden';
             }
 
-            if (messagesCache[chatId]) {
-                currentMessages = messagesCache[chatId];
-                renderMessages(currentMessages);
-                noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
-                if (currentMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
-                
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            } else {
-                messagesContainer.innerHTML = '';
-                noMessages.style.display = 'block';
-                noMessages.textContent = 'Загрузка...';
-            }
+            await loadMessages(chatId);
 
             const response = await fetch(`${SERVER_URL}/get_chat_info`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    platform_user_id: userData.platform_user_id
-                }),
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
                 credentials: 'include',
                 signal: signal
             });
             
             const chatData = await response.json();
             
-            if (chatData.status !== 'success') {
-                throw new Error(chatData.error || 'Не удалось загрузить чат');
-            }
-            
-            currentChat = chatData.chat;
-            
-            if (!currentChat) {
-                throw new Error('Chat data is null');
-            }
-            
-            chatTitle.textContent = currentChat.name || 'Новый чат';
-            
-            let statusText = 'был(а) недавно';
-            let isOnline = false;
-
-            if (currentChat.participants && currentChat.participants.length > 0) {
-                const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (chatData.status === 'success') {
+                currentChat = chatData.chat;
                 
-                if (otherParticipant) {
-                    const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
-                    const userActivity = activityData[otherParticipant.platform_user_id];
-                    
-                    if (userActivity) {
-                        if (userActivity.is_online) {
-                            statusText = 'В сети';
-                            isOnline = true;
-                        } else {
-                            statusText = formatLastSeen(userActivity.last_online);
-                            isOnline = false;
-                        }
-                    }
-                }
-            }
+                if (currentChat) {
+                    updateChatItemInDOM(chatId, { unread_count: 0 });
 
-            if (isOnline) {
-                chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                chatStatus.classList.add('online');
-            } else {
-                chatStatus.textContent = statusText;
-                chatStatus.classList.remove('online');
-            }
-            
-            if (currentChat.participants && currentChat.participants.length > 0) {
-                const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    const userId = otherParticipant.platform_user_id;
-                    const initials = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-                    const bgColor = currentChat.avatar_background || getRandomColor();
-                    
-                    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
-                    const img = new Image();
-                    
-                    img.onload = function() {
-                        chatAvatar.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                        chatAvatar.textContent = '';
-                    };
-                    
-                    img.onerror = function() {
-                        chatAvatar.style.background = bgColor ? 
-                            `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                            'linear-gradient(135deg, #0088cc, #40a7e3)';
-                        chatAvatar.textContent = initials;
-                    };
-                    
-                    img.src = avatarUrl;
-                } else {
-                    const bgColor = currentChat.avatar_background || getRandomColor();
-                    chatAvatar.style.background = bgColor ? 
-                        `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                        'linear-gradient(135deg, #0088cc, #40a7e3)';
-                    chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-                }
-            } else {
-                const bgColor = currentChat.avatar_background || getRandomColor();
-                chatAvatar.style.background = bgColor ? 
-                    `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 
-                    'linear-gradient(135deg, #0088cc, #40a7e3)';
-                chatAvatar.textContent = currentChat.name ? currentChat.name[0].toUpperCase() : '?';
-            }
-            
-            const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    platform_user_id: userData.platform_user_id
-                }),
-                credentials: 'include',
-                signal: signal
-            });
-            
-            const messagesData = await messagesResponse.json();
-            
-            if (messagesData.status === 'success') {
-                currentMessages = messagesData.messages || [];
-                messagesCache[chatId] = currentMessages;
-                
-                renderMessages(currentMessages);
-                
-                if (currentMessages.length === 0) {
-                    noMessages.style.display = 'block';
-                    noMessages.textContent = 'Сообщений пока нет...';
-                } else {
-                    noMessages.style.display = 'none';
-                }
-                
-                markAllMessagesAsRead(chatId);
-            } else {
-                currentMessages = [];
-                noMessages.style.display = 'block';
-                noMessages.textContent = 'Сообщений пока нет...';
-            }
-            
-            if (currentMessages.length > 0) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-
-            if (currentChat) {
-                updateChatItemInDOM(chatId, {
-                    last_message: currentChat.last_message || '',
-                    last_message_time: currentChat.last_message_time || '',
-                    unread_count: 0
-                });
-
-                const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-                if (chatIndex !== -1) {
-                    currentChatsList[chatIndex].unread_count = 0;
+                    const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
+                    if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
                 }
             }
             
         } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log('Fetch aborted - user switched chats quickly');
-                return;
-            }
-            
-            console.error('Error opening chat:', error);
-            
-            currentChat = null;
-            currentMessages = [];
-            
-            if (messagesContainer) messagesContainer.innerHTML = '';
-            if (noMessages) {
-                noMessages.style.display = 'block';
-                noMessages.textContent = 'Не удалось загрузить чат';
-            }
+            if (error.name === 'AbortError') return;
             
             if (isDesktop) {
                 if (chatModal) chatModal.style.display = 'none';
@@ -4380,14 +3912,9 @@ input, textarea {
     }
 
     function closeChat() {
-        console.log('closeChat() called');
-        
         const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
-        if (!chatModal) {
-            console.error('closeChat(): chatModal not found');
-            return;
-        }
+        if (!chatModal) return;
 
         currentChat = null;
         currentMessages = [];
@@ -4422,8 +3949,6 @@ input, textarea {
         }
         
         isOpeningChat = false;
-        
-        console.log('Chat closed successfully');
     }
 
     function moveChatToTop(chatId) {
@@ -4431,9 +3956,7 @@ input, textarea {
             if (!list) return;
             
             const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-            if (chatItem) {
-                list.prepend(chatItem);
-            }
+            if (chatItem) list.prepend(chatItem);
         });
     }
 
@@ -4447,9 +3970,7 @@ input, textarea {
                 
                 if (lastMessageEl && chatData.last_message) {
                     let lastMessageText = chatData.last_message;
-                    if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') {
-                        lastMessageText = '📷 Фото';
-                    }
+                    if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') lastMessageText = '📷 Фото';
                     lastMessageEl.textContent = lastMessageText;
                 }
                 
@@ -4463,9 +3984,7 @@ input, textarea {
                     badge.textContent = chatData.unread_count;
                 } else {
                     const badge = chatItem.querySelector('.unread-badge');
-                    if (badge) {
-                        badge.remove();
-                    }
+                    if (badge) badge.remove();
                 }
             }
         });
@@ -4517,25 +4036,15 @@ input, textarea {
         try {
             const response = await fetch(`${SERVER_URL}/mark_as_read`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    message_id: messageId,
-                    reader_id: userData.platform_user_id
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, message_id: messageId, reader_id: userData.platform_user_id }),
                 credentials: 'include'
             });
             
             const data = await response.json();
             
-            if (data.status === 'success') {
-                updateMessageStatusInUI(messageId);
-            }
-        } catch (error) {
-            console.error('Error updating message status:', error);
-        }
+            if (data.status === 'success') updateMessageStatusInUI(messageId);
+        } catch (error) {}
     }
 
     function updateMessageStatusInUI(messageId) {
@@ -4555,30 +4064,18 @@ input, textarea {
         try {
             const response = await fetch(`${SERVER_URL}/mark_all_as_read`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    reader_id: userData.platform_user_id
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, reader_id: userData.platform_user_id }),
                 credentials: 'include'
             });
             
             const data = await response.json();
             
             if (data.status === 'success') {
-                currentMessages.forEach(message => {
-                    if (!message.is_me) {
-                        message.is_read = true;
-                    }
-                });
-                
+                currentMessages.forEach(message => { if (!message.is_me) message.is_read = true; });
                 updateAllMessageStatusesInUI();
             }
-        } catch (error) {
-            console.error('Error marking all messages as read:', error);
-        }
+        } catch (error) {}
     }
 
     function updateAllMessageStatusesInUI() {
@@ -4600,17 +4097,13 @@ input, textarea {
     }
 
     async function updateChatStatuses() {
-        if (!currentChatsList || currentChatsList.length === 0) {
-            return;
-        }
+        if (!currentChatsList || currentChatsList.length === 0) return;
 
         const userIds = [];
         currentChatsList.forEach(chat => {
             if (chat.participants && chat.participants.length > 0) {
                 chat.participants.forEach(participant => {
-                    if (participant.platform_user_id !== userData.platform_user_id) {
-                        userIds.push(participant.platform_user_id);
-                    }
+                    if (participant.platform_user_id !== userData.platform_user_id) userIds.push(participant.platform_user_id);
                 });
             }
         });
@@ -4618,7 +4111,7 @@ input, textarea {
         if (userIds.length === 0) return;
 
         try {
-            const activityData = await getUsersActivityStatus(userIds);
+            const activityData = await getCachedActivityStatus(userIds);
             currentActivityData = activityData;
             
             [chatsListDesktop, chatsListMobile].forEach(list => {
@@ -4649,9 +4142,7 @@ input, textarea {
                     }
                 });
             });
-        } catch (error) {
-            console.error('Error updating chat statuses:', error);
-        }
+        } catch (error) {}
     }
 
     async function initializePage() {
@@ -4695,10 +4186,7 @@ input, textarea {
             chatModalMobile.classList.remove('active'); 
         }
 
-        await Promise.all([
-            loadUserData(),
-            loadChats()
-        ]);
+        await Promise.all([ loadUserData(), loadChats() ]);
         
         const openChatId = sessionStorage.getItem('openChatId');
         const openChatName = sessionStorage.getItem('openChatName');
@@ -4706,15 +4194,9 @@ input, textarea {
         window.addEventListener('resize', handleOrientationChange);
         
         if (openChatId && openChatName) {
-            const tempChat = {
-                id: openChatId,
-                name: openChatName,
-                is_temp: false
-            };
-            
+            const tempChat = { id: openChatId, name: openChatName, is_temp: false };
             sessionStorage.removeItem('openChatId');
             sessionStorage.removeItem('openChatName');
-            
             openChat(openChatId);
         } else {
             const tempChatContactId = sessionStorage.getItem('tempChatContactId');
@@ -4747,13 +4229,9 @@ input, textarea {
         closeContacts.addEventListener('click', hideContactsModal);
         modalOverlay.addEventListener('click', hideContactsModal);
         
-        contactsSearchInput.addEventListener('input', (e) => {
-            filterContacts(e.target.value);
-        });
+        contactsSearchInput.addEventListener('input', (e) => filterContacts(e.target.value));
 
-        searchInput.addEventListener('input', (e) => {
-            filterChats(e.target.value);
-        });
+        searchInput.addEventListener('input', (e) => filterChats(e.target.value));
 
         if (sendMessageButton && messageInput) {
             sendMessageButton.addEventListener('click', sendMessage);
@@ -4786,18 +4264,12 @@ input, textarea {
             const { chatModal } = getActiveElements();
             
             try {
-                await Promise.all([
-                    fetch(`${SERVER_URL}/refresh_activity`, {
-                        method: 'POST',
-                        credentials: 'include'
-                    }).catch(() => {}),
-                    updateChatStatuses()
-                ]);
+                await updateChatStatuses();
                 
                 if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
                     const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                     if (otherParticipant) {
-                        const activityData = await getUsersActivityStatus([otherParticipant.platform_user_id]);
+                        const activityData = await getCachedActivityStatus([otherParticipant.platform_user_id]);
                         const userActivity = activityData[otherParticipant.platform_user_id];
                         const chatStatus = getActiveElements().chatStatus;
                         
@@ -4815,25 +4287,15 @@ input, textarea {
                         }
                     }
                 }
-            } catch (error) {
-                console.error('Error updating statuses:', error);
-            }
-        }, 5000);
+            } catch (error) {}
+        }, 30000);
 
         setupKeyboardHandlers();
         setupKeyboardDetection();
         
-        document.addEventListener('gesturestart', function(e) {
-            e.preventDefault();
-        });
-        
-        document.addEventListener('gesturechange', function(e) {
-            e.preventDefault();
-        });
-        
-        document.addEventListener('gestureend', function(e) {
-            e.preventDefault();
-        });
+        document.addEventListener('gesturestart', (e) => e.preventDefault());
+        document.addEventListener('gesturechange', (e) => e.preventDefault());
+        document.addEventListener('gestureend', (e) => e.preventDefault());
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
@@ -4843,7 +4305,7 @@ input, textarea {
                 if (currentChat) {
                     const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                     if (otherParticipant) {
-                        getUsersActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
+                        getCachedActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
                             const userActivity = activityData[otherParticipant.platform_user_id];
                             const chatStatus = getActiveElements().chatStatus;
                             
@@ -4869,13 +4331,9 @@ input, textarea {
             updateUserActivity(true);
         });
 
-        setTimeout(() => {
-            updateUserActivity(true);
-        }, 100);
+        setTimeout(() => updateUserActivity(true), 100);
 
-        const activityInterval = setInterval(() => {
-            updateUserActivity(true);
-        }, 30000);
+        const activityInterval = setInterval(() => updateUserActivity(true), 60000);
         
         window.addEventListener('beforeunload', () => {
             clearInterval(activityInterval);
@@ -4897,24 +4355,18 @@ input, textarea {
         
         const menuButton = document.querySelector('.menu-button');
         if (menuButton) {
-            menuButton.addEventListener('click', () => {
-                console.log('Menu button clicked');
-            });
+            menuButton.addEventListener('click', () => {});
         }
 
         const contactsSearchBtn = document.querySelector('.contacts-search-btn');
         if (contactsSearchBtn) {
-            contactsSearchBtn.addEventListener('click', () => {
-                contactsSearchInput.focus();
-            });
+            contactsSearchBtn.addEventListener('click', () => contactsSearchInput.focus());
         }
 
         if (!isDesktop) {
             setupMobileChatHeight();
             window.addEventListener('resize', setupMobileChatHeight);
         }
-
-        console.log('Page initialized successfully');
     }
 
     function filterChats(searchTerm) {
@@ -4934,8 +4386,6 @@ input, textarea {
     }
 
     function handleOrientationChange() {
-        console.log('Orientation changed');
-        
         isDesktop = window.matchMedia("(min-width: 768px)").matches;
         
         setTimeout(() => {
@@ -4945,9 +4395,7 @@ input, textarea {
                 setupMobileChatHeight();
                 
                 const { messagesContainer } = getActiveElements();
-                if (messagesContainer && currentMessages.length > 0) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }
+                if (messagesContainer && currentMessages.length > 0) messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
         }, 100);
     }
@@ -4969,9 +4417,7 @@ input, textarea {
     document.addEventListener('DOMContentLoaded', initializePage);
     
     window.addEventListener('pageshow', (event) => {
-        if (event.persisted) {
-            initializePage();
-        }
+        if (event.persisted) initializePage();
     });
 </script>
      <script src="activity-tracker.js"></script>
