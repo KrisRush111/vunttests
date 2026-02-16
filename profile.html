@@ -1463,7 +1463,7 @@ body.wallpaper-enabled {
 
 /* Сетка обоев - горизонтальная прокрутка */
 .wallpaper-grid {
-    display: flex;
+    display: flex !important;
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 12px;
@@ -1489,6 +1489,7 @@ body.wallpaper-enabled {
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
+    display: block !important;
 }
 
 .wallpaper-item:active {
@@ -2081,6 +2082,7 @@ input:checked + .toggle-slider:before {
 </div>
 
 
+
 <!-- New: Mobile Settings View -->
 <div class="mobile-settings-view">
     <div class="mobile-settings-inner-content">
@@ -2657,39 +2659,46 @@ function updateDesktopPlaceholderWallpaper() {
     }
 }
 
-// Создание сетки обоев - горизонтальная прокрутка
+
+// Создание сетки обоев - ИСПРАВЛЕННАЯ ВЕРСИЯ С ОТЛАДКОЙ
 function createWallpaperGrids() {
     const grids = ['wallpaperGridDesktop', 'wallpaperGridMobile'];
     
     grids.forEach(gridId => {
         const grid = document.getElementById(gridId);
         if (!grid) {
-            console.warn(`Grid not found: ${gridId}`);
+            console.error(`❌ Grid not found: ${gridId} - проверьте HTML!`);
             return;
         }
+        
+        console.log(`✅ Grid found: ${gridId}, очищаем и заполняем`);
         
         // Очищаем сетку
         grid.innerHTML = '';
         
-        // Создаем элементы обоев с горизонтальным расположением
+        // Создаем элементы обоев
         WALLPAPERS.forEach(wallpaper => {
             const wallpaperItem = document.createElement('div');
             wallpaperItem.className = 'wallpaper-item';
             wallpaperItem.dataset.wallpaperId = wallpaper.id;
             
-            // Устанавливаем начальное состояние выделения
-            if (wallpaper.id === wallpaperState.selectedWallpaper) {
-                wallpaperItem.classList.add('selected');
-            }
+            // Для отладки - добавим инлайн стиль чтобы точно увидеть
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'wallpaper-preview';
+            previewDiv.style.backgroundImage = `url('${wallpaper.url}')`;
+            previewDiv.style.backgroundSize = 'cover';
+            previewDiv.style.backgroundPosition = 'center';
             
-            // Для ВСЕХ обоев используем фон, включая системные
-            wallpaperItem.innerHTML = `
-                <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}');"></div>
-                <div class="wallpaper-label">${wallpaper.name}</div>
-            `;
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'wallpaper-label';
+            labelDiv.textContent = wallpaper.name;
+            
+            wallpaperItem.appendChild(previewDiv);
+            wallpaperItem.appendChild(labelDiv);
             
             // Добавляем галочку для выбранных обоев
             if (wallpaper.id === wallpaperState.selectedWallpaper) {
+                wallpaperItem.classList.add('selected');
                 const checkmark = document.createElement('div');
                 checkmark.className = 'wallpaper-checkmark';
                 checkmark.innerHTML = '<i class="fas fa-check"></i>';
@@ -2698,6 +2707,8 @@ function createWallpaperGrids() {
             
             grid.appendChild(wallpaperItem);
         });
+        
+        console.log(`✅ Grid ${gridId} заполнен, элементов: ${grid.children.length}`);
     });
     
     // Обновление переключателей
@@ -3035,6 +3046,26 @@ window.addEventListener('resize', () => {
         updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
     }
 });
+
+
+// В функции showDesktopModule для appearanceModule
+appearanceBtn.addEventListener('click', () => {
+    showDesktopModule(appearanceModule);
+    setTimeout(() => {
+        createWallpaperGrids(); // Создаем сетку когда модуль уже виден
+        updateChatPreviewWallpaper();
+    }, 50);
+});
+
+// Для мобильного
+appearanceBtnMobile.addEventListener('click', () => {
+    showMobileModal(appearanceModuleMobile);
+    setTimeout(() => {
+        createWallpaperGrids();
+        updateChatPreviewWallpaper();
+    }, 50);
+});
+
 
 
         // Страницы, между которыми не должен сбрасываться кэш чатов
