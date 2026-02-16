@@ -2551,15 +2551,22 @@ function updateChatPreviewWallpaper() {
 }
 
 
-// Загрузка настроек обоев (кэш отключен)
+// Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
-    // Логика кэширования удалена по запросу
-    wallpaperState = {
-        enabled: false,
-        selectedWallpaper: 'default',
-        blur: 0,
-        brightness: 100
-    };
+    const saved = localStorage.getItem('vuntgram_wallpaper');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            wallpaperState = {
+                enabled: parsed.enabled !== undefined ? parsed.enabled : false,
+                selectedWallpaper: parsed.selectedWallpaper || 'default',
+                blur: parsed.blur || 0,
+                brightness: parsed.brightness || 100
+            };
+        } catch (e) {
+            console.error('Error loading wallpaper settings:', e);
+        }
+    }
     
     const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
     wallpaperNameElements.forEach(el => {
@@ -2611,10 +2618,17 @@ document.addEventListener('DOMContentLoaded', function() {
     setupWallpaperButtons(); // Добавить эту строку
 });
 
-// Сохранение настроек обоев (кэш отключен)
+// Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
-    // Логика кэширования удалена по запросу
-    console.log('Wallpaper settings changed, but not saved to cache.');
+    const settingsToSave = {
+        enabled: wallpaperState.enabled,
+        selectedWallpaper: wallpaperState.selectedWallpaper,
+        blur: wallpaperState.blur,
+        brightness: wallpaperState.brightness
+    };
+    
+    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
+    
     // Уведомляем другие вкладки
     broadcastWallpaperUpdate();
 }
