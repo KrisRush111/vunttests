@@ -2501,7 +2501,11 @@ function getWallpapersWithVersion() {
 // Инициализация обоев - ОДНА основная функция
 function initializeWallpaperSystem() {
     loadWallpaperSettings();
-    createWallpaperGrids(); // Теперь только создание сетки обоев
+    
+    // Получаем обои с версией
+    const wallpapersWithVersion = getWallpapersWithVersion();
+    
+    createWallpaperGrids(wallpapersWithVersion); // Передаем обновленные обои
     applyWallpaper();
     updateDesktopPlaceholderWallpaper();
     setupWallpaperEventListeners();
@@ -2516,7 +2520,7 @@ function initializeWallpaperSystem() {
     }, 100);
     
     // Устанавливаем обои в предпросмотр чата
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    const selectedWallpaper = wallpapersWithVersion.find(w => w.id === wallpaperState.selectedWallpaper);
     if (selectedWallpaper) {
         const previewContainers = document.querySelectorAll('.chat-preview-messages');
         previewContainers.forEach(container => {
@@ -2543,7 +2547,8 @@ function initializeWallpaperSystem() {
 
 // Обновление обоев в превью чата
 function updateChatPreviewWallpaper() {
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    const wallpapersWithVersion = getWallpapersWithVersion();
+    const selectedWallpaper = wallpapersWithVersion.find(w => w.id === wallpaperState.selectedWallpaper);
     if (selectedWallpaper) {
         const previewContainers = document.querySelectorAll('.chat-preview-messages');
         previewContainers.forEach(container => {
@@ -2564,7 +2569,6 @@ function updateChatPreviewWallpaper() {
         });
     }
 }
-
 
 // Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
@@ -2685,8 +2689,9 @@ function updateDesktopPlaceholderWallpaper() {
 }
 
 // Создание сетки обоев - горизонтальная прокрутка
-function createWallpaperGrids() {
+function createWallpaperGrids(wallpapersWithVersion) {
     const grids = ['wallpaperGridDesktop', 'wallpaperGridMobile'];
+    const wallpapers = wallpapersWithVersion || getWallpapersWithVersion();
     
     grids.forEach(gridId => {
         const grid = document.getElementById(gridId);
@@ -2699,7 +2704,7 @@ function createWallpaperGrids() {
         grid.innerHTML = '';
         
         // Создаем элементы обоев с горизонтальным расположением
-        WALLPAPERS.forEach(wallpaper => {
+        wallpapers.forEach(wallpaper => {
             const wallpaperItem = document.createElement('div');
             wallpaperItem.className = 'wallpaper-item';
             wallpaperItem.dataset.wallpaperId = wallpaper.id;
@@ -2811,10 +2816,9 @@ function setupWallpaperEventListeners() {
 }
 
 
-// Выбор обоев
-// Выбор обоев - исправленная версия
 function selectWallpaper(wallpaperId) {
-    const wallpaper = WALLPAPERS.find(w => w.id === wallpaperId);
+    const wallpapersWithVersion = getWallpapersWithVersion();
+    const wallpaper = wallpapersWithVersion.find(w => w.id === wallpaperId);
     if (!wallpaper) return;
     
     wallpaperState.selectedWallpaper = wallpaperId;
@@ -2835,9 +2839,8 @@ function selectWallpaper(wallpaperId) {
         if (el) el.textContent = wallpaper.name;
     });
     
-
     updateChatPreviewWallpaper();
-
+    
     // Обновляем UI выбора
     updateWallpaperSelectionUI(wallpaperId);
     
@@ -2848,7 +2851,6 @@ function selectWallpaper(wallpaperId) {
     // Обновляем переключатель
     updateWallpaperControls();
 }
-
 
 // Новая функция для обновления UI выбора обоев
 function updateWallpaperSelectionUI(selectedId) {
@@ -2878,7 +2880,8 @@ function updateWallpaperSelectionUI(selectedId) {
 
 // Применение обоев - сохраняем оригинальный фон
 function applyWallpaper() {
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    const wallpapersWithVersion = getWallpapersWithVersion();
+    const selectedWallpaper = wallpapersWithVersion.find(w => w.id === wallpaperState.selectedWallpaper);
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
     
     if (!selectedWallpaper || !desktopPlaceholder) {
@@ -2888,7 +2891,7 @@ function applyWallpaper() {
     
     // Удаляем обои с body и восстанавливаем оригинальный фон
     document.body.classList.remove('wallpaper-enabled');
-    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)'; // ВОССТАНАВЛИВАЕМ ОРИГИНАЛЬНЫЙ ФОН
+    document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
     document.body.style.backgroundImage = '';
     document.body.style.filter = '';
     
@@ -2899,18 +2902,16 @@ function applyWallpaper() {
     if (wallpaperState.enabled) {
         desktopPlaceholder.classList.add('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-        desktopPlaceholder.style.backgroundColor = ''; // Убираем цвет фона
+        desktopPlaceholder.style.backgroundColor = '';
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
         desktopPlaceholder.style.backgroundImage = '';
         desktopPlaceholder.style.filter = '';
-        // Восстанавливаем цвет фона для placeholder
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
     }
     
-
     updateChatPreviewWallpaper();
-
+    
     // Убеждаемся, что все модули имеют правильный фон
     const modules = [
         profileModalDesktop,
@@ -2941,6 +2942,7 @@ function applyWallpaper() {
     // Сохраняем настройки для других страниц
     broadcastWallpaperUpdate();
 }
+
 function hideAllDesktopModules() {
     const allModules = [profileModalDesktop, privacyModule, appearanceModule];
     allModules.forEach(mod => {
