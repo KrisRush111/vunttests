@@ -3247,8 +3247,10 @@ async function deleteMessage(messageId, messageElement) {
     if (!currentChat || !userData) return;
 
     try {
+        console.log('Deleting message:', { messageId, chatId: currentChat.id, userId: userData.platform_user_id });
+        
         const response = await fetch(`${SERVER_URL}/delete_message`, {
-            method: 'DELETE',
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message_id: messageId,
@@ -3258,28 +3260,34 @@ async function deleteMessage(messageId, messageElement) {
             credentials: 'include'
         });
 
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server response:', response.status, errorText);
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
         const data = await response.json();
+        console.log('Delete response:', data);
 
         if (data.status === 'success') {
             // Обновляем сообщение в текущем списке
             const messageIndex = currentMessages.findIndex(m => m.id === messageId);
             if (messageIndex !== -1) {
-                currentMessages[messageIndex] = {
-                    ...currentMessages[messageIndex],
-                    is_deleted: true,
-                    content: 'Сообщение удалено'
-                };
+                // Удаляем сообщение из массива
+                currentMessages.splice(messageIndex, 1);
             }
 
             // Обновляем кэш
             setCacheItem(`messages_${currentChat.id}`, currentMessages, CACHE.MESSAGES_TTL);
 
-            // Обновляем отображение
-            const messageContent = messageElement.querySelector('.message-content');
-            if (messageContent) {
-                messageContent.innerHTML = '<em style="opacity: 0.6;">Сообщение удалено</em>';
-                messageElement.style.opacity = '0.7';
-                messageElement.style.background = 'rgba(128, 128, 128, 0.1)';
+            // Удаляем элемент из DOM
+            messageElement.remove();
+
+            // Проверяем, остались ли сообщения
+            if (currentMessages.length === 0) {
+                const { noMessages } = getActiveElements();
+                noMessages.style.display = 'block';
+                noMessages.textContent = 'Сообщений пока нет...';
             }
 
             showMessage('Сообщение удалено', 'success');
@@ -3287,7 +3295,12 @@ async function deleteMessage(messageId, messageElement) {
             throw new Error(data.error || 'Не удалось удалить сообщение');
         }
     } catch (error) {
+        console.error('Delete error:', error);
         showMessage('Ошибка при удалении: ' + error.message, 'error');
+        
+        // Визуально отмечаем ошибку
+        messageElement.style.opacity = '0.5';
+        messageElement.classList.add('animate__animated', 'animate__shakeX');
     }
 }
 
