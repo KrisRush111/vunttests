@@ -720,22 +720,44 @@
             height: 0;
         }
         
-        .no-messages {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            display: block;
-            color: white;
-            font-size: 14px;
-            padding: 5px 12px;
-            border-radius: 24px;
-            background-color: rgba(0, 0, 0, 0.2);
-            backdrop-filter: blur(4px);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            z-index: 1;
-            animation: pulse 2s infinite;
-        }
+
+.no-messages {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: block;
+    color: white;
+    font-size: 14px;
+    padding: 5px 12px;
+    border-radius: 24px;
+    background-color: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    z-index: 1;
+    animation: pulse 2s infinite;
+    text-align: center; /* Добавьте для лучшего выравнивания текста */
+    max-width: 80%; /* Чтобы текст не растягивался на всю ширину */
+    width: auto; /* Автоматическая ширина по содержимому */
+}
+
+
+@media (max-width: 767px) {
+    .no-messages {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 16px; 
+        padding: 8px 16px; 
+        max-width: 90%; /* Немного шире на маленьких экранах */
+        white-space: normal; /* Разрешить перенос текста */
+        word-break: break-word; /* Переносить длинные слова */
+        line-height: 1.4;
+       
+    }
+    
+}
 
         @media (min-width: 768px) {
             .no-messages {
@@ -2623,9 +2645,6 @@
         let currentActivityData = {};
         let isSendingMessage = false;
         let userData = null;
-        let contextMenu = null;
-        let editingMessageId = null;
-        let editingMessageInput = null;
 
         const CACHE = {
             AVATAR_TTL: 24 * 60 * 60 * 1000,
@@ -2923,55 +2942,6 @@
                 };
             }
         }
-        const style = document.createElement('style');
-style.textContent = `
-    .context-menu {
-        transform-origin: top left;
-        animation: scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    
-    .context-menu-item {
-        animation: slideInRight 0.2s ease;
-        animation-fill-mode: both;
-    }
-    
-    .context-menu-item:nth-child(1) {
-        animation-delay: 0.05s;
-    }
-    
-    .context-menu-item:nth-child(2) {
-        animation-delay: 0.1s;
-    }
-    
-    @keyframes scaleIn {
-        from {
-            opacity: 0;
-            transform: scale(0.8);
-        }
-        to {
-            opacity: 1;
-            transform: scale(1);
-        }
-    }
-    
-    .edit-message-input {
-        animation: slideInDown 0.2s ease;
-    }
-    
-    .edit-message-container {
-        animation: fadeIn 0.2s ease;
-    }
-    
-    /* Стиль для удаленных сообщений */
-    .message[data-message-id].message-outgoing[style*="opacity: 0.7"] {
-        background: rgba(128, 128, 128, 0.1) !important;
-    }
-    
-    .message[data-message-id].message-incoming[style*="opacity: 0.7"] {
-        background: rgba(128, 128, 128, 0.1) !important;
-    }
-`;
-document.head.appendChild(style);
 
         function showMessage(message, type = 'error') {
             messageBox.textContent = message;
@@ -2987,370 +2957,6 @@ document.head.appendChild(style);
                 }, 300);
             }, 3000);
         }
-function createContextMenu(messageId, messageElement, x, y) {
-    // Удаляем предыдущее меню, если есть
-    if (contextMenu) {
-        contextMenu.remove();
-    }
-
-    const menu = document.createElement('div');
-    menu.className = 'context-menu';
-    menu.style.cssText = `
-        position: fixed;
-        background: var(--telegram-bg);
-        border-radius: 12px;
-        box-shadow: var(--telegram-shadow-large);
-        padding: 8px 0;
-        min-width: 180px;
-        z-index: 10000;
-        animation: scaleIn 0.2s ease;
-        border: 1px solid var(--telegram-divider);
-    `;
-    
-    // Позиционирование меню
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const menuWidth = 180;
-    const menuHeight = 100;
-    
-    let left = x;
-    let top = y;
-    
-    if (left + menuWidth > viewportWidth) {
-        left = viewportWidth - menuWidth - 10;
-    }
-    
-    if (top + menuHeight > viewportHeight) {
-        top = viewportHeight - menuHeight - 10;
-    }
-    
-    menu.style.left = left + 'px';
-    menu.style.top = top + 'px';
-
-    // Опции меню
-    const editOption = document.createElement('div');
-    editOption.className = 'context-menu-item';
-    editOption.style.cssText = `
-        padding: 12px 16px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        transition: background 0.2s ease;
-        color: var(--telegram-text);
-    `;
-    editOption.innerHTML = '<i class="fas fa-edit" style="width: 20px;"></i><span>Редактировать</span>';
-    editOption.addEventListener('mouseenter', () => {
-        editOption.style.background = 'rgba(0,0,0,0.05)';
-    });
-    editOption.addEventListener('mouseleave', () => {
-        editOption.style.background = 'transparent';
-    });
-    editOption.addEventListener('click', (e) => {
-        e.stopPropagation();
-        startEditingMessage(messageId, messageElement);
-        menu.remove();
-        contextMenu = null;
-    });
-
-    const deleteOption = document.createElement('div');
-    deleteOption.className = 'context-menu-item';
-    deleteOption.style.cssText = `
-        padding: 12px 16px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        transition: background 0.2s ease;
-        color: var(--telegram-destructive);
-    `;
-    deleteOption.innerHTML = '<i class="fas fa-trash" style="width: 20px;"></i><span>Удалить</span>';
-    deleteOption.addEventListener('mouseenter', () => {
-        deleteOption.style.background = 'rgba(238, 104, 111, 0.1)';
-    });
-    deleteOption.addEventListener('mouseleave', () => {
-        deleteOption.style.background = 'transparent';
-    });
-    deleteOption.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteMessage(messageId, messageElement);
-        menu.remove();
-        contextMenu = null;
-    });
-
-    menu.appendChild(editOption);
-    menu.appendChild(deleteOption);
-
-    // Закрытие меню при клике вне его
-    const closeMenu = (e) => {
-        if (!menu.contains(e.target)) {
-            menu.remove();
-            contextMenu = null;
-            document.removeEventListener('click', closeMenu);
-            document.removeEventListener('contextmenu', closeMenu);
-        }
-    };
-
-    setTimeout(() => {
-        document.addEventListener('click', closeMenu);
-        document.addEventListener('contextmenu', closeMenu);
-    }, 100);
-
-    document.body.appendChild(menu);
-    contextMenu = menu;
-}
-
-// Функция для начала редактирования сообщения
-function startEditingMessage(messageId, messageElement) {
-    const message = currentMessages.find(m => m.id === messageId);
-    if (!message || message.is_me === false) return;
-
-    // Если уже редактируем другое сообщение, завершаем редактирование
-    if (editingMessageId && editingMessageId !== messageId) {
-        cancelEditing();
-    }
-
-    const messageContent = messageElement.querySelector('.message-content');
-    const originalText = message.content;
-    const messageTime = messageElement.querySelector('.message-time');
-
-    // Создаем поле для редактирования
-    const editContainer = document.createElement('div');
-    editContainer.className = 'edit-message-container';
-    editContainer.style.cssText = `
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        width: 100%;
-    `;
-
-    const editInput = document.createElement('input');
-    editInput.type = 'text';
-    editInput.value = originalText;
-    editInput.className = 'edit-message-input';
-    editInput.style.cssText = `
-        padding: 8px 12px;
-        border: 1px solid var(--telegram-blue);
-        border-radius: 8px;
-        font-size: 14px;
-        background: var(--telegram-bg);
-        color: var(--telegram-text);
-        outline: none;
-    `;
-
-    const editActions = document.createElement('div');
-    editActions.style.cssText = `
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-    `;
-
-    const saveButton = document.createElement('button');
-    saveButton.textContent = 'Сохранить';
-    saveButton.style.cssText = `
-        padding: 6px 12px;
-        background: var(--telegram-blue);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 13px;
-        transition: opacity 0.2s;
-    `;
-    saveButton.addEventListener('mouseenter', () => saveButton.style.opacity = '0.9');
-    saveButton.addEventListener('mouseleave', () => saveButton.style.opacity = '1');
-
-    const cancelButton = document.createElement('button');
-    cancelButton.textContent = 'Отмена';
-    cancelButton.style.cssText = `
-        padding: 6px 12px;
-        background: var(--telegram-hint);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 13px;
-        transition: opacity 0.2s;
-    `;
-    cancelButton.addEventListener('mouseenter', () => cancelButton.style.opacity = '0.9');
-    cancelButton.addEventListener('mouseleave', () => cancelButton.style.opacity = '1');
-
-    editActions.appendChild(saveButton);
-    editActions.appendChild(cancelButton);
-    editContainer.appendChild(editInput);
-    editContainer.appendChild(editActions);
-
-    // Сохраняем оригинальный контент
-    const originalContent = messageContent.innerHTML;
-    messageContent.innerHTML = '';
-    messageContent.appendChild(editContainer);
-
-    editingMessageId = messageId;
-    editingMessageInput = editInput;
-    editInput.focus();
-
-    // Обработчики
-    const saveEdit = async () => {
-        const newText = editInput.value.trim();
-        if (newText && newText !== originalText) {
-            await editMessage(messageId, newText, messageElement);
-        } else {
-            // Возвращаем оригинальный текст, если он не изменился
-            messageContent.innerHTML = originalContent;
-        }
-        editingMessageId = null;
-        editingMessageInput = null;
-    };
-
-    saveButton.addEventListener('click', saveEdit);
-
-    cancelButton.addEventListener('click', () => {
-        messageContent.innerHTML = originalContent;
-        editingMessageId = null;
-        editingMessageInput = null;
-    });
-
-    editInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            saveEdit();
-        }
-    });
-
-    editInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            messageContent.innerHTML = originalContent;
-            editingMessageId = null;
-            editingMessageInput = null;
-        }
-    });
-}
-
-// Функция для отмены редактирования
-function cancelEditing() {
-    if (editingMessageId && editingMessageInput) {
-        const messageElement = document.querySelector(`[data-message-id="${editingMessageId}"]`);
-        if (messageElement) {
-            const message = currentMessages.find(m => m.id === editingMessageId);
-            const messageContent = messageElement.querySelector('.message-content');
-            if (message && messageContent) {
-                messageContent.innerHTML = escapeHtml(message.content);
-            }
-        }
-        editingMessageId = null;
-        editingMessageInput = null;
-    }
-}
-
-// Функция для удаления сообщения
-async function deleteMessage(messageId, messageElement) {
-    if (!currentChat || !userData) return;
-
-    try {
-        console.log('Deleting message:', { messageId, chatId: currentChat.id, userId: userData.platform_user_id });
-        
-        const response = await fetch(`${SERVER_URL}/delete_message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message_id: messageId,
-                chat_id: currentChat.id,
-                user_id: userData.platform_user_id
-            }),
-            credentials: 'include'
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Server response:', response.status, errorText);
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log('Delete response:', data);
-
-        if (data.status === 'success') {
-            // Обновляем сообщение в текущем списке
-            const messageIndex = currentMessages.findIndex(m => m.id === messageId);
-            if (messageIndex !== -1) {
-                // Удаляем сообщение из массива
-                currentMessages.splice(messageIndex, 1);
-            }
-
-            // Обновляем кэш
-            setCacheItem(`messages_${currentChat.id}`, currentMessages, CACHE.MESSAGES_TTL);
-
-            // Удаляем элемент из DOM
-            messageElement.remove();
-
-            // Проверяем, остались ли сообщения
-            if (currentMessages.length === 0) {
-                const { noMessages } = getActiveElements();
-                noMessages.style.display = 'block';
-                noMessages.textContent = 'Сообщений пока нет...';
-            }
-
-            showMessage('Сообщение удалено', 'success');
-        } else {
-            throw new Error(data.error || 'Не удалось удалить сообщение');
-        }
-    } catch (error) {
-        console.error('Delete error:', error);
-        showMessage('Ошибка при удалении: ' + error.message, 'error');
-        
-        // Визуально отмечаем ошибку
-        messageElement.style.opacity = '0.5';
-        messageElement.classList.add('animate__animated', 'animate__shakeX');
-    }
-}
-
-// Функция для редактирования сообщения
-async function editMessage(messageId, newText, messageElement) {
-    if (!currentChat || !userData) return;
-
-    try {
-        const response = await fetch(`${SERVER_URL}/edit_message`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message_id: messageId,
-                chat_id: currentChat.id,
-                user_id: userData.platform_user_id,
-                new_content: newText
-            }),
-            credentials: 'include'
-        });
-
-        const data = await response.json();
-
-        if (data.status === 'success') {
-            // Обновляем сообщение в текущем списке
-            const messageIndex = currentMessages.findIndex(m => m.id === messageId);
-            if (messageIndex !== -1) {
-                currentMessages[messageIndex] = {
-                    ...currentMessages[messageIndex],
-                    content: newText,
-                    edited_at: new Date().toISOString()
-                };
-            }
-
-            // Обновляем кэш
-            setCacheItem(`messages_${currentChat.id}`, currentMessages, CACHE.MESSAGES_TTL);
-
-            // Обновляем отображение
-            const messageContent = messageElement.querySelector('.message-content');
-            if (messageContent) {
-                messageContent.innerHTML = escapeHtml(newText) + ' <span style="font-size: 11px; opacity: 0.6;">(ред.)</span>';
-            }
-
-            showMessage('Сообщение отредактировано', 'success');
-        } else {
-            throw new Error(data.error || 'Не удалось отредактировать сообщение');
-        }
-    } catch (error) {
-        showMessage('Ошибка при редактировании: ' + error.message, 'error');
-    }
-}
 
         function handleImageSelection(event) {
             const files = event.target.files;
@@ -3518,72 +3124,38 @@ async function editMessage(messageId, newText, messageElement) {
             }
         }
 
-       function renderMessage(message) {
-    const messageElement = document.createElement('div');
-    messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
-    if (message.is_deleted) {
-        messageElement.style.opacity = '0.7';
-        messageElement.style.background = 'rgba(128, 128, 128, 0.1)';
-    }
-    messageElement.setAttribute('data-message-id', message.id);
-    
-    const messageTime = formatChatMessageTime(message.sent_at);
-    
-    let statusIcons = '';
-    if (message.is_me && !message.is_deleted) {
-        const isRead = message.is_read;
-        statusIcons = `<div class="message-status"><div class="status-icons"><i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i></div></div>`;
-    }
-    
-    let messageContent = '';
-    let editedMark = message.edited_at ? ' <span style="font-size: 11px; opacity: 0.6;">(ред.)</span>' : '';
-    
-    if (message.is_deleted) {
-        messageContent = `<div class="message-content"><em style="opacity: 0.6;">Сообщение удалено</em></div>`;
-    } else if (message.is_image || (message.content && isImageUrl(message.content))) {
-        const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
-        const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
-        const imageUrl = message.content;
-        
-        messageContent = `<div class="message-content"><img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;"></div>`;
-        messageElement.classList.add('message-with-image');
-    } else {
-        messageContent = `<div class="message-content">${escapeHtml(message.content)}${editedMark}</div>`;
-    }
-    
-    messageElement.innerHTML = `${messageContent}<div class="message-time">${messageTime}${message.is_me && !message.is_deleted ? statusIcons : ''}</div>`;
-    messageElement.style.opacity = '1';
-    messageElement.style.transform = 'translateY(0)';
-    
-    // Добавляем обработчики для контекстного меню только для своих сообщений
-    if (message.is_me && !message.is_deleted) {
-        // Для мобильных устройств - долгое нажатие
-        let pressTimer;
-        messageElement.addEventListener('touchstart', (e) => {
-            pressTimer = setTimeout(() => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                createContextMenu(message.id, messageElement, touch.clientX, touch.clientY);
-            }, 500);
-        });
-        
-        messageElement.addEventListener('touchend', () => {
-            clearTimeout(pressTimer);
-        });
-        
-        messageElement.addEventListener('touchmove', () => {
-            clearTimeout(pressTimer);
-        });
-        
-        // Для десктопа - правый клик
-        messageElement.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            createContextMenu(message.id, messageElement, e.clientX, e.clientY);
-        });
-    }
-    
-    return messageElement;
-}
+        function renderMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
+            messageElement.setAttribute('data-message-id', message.id);
+            
+            const messageTime = formatChatMessageTime(message.sent_at);
+            
+            let statusIcons = '';
+            if (message.is_me) {
+                const isRead = message.is_read;
+                statusIcons = `<div class="message-status"><div class="status-icons"><i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i></div></div>`;
+            }
+            
+            let messageContent = '';
+            
+            if (message.is_image || (message.content && isImageUrl(message.content))) {
+                const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+                const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
+                const imageUrl = message.content;
+                
+                messageContent = `<div class="message-content"><img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;"></div>`;
+                messageElement.classList.add('message-with-image');
+            } else {
+                messageContent = `<div class="message-content">${escapeHtml(message.content)}</div>`;
+            }
+            
+            messageElement.innerHTML = `${messageContent}<div class="message-time">${messageTime}${message.is_me ? statusIcons : ''}</div>`;
+            messageElement.style.opacity = '1';
+            messageElement.style.transform = 'translateY(0)';
+            
+            return messageElement;
+        }
 
         function escapeHtml(text) {
             const div = document.createElement('div');
