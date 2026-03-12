@@ -3073,6 +3073,88 @@
         box-shadow: 0 0 20px rgba(0, 199, 60, 0.8), 0 0 30px rgba(0, 199, 60, 0.4);
     }
 }
+
+
+
+/* Крестик для закрытия профиля на десктопе */
+.profile-close-button {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border: none;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--animation-duration) var(--animation-timing);
+    z-index: 10;
+}
+
+.profile-close-button:hover {
+    background: rgba(0, 0, 0, 0.4);
+    transform: scale(1.1);
+}
+
+.profile-close-button:active {
+    transform: scale(0.95);
+}
+
+/* Стили для профиля в десктопной версии */
+.desktop-content {
+    position: relative;
+    overflow: hidden;
+}
+
+.desktop-placeholder,
+#chatModalDesktop,
+#profileModalDesktop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.desktop-placeholder {
+    z-index: 1;
+}
+
+#chatModalDesktop {
+    z-index: 2;
+    display: none;
+}
+
+#chatModalDesktop.active {
+    display: flex !important;
+}
+
+#profileModalDesktop {
+    z-index: 3;
+    display: none;
+    background-color: var(--telegram-secondary-bg);
+    overflow-y: auto;
+    padding: 0;
+}
+
+#profileModalDesktop.visible {
+    display: flex !important;
+}
+
+/* Скрываем placeholder когда активен чат или профиль */
+.desktop-placeholder.hidden {
+    display: none !important;
+}
+
     </style>
 </head>
 <body>
@@ -3247,6 +3329,9 @@
     <div id="modalOverlay" class="modal-overlay"></div>
 
     <div id="profileModalDesktop" class="profile-modal desktop-profile">
+    <button id="profileCloseButtonDesktop" class="profile-close-button">
+        <i class="fas fa-times"></i>
+    </button>
         <div class="profile-modal-content">
             <div class="profile-header">
                 <div id="profileBackButtonDesktop" class="profile-back-button mobile-only">
@@ -3463,6 +3548,7 @@
         const profileModalMobile = document.getElementById('profileModalMobile');
         const profileBackButtonMobile = document.getElementById('profileBackButtonMobile');
         const profileBackButtonDesktop = document.getElementById('profileBackButtonDesktop');
+        const profileCloseButtonDesktop = document.getElementById('profileCloseButtonDesktop');
         
         let currentMessages = [];
         let currentChat = null;
@@ -3734,13 +3820,36 @@
             return `${messageDate.getDate()} ${months[messageDate.getMonth()]}`;
         }
 
+
+        
+
+// Функция для управления видимостью элементов на десктопе
+function updateDesktopVisibility(showChat = false, showProfile = false) {
+    if (!isDesktop) return;
+    
+    if (showChat) {
+        desktopPlaceholder.classList.add('hidden');
+        chatModalDesktop.classList.add('active');
+        profileModalDesktop.classList.remove('visible');
+    } else if (showProfile) {
+        desktopPlaceholder.classList.add('hidden');
+        chatModalDesktop.classList.remove('active');
+        profileModalDesktop.classList.add('visible');
+    } else {
+        desktopPlaceholder.classList.remove('hidden');
+        chatModalDesktop.classList.remove('active');
+        profileModalDesktop.classList.remove('visible');
+    }
+}
+
+
 function openProfileModal(userId) {
     // Проверяем, какая версия интерфейса активна
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
     if (isDesktop) {
-        // Для десктопа
-        profileModalDesktop.classList.add('visible');
+        // Для десктопа - показываем профиль в правой панели
+        updateDesktopVisibility(false, true);
         document.querySelector('.desktop-content').scrollTo({ top: 0, behavior: 'smooth' });
     } else {
         // Для мобильной версии - закрываем чат и показываем профиль
@@ -3760,11 +3869,18 @@ function openProfileModal(userId) {
     loadUserProfile(userId);
 }
 
+
 function closeProfileModal() {
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
     if (isDesktop) {
-        profileModalDesktop.classList.remove('visible');
+        if (currentChat) {
+            // Если чат открыт, показываем его
+            updateDesktopVisibility(true, false);
+        } else {
+            // Если чат не открыт, показываем плейсхолдер
+            updateDesktopVisibility(false, false);
+        }
     } else {
         document.body.classList.remove('modal-open');
         profileModalMobile.classList.remove('active');
@@ -3778,6 +3894,53 @@ function closeProfileModal() {
             }
         }
     }
+}
+
+function closeChat() {
+    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+
+    if (!chatModal) return;
+
+    currentChat = null;
+    currentMessages = [];
+
+    if (chatAvatar) {
+        chatAvatar.style.backgroundImage = '';
+        chatAvatar.style.backgroundColor = '';
+        chatAvatar.textContent = '';
+    }
+    
+    if (chatTitle) chatTitle.textContent = '';
+    if (chatStatus) chatStatus.textContent = '';
+    
+    if (messagesContainer) messagesContainer.innerHTML = '';
+    
+    if (noMessages) {
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Сообщений пока нет...';
+    }
+
+    if (isDesktop) {
+        // Закрываем и чат, и профиль, показываем плейсхолдер
+        updateDesktopVisibility(false, false);
+    } else {
+        chatModal.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    if (openChatAbortController) {
+        openChatAbortController.abort();
+        openChatAbortController = null;
+    }
+    
+    isOpeningChat = false;
+}
+
+// Добавьте обработчик для кнопки закрытия профиля
+if (profileCloseButtonDesktop) {
+    profileCloseButtonDesktop.addEventListener('click', () => {
+        closeProfileModal();
+    });
 }
 
 
@@ -5205,97 +5368,101 @@ function getActiveElements() {
             });
         }
 
-        async function openChat(chatId) {
-            if (openChatAbortController) openChatAbortController.abort();
-            openChatAbortController = new AbortController();
-            const signal = openChatAbortController.signal;
+async function openChat(chatId) {
+    // Закрываем профиль если он открыт
+    if (isDesktop) {
+        profileModalDesktop.classList.remove('visible');
+    }
+    
+    if (openChatAbortController) openChatAbortController.abort();
+    openChatAbortController = new AbortController();
+    const signal = openChatAbortController.signal;
 
-            isOpeningChat = true;
+    isOpeningChat = true;
 
-            const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+    
+    if (!chatModal || !chatAvatar || !chatTitle || !chatStatus || !messagesContainer || !noMessages) {
+        isOpeningChat = false;
+        return;
+    }
+    
+    if (currentChat) {
+        currentChat = null;
+        currentMessages = [];
+        messagesContainer.innerHTML = '';
+    }
+    
+    const cachedChat = currentChatsList.find(c => c.id === chatId);
+    if (cachedChat) {
+        chatTitle.textContent = cachedChat.name || 'Новый чат';
+        const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
+        const bgColor = cachedChat.avatar_background || '#0088cc';
+        
+        const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        if (otherParticipant) {
+            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
             
-            if (!chatModal || !chatAvatar || !chatTitle || !chatStatus || !messagesContainer || !noMessages) {
-                isOpeningChat = false;
-                return;
+            const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
+            if (statusElement) {
+                chatStatus.innerHTML = statusElement.innerHTML;
+                chatStatus.className = statusElement.className;
             }
+        } else {
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.textContent = initials;
+        }
+    }
+
+    try {
+        if (isDesktop) {
+            updateDesktopVisibility(true, false);
+        } else {
+            chatModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        await loadMessages(chatId);
+
+        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+            credentials: 'include',
+            signal: signal
+        });
+        
+        const chatData = await response.json();
+        
+        if (chatData.status === 'success') {
+            currentChat = chatData.chat;
             
             if (currentChat) {
-                currentChat = null;
-                currentMessages = [];
-                messagesContainer.innerHTML = '';
+                updateChatItemInDOM(chatId, { unread_count: 0 });
+
+                const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
+                if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
             }
-            
-            const cachedChat = currentChatsList.find(c => c.id === chatId);
-            if (cachedChat) {
-                chatTitle.textContent = cachedChat.name || 'Новый чат';
-                const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
-                const bgColor = cachedChat.avatar_background || '#0088cc';
-                
-                const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) {
-                    loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
-                    
-                    const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
-                    if (statusElement) {
-                        chatStatus.innerHTML = statusElement.innerHTML;
-                        chatStatus.className = statusElement.className;
-                    }
-                } else {
-                    chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                    chatAvatar.textContent = initials;
-                }
-            }
-
-            try {
-                if (isDesktop) {
-                    if (desktopPlaceholder) desktopPlaceholder.style.display = 'none';
-                    chatModal.style.display = 'flex';
-                } else {
-                    chatModal.classList.add('active');
-                    document.body.style.overflow = 'hidden';
-                }
-
-                await loadMessages(chatId);
-
-                const response = await fetch(`${SERVER_URL}/get_chat_info`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
-                    credentials: 'include',
-                    signal: signal
-                });
-                
-                const chatData = await response.json();
-                
-                if (chatData.status === 'success') {
-                    currentChat = chatData.chat;
-                    
-                    if (currentChat) {
-                        updateChatItemInDOM(chatId, { unread_count: 0 });
-
-                        const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-                        if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
-                    }
-                }
-                
-            } catch (error) {
-                if (error.name === 'AbortError') return;
-                
-                if (isDesktop) {
-                    if (chatModal) chatModal.style.display = 'none';
-                    if (desktopPlaceholder) desktopPlaceholder.style.display = 'flex';
-                } else {
-                    if (chatModal) chatModal.classList.remove('active');
-                    document.body.style.overflow = '';
-                }
-                
-            } finally {
-                isOpeningChat = false;
-            }
-
-            updateChatWallpaper();
-            applyWallpaper();
         }
+        
+    } catch (error) {
+        if (error.name === 'AbortError') return;
+        
+        if (isDesktop) {
+            updateDesktopVisibility(false, false);
+        } else {
+            if (chatModal) chatModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        
+    } finally {
+        isOpeningChat = false;
+    }
+
+    updateChatWallpaper();
+    applyWallpaper();
+}
+
 
         async function loadUserProfile(userId) {
             try {
@@ -5786,6 +5953,7 @@ function updateProfileModalStatus(userId) {
                 desktopOnlyNav.style.display = 'flex'; 
                 chatModalDesktop.style.display = 'none'; 
                 desktopPlaceholder.style.display = 'flex';
+                updateDesktopVisibility(false, false);
             } else {
                 mobileChatsContainer.style.display = 'flex';
                 mobileOnlyNav.style.display = 'flex';
