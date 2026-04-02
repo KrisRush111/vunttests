@@ -2299,6 +2299,49 @@
             animation: fadeIn 0.3s var(--animation-timing);
         }
 
+        /* Контекстное меню для сообщений */
+        .message-context-menu {
+            position: fixed;
+            background: var(--telegram-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            z-index: 11000;
+            min-width: 180px;
+            overflow: hidden;
+            display: none;
+            animation: fadeIn 0.2s var(--animation-timing);
+            border: 1px solid var(--telegram-divider);
+        }
+
+        .context-menu-item {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            color: var(--telegram-text);
+            font-size: 15px;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .context-menu-item:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .context-menu-item:hover {
+                background: rgba(255, 255, 255, 0.05);
+            }
+        }
+
+        .context-menu-item i {
+            width: 18px;
+            color: var(--telegram-blue);
+            font-size: 16px;
+        }
+
         .image-modal-content {
             flex: 1;
             display: flex;
@@ -3327,6 +3370,14 @@
     </div>
 
     <div id="modalOverlay" class="modal-overlay"></div>
+
+    <!-- Контекстное меню -->
+    <div id="messageContextMenu" class="message-context-menu">
+        <div class="context-menu-item" id="copyMessageText">
+            <i class="fas fa-copy"></i>
+            <span>Копировать текст</span>
+        </div>
+    </div>
 
     <div id="profileModalDesktop" class="profile-modal desktop-profile">
         <div class="profile-modal-content">
@@ -6263,6 +6314,92 @@ if (profileCloseDesktop) {
                 }
             });
         }
+
+        // Логика контекстного меню
+        const contextMenu = document.getElementById('messageContextMenu');
+        const copyBtn = document.getElementById('copyMessageText');
+        let selectedMessageText = '';
+        let longPressTimer;
+
+        function showContextMenu(x, y, text) {
+            selectedMessageText = text;
+            contextMenu.style.display = 'block';
+            
+            // Корректировка позиции, чтобы меню не уходило за экран
+            const menuWidth = contextMenu.offsetWidth;
+            const menuHeight = contextMenu.offsetHeight;
+            const windowWidth = window.innerWidth;
+            const windowHeight = window.innerHeight;
+
+            if (x + menuWidth > windowWidth) x = windowWidth - menuWidth - 10;
+            if (y + menuHeight > windowHeight) y = windowHeight - menuHeight - 10;
+
+            contextMenu.style.left = x + 'px';
+            contextMenu.style.top = y + 'px';
+        }
+
+        function hideContextMenu() {
+            contextMenu.style.display = 'none';
+        }
+
+        // Обработка правого клика (ПК)
+        document.addEventListener('contextmenu', (e) => {
+            const messageElement = e.target.closest('.message');
+            if (messageElement) {
+                const contentElement = messageElement.querySelector('.message-content');
+                if (contentElement && !messageElement.classList.contains('message-with-image')) {
+                    e.preventDefault();
+                    showContextMenu(e.clientX, e.clientY, contentElement.innerText);
+                }
+            } else {
+                hideContextMenu();
+            }
+        });
+
+        // Обработка долгого нажатия (Мобильные)
+        document.addEventListener('touchstart', (e) => {
+            const messageElement = e.target.closest('.message');
+            if (messageElement && !messageElement.classList.contains('message-with-image')) {
+                const contentElement = messageElement.querySelector('.message-content');
+                const touch = e.touches[0];
+                
+                longPressTimer = setTimeout(() => {
+                    showContextMenu(touch.clientX, touch.clientY, contentElement.innerText);
+                    // Вибрация для фидбека (если поддерживается)
+                    if (navigator.vibrate) navigator.vibrate(50);
+                }, 600); // 600мс для долгого нажатия
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchend', () => {
+            clearTimeout(longPressTimer);
+        });
+
+        document.addEventListener('touchmove', () => {
+            clearTimeout(longPressTimer);
+        });
+
+        // Закрытие меню при клике в любом месте
+        document.addEventListener('click', (e) => {
+            if (!contextMenu.contains(e.target)) {
+                hideContextMenu();
+            }
+        });
+
+        // Копирование текста
+        copyBtn.addEventListener('click', () => {
+            if (selectedMessageText) {
+                navigator.clipboard.writeText(selectedMessageText).then(() => {
+                    if (typeof showMessage === 'function') {
+                        showMessage('Текст скопирован', 'success');
+                    }
+                    hideContextMenu();
+                }).catch(err => {
+                    console.error('Ошибка копирования:', err);
+                    hideContextMenu();
+                });
+            }
+        });
 
         document.addEventListener('DOMContentLoaded', initializePage);
         
