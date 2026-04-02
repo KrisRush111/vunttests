@@ -2353,6 +2353,13 @@
             font-size: 16px;
         }
 
+        /* Эффект зажатия сообщения */
+        .message.pressing {
+            transform: scale(0.96) !important;
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            opacity: 0.8;
+        }
+
         .image-modal-content {
             flex: 1;
             display: flex;
@@ -6374,20 +6381,34 @@ if (profileCloseDesktop) {
                 const contentElement = messageElement.querySelector('.message-content');
                 const touch = e.touches[0];
                 
+                // Добавляем визуальный эффект "вдавливания"
+                messageElement.classList.add('pressing');
+                
                 longPressTimer = setTimeout(() => {
                     showContextMenu(touch.clientX, touch.clientY, contentElement.innerText);
-                    // Вибрация для фидбека (если поддерживается)
-                    if (navigator.vibrate) navigator.vibrate(50);
-                }, 600); // 600мс для долгого нажатия
+                    // Вибрация для фидбека (как в Telegram)
+                    if (navigator.vibrate) {
+                        navigator.vibrate(40); // Короткий четкий импульс
+                    }
+                    messageElement.classList.remove('pressing');
+                }, 500); // 500мс для более отзывчивого ощущения
             }
         }, { passive: true });
 
-        document.addEventListener('touchend', () => {
+        document.addEventListener('touchend', (e) => {
             clearTimeout(longPressTimer);
+            const messageElement = e.target.closest('.message');
+            if (messageElement) {
+                messageElement.classList.remove('pressing');
+            }
         });
 
-        document.addEventListener('touchmove', () => {
+        document.addEventListener('touchmove', (e) => {
             clearTimeout(longPressTimer);
+            const messageElement = e.target.closest('.message');
+            if (messageElement) {
+                messageElement.classList.remove('pressing');
+            }
         });
 
         // Закрытие меню при клике в любом месте
