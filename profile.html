@@ -3297,8 +3297,15 @@ window.addEventListener("beforeunload", () => {
         }
 
  
-        function loadAvatar(element, userId) {
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
+        function loadAvatar(element, userId, forceReload = false) {
+            // Если аватар уже установлен для этого элемента — не перезагружаем
+            const currentBg = element.style.backgroundImage || '';
+            if (!forceReload && currentBg && currentBg.includes('/avatar/')) {
+                return;
+            }
+
+            // Без ?t=Date.now() — браузер использует кэш (304 Not Modified)
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
             const img = new Image();
             
             img.onload = function() {
@@ -3306,7 +3313,7 @@ window.addEventListener("beforeunload", () => {
                 element.style.backgroundSize = 'cover';
                 element.style.backgroundPosition = 'center';
                 element.textContent = '';
-                element.style.backgroundColor = ''; // Remove solid background if image loads
+                element.style.backgroundColor = '';
                 
                 if (userData) {
                     userData.has_avatar = true;
@@ -3393,9 +3400,10 @@ window.addEventListener("beforeunload", () => {
         userData.avatar_background = data.avatar_background || userData.avatar_background;
         sessionStorage.setItem('userData', JSON.stringify(userData));
 
-        // Освобождаем локальный URL и используем серверный
+        // Освобождаем локальный URL и используем серверный (с forceReload=true — обновляем принудительно)
+        const freshAvatarUrl = `${data.avatar_url}?t=${Date.now()}`;
         avatarElements.forEach(element => {
-            element.style.backgroundImage = `url(${data.avatar_url}?t=${Date.now()})`;
+            element.style.backgroundImage = `url(${freshAvatarUrl})`;
         });
         
         URL.revokeObjectURL(localImageUrl);
@@ -3451,27 +3459,18 @@ window.addEventListener("beforeunload", () => {
                 userData.avatar_background = data.avatar_background || userData.avatar_background;
                 sessionStorage.setItem('userData', JSON.stringify(userData));
                 
-                // Update all avatar elements to show generated background
-                setAvatarBackground(
-                    profileAvatarMobile,
-                    userData.avatar_background,
-                    userData.nickname.charAt(0).toUpperCase()
-                );
-                setAvatarBackground(
-                    sidebarProfileAvatar,
-                    userData.avatar_background,
-                    userData.nickname.charAt(0).toUpperCase()
-                );
-                setAvatarBackground(
-                    desktopProfileAvatar,
-                    userData.avatar_background,
-                    userData.nickname.charAt(0).toUpperCase()
-                );
-                setAvatarBackground(
-                    mobileSidebarProfileAvatar,
-                    userData.avatar_background,
-                    userData.nickname.charAt(0).toUpperCase()
-                );
+                const firstLetter = userData.nickname?.charAt(0).toUpperCase() || '?';
+                
+                // Явно сбрасываем backgroundImage (чтобы не оставался кэшированный URL аватара)
+                [profileAvatarMobile, sidebarProfileAvatar, desktopProfileAvatar, mobileSidebarProfileAvatar].forEach(el => {
+                    el.style.backgroundImage = '';
+                });
+                
+                // Обновляем все аватары на инициалы
+                setAvatarBackground(profileAvatarMobile, userData.avatar_background, firstLetter);
+                setAvatarBackground(sidebarProfileAvatar, userData.avatar_background, firstLetter);
+                setAvatarBackground(desktopProfileAvatar, userData.avatar_background, firstLetter);
+                setAvatarBackground(mobileSidebarProfileAvatar, userData.avatar_background, firstLetter);
                 
                 showMessage('Аватар успешно удален!', 'success');
             } catch (error) {
@@ -3764,7 +3763,8 @@ function updateProfileUI() {
                 return;
             }
             
-            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}?t=${Date.now()}`;
+            // Без ?t=Date.now() — браузер использует кэш (не мигает при открытии)
+            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}`;
             
             avatarModalImage.src = avatarUrl;
             avatarModal.classList.add('active');
@@ -3779,12 +3779,12 @@ function updateProfileUI() {
         
         function openDesktopProfile() {
             showDesktopModule(profileModalDesktop);
-            updateProfileUI(); 
+            // updateProfileUI() не вызываем — данные уже загружены при инициализации
         }
 
         function openMobileProfile() {
             showMobileModal(profileModalMobile);
-            updateProfileUI();
+            // updateProfileUI() не вызываем — данные уже загружены при инициализации
         }
 
        
@@ -3927,12 +3927,13 @@ function updateProfileUI() {
        
         window.addEventListener('pageshow', (event) => {
             if (event.persisted) {
-                // Re-check authorization on pageshow for back/forward navigation
+                // При навигации назад/вперёд — только проверяем авторизацию и обновляем layout
+                // НЕ делаем полный fetchUserData() — данные уже есть в sessionStorage
                 if (!checkAuthorization()) {
                     return;
                 }
                 initializeLayout();
-                loadProfileData();
+                updateProfileUI(); // Только рендерим из кэша, без запроса на сервер
             }
         });
 
