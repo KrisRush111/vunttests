@@ -1923,6 +1923,34 @@ body {
 
 
 
+
+        /* ===== UNREAD CHAT BADGE ===== */
+        .nav-item[href="chats.html"] {
+            position: relative;
+        }
+        .nav-unread-badge {
+            position: absolute;
+            top: 2px;
+            right: 6px;
+            background: #0088cc;
+            color: #fff;
+            border-radius: 10px;
+            min-width: 18px;
+            height: 18px;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 18px;
+            text-align: center;
+            padding: 0 4px;
+            pointer-events: none;
+            z-index: 10;
+            box-shadow: 0 1px 4px rgba(0,136,204,0.4);
+            animation: badgePop 0.25s ease;
+        }
+        @keyframes badgePop {
+            from { transform: scale(0.5); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -3988,6 +4016,37 @@ function setupSearchHandlers() {
     </script>
 
       <script src="activity-tracker.js"></script>
+    <script>
+    /* ===== UNREAD MESSAGES BADGE ===== */
+    (function () {
+        var _S = "https://api.vuntgram.duckdns.org";
+        var _P = 12000;
+        var _t = null;
+        function _uid() {
+            try { var d=JSON.parse(sessionStorage.getItem("userData")||localStorage.getItem("rememberedUser")||"{}"); return d.platform_user_id||null; } catch{return null;}
+        }
+        async function _fetch() {
+            var uid=_uid(); if(!uid) return 0;
+            try {
+                var r=await fetch(_S+"/get_chats",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({platform_user_id:uid}),credentials:"include"});
+                var d=await r.json(); if(d.status!=="success") return 0;
+                return (d.chats||[]).reduce(function(s,c){return s+(c.unread_count||0);},0);
+            } catch{return 0;}
+        }
+        function _apply(n) {
+            document.querySelectorAll('.nav-item[href="chats.html"]').forEach(function(a){
+                var b=a.querySelector(".nav-unread-badge");
+                if(n>0){if(!b){b=document.createElement("span");b.className="nav-unread-badge";a.style.position="relative";a.insertBefore(b,a.firstChild);}b.textContent=n>99?"99+":n;}
+                else{if(b)b.remove();}
+            });
+        }
+        async function _refresh(){_apply(await _fetch());}
+        function _start(){_refresh();if(_t)clearInterval(_t);_t=setInterval(_refresh,_P);}
+        window._refreshUnreadBadge=_refresh;
+        document.addEventListener("DOMContentLoaded",_start);
+        document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")_refresh();});
+    })();
+    </script>
 </body>
 </html>
 
