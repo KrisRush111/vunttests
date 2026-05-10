@@ -4178,34 +4178,25 @@ function getActiveElements() {
         }
 
         function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-            // Use in-memory Map (CACHE.avatars) to avoid re-fetching on every render
+            const cacheKey = `avatar_${userId}`;
+            const cached = getCacheItem(cacheKey);
+            
             avatarElement.style.background = bgColor ? `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 'linear-gradient(135deg, #0088cc, #40a7e3)';
             avatarElement.textContent = initials;
 
-            if (CACHE.avatars.has(userId)) {
-                const cached = CACHE.avatars.get(userId);
-                if (cached) {
-                    avatarElement.style.background = `url(${cached}) center/cover no-repeat`;
+            if (cached) {
+                avatarElement.style.background = `url(${cached}) center/cover no-repeat`;
+                avatarElement.textContent = '';
+            } else {
+                const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+                const img = new Image();
+                img.onload = function() {
+                    avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
                     avatarElement.textContent = '';
-                }
-                return;
+                    setCacheItem(cacheKey, avatarUrl, CACHE.AVATAR_TTL);
+                };
+                img.src = avatarUrl;
             }
-
-            // Mark as loading to prevent duplicate requests
-            CACHE.avatars.set(userId, null);
-
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
-            const img = new Image();
-            img.onload = function() {
-                CACHE.avatars.set(userId, avatarUrl);
-                // Update all elements showing this user's avatar
-                document.querySelectorAll(`[data-avatar-uid="${userId}"]`).forEach(el => {
-                    el.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                    el.textContent = '';
-                });
-            };
-            img.onerror = function() { CACHE.avatars.set(userId, null); };
-            img.src = avatarUrl;
         }
 
         function loadContactAvatar(avatarElement, userId, initials, bgColor) {
@@ -4742,21 +4733,6 @@ function getActiveElements() {
                     const data = await response.json();
                     if (data.status === 'success') {
                         setCacheItem(cacheKey, data.chats, CACHE.CHATS_TTL);
-                        // Update unread counts without full re-render (avoids avatar re-fetch)
-                        const fresh = data.chats || [];
-                        fresh.forEach(fc => {
-                            const idx = currentChatsList.findIndex(c => c.id === fc.id);
-                            if (idx !== -1) {
-                                const wasUnread = currentChatsList[idx].unread_count;
-                                currentChatsList[idx].unread_count = fc.unread_count;
-                                currentChatsList[idx].last_message = fc.last_message;
-                                currentChatsList[idx].last_message_time = fc.last_message_time;
-                                if (wasUnread !== fc.unread_count || true) {
-                                    updateChatItemInDOM(fc.id, fc);
-                                }
-                            }
-                        });
-                        if (window._refreshUnreadBadge) window._refreshUnreadBadge();
                     }
                 }).catch(() => {});
                 
@@ -4873,7 +4849,7 @@ function getActiveElements() {
                 if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') lastMessageText = '📷 Фото';
 
                 chatItem.innerHTML = `
-                    <div class="chat-avatar" data-avatar-uid="${otherParticipant ? otherParticipant.platform_user_id : ''}" style="background: ${avatarStyle}">${initials}</div>
+                    <div class="chat-avatar" style="background: ${avatarStyle}">${initials}</div>
                     <div class="chat-info">
                         <div class="chat-name">${chat.name || 'Новый чат'}</div>
                         <div class="last-message">${lastMessageText}</div>
@@ -6476,8 +6452,22 @@ if (profileCloseDesktop) {
     </script>
     <script src="activity-tracker.js"></script>
     <script>
-    /* ===== UNREAD MESSAGES BADGE (chats.html — reads from in-memory list) ===== */
+    /* ===== UNREAD MESSAGES BADGE ===== */
     (function () {
+        var _S = "https://api.vuntgram.duckdns.org";
+        var _P = 12000;
+        var _t = null;
+        function _uid() {
+            try { var d=JSON.parse(sessionStorage.getItem("userData")||localStorage.getItem("rememberedUser")||"{}"); return d.platform_user_id||null; } catch{return null;}
+        }
+        async function _fetch() {
+            var uid=_uid(); if(!uid) return 0;
+            try {
+                var r=await fetch(_S+"/get_chats",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({platform_user_id:uid}),credentials:"include"});
+                var d=await r.json(); if(d.status!=="success") return 0;
+                return (d.chats||[]).reduce(function(s,c){return s+(c.unread_count||0);},0);
+            } catch{return 0;}
+        }
         function _apply(n) {
             document.querySelectorAll('.nav-item[href="chats.html"]').forEach(function(a){
                 var b=a.querySelector(".nav-unread-badge");
@@ -6485,24 +6475,11 @@ if (profileCloseDesktop) {
                 else{if(b)b.remove();}
             });
         }
-        function _countFromMemory() {
-            // currentChatsList is defined in chats.html's main script
-            try {
-                var list = window.currentChatsList;
-                if (!list || !list.length) return 0;
-                return list.reduce(function(s,c){return s+(c.unread_count||0);},0);
-            } catch { return 0; }
-        }
-        function _refresh() { _apply(_countFromMemory()); }
-        window._refreshUnreadBadge = _refresh;
-        // Run after main script populates currentChatsList
-        document.addEventListener("DOMContentLoaded", function(){
-            // Poll from in-memory data every 3 seconds (zero extra server calls)
-            setInterval(_refresh, 3000);
-        });
-        document.addEventListener("visibilitychange", function(){
-            if(document.visibilityState==="visible") _refresh();
-        });
+        async function _refresh(){_apply(await _fetch());}
+        function _start(){_refresh();if(_t)clearInterval(_t);_t=setInterval(_refresh,_P);}
+        window._refreshUnreadBadge=_refresh;
+        document.addEventListener("DOMContentLoaded",_start);
+        document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")_refresh();});
     })();
     </script>
 </body>
