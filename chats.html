@@ -4784,10 +4784,70 @@ function getActiveElements() {
             }, { once: true });
 
             const footer = document.createElement('div');
-            footer.style.cssText = `padding: 16px; background: rgba(0, 0, 0, 0.8); color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); font-size: 14px;`;
+            footer.style.cssText = `padding: 12px 16px; background: rgba(0, 0, 0, 0.8); color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); font-size: 14px; display: flex; align-items: center; justify-content: space-between;`;
 
+            const shareBtn = document.createElement('button');
+            shareBtn.innerHTML = '<i class="fa-solid fa-share-nodes"></i>';
+            shareBtn.title = 'Поделиться';
+            shareBtn.style.cssText = `background: rgba(255,255,255,0.15); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; transition: background 0.18s ease, transform 0.18s ease; flex-shrink: 0;`;
+            shareBtn.addEventListener('mouseenter', () => { shareBtn.style.background = 'rgba(255,255,255,0.28)'; shareBtn.style.transform = 'scale(1.1)'; });
+            shareBtn.addEventListener('mouseleave', () => { shareBtn.style.background = 'rgba(255,255,255,0.15)'; shareBtn.style.transform = 'scale(1)'; });
+            shareBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const currentSrc = img.src;
+                try {
+                    if (navigator.share) {
+                        await navigator.share({ url: currentSrc });
+                    } else {
+                        await navigator.clipboard.writeText(currentSrc);
+                        shareBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                        setTimeout(() => { shareBtn.innerHTML = '<i class="fa-solid fa-share-nodes"></i>'; }, 1500);
+                    }
+                } catch {}
+            });
+
+            const footerTime = document.createElement('span');
+            footerTime.style.cssText = `text-align: center; flex: 1; font-size: 13px; color: rgba(255,255,255,0.6);`;
             const currentMessage = imageMessages[currentIndex];
-            if (currentMessage) footer.textContent = `${formatChatMessageTime(currentMessage.sent_at)}`;
+            if (currentMessage) footerTime.textContent = `${formatChatMessageTime(currentMessage.sent_at)}`;
+
+            const saveBtn = document.createElement('button');
+            saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>';
+            saveBtn.title = 'Сохранить';
+            saveBtn.style.cssText = `background: rgba(255,255,255,0.15); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; transition: background 0.18s ease, transform 0.18s ease; flex-shrink: 0;`;
+            saveBtn.addEventListener('mouseenter', () => { saveBtn.style.background = 'rgba(255,255,255,0.28)'; saveBtn.style.transform = 'scale(1.1)'; });
+            saveBtn.addEventListener('mouseleave', () => { saveBtn.style.background = 'rgba(255,255,255,0.15)'; saveBtn.style.transform = 'scale(1)'; });
+            saveBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const currentSrc = img.src;
+                try {
+                    const response = await fetch(currentSrc);
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const ext = blob.type.split('/')[1] || 'jpg';
+                    a.download = `photo.${ext}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                } catch {
+                    const a = document.createElement('a');
+                    a.href = currentSrc;
+                    a.download = 'photo.jpg';
+                    a.target = '_blank';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+            });
+
+            footer.appendChild(shareBtn);
+            footer.appendChild(footerTime);
+            footer.appendChild(saveBtn);
 
             function clampTranslate() {
                 const rect = imageContainer.getBoundingClientRect();
@@ -5024,7 +5084,7 @@ function getActiveElements() {
                     title.textContent = `${newIndex + 1} из ${totalImages}`;
                     img.src = newMessage.content;
                     resetZoom();
-                    footer.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
+                    footerTime.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
                     return newIndex;
                 }
                 return currentIndex;
