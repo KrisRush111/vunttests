@@ -2281,13 +2281,52 @@
         .image-caption {
             font-size: 14px;
             color: inherit;
-            margin-top: 8px;
             opacity: 0.9;
             line-height: 1.4;
         }
 
         .message-with-image .image-caption {
-            padding: 0 10px 6px 10px;
+            padding: 6px 10px 6px 10px;
+            display: block;
+            overflow: hidden;
+        }
+
+        .message-with-image .image-caption::after {
+            content: '';
+            display: table;
+            clear: both;
+        }
+
+        /* Время внутри подписи — обтекание текстом, как в обычных сообщениях */
+        .message-with-image .image-caption .message-time {
+            float: right;
+            display: inline-flex !important;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 3px;
+            margin: 4px 0 0 8px;
+            padding: 0;
+            font-size: 11px;
+            color: var(--telegram-hint);
+        }
+
+        /* Время без подписи — отдельной строкой под фото */
+        .message-with-image .message-content > .message-time {
+            display: inline-flex !important;
+            float: right;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 3px;
+            margin: 4px 10px 6px 6px;
+            padding: 0;
+            font-size: 11px;
+            color: var(--telegram-hint);
+        }
+
+        .message-with-image .message-content::after {
+            content: '';
+            display: table;
+            clear: both;
         }
 
         .message-with-image {
@@ -2316,18 +2355,6 @@
             overflow: hidden;
             margin: 0;
             display: block;
-        }
-
-        .message-with-image .message-time {
-            display: flex !important;
-            float: none;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 3px;
-            margin: 4px 6px 0 0;
-            padding: 0 4px 2px 4px;
-            font-size: 11px;
-            color: var(--telegram-hint);
         }
 
         .message-with-image.message-outgoing .message-time {
@@ -4663,20 +4690,29 @@ function getActiveElements() {
             }
             
             let messageContent = '';
+            const timeHtml = `<div class="message-time">${messageTime}${message.is_me ? statusIcons : ''}</div>`;
             
             if (message.is_image || (message.content && isImageUrl(message.content))) {
                 const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
                 const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
                 const imageUrl = message.content;
                 
-                const captionHtml = message.caption ? `<div class="image-caption">${escapeHtml(message.caption)}</div>` : '';
-                messageContent = `<div class="message-content"><img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">${captionHtml}</div>`;
+                const imgHtml = `<img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">`;
+                
+                if (message.caption) {
+                    const captionHtml = `<div class="image-caption">${escapeHtml(message.caption)}${timeHtml}</div>`;
+                    messageContent = `<div class="message-content">${imgHtml}${captionHtml}</div>`;
+                } else {
+                    messageContent = `<div class="message-content">${imgHtml}${timeHtml}</div>`;
+                }
                 messageElement.classList.add('message-with-image');
             } else {
                 messageContent = `<div class="message-content">${escapeHtml(message.content)}</div>`;
             }
             
-            messageElement.innerHTML = `${messageContent}<div class="message-time">${messageTime}${message.is_me ? statusIcons : ''}</div>`;
+            messageElement.innerHTML = message.is_image || (message.content && isImageUrl(message.content))
+                ? messageContent
+                : `${messageContent}${timeHtml}`;
             messageElement.style.opacity = '1';
             messageElement.style.transform = 'translateY(0)';
             
