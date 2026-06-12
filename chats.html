@@ -2448,8 +2448,14 @@
             max-height: 100%;
             object-fit: contain;
             cursor: grab;
-            transition: transform 0.1s ease;
+            transition: none;
             transform-origin: center center;
+            will-change: transform;
+        }
+
+        @keyframes imageModalAppear {
+            from { opacity: 0; }
+            to   { opacity: 1; }
         }
 
         .zoomable-image:active {
@@ -2889,6 +2895,15 @@
     max-height: 80vh;
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transform: scale(0.92);
+    opacity: 0;
+    transition: transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.22s ease;
+    will-change: transform, opacity;
+}
+
+.photo-viewer-modal.active .photo-viewer-img {
+    transform: scale(1);
+    opacity: 1;
 }
 
 .photo-viewer-close {
@@ -4759,6 +4774,14 @@ function getActiveElements() {
             img.src = imageUrl;
             img.className = 'zoomable-image';
             img.draggable = false;
+            img.style.opacity = '0';
+            img.style.transform = 'scale(0.92)';
+            img.style.transition = 'opacity 0.18s ease, transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            img.addEventListener('load', () => {
+                img.style.opacity = '1';
+                img.style.transform = 'scale(1)';
+                setTimeout(() => { img.style.transition = 'none'; }, 200);
+            }, { once: true });
 
             const footer = document.createElement('div');
             footer.style.cssText = `padding: 16px; background: rgba(0, 0, 0, 0.8); color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); font-size: 14px;`;
@@ -4782,7 +4805,7 @@ function getActiveElements() {
             }
 
             function updateTransform(animate = false) {
-                img.style.transition = animate ? 'transform 0.25s ease-out' : 'none';
+                img.style.transition = animate ? 'transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none';
                 img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
                 resetZoomButton.style.display = scale > 1.01 ? 'block' : 'none';
             }
