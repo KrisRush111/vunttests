@@ -4796,7 +4796,13 @@ function getActiveElements() {
                 e.stopPropagation();
                 const currentSrc = img.src;
                 try {
-                    if (navigator.share) {
+                    const response = await fetch(currentSrc);
+                    const blob = await response.blob();
+                    const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg','jpg');
+                    const file = new File([blob], `photo.${ext}`, { type: blob.type });
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        await navigator.share({ files: [file] });
+                    } else if (navigator.share) {
                         await navigator.share({ url: currentSrc });
                     } else {
                         await navigator.clipboard.writeText(currentSrc);
@@ -4823,17 +4829,26 @@ function getActiveElements() {
                 try {
                     const response = await fetch(currentSrc);
                     const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    const ext = blob.type.split('/')[1] || 'jpg';
-                    a.download = `photo.${ext}`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                    setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                    const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg','jpg');
+                    const file = new File([blob], `photo.${ext}`, { type: blob.type });
+                    // На мобильных используем Web Share API для сохранения как фото
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        await navigator.share({ files: [file] });
+                        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                        setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                    } else {
+                        // Десктоп — обычное скачивание
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `photo.${ext}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                        setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                    }
                 } catch {
                     const a = document.createElement('a');
                     a.href = currentSrc;
@@ -6978,4 +6993,4 @@ if (profileCloseDesktop) {
     </script>
     <script src="activity-tracker.js"></script>
 </body>
-</html>  
+</html>
