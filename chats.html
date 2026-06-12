@@ -2285,6 +2285,10 @@
             line-height: 1.4;
         }
 
+        .message-with-image .image-caption {
+            padding: 0 10px 6px 10px;
+        }
+
         .message-with-image {
             background: transparent !important;
             padding: 8px !important;
@@ -4239,11 +4243,222 @@ function getActiveElements() {
         function handleImageSelection(event) {
             const files = event.target.files;
             if (!files || files.length === 0) return;
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                if (file.type.startsWith('image/')) sendImageMessage(file);
+
+            let imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+            if (imageFiles.length === 0) {
+                event.target.value = '';
+                return;
             }
+            if (imageFiles.length > 3) {
+                showMessage('Можно отправить не более 3 фотографий за раз', 'error');
+                imageFiles = imageFiles.slice(0, 3);
+            }
+
+            openImageSendModal(imageFiles);
             event.target.value = '';
+        }
+
+        function openImageSendModal(files) {
+            const items = files.map(file => ({
+                file,
+                url: URL.createObjectURL(file)
+            }));
+            let currentIdx = 0;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'image-modal-overlay image-send-overlay';
+
+            const header = document.createElement('div');
+            header.style.cssText = `display: flex; align-items: center; padding: 16px; background: rgba(0, 0, 0, 0.8); color: white; border-bottom: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); z-index: 10001; position: relative;`;
+
+            const cancelButton = document.createElement('button');
+            cancelButton.innerHTML = '✕';
+            cancelButton.style.cssText = `background: none; border: none; color: white; font-size: 20px; margin-right: 16px; cursor: pointer; padding: 8px;`;
+
+            const title = document.createElement('div');
+            title.style.cssText = `flex: 1; font-size: 17px; font-weight: 500; text-align: center;`;
+            title.textContent = items.length > 1 ? `${currentIdx + 1} из ${items.length}` : 'Фото';
+
+            const spacer = document.createElement('div');
+            spacer.style.cssText = `width: 36px;`;
+
+            header.appendChild(cancelButton);
+            header.appendChild(title);
+            header.appendChild(spacer);
+
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'image-modal-content';
+
+            const img = document.createElement('img');
+            img.src = items[0].url;
+            img.className = 'zoomable-image';
+            img.draggable = false;
+
+            let scale = 1, translateX = 0, translateY = 0, isDragging = false, startX, startY, lastTouchDistance = null;
+
+            function updateTransform() {
+                img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+            }
+
+            function resetZoom() {
+                scale = 1; translateX = 0; translateY = 0;
+                updateTransform();
+            }
+
+            imageContainer.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (e.deltaY < 0) scale = Math.min(scale * 1.5, 5);
+                else { scale = Math.max(scale / 1.5, 1); if (scale === 1) { translateX = 0; translateY = 0; } }
+                updateTransform();
+            });
+
+            imageContainer.addEventListener('mousedown', (e) => {
+                if (scale <= 1) return;
+                isDragging = true;
+                startX = e.clientX - translateX;
+                startY = e.clientY - translateY;
+                img.style.cursor = 'grabbing';
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging || scale <= 1) return;
+                e.preventDefault();
+                translateX = e.clientX - startX;
+                translateY = e.clientY - startY;
+                updateTransform();
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+                img.style.cursor = scale > 1 ? 'grab' : 'default';
+            });
+
+            imageContainer.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    lastTouchDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                } else if (e.touches.length === 1 && scale > 1) {
+                    const t = e.touches[0];
+                    startX = t.clientX - translateX;
+                    startY = t.clientY - translateY;
+                }
+            });
+
+            imageContainer.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                    if (lastTouchDistance !== null) {
+                        scale = Math.max(1, Math.min(scale * (dist / lastTouchDistance), 5));
+                        updateTransform();
+                    }
+                    lastTouchDistance = dist;
+                } else if (e.touches.length === 1 && scale > 1) {
+                    e.preventDefault();
+                    const t = e.touches[0];
+                    translateX = t.clientX - startX;
+                    translateY = t.clientY - startY;
+                    updateTransform();
+                }
+            });
+
+            imageContainer.addEventListener('touchend', (e) => {
+                if (e.touches.length < 2) lastTouchDistance = null;
+            });
+
+            img.addEventListener('dblclick', resetZoom);
+
+            imageContainer.appendChild(img);
+
+            // Swipe between selected photos (touch)
+            let touchStartX = 0;
+            imageContainer.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) touchStartX = e.touches[0].clientX;
+            });
+            imageContainer.addEventListener('touchend', (e) => {
+                if (scale > 1 || items.length < 2) return;
+                const endX = e.changedTouches[0].clientX;
+                const diffX = touchStartX - endX;
+                if (Math.abs(diffX) > 50) {
+                    if (diffX > 0 && currentIdx < items.length - 1) showItem(currentIdx + 1);
+                    else if (diffX < 0 && currentIdx > 0) showItem(currentIdx - 1);
+                }
+            });
+
+            // Footer with caption input and send/cancel
+            const footer = document.createElement('div');
+            footer.style.cssText = `padding: 12px 16px; background: rgba(0, 0, 0, 0.8); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 10px;`;
+
+            const captionInput = document.createElement('textarea');
+            captionInput.placeholder = 'Добавить подпись...';
+            captionInput.rows = 1;
+            captionInput.style.cssText = `width: 100%; resize: none; border: none; outline: none; border-radius: 18px; padding: 10px 14px; background: rgba(255,255,255,0.12); color: white; font-size: 15px; font-family: inherit; max-height: 100px;`;
+            captionInput.addEventListener('input', () => {
+                captionInput.style.height = 'auto';
+                captionInput.style.height = Math.min(captionInput.scrollHeight, 100) + 'px';
+            });
+
+            const buttonsRow = document.createElement('div');
+            buttonsRow.style.cssText = `display: flex; gap: 10px; justify-content: flex-end;`;
+
+            const sendButton = document.createElement('button');
+            sendButton.textContent = items.length > 1 ? `Отправить (${items.length})` : 'Отправить';
+            sendButton.style.cssText = `background: var(--telegram-blue); color: white; border: none; border-radius: 18px; padding: 10px 22px; font-size: 15px; font-weight: 500; cursor: pointer;`;
+
+            buttonsRow.appendChild(sendButton);
+
+            footer.appendChild(captionInput);
+            footer.appendChild(buttonsRow);
+
+            overlay.appendChild(header);
+            overlay.appendChild(imageContainer);
+            overlay.appendChild(footer);
+            document.body.appendChild(overlay);
+
+            captionInput.focus();
+
+            function showItem(idx) {
+                currentIdx = idx;
+                title.textContent = `${currentIdx + 1} из ${items.length}`;
+                img.src = items[currentIdx].url;
+                resetZoom();
+            }
+
+            function closeOverlay() {
+                overlay.classList.add('animate__animated', 'animate__fadeOut');
+                setTimeout(() => {
+                    items.forEach(it => URL.revokeObjectURL(it.url));
+                    if (overlay.parentNode) document.body.removeChild(overlay);
+                    document.removeEventListener('keydown', handleKeydown);
+                }, 300);
+            }
+
+            cancelButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeOverlay();
+            });
+
+            sendButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const caption = captionInput.value.trim();
+                items.forEach(it => URL.revokeObjectURL(it.url));
+                files.forEach(file => sendImageMessage(file, caption));
+                if (overlay.parentNode) document.body.removeChild(overlay);
+                document.removeEventListener('keydown', handleKeydown);
+            });
+
+            function handleKeydown(e) {
+                if (e.key === 'Escape') {
+                    closeOverlay();
+                } else if (e.key === 'ArrowLeft' && currentIdx > 0 && document.activeElement !== captionInput) {
+                    showItem(currentIdx - 1);
+                } else if (e.key === 'ArrowRight' && currentIdx < items.length - 1 && document.activeElement !== captionInput) {
+                    showItem(currentIdx + 1);
+                }
+            }
+            document.addEventListener('keydown', handleKeydown);
         }
 
         async function getCachedAvatar(userId) {
@@ -4287,7 +4502,7 @@ function getActiveElements() {
             loadChatAvatar(avatarElement, userId, initials, bgColor);
         }
 
-        async function sendImageMessage(file) {
+        async function sendImageMessage(file, caption = '') {
             if (!currentChat || isSendingMessage) return;
             
             isSendingMessage = true;
@@ -4299,6 +4514,7 @@ function getActiveElements() {
                     id: tempMessageId,
                     sender_id: userData.platform_user_id,
                     content: 'Загрузка изображения...',
+                    caption: caption,
                     sent_at: new Date().toISOString(),
                     is_read: false,
                     is_me: true,
@@ -4314,6 +4530,7 @@ function getActiveElements() {
                 formData.append('chat_id', currentChat.id);
                 formData.append('sender_id', userData.platform_user_id);
                 formData.append('image', file);
+                if (caption) formData.append('caption', caption);
                 
                 let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
@@ -4334,7 +4551,7 @@ function getActiveElements() {
                     const newChat = {
                         id: data.chat_id,
                         name: currentChat.name,
-                        last_message: '📷 Фото',
+                        last_message: caption ? `📷 ${caption}` : '📷 Фото',
                         last_message_time: new Date().toISOString(),
                         unread_count: 0,
                         participants: currentChat.participants,
@@ -4363,6 +4580,7 @@ function getActiveElements() {
                     id: messageData.message_id,
                     sender_id: userData.platform_user_id,
                     content: messageData.image_url,
+                    caption: caption,
                     sent_at: messageData.sent_at || new Date().toISOString(),
                     is_read: false,
                     is_me: true,
@@ -4373,12 +4591,13 @@ function getActiveElements() {
                 setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
                 renderMessages(currentMessages);
                 
+                const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, { last_message: '📷 Фото', last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image' });
+                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image' });
                     
                     const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
                     if (chatIndex !== -1) {
-                        currentChatsList[chatIndex].last_message = '📷 Фото';
+                        currentChatsList[chatIndex].last_message = lastMessagePreview;
                         currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
                         currentChatsList[chatIndex].last_message_type = 'image';
                         currentChatsList[chatIndex].unread_count = 0;
@@ -4422,7 +4641,8 @@ function getActiveElements() {
                 const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
                 const imageUrl = message.content;
                 
-                messageContent = `<div class="message-content"><img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;"></div>`;
+                const captionHtml = message.caption ? `<div class="image-caption">${escapeHtml(message.caption)}</div>` : '';
+                messageContent = `<div class="message-content"><img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">${captionHtml}</div>`;
                 messageElement.classList.add('message-with-image');
             } else {
                 messageContent = `<div class="message-content">${escapeHtml(message.content)}</div>`;
@@ -4502,30 +4722,6 @@ function getActiveElements() {
             zoomIndicator.className = 'zoom-indicator';
             zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
 
-            const zoomControls = document.createElement('div');
-            zoomControls.className = 'zoom-controls';
-
-            const zoomInButton = document.createElement('button');
-            zoomInButton.className = 'zoom-control';
-            zoomInButton.innerHTML = '+';
-            zoomInButton.title = 'Увеличить';
-
-            const zoomOutButton = document.createElement('button');
-            zoomOutButton.className = 'zoom-control';
-            zoomOutButton.innerHTML = '−';
-            zoomOutButton.title = 'Уменьшить';
-
-            zoomControls.appendChild(zoomInButton);
-            zoomControls.appendChild(zoomOutButton);
-
-            const prevButton = document.createElement('button');
-            prevButton.innerHTML = '←';
-            prevButton.style.cssText = `position: absolute; left: 20px; top: 50%; transform: translateY(-50%); background: rgba(255, 255, 255, 0.2); border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: ${currentIndex > 0 ? 'flex' : 'none'}; align-items: center; justify-content: center; font-size: 20px; backdrop-filter: blur(10px); transition: all 0.2s ease; z-index: 10001;`;
-
-            const nextButton = document.createElement('button');
-            nextButton.innerHTML = '→';
-            nextButton.style.cssText = `position: absolute; right: 80px; top: 50%; transform: translateY(-50%); background: rgba(255, 255, 255, 0.2); border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: ${currentIndex < totalImages - 1 ? 'flex' : 'none'}; align-items: center; justify-content: center; font-size: 20px; backdrop-filter: blur(10px); transition: all 0.2s ease; z-index: 10001;`;
-
             const footer = document.createElement('div');
             footer.style.cssText = `padding: 16px; background: rgba(0, 0, 0, 0.8); color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); font-size: 14px;`;
 
@@ -4572,8 +4768,6 @@ function getActiveElements() {
                 element.hideTimeout = setTimeout(() => element.classList.remove('show'), 1000);
             }
 
-            zoomInButton.addEventListener('click', zoomIn);
-            zoomOutButton.addEventListener('click', zoomOut);
             resetZoomButton.addEventListener('click', resetZoom);
 
             imageContainer.addEventListener('wheel', (e) => {
@@ -4646,9 +4840,6 @@ function getActiveElements() {
 
             imageContainer.appendChild(img);
             imageContainer.appendChild(zoomIndicator);
-            imageContainer.appendChild(zoomControls);
-            imageContainer.appendChild(prevButton);
-            imageContainer.appendChild(nextButton);
             
             modal.appendChild(header);
             modal.appendChild(imageContainer);
@@ -4664,8 +4855,6 @@ function getActiveElements() {
                     img.src = newMessage.content;
                     resetZoom();
                     footer.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
-                    prevButton.style.display = newIndex > 0 ? 'flex' : 'none';
-                    nextButton.style.display = newIndex < totalImages - 1 ? 'flex' : 'none';
                     return newIndex;
                 }
                 return currentIndex;
@@ -4677,20 +4866,6 @@ function getActiveElements() {
                 setTimeout(() => {
                     document.body.removeChild(modal);
                 }, 300);
-            });
-
-            prevButton.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentImageIndex > 0) {
-                    currentImageIndex = updateNavigation(currentImageIndex - 1);
-                }
-            });
-
-            nextButton.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentImageIndex < totalImages - 1) {
-                    currentImageIndex = updateNavigation(currentImageIndex + 1);
-                }
             });
 
             let touchStartX = 0;
@@ -6593,4 +6768,4 @@ if (profileCloseDesktop) {
     </script>
     <script src="activity-tracker.js"></script>
 </body>
-</html> 
+</html>
