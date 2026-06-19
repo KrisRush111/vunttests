@@ -2928,6 +2928,52 @@
     transform: scale(1.1);
 }
 
+/* Стрелки навигации по фото в чате — только для десктопа (мышь/тачпад) */
+.image-modal-nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    border: none;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10002;
+    transition: background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+    opacity: 0.85;
+}
+
+.image-modal-nav-arrow:hover {
+    background: rgba(0, 0, 0, 0.7);
+    transform: translateY(-50%) scale(1.08);
+    opacity: 1;
+}
+
+.image-modal-nav-arrow:disabled {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.image-modal-nav-arrow.prev {
+    left: 16px;
+}
+
+.image-modal-nav-arrow.next {
+    right: 16px;
+}
+
+@media (max-width: 767px) {
+    .image-modal-nav-arrow {
+        display: none !important;
+    }
+}
+
 /* Стили для кнопок профиля (градиенты и анимации) */
 .action-button-icon {
     position: relative;
@@ -4774,6 +4820,19 @@ function getActiveElements() {
             const imageContainer = document.createElement('div');
             imageContainer.className = 'image-modal-content';
 
+            // Стрелки навигации для десктопа (мышь/тачпад) — на мобильных скрыты через CSS
+            const prevArrow = document.createElement('button');
+            prevArrow.className = 'image-modal-nav-arrow prev';
+            prevArrow.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+            prevArrow.title = 'Предыдущее фото';
+            prevArrow.setAttribute('aria-label', 'Предыдущее фото');
+
+            const nextArrow = document.createElement('button');
+            nextArrow.className = 'image-modal-nav-arrow next';
+            nextArrow.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+            nextArrow.title = 'Следующее фото';
+            nextArrow.setAttribute('aria-label', 'Следующее фото');
+
             const img = document.createElement('img');
             img.src = imageUrl;
             img.className = 'zoomable-image';
@@ -5089,6 +5148,8 @@ function getActiveElements() {
             });
 
             imageContainer.appendChild(img);
+            imageContainer.appendChild(prevArrow);
+            imageContainer.appendChild(nextArrow);
             
             modal.appendChild(header);
             modal.appendChild(imageContainer);
@@ -5097,6 +5158,11 @@ function getActiveElements() {
 
             let currentImageIndex = currentIndex;
 
+            function updateArrowsState() {
+                prevArrow.disabled = currentImageIndex <= 0;
+                nextArrow.disabled = currentImageIndex >= totalImages - 1;
+            }
+
             function updateNavigation(newIndex) {
                 const newMessage = imageMessages[newIndex];
                 if (newMessage) {
@@ -5104,10 +5170,29 @@ function getActiveElements() {
                     img.src = newMessage.content;
                     resetZoom();
                     footerTime.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
+                    currentImageIndex = newIndex;
+                    updateArrowsState();
                     return newIndex;
                 }
                 return currentIndex;
             }
+
+            prevArrow.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentImageIndex > 0) {
+                    updateNavigation(currentImageIndex - 1);
+                }
+            });
+
+            nextArrow.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentImageIndex < totalImages - 1) {
+                    updateNavigation(currentImageIndex + 1);
+                }
+            });
+
+            updateArrowsState();
+
 
             backButton.addEventListener('click', (e) => {
                 e.stopPropagation();
