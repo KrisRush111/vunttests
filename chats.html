@@ -4640,6 +4640,25 @@ function getActiveElements() {
             loadChatAvatar(avatarElement, userId, initials, bgColor);
         }
 
+        // Загружает изображение в фоне и резолвится, когда оно реально готово
+        // к показу (или по таймауту/ошибке — чтобы не блокировать UI навсегда,
+        // если сеть медленная или картинка недоступна).
+        function preloadImage(url, timeoutMs = 8000) {
+            return new Promise(resolve => {
+                const img = new Image();
+                let done = false;
+                const finish = () => {
+                    if (done) return;
+                    done = true;
+                    resolve();
+                };
+                img.onload = finish;
+                img.onerror = finish;
+                setTimeout(finish, timeoutMs);
+                img.src = url;
+            });
+        }
+
         async function sendImageMessage(file, caption = '') {
             if (!currentChat || isSendingMessage) return;
             
@@ -4714,11 +4733,22 @@ function getActiveElements() {
                 const messageData = await messageResponse.json();
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
                 
-                currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
+                // Предзагружаем финальное изображение с сервера ДО того, как заменить
+                // локальное превью. Это исключает момент, когда <img> уже стоит новый
+                // src, но файл ещё не скачан (opacity остаётся 0 до onload) — именно
+                // это раньше выглядело как "фото пропало после отправки".
+                await preloadImage(messageData.image_url);
+                
                 URL.revokeObjectURL(localPreviewUrl);
                 
+                // Важно: используем тот же id, что был у временного сообщения.
+                // Так renderMessages() распознаёт это как ОБНОВЛЕНИЕ существующего
+                // элемента, а не удаление старого узла + создание нового —
+                // без этого DOM-узел с превью удалялся, и пока новая картинка
+                // догружалась с нуля, на её месте было пусто.
                 const newMessage = {
-                    id: messageData.message_id,
+                    id: tempMessageId,
+                    server_id: messageData.message_id,
                     sender_id: userData.platform_user_id,
                     content: messageData.image_url,
                     caption: caption,
@@ -4728,7 +4758,7 @@ function getActiveElements() {
                     is_image: true
                 };
                 
-                currentMessages = [...currentMessages, newMessage];
+                currentMessages = currentMessages.map(msg => msg.id === tempMessageId ? newMessage : msg);
                 setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
                 renderMessages(currentMessages);
                 
@@ -6525,6 +6555,29 @@ function updateProfileModalStatus(userId) {
                             }
                         }
                     }
+
+                    // Если временное "загружаемое" сообщение с картинкой превратилось
+                    // в финальное (id сохранился, но is_uploading исчез), обновляем
+                    // изображение на месте вместо удаления/пересоздания узла.
+                    // К этому моменту итоговый файл уже предзагружен в фоне
+                    // (см. preloadImage в sendImageMessage), поэтому смена src
+                    // происходит без видимого мигания/пропадания фото.
+                    if (message.is_image && !message.is_uploading) {
+                        const el = messagesContainer.querySelector(`[data-message-id="${msgId}"]`);
+                        const wrapper = el?.querySelector('.message-image-wrapper');
+                        if (wrapper) {
+                            const img = wrapper.querySelector('.message-image');
+                            if (img && img.getAttribute('src') !== message.content) {
+                                img.style.opacity = '1';
+                                img.src = message.content;
+                                img.setAttribute('onclick', `openImageModal('${message.content}', ${index})`);
+                            }
+                            wrapper.classList.add('image-loaded');
+                            const spinner = wrapper.querySelector('.upload-spinner-overlay');
+                            if (spinner) spinner.remove();
+                        }
+                    }
+
                     return;
                 }
 
