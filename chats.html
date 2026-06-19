@@ -6477,6 +6477,17 @@ function updateProfileModalStatus(userId) {
                 existingIds.add(el.getAttribute('data-message-id'));
             });
 
+            // Remove DOM nodes for messages that no longer exist in the new list
+            // (e.g. a temp "uploading" message that got replaced by the real server message)
+            const newIdsSet = new Set(messages.map(m => m.id?.toString()));
+            messagesContainer.querySelectorAll('.message[data-message-id]').forEach(el => {
+                const elId = el.getAttribute('data-message-id');
+                if (!newIdsSet.has(elId)) {
+                    el.remove();
+                    existingIds.delete(elId);
+                }
+            });
+
             // Check if we need a full re-render (e.g. messages were deleted or order changed)
             const existingCount = existingIds.size;
             const newCount = messages.length;
@@ -6573,12 +6584,12 @@ function updateProfileModalStatus(userId) {
                         
                         if (hasNewMessages) {
                             lastKnownMessageId = latestId;
-                            // Merge: keep temp messages, add real ones
-                            const tempMessages = currentMessages.filter(m => m.is_temp);
+                            // Merge: keep temp/uploading messages, add real ones
+                            const tempMessages = currentMessages.filter(m => m.is_temp || m.is_uploading);
                             const merged = [...newMessages];
                             // Re-add any temp messages not yet confirmed
                             tempMessages.forEach(tm => {
-                                if (!merged.find(m => m.content === tm.content && m.is_me)) {
+                                if (!merged.find(m => m.id === tm.id)) {
                                     merged.push(tm);
                                 }
                             });
