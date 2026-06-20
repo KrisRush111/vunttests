@@ -2395,45 +2395,6 @@
             height: auto;
         }
 
-        /* Оверлей загрузки фото (как в Telegram) — спиннер поверх локального превью */
-        .message-image-wrapper {
-            position: relative;
-            display: block;
-        }
-
-        .message-image-wrapper .message-image {
-            filter: brightness(0.75);
-        }
-
-        .message-image-wrapper.image-loaded .message-image {
-            filter: none;
-        }
-
-        .upload-spinner-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
-        }
-
-        .upload-spinner {
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            border: 3px solid rgba(255, 255, 255, 0.35);
-            border-top-color: #fff;
-            animation: upload-spin 0.8s linear infinite;
-        }
-
-        @keyframes upload-spin {
-            to { transform: rotate(360deg); }
-        }
-
         .message-outgoing .message-image {
             border-bottom-right-radius: 4px;
         }
@@ -2965,52 +2926,6 @@
 .photo-viewer-close:hover {
     background: rgba(255, 255, 255, 0.3);
     transform: scale(1.1);
-}
-
-/* Стрелки навигации по фото в чате — только для десктопа (мышь/тачпад) */
-.image-modal-nav-arrow {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.45);
-    color: #fff;
-    border: none;
-    font-size: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 10002;
-    transition: background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
-    opacity: 0.85;
-}
-
-.image-modal-nav-arrow:hover {
-    background: rgba(0, 0, 0, 0.7);
-    transform: translateY(-50%) scale(1.08);
-    opacity: 1;
-}
-
-.image-modal-nav-arrow:disabled {
-    opacity: 0;
-    pointer-events: none;
-}
-
-.image-modal-nav-arrow.prev {
-    left: 16px;
-}
-
-.image-modal-nav-arrow.next {
-    right: 16px;
-}
-
-@media (max-width: 767px) {
-    .image-modal-nav-arrow {
-        display: none !important;
-    }
 }
 
 /* Стили для кнопок профиля (градиенты и анимации) */
@@ -4640,39 +4555,18 @@ function getActiveElements() {
             loadChatAvatar(avatarElement, userId, initials, bgColor);
         }
 
-        // Загружает изображение в фоне и резолвится, когда оно реально готово
-        // к показу (или по таймауту/ошибке — чтобы не блокировать UI навсегда,
-        // если сеть медленная или картинка недоступна).
-        function preloadImage(url, timeoutMs = 8000) {
-            return new Promise(resolve => {
-                const img = new Image();
-                let done = false;
-                const finish = () => {
-                    if (done) return;
-                    done = true;
-                    resolve();
-                };
-                img.onload = finish;
-                img.onerror = finish;
-                setTimeout(finish, timeoutMs);
-                img.src = url;
-            });
-        }
-
         async function sendImageMessage(file, caption = '') {
             if (!currentChat || isSendingMessage) return;
             
             isSendingMessage = true;
             const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
-            let localPreviewUrl = null;
             
             try {
                 const tempMessageId = `temp_${Date.now()}`;
-                localPreviewUrl = URL.createObjectURL(file);
                 const tempMessage = {
                     id: tempMessageId,
                     sender_id: userData.platform_user_id,
-                    content: localPreviewUrl,
+                    content: 'Загрузка изображения...',
                     caption: caption,
                     sent_at: new Date().toISOString(),
                     is_read: false,
@@ -4733,13 +4627,7 @@ function getActiveElements() {
                 const messageData = await messageResponse.json();
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
                 
-                // Предзагружаем финальное изображение с сервера ДО того, как заменить
-                // локальное превью. Это исключает момент, когда <img> уже стоит новый
-                // src, но файл ещё не скачан (opacity остаётся 0 до onload) — именно
-                // это раньше выглядело как "фото пропало после отправки".
-                await preloadImage(messageData.image_url);
-                
-                URL.revokeObjectURL(localPreviewUrl);
+                currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
                 
                 const newMessage = {
                     id: messageData.message_id,
@@ -4752,41 +4640,9 @@ function getActiveElements() {
                     is_image: true
                 };
                 
-                const tempIndex = currentMessages.findIndex(msg => msg.id === tempMessageId);
-                if (tempIndex !== -1) {
-                    currentMessages[tempIndex] = newMessage;
-                } else {
-                    currentMessages = [...currentMessages, newMessage];
-                }
-                
-                // Критично: переиспользуем существующий DOM-узел временного сообщения,
-                // просто обновляя его id и картинку на месте — как уже делается для
-                // текстовых сообщений. Если вместо этого положиться на следующий вызов
-                // renderMessages(), он сравнит data-message-id (всё ещё "temp_...")
-                // с id из ближайшего polling-ответа (реальный числовой id с сервера) —
-                // не найдёт совпадения, удалит узел как "устаревший" и создаст новый
-                // <img> с нуля, который снова невидим до своей собственной загрузки.
-                // Именно это и вызывало "пропадание фото почти сразу после отправки".
-                const tempElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
-                if (tempElement) {
-                    tempElement.setAttribute('data-message-id', messageData.message_id);
-                    const wrapper = tempElement.querySelector('.message-image-wrapper');
-                    if (wrapper) {
-                        const img = wrapper.querySelector('.message-image');
-                        if (img) {
-                            img.style.opacity = '1';
-                            img.src = messageData.image_url;
-                            img.setAttribute('onclick', `openImageModal('${messageData.image_url}', ${currentMessages.length - 1})`);
-                        }
-                        wrapper.classList.add('image-loaded');
-                        const spinner = wrapper.querySelector('.upload-spinner-overlay');
-                        if (spinner) spinner.remove();
-                    }
-                } else {
-                    renderMessages(currentMessages);
-                }
-                
+                currentMessages = [...currentMessages, newMessage];
                 setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
+                renderMessages(currentMessages);
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
@@ -4812,7 +4668,6 @@ function getActiveElements() {
                 showMessage('Ошибка отправки изображения: ' + error.message, 'error');
                 currentMessages = currentMessages.filter(msg => !msg.is_uploading);
                 renderMessages(currentMessages);
-                if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
             } finally {
                 isSendingMessage = false;
                 sendMessageButton.disabled = false;
@@ -4839,13 +4694,8 @@ function getActiveElements() {
                 const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
                 const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
                 const imageUrl = message.content;
-                const isUploading = !!message.is_uploading;
                 
-                const imgTag = `<img src="${imageUrl}" alt="Изображение" class="message-image" ${isUploading ? '' : `onclick="openImageModal('${imageUrl}', ${imageIndex})"`} loading="lazy" onload="this.style.opacity='1'; this.closest('.message-image-wrapper') && this.closest('.message-image-wrapper').classList.add('image-loaded');" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">`;
-                
-                const imgHtml = isUploading
-                    ? `<div class="message-image-wrapper" data-message-id="${message.id}">${imgTag}<div class="upload-spinner-overlay"><div class="upload-spinner"></div></div></div>`
-                    : imgTag;
+                const imgHtml = `<img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">`;
                 
                 if (message.caption) {
                     const captionHtml = `<div class="image-caption">${escapeHtml(message.caption)}${timeHtml}</div>`;
@@ -4923,19 +4773,6 @@ function getActiveElements() {
 
             const imageContainer = document.createElement('div');
             imageContainer.className = 'image-modal-content';
-
-            // Стрелки навигации для десктопа (мышь/тачпад) — на мобильных скрыты через CSS
-            const prevArrow = document.createElement('button');
-            prevArrow.className = 'image-modal-nav-arrow prev';
-            prevArrow.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-            prevArrow.title = 'Предыдущее фото';
-            prevArrow.setAttribute('aria-label', 'Предыдущее фото');
-
-            const nextArrow = document.createElement('button');
-            nextArrow.className = 'image-modal-nav-arrow next';
-            nextArrow.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
-            nextArrow.title = 'Следующее фото';
-            nextArrow.setAttribute('aria-label', 'Следующее фото');
 
             const img = document.createElement('img');
             img.src = imageUrl;
@@ -5252,8 +5089,6 @@ function getActiveElements() {
             });
 
             imageContainer.appendChild(img);
-            imageContainer.appendChild(prevArrow);
-            imageContainer.appendChild(nextArrow);
             
             modal.appendChild(header);
             modal.appendChild(imageContainer);
@@ -5262,11 +5097,6 @@ function getActiveElements() {
 
             let currentImageIndex = currentIndex;
 
-            function updateArrowsState() {
-                prevArrow.disabled = currentImageIndex <= 0;
-                nextArrow.disabled = currentImageIndex >= totalImages - 1;
-            }
-
             function updateNavigation(newIndex) {
                 const newMessage = imageMessages[newIndex];
                 if (newMessage) {
@@ -5274,29 +5104,10 @@ function getActiveElements() {
                     img.src = newMessage.content;
                     resetZoom();
                     footerTime.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
-                    currentImageIndex = newIndex;
-                    updateArrowsState();
                     return newIndex;
                 }
                 return currentIndex;
             }
-
-            prevArrow.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentImageIndex > 0) {
-                    updateNavigation(currentImageIndex - 1);
-                }
-            });
-
-            nextArrow.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentImageIndex < totalImages - 1) {
-                    updateNavigation(currentImageIndex + 1);
-                }
-            });
-
-            updateArrowsState();
-
 
             backButton.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -5962,13 +5773,11 @@ function getActiveElements() {
             };
             
             currentMessages.push(tempMessage);
-            console.log('[DEBUG sendMessage] pushed temp message', tempMessageId, 'total now', currentMessages.length);
             
             if (noMessages.style.display !== 'none') noMessages.style.display = 'none';
             
             const messageElement = renderMessage(tempMessage);
             messagesContainer.appendChild(messageElement);
-            console.log('[DEBUG sendMessage] appended DOM node for', tempMessageId, 'container children now:', messagesContainer.children.length);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
             
             (async () => {
@@ -6518,10 +6327,8 @@ function updateProfileModalStatus(userId) {
 
         function renderMessages(messages) {
             const { messagesContainer, noMessages } = getActiveElements();
-            console.log('[DEBUG renderMessages] called with', messages?.length, 'messages, stack:', new Error().stack);
             
             if (!messages || messages.length === 0) {
-                console.log('[DEBUG renderMessages] EMPTY LIST -> clearing container!');
                 messagesContainer.innerHTML = '';
                 noMessages.style.display = 'block';
                 noMessages.textContent = 'Сообщений пока нет...';
@@ -6537,17 +6344,6 @@ function updateProfileModalStatus(userId) {
                 existingIds.add(el.getAttribute('data-message-id'));
             });
 
-            // Remove DOM nodes for messages that no longer exist in the new list
-            // (e.g. a temp "uploading" message that got replaced by the real server message)
-            const newIdsSet = new Set(messages.map(m => m.id?.toString()));
-            messagesContainer.querySelectorAll('.message[data-message-id]').forEach(el => {
-                const elId = el.getAttribute('data-message-id');
-                if (!newIdsSet.has(elId)) {
-                    el.remove();
-                    existingIds.delete(elId);
-                }
-            });
-
             // Check if we need a full re-render (e.g. messages were deleted or order changed)
             const existingCount = existingIds.size;
             const newCount = messages.length;
@@ -6555,10 +6351,8 @@ function updateProfileModalStatus(userId) {
             const firstNewId = messages[0]?.id?.toString();
             
             const needsFullRender = existingCount > newCount || (existingCount > 0 && firstExistingId !== firstNewId);
-            console.log('[DEBUG renderMessages] existingCount=', existingCount, 'newCount=', newCount, 'firstExistingId=', firstExistingId, 'firstNewId=', firstNewId, 'needsFullRender=', needsFullRender);
 
             if (needsFullRender) {
-                console.log('[DEBUG renderMessages] FULL RENDER -> clearing innerHTML');
                 messagesContainer.innerHTML = '';
                 existingIds.clear();
             }
@@ -6587,29 +6381,6 @@ function updateProfileModalStatus(userId) {
                             }
                         }
                     }
-
-                    // Если временное "загружаемое" сообщение с картинкой превратилось
-                    // в финальное (id сохранился, но is_uploading исчез), обновляем
-                    // изображение на месте вместо удаления/пересоздания узла.
-                    // К этому моменту итоговый файл уже предзагружен в фоне
-                    // (см. preloadImage в sendImageMessage), поэтому смена src
-                    // происходит без видимого мигания/пропадания фото.
-                    if (message.is_image && !message.is_uploading) {
-                        const el = messagesContainer.querySelector(`[data-message-id="${msgId}"]`);
-                        const wrapper = el?.querySelector('.message-image-wrapper');
-                        if (wrapper) {
-                            const img = wrapper.querySelector('.message-image');
-                            if (img && img.getAttribute('src') !== message.content) {
-                                img.style.opacity = '1';
-                                img.src = message.content;
-                                img.setAttribute('onclick', `openImageModal('${message.content}', ${index})`);
-                            }
-                            wrapper.classList.add('image-loaded');
-                            const spinner = wrapper.querySelector('.upload-spinner-overlay');
-                            if (spinner) spinner.remove();
-                        }
-                    }
-
                     return;
                 }
 
@@ -6669,12 +6440,12 @@ function updateProfileModalStatus(userId) {
                         
                         if (hasNewMessages) {
                             lastKnownMessageId = latestId;
-                            // Merge: keep temp/uploading messages, add real ones
-                            const tempMessages = currentMessages.filter(m => m.is_temp || m.is_uploading);
+                            // Merge: keep temp messages, add real ones
+                            const tempMessages = currentMessages.filter(m => m.is_temp);
                             const merged = [...newMessages];
                             // Re-add any temp messages not yet confirmed
                             tempMessages.forEach(tm => {
-                                if (!merged.find(m => m.id === tm.id)) {
+                                if (!merged.find(m => m.content === tm.content && m.is_me)) {
                                     merged.push(tm);
                                 }
                             });
@@ -7219,29 +6990,6 @@ if (profileCloseDesktop) {
         }
 
         document.addEventListener('DOMContentLoaded', initializePage);
-        
-        // ВРЕМЕННАЯ ДИАГНОСТИКА: отслеживаем удаление сообщений из DOM, чтобы понять,
-        // кто и когда стирает контейнер сообщений. Удалить после нахождения причины.
-        setTimeout(() => {
-            try {
-                const { messagesContainer } = getActiveElements();
-                if (messagesContainer) {
-                    const observer = new MutationObserver((mutationsList) => {
-                        for (const mutation of mutationsList) {
-                            if (mutation.removedNodes.length > 0) {
-                                mutation.removedNodes.forEach(node => {
-                                    if (node.nodeType === 1 && (node.classList?.contains('message') || node.querySelector?.('.message'))) {
-                                        console.log('[DEBUG MutationObserver] message node(s) REMOVED:', node, 'stack:', new Error().stack);
-                                    }
-                                });
-                            }
-                        }
-                    });
-                    observer.observe(messagesContainer, { childList: true });
-                    console.log('[DEBUG MutationObserver] watching messagesContainer for removals');
-                }
-            } catch (e) { console.log('[DEBUG MutationObserver] setup failed', e); }
-        }, 1000);
         
         window.addEventListener('pageshow', (event) => {
             if (event.persisted) initializePage();
