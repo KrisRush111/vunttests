@@ -4741,14 +4741,8 @@ function getActiveElements() {
                 
                 URL.revokeObjectURL(localPreviewUrl);
                 
-                // Важно: используем тот же id, что был у временного сообщения.
-                // Так renderMessages() распознаёт это как ОБНОВЛЕНИЕ существующего
-                // элемента, а не удаление старого узла + создание нового —
-                // без этого DOM-узел с превью удалялся, и пока новая картинка
-                // догружалась с нуля, на её месте было пусто.
                 const newMessage = {
-                    id: tempMessageId,
-                    server_id: messageData.message_id,
+                    id: messageData.message_id,
                     sender_id: userData.platform_user_id,
                     content: messageData.image_url,
                     caption: caption,
@@ -4758,9 +4752,41 @@ function getActiveElements() {
                     is_image: true
                 };
                 
-                currentMessages = currentMessages.map(msg => msg.id === tempMessageId ? newMessage : msg);
+                const tempIndex = currentMessages.findIndex(msg => msg.id === tempMessageId);
+                if (tempIndex !== -1) {
+                    currentMessages[tempIndex] = newMessage;
+                } else {
+                    currentMessages = [...currentMessages, newMessage];
+                }
+                
+                // Критично: переиспользуем существующий DOM-узел временного сообщения,
+                // просто обновляя его id и картинку на месте — как уже делается для
+                // текстовых сообщений. Если вместо этого положиться на следующий вызов
+                // renderMessages(), он сравнит data-message-id (всё ещё "temp_...")
+                // с id из ближайшего polling-ответа (реальный числовой id с сервера) —
+                // не найдёт совпадения, удалит узел как "устаревший" и создаст новый
+                // <img> с нуля, который снова невидим до своей собственной загрузки.
+                // Именно это и вызывало "пропадание фото почти сразу после отправки".
+                const tempElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
+                if (tempElement) {
+                    tempElement.setAttribute('data-message-id', messageData.message_id);
+                    const wrapper = tempElement.querySelector('.message-image-wrapper');
+                    if (wrapper) {
+                        const img = wrapper.querySelector('.message-image');
+                        if (img) {
+                            img.style.opacity = '1';
+                            img.src = messageData.image_url;
+                            img.setAttribute('onclick', `openImageModal('${messageData.image_url}', ${currentMessages.length - 1})`);
+                        }
+                        wrapper.classList.add('image-loaded');
+                        const spinner = wrapper.querySelector('.upload-spinner-overlay');
+                        if (spinner) spinner.remove();
+                    }
+                } else {
+                    renderMessages(currentMessages);
+                }
+                
                 setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
-                renderMessages(currentMessages);
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
