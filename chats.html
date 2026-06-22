@@ -2395,45 +2395,6 @@
             height: auto;
         }
 
-        /* Оверлей загрузки фото (как в Telegram) — спиннер поверх локального превью */
-        .message-image-wrapper {
-            position: relative;
-            display: block;
-        }
-
-        .message-image-wrapper .message-image {
-            filter: brightness(0.75);
-        }
-
-        .message-image-wrapper.image-loaded .message-image {
-            filter: none;
-        }
-
-        .upload-spinner-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
-        }
-
-        .upload-spinner {
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            border: 3px solid rgba(255, 255, 255, 0.35);
-            border-top-color: #fff;
-            animation: upload-spin 0.8s linear infinite;
-        }
-
-        @keyframes upload-spin {
-            to { transform: rotate(360deg); }
-        }
-
         .message-outgoing .message-image {
             border-bottom-right-radius: 4px;
         }
@@ -2965,52 +2926,6 @@
 .photo-viewer-close:hover {
     background: rgba(255, 255, 255, 0.3);
     transform: scale(1.1);
-}
-
-/* Стрелки навигации по фото в чате — только для десктопа (мышь/тачпад) */
-.image-modal-nav-arrow {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.45);
-    color: #fff;
-    border: none;
-    font-size: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 10002;
-    transition: background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
-    opacity: 0.85;
-}
-
-.image-modal-nav-arrow:hover {
-    background: rgba(0, 0, 0, 0.7);
-    transform: translateY(-50%) scale(1.08);
-    opacity: 1;
-}
-
-.image-modal-nav-arrow:disabled {
-    opacity: 0;
-    pointer-events: none;
-}
-
-.image-modal-nav-arrow.prev {
-    left: 16px;
-}
-
-.image-modal-nav-arrow.next {
-    right: 16px;
-}
-
-@media (max-width: 767px) {
-    .image-modal-nav-arrow {
-        display: none !important;
-    }
 }
 
 /* Стили для кнопок профиля (градиенты и анимации) */
@@ -4645,15 +4560,13 @@ function getActiveElements() {
             
             isSendingMessage = true;
             const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
-            let localPreviewUrl = null;
             
             try {
                 const tempMessageId = `temp_${Date.now()}`;
-                localPreviewUrl = URL.createObjectURL(file);
                 const tempMessage = {
                     id: tempMessageId,
                     sender_id: userData.platform_user_id,
-                    content: localPreviewUrl,
+                    content: 'Загрузка изображения...',
                     caption: caption,
                     sent_at: new Date().toISOString(),
                     is_read: false,
@@ -4715,7 +4628,6 @@ function getActiveElements() {
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
                 
                 currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
-                URL.revokeObjectURL(localPreviewUrl);
                 
                 const newMessage = {
                     id: messageData.message_id,
@@ -4756,7 +4668,6 @@ function getActiveElements() {
                 showMessage('Ошибка отправки изображения: ' + error.message, 'error');
                 currentMessages = currentMessages.filter(msg => !msg.is_uploading);
                 renderMessages(currentMessages);
-                if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
             } finally {
                 isSendingMessage = false;
                 sendMessageButton.disabled = false;
@@ -4783,13 +4694,8 @@ function getActiveElements() {
                 const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
                 const imageIndex = imageMessages.findIndex(msg => msg.id === message.id);
                 const imageUrl = message.content;
-                const isUploading = !!message.is_uploading;
                 
-                const imgTag = `<img src="${imageUrl}" alt="Изображение" class="message-image" ${isUploading ? '' : `onclick="openImageModal('${imageUrl}', ${imageIndex})"`} loading="lazy" onload="this.style.opacity='1'; this.closest('.message-image-wrapper') && this.closest('.message-image-wrapper').classList.add('image-loaded');" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">`;
-                
-                const imgHtml = isUploading
-                    ? `<div class="message-image-wrapper" data-message-id="${message.id}">${imgTag}<div class="upload-spinner-overlay"><div class="upload-spinner"></div></div></div>`
-                    : imgTag;
+                const imgHtml = `<img src="${imageUrl}" alt="Изображение" class="message-image" onclick="openImageModal('${imageUrl}', ${imageIndex})" loading="lazy" onload="this.style.opacity='1'" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">`;
                 
                 if (message.caption) {
                     const captionHtml = `<div class="image-caption">${escapeHtml(message.caption)}${timeHtml}</div>`;
@@ -4867,19 +4773,6 @@ function getActiveElements() {
 
             const imageContainer = document.createElement('div');
             imageContainer.className = 'image-modal-content';
-
-            // Стрелки навигации для десктопа (мышь/тачпад) — на мобильных скрыты через CSS
-            const prevArrow = document.createElement('button');
-            prevArrow.className = 'image-modal-nav-arrow prev';
-            prevArrow.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-            prevArrow.title = 'Предыдущее фото';
-            prevArrow.setAttribute('aria-label', 'Предыдущее фото');
-
-            const nextArrow = document.createElement('button');
-            nextArrow.className = 'image-modal-nav-arrow next';
-            nextArrow.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
-            nextArrow.title = 'Следующее фото';
-            nextArrow.setAttribute('aria-label', 'Следующее фото');
 
             const img = document.createElement('img');
             img.src = imageUrl;
@@ -5196,8 +5089,6 @@ function getActiveElements() {
             });
 
             imageContainer.appendChild(img);
-            imageContainer.appendChild(prevArrow);
-            imageContainer.appendChild(nextArrow);
             
             modal.appendChild(header);
             modal.appendChild(imageContainer);
@@ -5206,11 +5097,6 @@ function getActiveElements() {
 
             let currentImageIndex = currentIndex;
 
-            function updateArrowsState() {
-                prevArrow.disabled = currentImageIndex <= 0;
-                nextArrow.disabled = currentImageIndex >= totalImages - 1;
-            }
-
             function updateNavigation(newIndex) {
                 const newMessage = imageMessages[newIndex];
                 if (newMessage) {
@@ -5218,29 +5104,10 @@ function getActiveElements() {
                     img.src = newMessage.content;
                     resetZoom();
                     footerTime.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
-                    currentImageIndex = newIndex;
-                    updateArrowsState();
                     return newIndex;
                 }
                 return currentIndex;
             }
-
-            prevArrow.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentImageIndex > 0) {
-                    updateNavigation(currentImageIndex - 1);
-                }
-            });
-
-            nextArrow.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentImageIndex < totalImages - 1) {
-                    updateNavigation(currentImageIndex + 1);
-                }
-            });
-
-            updateArrowsState();
-
 
             backButton.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -5822,12 +5689,24 @@ function getActiveElements() {
             const cached = getCacheItem(cacheKey);
             const { messagesContainer, noMessages } = getActiveElements();
             
+            // Helper: force scroll to bottom after layout settles
+            const scrollToBottom = () => {
+                requestAnimationFrame(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    requestAnimationFrame(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    });
+                });
+            };
+
             if (cached) {
                 currentMessages = cached;
                 lastKnownMessageId = cached.length > 0 ? cached[cached.length - 1]?.id?.toString() : null;
                 renderMessages(currentMessages);
                 noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
                 if (currentMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
+                // Force scroll after rendering from cache
+                scrollToBottom();
                 
                 // Silent background refresh — renderMessages will do smart diff
                 fetch(`${SERVER_URL}/get_messages`, {
@@ -5846,6 +5725,8 @@ function getActiveElements() {
                             messagesCache[chatId] = currentMessages;
                             setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
                             renderMessages(currentMessages);
+                            // Scroll to bottom after background refresh too
+                            scrollToBottom();
                         }
                     }
                 }).catch(() => {});
@@ -5870,6 +5751,8 @@ function getActiveElements() {
                     setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
                     
                     renderMessages(currentMessages);
+                    // Force scroll to bottom after network load
+                    scrollToBottom();
                     
                     if (currentMessages.length === 0) {
                         noMessages.style.display = 'block';
@@ -6539,7 +6422,15 @@ function updateProfileModalStatus(userId) {
                 const wasAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 60;
                 messagesContainer.appendChild(fragment);
                 if (wasAtBottom || needsFullRender) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    // Use requestAnimationFrame to ensure the browser has laid out
+                    // the new content before scrolling (fixes "opens in the middle" bug)
+                    requestAnimationFrame(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        // Second frame for safety in case animations shifted layout
+                        requestAnimationFrame(() => {
+                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        });
+                    });
                 }
             }
         }
