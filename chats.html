@@ -3856,11 +3856,45 @@
             if (!messagesContainer || !chatId) return;
             let saved;
             try { saved = localStorage.getItem(SCROLL_KEY_PREFIX + chatId); } catch(e) {}
-            if (saved === null || saved === undefined || saved === 'bottom') {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            } else {
-                messagesContainer.scrollTop = parseInt(saved, 10) || messagesContainer.scrollHeight;
+            const goBottom = (saved === null || saved === undefined || saved === 'bottom');
+            const targetPx  = goBottom ? null : (parseInt(saved, 10) || null);
+
+            // Images haven't loaded yet when renderMessages finishes, so scrollHeight
+            // is too small. We wait for the next paint, then again after any <img>
+            // inside the container finishes loading so the final layout is correct.
+            function doScroll() {
+                const { messagesContainer: mc } = getActiveElements();
+                if (!mc) return;
+                if (goBottom) {
+                    mc.scrollTop = mc.scrollHeight;
+                } else if (targetPx !== null) {
+                    mc.scrollTop = targetPx;
+                }
             }
+
+            // First pass: after the current paint cycle
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    doScroll();
+
+                    // Second pass: after every image in the container has loaded
+                    // (images expand the scrollHeight, so we need to re-apply)
+                    if (goBottom) {
+                        const imgs = messagesContainer.querySelectorAll('img');
+                        let pending = 0;
+                        imgs.forEach(img => {
+                            if (!img.complete) {
+                                pending++;
+                                img.addEventListener('load',  doScroll, { once: true });
+                                img.addEventListener('error', doScroll, { once: true });
+                            }
+                        });
+                        // Safety net: re-scroll 600 ms later in case late-arriving images
+                        // or CSS transitions are still expanding the container
+                        if (pending > 0) setTimeout(doScroll, 600);
+                    }
+                });
+            });
         }
         // ─────────────────────────────────────────────────────────────────────
         let userData = null;
