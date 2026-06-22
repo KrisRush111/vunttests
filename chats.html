@@ -3887,26 +3887,169 @@
             return null;
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // PERSISTENT LOCAL STORAGE (IndexedDB)
+        // Сообщения хранятся постоянно без TTL.
+        // Чаты/аватарки — с TTL в памяти + IndexedDB.
+        // Синхронизация: сравниваем последний ID и количество.
+        // ═══════════════════════════════════════════════════════════
+        const DB_NAME = 'vuntgram_db';
+        const DB_VERSION = 2;
+        let _db = null;
+
+        function openDB() {
+            if (_db) return Promise.resolve(_db);
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, DB_VERSION);
+                req.onupgradeneeded = e => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('cache')) {
+                        db.createObjectStore('cache', { keyPath: 'key' });
+                    }
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id' });
+                        ms.createIndex('chat_id', 'chat_id', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('chat_meta')) {
+                        db.createObjectStore('chat_meta', { keyPath: 'chat_id' });
+                    }
+                };
+                req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        const _memCache = new Map();
+
         function setCacheItem(key, value, ttl) {
-            const item = { value: value, timestamp: Date.now(), ttl: ttl };
-            localStorage.setItem(key, JSON.stringify(item));
+            const item = { key, value, timestamp: Date.now(), ttl };
+            _memCache.set(key, item);
+            openDB().then(db => {
+                const tx = db.transaction('cache', 'readwrite');
+                tx.objectStore('cache').put(item);
+            }).catch(() => {
+                try { localStorage.setItem('c_' + key, JSON.stringify(item)); } catch(e) {}
+            });
         }
 
         function getCacheItem(key) {
-            const itemStr = localStorage.getItem(key);
-            if (!itemStr) return null;
+            const mem = _memCache.get(key);
+            if (mem) {
+                if (Date.now() - mem.timestamp > mem.ttl) { _memCache.delete(key); return null; }
+                return mem.value;
+            }
+            return null;
+        }
+
+        async function getCacheItemAsync(key) {
+            const mem = _memCache.get(key);
+            if (mem) {
+                if (Date.now() - mem.timestamp > mem.ttl) { _memCache.delete(key); return null; }
+                return mem.value;
+            }
             try {
-                const item = JSON.parse(itemStr);
-                const now = Date.now();
-                if (now - item.timestamp > item.ttl) {
-                    localStorage.removeItem(key);
-                    return null;
-                }
-                return item.value;
-            } catch (e) {
-                return null;
+                const db = await openDB();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('cache', 'readonly');
+                    const req = tx.objectStore('cache').get(key);
+                    req.onsuccess = () => {
+                        const item = req.result;
+                        if (!item) return resolve(null);
+                        if (Date.now() - item.timestamp > item.ttl) {
+                            openDB().then(db2 => db2.transaction('cache','readwrite').objectStore('cache').delete(key));
+                            return resolve(null);
+                        }
+                        _memCache.set(key, item);
+                        resolve(item.value);
+                    };
+                    req.onerror = () => resolve(null);
+                });
+            } catch(e) {
+                try {
+                    const raw = localStorage.getItem('c_' + key);
+                    if (!raw) return null;
+                    const item = JSON.parse(raw);
+                    if (Date.now() - item.timestamp > item.ttl) { localStorage.removeItem('c_' + key); return null; }
+                    return item.value;
+                } catch(e2) { return null; }
             }
         }
+
+        // --- Постоянное хранение сообщений (без TTL) ---
+        async function saveMessagesToDB(chatId, messages) {
+            if (!messages || messages.length === 0) return;
+            try {
+                const db = await openDB();
+                const realMsgs = messages.filter(m => !String(m.id).startsWith('temp_'));
+                if (realMsgs.length === 0) return;
+                const tx = db.transaction(['messages', 'chat_meta'], 'readwrite');
+                const store = tx.objectStore('messages');
+                realMsgs.forEach(msg => store.put({ ...msg, chat_id: String(chatId) }));
+                const lastMsg = realMsgs[realMsgs.length - 1];
+                tx.objectStore('chat_meta').put({
+                    chat_id: String(chatId),
+                    last_id: String(lastMsg?.id || ''),
+                    count: realMsgs.length,
+                    updated_at: Date.now()
+                });
+            } catch(e) {}
+        }
+
+        async function getMessagesFromDB(chatId) {
+            try {
+                const db = await openDB();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('messages', 'readonly');
+                    const req = tx.objectStore('messages').index('chat_id').getAll(String(chatId));
+                    req.onsuccess = () => {
+                        const msgs = (req.result || []).sort((a, b) => {
+                            const ta = new Date(a.sent_at).getTime();
+                            const tb = new Date(b.sent_at).getTime();
+                            if (ta !== tb) return ta - tb;
+                            return Number(a.id) - Number(b.id);
+                        });
+                        resolve(msgs);
+                    };
+                    req.onerror = () => resolve([]);
+                });
+            } catch(e) { return []; }
+        }
+
+        async function getChatMeta(chatId) {
+            try {
+                const db = await openDB();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('chat_meta', 'readonly');
+                    const req = tx.objectStore('chat_meta').get(String(chatId));
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch(e) { return null; }
+        }
+
+        async function deleteMissingMessages(chatId, serverMessages) {
+            try {
+                const db = await openDB();
+                const localMsgs = await getMessagesFromDB(chatId);
+                const serverIds = new Set(serverMessages.map(m => String(m.id)));
+                const toDelete = localMsgs.filter(m => !serverIds.has(String(m.id)));
+                if (toDelete.length === 0) return;
+                const tx = db.transaction('messages', 'readwrite');
+                const store = tx.objectStore('messages');
+                toDelete.forEach(m => store.delete(m.id));
+            } catch(e) {}
+        }
+
+        // Инициализация DB и предзагрузка кэша в память
+        openDB().then(db => {
+            const tx = db.transaction('cache', 'readonly');
+            const req = tx.objectStore('cache').getAll();
+            req.onsuccess = () => {
+                (req.result || []).forEach(item => {
+                    if (Date.now() - item.timestamp <= item.ttl) _memCache.set(item.key, item);
+                });
+            };
+        }).catch(() => {});
 
         function initializeWallpaperSystem() {
             loadWallpaperSettings();
@@ -4729,7 +4872,7 @@ function getActiveElements() {
                 };
                 
                 currentMessages = [...currentMessages, newMessage];
-                setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
+                saveMessagesToDB(actualChatId, currentMessages);
                 renderMessages(currentMessages);
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
@@ -5313,12 +5456,12 @@ function getActiveElements() {
 
         function preloadAllMessages(chats) {
             if (!chats || chats.length === 0) return;
-            
+            // Фоновая синхронизация: только для чатов где мета устарела (>30 сек)
             chats.forEach(async (chat) => {
-                const cacheKey = `messages_${chat.id}`;
-                if (getCacheItem(cacheKey)) return;
-                
                 try {
+                    const meta = await getChatMeta(chat.id);
+                    const stale = !meta || (Date.now() - (meta.updated_at || 0) > 30000);
+                    if (!stale) return; // свежие данные — пропускаем
                     const response = await fetch(`${SERVER_URL}/get_messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -5326,9 +5469,9 @@ function getActiveElements() {
                         credentials: 'include'
                     });
                     const data = await response.json();
-                    if (data.status === 'success') {
-                        messagesCache[chat.id] = data.messages || [];
-                        setCacheItem(cacheKey, data.messages || [], CACHE.MESSAGES_TTL);
+                    if (data.status === 'success' && data.messages) {
+                        messagesCache[chat.id] = data.messages;
+                        await saveMessagesToDB(chat.id, data.messages);
                     }
                 } catch (e) {}
             });
@@ -5818,11 +5961,8 @@ function getActiveElements() {
         }
 
         async function loadMessages(chatId) {
-            const cacheKey = `messages_${chatId}`;
-            const cached = getCacheItem(cacheKey);
             const { messagesContainer, noMessages } = getActiveElements();
-            
-            // Helper: force scroll to bottom after layout settles
+
             const scrollToBottom = () => {
                 requestAnimationFrame(() => {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -5832,71 +5972,84 @@ function getActiveElements() {
                 });
             };
 
-            if (cached) {
-                currentMessages = cached;
-                lastKnownMessageId = cached.length > 0 ? cached[cached.length - 1]?.id?.toString() : null;
+            // ── 1. Показываем локальные сообщения мгновенно ──────────────
+            const localMsgs = await getMessagesFromDB(chatId);
+            if (localMsgs.length > 0) {
+                currentMessages = localMsgs;
+                lastKnownMessageId = localMsgs[localMsgs.length - 1]?.id?.toString() || null;
                 renderMessages(currentMessages);
-                noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
-                if (currentMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
-                // Force scroll after rendering from cache
+                noMessages.style.display = 'none';
                 scrollToBottom();
-                
-                // Silent background refresh — renderMessages will do smart diff
-                fetch(`${SERVER_URL}/get_messages`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
-                    credentials: 'include'
-                }).then(async response => {
-                    const messagesData = await response.json();
-                    if (messagesData.status === 'success') {
-                        const freshMessages = messagesData.messages || [];
-                        const freshLatestId = freshMessages.length > 0 ? freshMessages[freshMessages.length - 1]?.id?.toString() : null;
-                        if (freshLatestId !== lastKnownMessageId || freshMessages.length !== currentMessages.length) {
-                            currentMessages = freshMessages;
-                            lastKnownMessageId = freshLatestId;
-                            messagesCache[chatId] = currentMessages;
-                            setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
-                            renderMessages(currentMessages);
-                            // Scroll to bottom after background refresh too
-                            scrollToBottom();
-                        }
-                    }
-                }).catch(() => {});
-                
-                return;
             }
-            
-            try {
-                const messagesResponse = await fetch(`${SERVER_URL}/get_messages`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
-                    credentials: 'include'
-                });
-                
-                const messagesData = await messagesResponse.json();
-                
-                if (messagesData.status === 'success') {
-                    currentMessages = messagesData.messages || [];
-                    lastKnownMessageId = currentMessages.length > 0 ? currentMessages[currentMessages.length - 1]?.id?.toString() : null;
-                    messagesCache[chatId] = currentMessages;
-                    setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
-                    
-                    renderMessages(currentMessages);
-                    // Force scroll to bottom after network load
-                    scrollToBottom();
-                    
-                    if (currentMessages.length === 0) {
+
+            // ── 2. Тихая синхронизация с сервером ────────────────────────
+            const syncWithServer = async () => {
+                try {
+                    const meta = await getChatMeta(chatId);
+                    const serverLocal = localMsgs.length;
+                    const serverLastId = meta?.last_id || null;
+
+                    const response = await fetch(`${SERVER_URL}/get_messages`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                        credentials: 'include'
+                    });
+                    const messagesData = await response.json();
+                    if (messagesData.status !== 'success') return;
+
+                    const freshMessages = messagesData.messages || [];
+                    const freshLastId = freshMessages.length > 0
+                        ? freshMessages[freshMessages.length - 1]?.id?.toString()
+                        : null;
+                    const freshCount = freshMessages.filter(m => !String(m.id).startsWith('temp_')).length;
+
+                    // Проверяем нужна ли синхронизация
+                    const lastIdChanged = freshLastId !== lastKnownMessageId;
+                    const countChanged = freshCount !== serverLocal;
+                    const needsSync = lastIdChanged || countChanged;
+
+                    if (needsSync) {
+                        // Если удалились сообщения — чистим локальное хранилище
+                        if (freshCount < serverLocal) {
+                            await deleteMissingMessages(chatId, freshMessages);
+                        }
+                        // Сохраняем новые/обновлённые сообщения
+                        await saveMessagesToDB(chatId, freshMessages);
+
+                        currentMessages = freshMessages;
+                        lastKnownMessageId = freshLastId;
+                        messagesCache[chatId] = freshMessages;
+
+                        const wasAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 80;
+                        renderMessages(currentMessages);
+                        if (wasAtBottom || localMsgs.length === 0) scrollToBottom();
+                    }
+
+                    if (freshMessages.length === 0) {
                         noMessages.style.display = 'block';
                         noMessages.textContent = 'Сообщений пока нет...';
                     } else {
                         noMessages.style.display = 'none';
                     }
-                    
+
                     markAllMessagesAsRead(chatId);
+                } catch(e) {
+                    // Нет сети — работаем с локальными данными
+                    if (localMsgs.length === 0) {
+                        noMessages.style.display = 'block';
+                        noMessages.textContent = 'Нет соединения с сервером...';
+                    }
                 }
-            } catch (error) {}
+            };
+
+            // Если есть локальные данные — синхронизируем в фоне
+            // Если нет — ждём ответа сервера (первый запуск)
+            if (localMsgs.length > 0) {
+                syncWithServer(); // фоновая синхронизация, не блокирует UI
+            } else {
+                await syncWithServer(); // ждём, чтобы показать сообщения
+            }
         }
 
         async function sendMessage() {
@@ -5989,7 +6142,7 @@ function getActiveElements() {
                         if (msgElement) msgElement.setAttribute('data-message-id', messageData.message_id);
                     }
                     
-                    setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
+                    saveMessagesToDB(actualChatId, currentMessages);
                     
                     if (!currentChat.is_temp) {
                         updateChatItemInDOM(currentChat.id, { last_message: messageContent, last_message_time: new Date().toISOString(), unread_count: 0 });
@@ -6599,15 +6752,19 @@ function updateProfileModalStatus(userId) {
                             // Merge: keep temp messages, add real ones
                             const tempMessages = currentMessages.filter(m => m.is_temp);
                             const merged = [...newMessages];
-                            // Re-add any temp messages not yet confirmed
                             tempMessages.forEach(tm => {
                                 if (!merged.find(m => m.content === tm.content && m.is_me)) {
                                     merged.push(tm);
                                 }
                             });
+                            // Если сообщения удалились — чистим локальное хранилище
+                            if (newMessages.length < currentMessages.filter(m=>!m.is_temp).length) {
+                                deleteMissingMessages(chatId, newMessages);
+                            }
                             currentMessages = merged;
                             messagesCache[chatId] = newMessages;
-                            setCacheItem(`messages_${chatId}`, newMessages, CACHE.MESSAGES_TTL);
+                            // Сохраняем в IndexedDB (постоянно, без TTL)
+                            saveMessagesToDB(chatId, newMessages);
                             renderMessages(currentMessages);
                             
                             // Update unread counter in chat list
