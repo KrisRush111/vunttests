@@ -4785,7 +4785,7 @@ function getActiveElements() {
                 const imageUrl = message.content;
                 const isUploading = !!message.is_uploading;
                 
-                const imgTag = `<img src="${imageUrl}" alt="Изображение" class="message-image" ${isUploading ? '' : `onclick="openImageModal('${imageUrl}', ${imageIndex})"`} loading="lazy" onload="this.style.opacity='1'; this.closest('.message-image-wrapper') && this.closest('.message-image-wrapper').classList.add('image-loaded');" onerror="this.onerror=null; this.style.opacity='0.5'" style="opacity: 0; max-width: 100%; height: auto;">`;
+                const imgTag = `<img src="${imageUrl}" alt="Изображение" class="message-image" ${isUploading ? '' : `onclick="openImageModal('${imageUrl}', ${imageIndex})"`} loading="lazy" onload="this.style.opacity='1'; this.style.minHeight=''; this.closest('.message-image-wrapper') && this.closest('.message-image-wrapper').classList.add('image-loaded');" onerror="this.onerror=null; this.style.opacity='1'; this.alt='Не удалось загрузить изображение';" style="opacity: 0.15; max-width: 100%; height: auto; min-height: 80px; background: var(--telegram-secondary-bg); transition: opacity 0.3s ease;">`;
                 
                 const imgHtml = isUploading
                     ? `<div class="message-image-wrapper" data-message-id="${message.id}">${imgTag}<div class="upload-spinner-overlay"><div class="upload-spinner"></div></div></div>`
@@ -6499,7 +6499,11 @@ function updateProfileModalStatus(userId) {
             const firstExistingId = existingCount > 0 ? messagesContainer.querySelector('.message[data-message-id]')?.getAttribute('data-message-id') : null;
             const firstNewId = messages[0]?.id?.toString();
             
-            const needsFullRender = existingCount > newCount || (existingCount > 0 && firstExistingId !== firstNewId);
+            // Only do full re-render if existing count is more than new (deletion happened)
+            // OR if first IDs mismatch AND neither is a temp message (temp IDs start with "temp_")
+            const firstIdMismatch = existingCount > 0 && firstExistingId !== firstNewId;
+            const firstIsTemp = (firstExistingId && firstExistingId.startsWith('temp_')) || (firstNewId && firstNewId.startsWith('temp_'));
+            const needsFullRender = existingCount > newCount || (firstIdMismatch && !firstIsTemp);
 
             if (needsFullRender) {
                 messagesContainer.innerHTML = '';
@@ -6544,9 +6548,6 @@ function updateProfileModalStatus(userId) {
                 }
                 
                 const messageElement = renderMessage(message);
-                if (needsFullRender) {
-                    messageElement.style.animationDelay = `${index * 0.02}s`;
-                }
                 fragment.appendChild(messageElement);
                 addedAny = true;
             });
