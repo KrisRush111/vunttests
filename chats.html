@@ -5960,20 +5960,28 @@ function getActiveElements() {
             }
         }
 
-        async function loadMessages(chatId) {
+        async function loadMessages(chatId, signal) {
             const { messagesContainer, noMessages } = getActiveElements();
 
+            // Проверка: актуален ли ещё этот чат?
+            const isCancelled = () => signal && signal.aborted;
+
             const scrollToBottom = () => {
+                if (isCancelled()) return;
                 requestAnimationFrame(() => {
+                    if (isCancelled()) return;
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     requestAnimationFrame(() => {
+                        if (isCancelled()) return;
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     });
                 });
             };
 
-            // ── 1. Показываем локальные сообщения мгновенно ──────────────
+            // ── 1. Локальные сообщения — мгновенно, без сети ─────────────
             const localMsgs = await getMessagesFromDB(chatId);
+            if (isCancelled()) return; // пользователь уже переключился
+
             if (localMsgs.length > 0) {
                 currentMessages = localMsgs;
                 lastKnownMessageId = localMsgs[localMsgs.length - 1]?.id?.toString() || null;
@@ -5982,20 +5990,20 @@ function getActiveElements() {
                 scrollToBottom();
             }
 
-            // ── 2. Тихая синхронизация с сервером ────────────────────────
+            // ── 2. Фоновая синхронизация с сервером ──────────────────────
             const syncWithServer = async () => {
                 try {
-                    const meta = await getChatMeta(chatId);
-                    const serverLocal = localMsgs.length;
-                    const serverLastId = meta?.last_id || null;
-
                     const response = await fetch(`${SERVER_URL}/get_messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
-                        credentials: 'include'
+                        credentials: 'include',
+                        signal: signal  // отменяем fetch если чат сменился
                     });
+                    if (isCancelled()) return;
+
                     const messagesData = await response.json();
+                    if (isCancelled()) return;
                     if (messagesData.status !== 'success') return;
 
                     const freshMessages = messagesData.messages || [];
@@ -6004,18 +6012,16 @@ function getActiveElements() {
                         : null;
                     const freshCount = freshMessages.filter(m => !String(m.id).startsWith('temp_')).length;
 
-                    // Проверяем нужна ли синхронизация
                     const lastIdChanged = freshLastId !== lastKnownMessageId;
-                    const countChanged = freshCount !== serverLocal;
+                    const countChanged = freshCount !== localMsgs.length;
                     const needsSync = lastIdChanged || countChanged;
 
                     if (needsSync) {
-                        // Если удалились сообщения — чистим локальное хранилище
-                        if (freshCount < serverLocal) {
+                        if (freshCount < localMsgs.length) {
                             await deleteMissingMessages(chatId, freshMessages);
                         }
-                        // Сохраняем новые/обновлённые сообщения
                         await saveMessagesToDB(chatId, freshMessages);
+                        if (isCancelled()) return;
 
                         currentMessages = freshMessages;
                         lastKnownMessageId = freshLastId;
@@ -6026,29 +6032,24 @@ function getActiveElements() {
                         if (wasAtBottom || localMsgs.length === 0) scrollToBottom();
                     }
 
-                    if (freshMessages.length === 0) {
-                        noMessages.style.display = 'block';
-                        noMessages.textContent = 'Сообщений пока нет...';
-                    } else {
-                        noMessages.style.display = 'none';
-                    }
+                    if (isCancelled()) return;
+                    noMessages.style.display = freshMessages.length === 0 ? 'block' : 'none';
+                    if (freshMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
 
                     markAllMessagesAsRead(chatId);
                 } catch(e) {
-                    // Нет сети — работаем с локальными данными
-                    if (localMsgs.length === 0) {
+                    if (e.name === 'AbortError') return; // нормальная отмена
+                    if (localMsgs.length === 0 && !isCancelled()) {
                         noMessages.style.display = 'block';
                         noMessages.textContent = 'Нет соединения с сервером...';
                     }
                 }
             };
 
-            // Если есть локальные данные — синхронизируем в фоне
-            // Если нет — ждём ответа сервера (первый запуск)
             if (localMsgs.length > 0) {
-                syncWithServer(); // фоновая синхронизация, не блокирует UI
+                syncWithServer(); // фон — не блокирует
             } else {
-                await syncWithServer(); // ждём, чтобы показать сообщения
+                await syncWithServer(); // первый раз — ждём
             }
         }
 
@@ -6223,40 +6224,43 @@ function getActiveElements() {
         }
 
 async function openChat(chatId) {
-    // Закрываем профиль если он открыт
-    if (isDesktop) {
-        profileModalDesktop.classList.remove('visible');
-    }
-    
+    // ── Отменяем любой предыдущий openChat ──────────────────────────
     if (openChatAbortController) openChatAbortController.abort();
     openChatAbortController = new AbortController();
     const signal = openChatAbortController.signal;
 
+    // Уникальный токен этого вызова — защита от race condition
+    const openToken = Symbol();
+    openChat._lastToken = openToken;
+    const isStale = () => openChat._lastToken !== openToken || signal.aborted;
+
+    stopMessagePolling(); // сразу останавливаем polling предыдущего чата
+
+    if (isDesktop) profileModalDesktop.classList.remove('visible');
+
     isOpeningChat = true;
 
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-    
     if (!chatModal || !chatAvatar || !chatTitle || !chatStatus || !messagesContainer || !noMessages) {
         isOpeningChat = false;
         return;
     }
-    
-    if (currentChat) {
-        currentChat = null;
-        currentMessages = [];
-        messagesContainer.innerHTML = '';
-    }
-    
+
+    // Сбрасываем UI мгновенно
+    currentChat = null;
+    currentMessages = [];
+    messagesContainer.innerHTML = '';
+    noMessages.style.display = 'none';
+
+    // Показываем имя/аватар из кэша немедленно (не ждём сеть)
     const cachedChat = currentChatsList.find(c => c.id === chatId);
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
-        
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
             loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
-            
             const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
             if (statusElement) {
                 chatStatus.innerHTML = statusElement.innerHTML;
@@ -6268,16 +6272,20 @@ async function openChat(chatId) {
         }
     }
 
+    // Открываем модал
+    if (isDesktop) {
+        updateDesktopVisibility(true, false);
+    } else {
+        chatModal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+
     try {
-        if (isDesktop) {
-            updateDesktopVisibility(true, false);
-        } else {
-            chatModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
-        }
+        // Загружаем сообщения (с signal — отменится если снова сменят чат)
+        await loadMessages(chatId, signal);
+        if (isStale()) return; // пользователь уже переключился — выходим
 
-        await loadMessages(chatId);
-
+        // Запрашиваем мета-данные чата
         const response = await fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -6285,34 +6293,31 @@ async function openChat(chatId) {
             credentials: 'include',
             signal: signal
         });
-        
-        const chatData = await response.json();
-        
-        if (chatData.status === 'success') {
-            currentChat = chatData.chat;
-            
-            if (currentChat) {
-                updateChatItemInDOM(chatId, { unread_count: 0 });
+        if (isStale()) return;
 
-                const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-                if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
-            }
+        const chatData = await response.json();
+        if (isStale()) return;
+
+        if (chatData.status === 'success' && chatData.chat) {
+            currentChat = chatData.chat;
+            updateChatItemInDOM(chatId, { unread_count: 0 });
+            const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
+            if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
         }
-        
+
     } catch (error) {
-        if (error.name === 'AbortError') return;
-        
+        if (error.name === 'AbortError' || isStale()) return;
         if (isDesktop) {
             updateDesktopVisibility(false, false);
         } else {
             if (chatModal) chatModal.classList.remove('active');
             document.body.style.overflow = '';
         }
-        
     } finally {
         isOpeningChat = false;
     }
 
+    if (isStale()) return;
     updateChatWallpaper();
     applyWallpaper();
     startMessagePolling(chatId);
@@ -6726,10 +6731,15 @@ function updateProfileModalStatus(userId) {
 
         function startMessagePolling(chatId) {
             stopMessagePolling();
-            
+            // Токен polling-а: если chatId сменится — старый тик ничего не сделает
+            const pollToken = Symbol();
+            startMessagePolling._token = pollToken;
+
             messagePollingInterval = setInterval(async () => {
-                if (!currentChat || currentChat.id !== chatId || isSendingMessage) return;
-                
+                // Двойная проверка: и по токену, и по currentChat.id
+                if (startMessagePolling._token !== pollToken) return;
+                if (!currentChat || String(currentChat.id) !== String(chatId) || isSendingMessage) return;
+
                 try {
                     const response = await fetch(`${SERVER_URL}/get_messages`, {
                         method: 'POST',
@@ -6737,43 +6747,41 @@ function updateProfileModalStatus(userId) {
                         body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
                         credentials: 'include'
                     });
-                    
+
+                    // После await — снова проверяем актуальность
+                    if (startMessagePolling._token !== pollToken) return;
+                    if (!currentChat || String(currentChat.id) !== String(chatId)) return;
+
                     const data = await response.json();
-                    
+                    if (startMessagePolling._token !== pollToken) return;
+
                     if (data.status === 'success') {
                         const newMessages = data.messages || [];
-                        
-                        // Check if there are actually new messages
                         const latestId = newMessages.length > 0 ? newMessages[newMessages.length - 1]?.id?.toString() : null;
                         const hasNewMessages = newMessages.length !== currentMessages.length || latestId !== lastKnownMessageId;
-                        
+
                         if (hasNewMessages) {
                             lastKnownMessageId = latestId;
-                            // Merge: keep temp messages, add real ones
                             const tempMessages = currentMessages.filter(m => m.is_temp);
                             const merged = [...newMessages];
                             tempMessages.forEach(tm => {
-                                if (!merged.find(m => m.content === tm.content && m.is_me)) {
-                                    merged.push(tm);
-                                }
+                                if (!merged.find(m => m.content === tm.content && m.is_me)) merged.push(tm);
                             });
-                            // Если сообщения удалились — чистим локальное хранилище
                             if (newMessages.length < currentMessages.filter(m=>!m.is_temp).length) {
                                 deleteMissingMessages(chatId, newMessages);
                             }
                             currentMessages = merged;
                             messagesCache[chatId] = newMessages;
-                            // Сохраняем в IndexedDB (постоянно, без TTL)
                             saveMessagesToDB(chatId, newMessages);
+
+                            if (startMessagePolling._token !== pollToken) return; // последняя проверка перед рендером
                             renderMessages(currentMessages);
-                            
-                            // Update unread counter in chat list
                             updateChatItemInDOM(chatId, { unread_count: 0 });
                             markAllMessagesAsRead(chatId);
                         }
                     }
                 } catch (e) {}
-            }, 2500); // Poll every 2.5 seconds
+            }, 2500);
         }
 
         function stopMessagePolling() {
