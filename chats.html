@@ -4666,7 +4666,10 @@ function getActiveElements() {
                 
                 currentMessages = [...currentMessages, tempMessage];
                 noMessages.style.display = 'none';
-                renderMessages(currentMessages);
+                // Append only the new temp element — avoid a full re-render
+                const tempElement = renderMessage(tempMessage);
+                messagesContainer.appendChild(tempElement);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 
                 let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
@@ -4732,7 +4735,14 @@ function getActiveElements() {
                 
                 currentMessages = [...currentMessages, newMessage];
                 setCacheItem(`messages_${actualChatId}`, currentMessages, CACHE.MESSAGES_TTL);
-                renderMessages(currentMessages);
+                // Swap temp element for the confirmed real element (no full re-render)
+                const tempEl = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
+                const realEl = renderMessage(newMessage);
+                if (tempEl) {
+                    messagesContainer.replaceChild(realEl, tempEl);
+                } else {
+                    messagesContainer.appendChild(realEl);
+                }
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
@@ -4751,8 +4761,9 @@ function getActiveElements() {
                         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                     }
                 }
-                
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                // Scroll to show the confirmed image if user was near bottom
+                const wasAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 100;
+                if (wasAtBottom) messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 
             } catch (error) {
                 showMessage('Ошибка отправки изображения: ' + error.message, 'error');
@@ -6423,9 +6434,12 @@ function updateProfileModalStatus(userId) {
         function moveChatToTop(chatId) {
             [chatsListDesktop, chatsListMobile].forEach(list => {
                 if (!list) return;
-                
                 const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-                if (chatItem) list.prepend(chatItem);
+                if (!chatItem || list.firstElementChild === chatItem) return; // already at top
+                // Save scroll position so the list doesn't jump when we prepend the node
+                const savedScroll = list.scrollTop;
+                list.prepend(chatItem);
+                list.scrollTop = savedScroll;
             });
         }
 
@@ -6479,13 +6493,12 @@ function updateProfileModalStatus(userId) {
                 existingIds.add(el.getAttribute('data-message-id'));
             });
 
-            // Check if we need a full re-render (e.g. messages were deleted or order changed)
-            const existingCount = existingIds.size;
-            const newCount = messages.length;
-            const firstExistingId = existingCount > 0 ? messagesContainer.querySelector('.message[data-message-id]')?.getAttribute('data-message-id') : null;
-            const firstNewId = messages[0]?.id?.toString();
-            
-            const needsFullRender = existingCount > newCount || (existingCount > 0 && firstExistingId !== firstNewId);
+            // Full re-render only when real (non-temp) DOM messages are absent from server response
+            // (e.g. deleted). Old firstExistingId check caused spurious re-render every time the
+            // LIMIT-100 window shifted after a new message was sent.
+            const newIds = new Set(messages.map(m => m.id?.toString()));
+            const staleIds = [...existingIds].filter(id => !id.startsWith('temp_') && !newIds.has(id));
+            const needsFullRender = staleIds.length > 0;
 
             if (needsFullRender) {
                 messagesContainer.innerHTML = '';
