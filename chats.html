@@ -3839,6 +3839,30 @@
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+
+        // ── Scroll-position memory (per chat, persisted in localStorage) ──────
+        const SCROLL_KEY_PREFIX = 'chatScroll_';
+
+        function saveScrollPosition(chatId) {
+            const { messagesContainer } = getActiveElements();
+            if (!messagesContainer || !chatId) return;
+            const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 60;
+            const pos = atBottom ? 'bottom' : messagesContainer.scrollTop;
+            try { localStorage.setItem(SCROLL_KEY_PREFIX + chatId, String(pos)); } catch(e) {}
+        }
+
+        function restoreScrollPosition(chatId) {
+            const { messagesContainer } = getActiveElements();
+            if (!messagesContainer || !chatId) return;
+            let saved;
+            try { saved = localStorage.getItem(SCROLL_KEY_PREFIX + chatId); } catch(e) {}
+            if (saved === null || saved === undefined || saved === 'bottom') {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            } else {
+                messagesContainer.scrollTop = parseInt(saved, 10) || messagesContainer.scrollHeight;
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
         let userData = null;
         let currentViewedUser = null;
 
@@ -4179,6 +4203,8 @@ function closeChat() {
     const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
     if (!chatModal) return;
+
+    if (currentChat) saveScrollPosition(currentChat.id);
 
     currentChat = null;
     currentMessages = [];
@@ -4670,6 +4696,7 @@ function getActiveElements() {
                 const tempElement = renderMessage(tempMessage);
                 messagesContainer.appendChild(tempElement);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                saveScrollPosition(currentChat.id);
                 
                 let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
@@ -5841,7 +5868,8 @@ function getActiveElements() {
                 renderMessages(currentMessages);
                 noMessages.style.display = currentMessages.length === 0 ? 'block' : 'none';
                 if (currentMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
-                
+                restoreScrollPosition(chatId);
+
                 // Silent background refresh — renderMessages will do smart diff
                 fetch(`${SERVER_URL}/get_messages`, {
                     method: 'POST',
@@ -5854,11 +5882,15 @@ function getActiveElements() {
                         const freshMessages = messagesData.messages || [];
                         const freshLatestId = freshMessages.length > 0 ? freshMessages[freshMessages.length - 1]?.id?.toString() : null;
                         if (freshLatestId !== lastKnownMessageId || freshMessages.length !== currentMessages.length) {
+                            const { messagesContainer: mc } = getActiveElements();
+                            const wasAtBottom = mc && mc.scrollHeight - mc.scrollTop - mc.clientHeight < 60;
                             currentMessages = freshMessages;
                             lastKnownMessageId = freshLatestId;
                             messagesCache[chatId] = currentMessages;
                             setCacheItem(cacheKey, currentMessages, CACHE.MESSAGES_TTL);
                             renderMessages(currentMessages);
+                            // Only jump to bottom if there are new messages the user hasn't seen yet
+                            if (wasAtBottom && mc) mc.scrollTop = mc.scrollHeight;
                         }
                     }
                 }).catch(() => {});
@@ -5891,6 +5923,7 @@ function getActiveElements() {
                         noMessages.style.display = 'none';
                     }
                     
+                    restoreScrollPosition(chatId);
                     markAllMessagesAsRead(chatId);
                 }
             } catch (error) {}
@@ -5925,6 +5958,7 @@ function getActiveElements() {
             const messageElement = renderMessage(tempMessage);
             messagesContainer.appendChild(messageElement);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            saveScrollPosition(currentChat.id);
             
             (async () => {
                 try {
@@ -6160,6 +6194,18 @@ async function openChat(chatId) {
     updateChatWallpaper();
     applyWallpaper();
     startMessagePolling(chatId);
+
+    // Save scroll position whenever the user scrolls, so it's always up to date
+    const { messagesContainer: mc } = getActiveElements();
+    if (mc) {
+        mc._scrollSaveTimer = null;
+        mc.addEventListener('scroll', function _scrollSave() {
+            if (currentChat && currentChat.id === chatId) {
+                clearTimeout(mc._scrollSaveTimer);
+                mc._scrollSaveTimer = setTimeout(() => saveScrollPosition(chatId), 200);
+            }
+        }, { passive: true });
+    }
 }
 
 
@@ -6395,6 +6441,9 @@ function updateProfileModalStatus(userId) {
             if (!chatModal) return;
 
             stopMessagePolling();
+
+            // Save scroll position before clearing state so we can restore it next visit
+            if (currentChat) saveScrollPosition(currentChat.id);
 
             currentChat = null;
             currentMessages = [];
