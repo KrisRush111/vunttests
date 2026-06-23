@@ -4868,7 +4868,12 @@ function getActiveElements() {
                     is_image: true
                 };
 
-                // Обновляем temp-элемент прямо на месте — без удаления и перерисовки
+                // Сразу меняем temp на реальное в массиве — до любых DOM-манипуляций
+                currentMessages = currentMessages.map(msg => msg.id === tempMessageId ? newMessage : msg);
+                URL.revokeObjectURL(localPreviewUrl);
+                saveMessagesToDB(actualChatId, currentMessages);
+
+                // Обновляем DOM прямо на месте — без перерисовки
                 const { messagesContainer: mc } = getActiveElements();
                 const tempEl = mc.querySelector(`[data-message-id="${tempMessageId}"]`);
                 if (tempEl) {
@@ -4876,9 +4881,8 @@ function getActiveElements() {
                     const imgEl = tempEl.querySelector('img.message-image');
                     const spinner = tempEl.querySelector('.upload-spinner-overlay');
                     if (imgEl) {
-                        const imageIndex = currentMessages.filter(m => m.is_image || (m.content && isImageUrl(m.content))).findIndex(m => m.id === tempMessageId);
+                        const imageIndex = currentMessages.filter(m => m.is_image || (m.content && isImageUrl(m.content))).findIndex(m => m.id === newMessage.id);
                         imgEl.setAttribute('onclick', `openImageModal('${messageData.image_url}', ${imageIndex})`);
-                        // Загружаем через fetch — даёт blob URL который уже в памяти — без перезагрузки
                         fetch(messageData.image_url)
                             .then(r => r.blob())
                             .then(blob => {
@@ -4896,10 +4900,6 @@ function getActiveElements() {
                         if (spinner) spinner.remove();
                     }
                 }
-
-                currentMessages = currentMessages.map(msg => msg.id === tempMessageId ? newMessage : msg);
-                URL.revokeObjectURL(localPreviewUrl);
-                saveMessagesToDB(actualChatId, currentMessages);
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
@@ -6785,6 +6785,10 @@ function updateProfileModalStatus(userId) {
                         const newMessages = data.messages || [];
                         const latestId = newMessages.length > 0 ? newMessages[newMessages.length - 1]?.id?.toString() : null;
                         const hasNewMessages = newMessages.length !== currentMessages.length || latestId !== lastKnownMessageId;
+
+                        // Если в DOM ещё есть элемент с is_uploading — пропускаем тик, чтобы не создать дубль
+                        const { messagesContainer: pollMc } = getActiveElements();
+                        if (pollMc && pollMc.querySelector('.upload-spinner-overlay')) return;
 
                         if (hasNewMessages) {
                             lastKnownMessageId = latestId;
