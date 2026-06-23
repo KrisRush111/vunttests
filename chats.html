@@ -4878,19 +4878,20 @@ function getActiveElements() {
                     if (imgEl) {
                         const imageIndex = currentMessages.filter(m => m.is_image || (m.content && isImageUrl(m.content))).findIndex(m => m.id === tempMessageId);
                         imgEl.setAttribute('onclick', `openImageModal('${messageData.image_url}', ${imageIndex})`);
-                        // Предзагружаем новый URL в фоне, чтобы фото не пропадало
-                        const preloader = new Image();
-                        preloader.onload = () => {
-                            imgEl.src = messageData.image_url;
-                            imgEl.style.opacity = '1';
-                            if (spinner) spinner.remove();
-                        };
-                        preloader.onerror = () => {
-                            imgEl.src = messageData.image_url;
-                            imgEl.style.opacity = '1';
-                            if (spinner) spinner.remove();
-                        };
-                        preloader.src = messageData.image_url;
+                        // Загружаем через fetch — даёт blob URL который уже в памяти — без перезагрузки
+                        fetch(messageData.image_url)
+                            .then(r => r.blob())
+                            .then(blob => {
+                                const blobUrl = URL.createObjectURL(blob);
+                                imgEl.src = blobUrl;
+                                imgEl.style.opacity = '1';
+                                if (spinner) spinner.remove();
+                            })
+                            .catch(() => {
+                                imgEl.src = messageData.image_url;
+                                imgEl.style.opacity = '1';
+                                if (spinner) spinner.remove();
+                            });
                     } else {
                         if (spinner) spinner.remove();
                     }
