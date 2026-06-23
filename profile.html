@@ -2587,14 +2587,16 @@ function updateChatPreviewWallpaper() {
     if (selectedWallpaper) {
         const previewContainers = document.querySelectorAll('.chat-preview-messages');
         previewContainers.forEach(container => {
-            // Всегда используем обои, даже для системных
-            container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            container.style.backgroundSize = 'cover';
-            container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = '';
-            
-            // Для отладки
-            console.log('Wallpaper applied:', selectedWallpaper.url, 'isDefault:', wallpaperState.selectedWallpaper === 'default');
+            if (wallpaperState.enabled && selectedWallpaper.url) {
+                // Всегда показываем картинку обоев — включая "default" (фон.webp)
+                container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+                container.style.backgroundSize = 'cover';
+                container.style.backgroundPosition = 'center';
+                container.style.backgroundColor = '';
+            } else {
+                container.style.backgroundImage = 'none';
+                container.style.backgroundColor = 'var(--telegram-secondary-bg)';
+            }
         });
         
         // Обновляем название выбранных обоев
@@ -2606,23 +2608,43 @@ function updateChatPreviewWallpaper() {
 }
 
 
+// Получение ключа localStorage с привязкой к пользователю
+function getWallpaperStorageKey() {
+    try {
+        const savedUserData = JSON.parse(sessionStorage.getItem('userData'));
+        const userId = savedUserData?.platform_user_id || 'guest';
+        return `vuntgram_wallpaper_${userId}`;
+    } catch (e) {
+        return 'vuntgram_wallpaper_guest';
+    }
+}
+
 // Загрузка настроек обоев из localStorage
 function loadWallpaperSettings() {
-    const saved = localStorage.getItem('vuntgram_wallpaper');
+    const storageKey = getWallpaperStorageKey();
+    const saved = localStorage.getItem(storageKey);
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
             wallpaperState = {
-                enabled: parsed.enabled !== undefined ? parsed.enabled : false,
+                enabled: parsed.enabled !== undefined ? parsed.enabled : true,
                 selectedWallpaper: parsed.selectedWallpaper || 'default',
                 blur: parsed.blur || 0,
                 brightness: parsed.brightness || 100
             };
         } catch (e) {
             console.error('Error loading wallpaper settings:', e);
+            // При ошибке чтения — ставим дефолтный фон
+            wallpaperState = {
+                enabled: true,
+                selectedWallpaper: 'default',
+                blur: 0,
+                brightness: 100
+            };
+            saveWallpaperSettings();
         }
     } else {
-        // ПЕРВЫЙ ВХОД: Автоматически устанавливаем системные обои
+        // ПЕРВЫЙ ВХОД на этом устройстве: Автоматически устанавливаем фон.jpg (default)
         wallpaperState = {
             enabled: true,
             selectedWallpaper: 'default',
@@ -2692,7 +2714,8 @@ function saveWallpaperSettings() {
         brightness: wallpaperState.brightness
     };
     
-    localStorage.setItem('vuntgram_wallpaper', JSON.stringify(settingsToSave));
+    const storageKey = getWallpaperStorageKey();
+    localStorage.setItem(storageKey, JSON.stringify(settingsToSave));
     
     // Уведомляем другие вкладки
     broadcastWallpaperUpdate();
@@ -2857,13 +2880,13 @@ function selectWallpaper(wallpaperId) {
     wallpaperState.selectedWallpaper = wallpaperId;
     wallpaperState.enabled = true;
     
-    // Обновляем предпросмотр чата
+    // Обновляем предпросмотр чата (показываем картинку для ВСЕХ обоев включая default)
     const previewContainers = document.querySelectorAll('.chat-preview-messages');
     previewContainers.forEach(container => {
-        container.style.backgroundImage = wallpaperId === 'default' ? 'none' : `url('${wallpaper.url}')`;
+        container.style.backgroundImage = wallpaper.url ? `url('${wallpaper.url}')` : 'none';
         container.style.backgroundSize = 'cover';
         container.style.backgroundPosition = 'center';
-        container.style.backgroundColor = wallpaperId === 'default' ? 'var(--telegram-secondary-bg)' : '';
+        container.style.backgroundColor = wallpaper.url ? '' : 'var(--telegram-secondary-bg)';
     });
     
     // Обновляем название выбранных обоев
@@ -3054,10 +3077,11 @@ function updateAppearanceUI() {
     if (selectedWallpaper) {
         const previewContainers = document.querySelectorAll('.chat-preview-messages');
         previewContainers.forEach(container => {
-            container.style.backgroundImage = wallpaperState.selectedWallpaper === 'default' ? 'none' : `url('${selectedWallpaper.url}')`;
+            // Показываем картинку для ВСЕХ обоев включая default
+            container.style.backgroundImage = (wallpaperState.enabled && selectedWallpaper.url) ? `url('${selectedWallpaper.url}')` : 'none';
             container.style.backgroundSize = 'cover';
             container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = wallpaperState.selectedWallpaper === 'default' ? 'var(--telegram-secondary-bg)' : '';
+            container.style.backgroundColor = (!wallpaperState.enabled || !selectedWallpaper.url) ? 'var(--telegram-secondary-bg)' : '';
         });
         
         const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
@@ -3077,10 +3101,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Инициализируем интерфейс
     initializeLayout();
-    loadProfileData();
     
-    // Инициализируем систему обоев - ОДИН раз
-    initializeWallpaperSystem();
+    // Инициализируем систему обоев ПОСЛЕ того, как userData уже есть в sessionStorage
+    // (checkAuthorization/loadProfileData кладут userData в sessionStorage)
+    loadProfileData().finally(() => {
+        // Инициализируем систему обоев - ОДИН раз, когда user_id уже известен
+        initializeWallpaperSystem();
+    });
     
     // Назначаем обработчики для кнопок оформления
     if (appearanceBtn) {
