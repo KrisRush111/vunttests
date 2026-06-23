@@ -4857,9 +4857,6 @@ function getActiveElements() {
                 const messageData = await messageResponse.json();
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
                 
-                currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
-                URL.revokeObjectURL(localPreviewUrl);
-                
                 const newMessage = {
                     id: messageData.message_id,
                     sender_id: userData.platform_user_id,
@@ -4870,10 +4867,38 @@ function getActiveElements() {
                     is_me: true,
                     is_image: true
                 };
-                
-                currentMessages = [...currentMessages, newMessage];
+
+                // Обновляем temp-элемент прямо на месте — без удаления и перерисовки
+                const { messagesContainer: mc } = getActiveElements();
+                const tempEl = mc.querySelector(`[data-message-id="${tempMessageId}"]`);
+                if (tempEl) {
+                    tempEl.setAttribute('data-message-id', String(messageData.message_id));
+                    const imgEl = tempEl.querySelector('img.message-image');
+                    const spinner = tempEl.querySelector('.upload-spinner-overlay');
+                    if (imgEl) {
+                        const imageIndex = currentMessages.filter(m => m.is_image || (m.content && isImageUrl(m.content))).findIndex(m => m.id === tempMessageId);
+                        imgEl.setAttribute('onclick', `openImageModal('${messageData.image_url}', ${imageIndex})`);
+                        // Предзагружаем новый URL в фоне, чтобы фото не пропадало
+                        const preloader = new Image();
+                        preloader.onload = () => {
+                            imgEl.src = messageData.image_url;
+                            imgEl.style.opacity = '1';
+                            if (spinner) spinner.remove();
+                        };
+                        preloader.onerror = () => {
+                            imgEl.src = messageData.image_url;
+                            imgEl.style.opacity = '1';
+                            if (spinner) spinner.remove();
+                        };
+                        preloader.src = messageData.image_url;
+                    } else {
+                        if (spinner) spinner.remove();
+                    }
+                }
+
+                currentMessages = currentMessages.map(msg => msg.id === tempMessageId ? newMessage : msg);
+                URL.revokeObjectURL(localPreviewUrl);
                 saveMessagesToDB(actualChatId, currentMessages);
-                renderMessages(currentMessages);
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
