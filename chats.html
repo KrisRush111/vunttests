@@ -5131,13 +5131,29 @@ function getActiveElements() {
                         setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
                     }
                 } catch {
-                    const a = document.createElement('a');
-                    a.href = currentSrc;
-                    a.download = 'photo.jpg';
-                    a.target = '_blank';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
+                    try {
+                        // Повторная попытка через no-cors для десктопа
+                        const response = await fetch(currentSrc, { mode: 'no-cors' });
+                        const blob = await response.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'photo.jpg';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                        setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                    } catch {
+                        // Крайний фолбэк — скачивание напрямую без открытия вкладки
+                        const a = document.createElement('a');
+                        a.href = currentSrc;
+                        a.download = 'photo.jpg';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    }
                 }
             });
 
