@@ -4265,7 +4265,31 @@ function updateDesktopVisibility(showChat = false, showProfile = false) {
 }
 
 
+// Токен для защиты от race condition при быстром переключении чатов
+let _profileLoadToken = null;
+
 function openProfileModal(userId) {
+    // Генерируем уникальный токен для этого открытия профиля
+    const token = Symbol();
+    _profileLoadToken = token;
+
+    // Сбрасываем UI профиля перед загрузкой (чтобы не светился профиль прошлого чата)
+    const activeElements = getActiveElements();
+    if (activeElements.modalProfileNickname) activeElements.modalProfileNickname.textContent = '...';
+    if (activeElements.modalProfileId) activeElements.modalProfileId.textContent = '';
+    if (activeElements.modalProfileAvatar) {
+        activeElements.modalProfileAvatar.textContent = '?';
+        activeElements.modalProfileAvatar.style.backgroundImage = 'none';
+        activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+    }
+    if (activeElements.modalProfileStatus) {
+        const statusTextSpan = activeElements.modalProfileStatus.querySelector('.status-text');
+        const statusIndicatorSpan = activeElements.modalProfileStatus.querySelector('.status-indicator');
+        if (statusTextSpan) statusTextSpan.textContent = '...';
+        if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'none';
+        activeElements.modalProfileStatus.classList.add('offline');
+    }
+
     // Проверяем, какая версия интерфейса активна
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
@@ -4288,11 +4312,13 @@ function openProfileModal(userId) {
         modalOverlay.classList.add('active');
     }
 
-    loadUserProfile(userId);
+    // Загружаем профиль с проверкой токена (защита от race condition)
+    loadUserProfile(userId, token);
 }
 
 
 function closeProfileModal() {
+    stopProfileStatusPolling();
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
     if (isDesktop) {
@@ -6379,24 +6405,55 @@ async function openChat(chatId) {
 }
 
 
-        async function loadUserProfile(userId) {
+        async function loadUserProfile(userId, token) {
             try {
-                const response = await fetch(`${SERVER_URL}/get_user_data`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ platform_user_id: userId }),
-                    credentials: 'include'
-                });
+                // Параллельно запрашиваем профиль и статус активности
+                const [profileResponse, freshActivity] = await Promise.all([
+                    fetch(`${SERVER_URL}/get_user_data`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ platform_user_id: userId }),
+                        credentials: 'include'
+                    }),
+                    // Всегда делаем свежий запрос статуса сети при открытии профиля
+                    (async () => {
+                        try {
+                            const r = await fetch(`${SERVER_URL}/get_activity_status`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ user_ids: [userId] }),
+                                credentials: 'include'
+                            });
+                            const d = await r.json();
+                            if (d.status === 'success' && d.activity_data) {
+                                const now = Date.now();
+                                Object.entries(d.activity_data).forEach(([id, status]) => {
+                                    CACHE.statuses.set(id, status);
+                                    CACHE.statusesTimestamp.set(id, now);
+                                    if (!currentActivityData) currentActivityData = {};
+                                    currentActivityData[id] = status;
+                                });
+                                return d.activity_data;
+                            }
+                        } catch (e) {}
+                        return {};
+                    })()
+                ]);
 
-                const data = await response.json();
+                // Защита от race condition: если открыли другой профиль — выходим
+                if (token && _profileLoadToken !== token) return;
 
-                if (!response.ok) throw new Error(data.error || 'Ошибка загрузки профиля');
+                const data = await profileResponse.json();
+
+                if (!profileResponse.ok) throw new Error(data.error || 'Ошибка загрузки профиля');
                 if (data.status === 'success' && data.user) {
+                    if (token && _profileLoadToken !== token) return;
                     updateProfileModalUI(data.user);
                 } else {
                     throw new Error('Пользователь не найден');
                 }
             } catch (error) {
+                if (token && _profileLoadToken !== token) return;
                 console.error('Profile loading error:', error);
             }
         }
@@ -6441,6 +6498,7 @@ async function updateProfileModalUI(user) {
 
     // Обновление статуса
     updateProfileModalStatus(user.platform_user_id);
+    startProfileStatusPolling(user.platform_user_id);
 
     // Функция для проверки и отображения поля
     function updateField(fieldValue, fieldElement, containerElement, fieldName) {
@@ -6577,6 +6635,10 @@ async function openChatWithContact(user) {
 
 
 // Добавьте функцию для обновления статуса в профиле
+// Интервал обновления статуса сети в профиле
+let _profileStatusInterval = null;
+let _profileViewedUserId = null;
+
 function updateProfileModalStatus(userId) {
     const activeElements = getActiveElements();
     const statusElement = activeElements.modalProfileStatus;
@@ -6599,10 +6661,69 @@ function updateProfileModalStatus(userId) {
             if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'none';
         }
     } else {
-        statusTextSpan.textContent = 'не в сети';
-        statusElement.classList.add('offline');
-        if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'none';
+        // Данных нет — пробуем запросить напрямую
+        getCachedActivityStatus([userId]).then(data => {
+            const act = data && data[userId];
+            if (!act) {
+                statusTextSpan.textContent = 'не в сети';
+                statusElement.classList.add('offline');
+                if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'none';
+                return;
+            }
+            if (act.is_online) {
+                statusTextSpan.textContent = 'В сети';
+                statusElement.classList.remove('offline');
+                if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'inline-block';
+            } else {
+                statusTextSpan.textContent = formatLastSeen(act.last_online);
+                statusElement.classList.add('offline');
+                if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'none';
+            }
+        }).catch(() => {
+            statusTextSpan.textContent = 'не в сети';
+            statusElement.classList.add('offline');
+            if (statusIndicatorSpan) statusIndicatorSpan.style.display = 'none';
+        });
     }
+}
+
+// Запуск live-обновления статуса пока открыт профиль
+function startProfileStatusPolling(userId) {
+    stopProfileStatusPolling();
+    _profileViewedUserId = userId;
+    _profileStatusInterval = setInterval(async () => {
+        if (!_profileViewedUserId) return;
+        try {
+            const r = await fetch(`${SERVER_URL}/get_activity_status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_ids: [_profileViewedUserId] }),
+                credentials: 'include'
+            });
+            const d = await r.json();
+            if (d.status === 'success' && d.activity_data) {
+                const now = Date.now();
+                Object.entries(d.activity_data).forEach(([id, status]) => {
+                    CACHE.statuses.set(id, status);
+                    CACHE.statusesTimestamp.set(id, now);
+                    if (!currentActivityData) currentActivityData = {};
+                    currentActivityData[id] = status;
+                });
+                // Обновляем только если этот профиль всё ещё открыт
+                if (_profileViewedUserId === userId) {
+                    updateProfileModalStatus(userId);
+                }
+            }
+        } catch(e) {}
+    }, 15000); // каждые 15 секунд
+}
+
+function stopProfileStatusPolling() {
+    if (_profileStatusInterval) {
+        clearInterval(_profileStatusInterval);
+        _profileStatusInterval = null;
+    }
+    _profileViewedUserId = null;
 }
 
         function closeChat() {
