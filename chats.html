@@ -1061,6 +1061,29 @@
             opacity: 0.85;
         }
 
+        .reaction-pill-avatars {
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .reaction-pill-avatar {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-size: cover;
+            background-position: center;
+            box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+            flex-shrink: 0;
+        }
+
+        .message-outgoing .reaction-pill-avatar {
+            box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.5);
+        }
+
+        .reaction-pill-avatars .reaction-pill-avatar + .reaction-pill-avatar {
+            margin-left: -6px;
+        }
+
         .reaction-picker {
             position: fixed;
             z-index: 5000;
@@ -5122,7 +5145,42 @@ function getActiveElements() {
             reactions.forEach(r => {
                 const pill = document.createElement('div');
                 pill.className = 'reaction-pill' + (r.reacted_by_me ? ' reaction-pill-mine' : '');
-                pill.innerHTML = `<span class="reaction-pill-emoji">${r.emoji}</span><span class="reaction-pill-count">${r.count}</span>`;
+
+                const emojiSpan = document.createElement('span');
+                emojiSpan.className = 'reaction-pill-emoji';
+                emojiSpan.textContent = r.emoji;
+                pill.appendChild(emojiSpan);
+
+                const users = r.users || [];
+                if (users.length > 0) {
+                    // Показываем аватары поставивших реакцию (как в Telegram), максимум 3 — остальное цифрой
+                    const avatarsWrap = document.createElement('span');
+                    avatarsWrap.className = 'reaction-pill-avatars';
+                    users.slice(0, 3).forEach(u => {
+                        const av = document.createElement('span');
+                        av.className = 'reaction-pill-avatar';
+                        av.style.background = u.avatar_background || '#0088cc';
+                        if (u.avatar_url) {
+                            av.style.backgroundImage = `url('${u.avatar_url}')`;
+                        }
+                        avatarsWrap.appendChild(av);
+                    });
+                    pill.appendChild(avatarsWrap);
+
+                    if (r.count > 3) {
+                        const countSpan = document.createElement('span');
+                        countSpan.className = 'reaction-pill-count';
+                        countSpan.textContent = `${r.count}`;
+                        pill.appendChild(countSpan);
+                    }
+                } else {
+                    // Фолбэк, если сервер не прислал данные об аватарах
+                    const countSpan = document.createElement('span');
+                    countSpan.className = 'reaction-pill-count';
+                    countSpan.textContent = `${r.count}`;
+                    pill.appendChild(countSpan);
+                }
+
                 pill.addEventListener('click', (e) => {
                     e.stopPropagation();
                     vibrateBubble();
