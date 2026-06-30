@@ -1012,6 +1012,83 @@
         }
         /* ====== КОНЕЦ стилей пузырей ====== */
 
+        /* ====== РЕАКЦИИ НА СООБЩЕНИЯ ====== */
+        .message-reactions-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            flex-basis: 100%;
+            margin-top: 4px;
+        }
+
+        .reaction-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.06);
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.12s ease, background 0.15s ease;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .reaction-pill:active {
+            transform: scale(0.92);
+        }
+
+        .reaction-pill-mine {
+            background: rgba(0, 136, 204, 0.18);
+        }
+
+        .message-outgoing .reaction-pill {
+            background: rgba(255, 255, 255, 0.18);
+        }
+
+        .message-outgoing .reaction-pill-mine {
+            background: rgba(255, 255, 255, 0.35);
+        }
+
+        .reaction-pill-emoji {
+            font-size: 14px;
+        }
+
+        .reaction-pill-count {
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.85;
+        }
+
+        .reaction-picker {
+            position: fixed;
+            z-index: 5000;
+            display: flex;
+            gap: 4px;
+            padding: 8px 10px;
+            border-radius: 24px;
+            background: var(--telegram-bg, #fff);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+            animation-duration: 0.18s;
+        }
+
+        .reaction-picker-emoji {
+            border: none;
+            background: none;
+            font-size: 24px;
+            line-height: 1;
+            padding: 4px;
+            cursor: pointer;
+            transition: transform 0.12s ease;
+        }
+
+        .reaction-picker-emoji:hover,
+        .reaction-picker-emoji:active {
+            transform: scale(1.25);
+        }
+        /* ====== КОНЕЦ стилей реакций ====== */
+
         .contacts-modal {
             position: fixed;
             top: auto;
@@ -5019,8 +5096,177 @@ function getActiveElements() {
                 : `<div class="message-content"><span class="message-text">${escapeHtml(message.content)}</span>${timeHtml}</div>`;
             messageElement.style.opacity = '1';
             messageElement.style.transform = 'translateY(0)';
-            
+
+            renderReactionsOnElement(messageElement, message.reactions);
+            attachMessageLongPress(messageElement, message);
+
             return messageElement;
+        }
+
+        // === РЕАКЦИИ НА СООБЩЕНИЯ (как в Telegram) ===
+        const REACTION_EMOJIS = ['😀', '❤️', '👍', '🙏', '🔥', '🎉', '😢', '😡'];
+
+        function renderReactionsOnElement(messageElement, reactions) {
+            let row = messageElement.querySelector('.message-reactions-row');
+            if (!reactions || reactions.length === 0) {
+                if (row) row.remove();
+                return;
+            }
+            if (!row) {
+                row = document.createElement('div');
+                row.className = 'message-reactions-row';
+                const content = messageElement.querySelector('.message-content') || messageElement;
+                content.appendChild(row);
+            }
+            row.innerHTML = '';
+            reactions.forEach(r => {
+                const pill = document.createElement('div');
+                pill.className = 'reaction-pill' + (r.reacted_by_me ? ' reaction-pill-mine' : '');
+                pill.innerHTML = `<span class="reaction-pill-emoji">${r.emoji}</span><span class="reaction-pill-count">${r.count}</span>`;
+                pill.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    vibrateBubble();
+                    toggleReaction(messageElement.getAttribute('data-message-id'), r.emoji);
+                });
+                row.appendChild(pill);
+            });
+        }
+
+        function vibrateBubble() {
+            if (navigator.vibrate) {
+                // Короткий "пузырьковый" паттерн вибрации, похожий на Telegram
+                navigator.vibrate([10, 30, 10]);
+            }
+        }
+
+        function attachMessageLongPress(messageElement, message) {
+            let pressTimer = null;
+            let longPressTriggered = false;
+            let startX = 0, startY = 0;
+
+            const clear = () => {
+                if (pressTimer) {
+                    clearTimeout(pressTimer);
+                    pressTimer = null;
+                }
+            };
+
+            const start = (clientX, clientY) => {
+                longPressTriggered = false;
+                startX = clientX;
+                startY = clientY;
+                clear();
+                pressTimer = setTimeout(() => {
+                    longPressTriggered = true;
+                    if (navigator.vibrate) navigator.vibrate(15);
+                    openReactionPicker(messageElement, message);
+                }, 450);
+            };
+
+            const move = (clientX, clientY) => {
+                if (pressTimer && (Math.abs(clientX - startX) > 10 || Math.abs(clientY - startY) > 10)) {
+                    clear();
+                }
+            };
+
+            messageElement.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY);
+            }, { passive: true });
+            messageElement.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY);
+            }, { passive: true });
+            messageElement.addEventListener('touchend', clear);
+            messageElement.addEventListener('touchcancel', clear);
+
+            // Поддержка десктопа (мышь)
+            messageElement.addEventListener('mousedown', (e) => start(e.clientX, e.clientY));
+            messageElement.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
+            messageElement.addEventListener('mouseup', clear);
+            messageElement.addEventListener('mouseleave', clear);
+
+            messageElement.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (navigator.vibrate) navigator.vibrate(15);
+                openReactionPicker(messageElement, message);
+            });
+        }
+
+        let activeReactionPicker = null;
+
+        function closeReactionPicker() {
+            if (activeReactionPicker) {
+                activeReactionPicker.remove();
+                activeReactionPicker = null;
+                document.removeEventListener('click', closeReactionPicker, true);
+                document.removeEventListener('scroll', closeReactionPicker, true);
+            }
+        }
+
+        function openReactionPicker(messageElement, message) {
+            closeReactionPicker();
+
+            const picker = document.createElement('div');
+            picker.className = 'reaction-picker animate__animated animate__fadeInUp';
+
+            REACTION_EMOJIS.forEach(emoji => {
+                const btn = document.createElement('button');
+                btn.className = 'reaction-picker-emoji';
+                btn.type = 'button';
+                btn.textContent = emoji;
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    vibrateBubble();
+                    toggleReaction(messageElement.getAttribute('data-message-id'), emoji);
+                    closeReactionPicker();
+                });
+                picker.appendChild(btn);
+            });
+
+            document.body.appendChild(picker);
+
+            const rect = messageElement.getBoundingClientRect();
+            const pickerWidth = picker.offsetWidth;
+            const pickerHeight = picker.offsetHeight;
+            let left = rect.left + rect.width / 2 - pickerWidth / 2;
+            left = Math.max(8, Math.min(left, window.innerWidth - pickerWidth - 8));
+            let top = rect.top - pickerHeight - 10;
+            if (top < 8) top = rect.bottom + 10;
+
+            picker.style.left = `${left}px`;
+            picker.style.top = `${top}px`;
+
+            activeReactionPicker = picker;
+
+            setTimeout(() => {
+                document.addEventListener('click', closeReactionPicker, true);
+                document.addEventListener('scroll', closeReactionPicker, true);
+            }, 0);
+        }
+
+        async function toggleReaction(messageId, emoji) {
+            if (!messageId || !currentChat) return;
+            try {
+                const response = await fetch(`${SERVER_URL}/toggle_reaction`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: currentChat.id,
+                        message_id: messageId,
+                        platform_user_id: userData.platform_user_id,
+                        emoji
+                    }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    const msg = currentMessages.find(m => String(m.id) === String(messageId));
+                    if (msg) msg.reactions = data.reactions;
+                    const el = document.querySelector(`.message[data-message-id="${messageId}"]`);
+                    if (el) renderReactionsOnElement(el, data.reactions);
+                }
+            } catch (e) {
+                console.error('toggleReaction error', e);
+            }
         }
 
         function escapeHtml(text) {
@@ -6949,6 +7195,16 @@ function stopProfileStatusPolling() {
 
                     if (data.status === 'success') {
                         const newMessages = data.messages || [];
+
+                        // Синхронизация реакций при каждом тике, даже если новых сообщений нет
+                        const { messagesContainer: reactionMc } = getActiveElements();
+                        newMessages.forEach(nm => {
+                            const target = reactionMc ? reactionMc.querySelector(`.message[data-message-id="${nm.id}"]`) : null;
+                            if (target) renderReactionsOnElement(target, nm.reactions);
+                            const cached = currentMessages.find(m => String(m.id) === String(nm.id));
+                            if (cached) cached.reactions = nm.reactions;
+                        });
+
                         const latestId = newMessages.length > 0 ? newMessages[newMessages.length - 1]?.id?.toString() : null;
                         const hasNewMessages = newMessages.length !== currentMessages.length || latestId !== lastKnownMessageId;
 
