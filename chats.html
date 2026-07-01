@@ -1173,6 +1173,35 @@
             font-size: 22px;
             padding: 6px;
         }
+
+        .quick-reaction-burst {
+            position: fixed;
+            z-index: 6000;
+            font-size: 56px;
+            line-height: 1;
+            pointer-events: none;
+            animation: quickReactionPop 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
+        }
+
+        @keyframes quickReactionPop {
+            0% {
+                transform: scale(0.3);
+                opacity: 0;
+            }
+            35% {
+                transform: scale(1.2);
+                opacity: 1;
+            }
+            55% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(1.15) translateY(-36px);
+                opacity: 0;
+            }
+        }
         /* ====== КОНЕЦ стилей реакций ====== */
 
         .contacts-modal {
@@ -5271,6 +5300,27 @@ function getActiveElements() {
             }
         }
 
+        const QUICK_REACTION_EMOJI = '🩵';
+
+        function showQuickReactionBurst(messageElement, emoji) {
+            const rect = messageElement.getBoundingClientRect();
+            const burst = document.createElement('div');
+            burst.className = 'quick-reaction-burst';
+            burst.textContent = emoji;
+            burst.style.left = `${rect.left + rect.width / 2 - 28}px`;
+            burst.style.top = `${rect.top + rect.height / 2 - 28}px`;
+            document.body.appendChild(burst);
+            burst.addEventListener('animationend', () => burst.remove());
+            setTimeout(() => burst.remove(), 800);
+        }
+
+        function quickReact(messageElement, message) {
+            closeReactionPicker();
+            if (navigator.vibrate) navigator.vibrate([10, 30, 10]);
+            toggleReaction(messageElement.getAttribute('data-message-id'), QUICK_REACTION_EMOJI);
+            showQuickReactionBurst(messageElement, QUICK_REACTION_EMOJI);
+        }
+
         function attachMessageLongPress(messageElement, message) {
             let pressTimer = null;
             let longPressTriggered = false;
@@ -5301,13 +5351,37 @@ function getActiveElements() {
                 }
             };
 
+            // Двойной тап (мобильные) — мгновенная реакция 🩵, как двойной тап по фото в Instagram/WhatsApp
+            let lastTapTime = 0;
+            let lastTapX = 0, lastTapY = 0;
+
             messageElement.addEventListener('touchstart', (e) => {
                 if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY);
             }, { passive: true });
             messageElement.addEventListener('touchmove', (e) => {
                 if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY);
             }, { passive: true });
-            messageElement.addEventListener('touchend', clear);
+            messageElement.addEventListener('touchend', (e) => {
+                const wasLongPress = longPressTriggered;
+                clear();
+                if (wasLongPress) return;
+
+                const touch = e.changedTouches && e.changedTouches[0];
+                if (!touch) return;
+
+                const now = Date.now();
+                const dx = Math.abs(touch.clientX - lastTapX);
+                const dy = Math.abs(touch.clientY - lastTapY);
+
+                if (now - lastTapTime < 300 && dx < 30 && dy < 30) {
+                    lastTapTime = 0;
+                    quickReact(messageElement, message);
+                } else {
+                    lastTapTime = now;
+                    lastTapX = touch.clientX;
+                    lastTapY = touch.clientY;
+                }
+            });
             messageElement.addEventListener('touchcancel', clear);
 
             // Поддержка десктопа (мышь)
@@ -5315,6 +5389,12 @@ function getActiveElements() {
             messageElement.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
             messageElement.addEventListener('mouseup', clear);
             messageElement.addEventListener('mouseleave', clear);
+
+            // Двойной клик (десктоп) — та же мгновенная реакция 🩵
+            messageElement.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                quickReact(messageElement, message);
+            });
 
             messageElement.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
@@ -5348,14 +5428,22 @@ function getActiveElements() {
             return btn;
         }
 
-        function positionReactionPicker(picker, messageElement) {
+        let activeReactionSide = null; // 'above' | 'below' — запоминаем сторону, чтобы расширенная сетка не "прыгала" под сообщение
+
+        function positionReactionPicker(picker, messageElement, forceSide) {
             const rect = messageElement.getBoundingClientRect();
             const pickerWidth = picker.offsetWidth;
             const pickerHeight = picker.offsetHeight;
             let left = rect.left + rect.width / 2 - pickerWidth / 2;
             left = Math.max(8, Math.min(left, window.innerWidth - pickerWidth - 8));
-            let top = rect.top - pickerHeight - 10;
-            if (top < 8) top = rect.bottom + 10;
+
+            // Сторону (сверху/снизу) решаем один раз для маленького пикера и переиспользуем
+            // для расширенного, чтобы он раскрывался в том же месте, а не съезжал под сообщение
+            let side = forceSide || (rect.top - pickerHeight - 10 >= 8 ? 'above' : 'below');
+            activeReactionSide = side;
+
+            let top = side === 'above' ? (rect.top - pickerHeight - 10) : (rect.bottom + 10);
+            top = Math.max(8, Math.min(top, window.innerHeight - pickerHeight - 8));
 
             picker.style.left = `${left}px`;
             picker.style.top = `${top}px`;
@@ -5404,7 +5492,7 @@ function getActiveElements() {
             });
 
             document.body.appendChild(picker);
-            positionReactionPicker(picker, messageElement);
+            positionReactionPicker(picker, messageElement, activeReactionSide);
 
             activeReactionPicker = picker;
 
