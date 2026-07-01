@@ -1097,12 +1097,21 @@
             position: fixed;
             z-index: 5000;
             display: flex;
+            align-items: center;
             gap: 4px;
             padding: 8px 10px;
             border-radius: 24px;
-            background: var(--telegram-bg, #fff);
+            background: rgba(255, 255, 255, 0.55);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            backdrop-filter: blur(18px) saturate(160%);
             box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
             animation-duration: 0.18s;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .reaction-picker {
+                background: rgba(33, 33, 33, 0.55);
+            }
         }
 
         .reaction-picker-emoji {
@@ -1113,11 +1122,56 @@
             padding: 4px;
             cursor: pointer;
             transition: transform 0.12s ease;
+            opacity: 1;
         }
 
         .reaction-picker-emoji:hover,
         .reaction-picker-emoji:active {
             transform: scale(1.25);
+        }
+
+        .reaction-picker-expand {
+            border: none;
+            background: rgba(120, 120, 128, 0.16);
+            width: 30px;
+            height: 30px;
+            min-width: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-color, #8e8e93);
+            font-size: 14px;
+            line-height: 1;
+            padding: 0;
+            margin-left: 2px;
+            transition: transform 0.12s ease, background 0.12s ease;
+        }
+
+        .reaction-picker-expand:hover,
+        .reaction-picker-expand:active {
+            background: rgba(120, 120, 128, 0.28);
+        }
+
+        .reaction-picker-expand svg {
+            width: 14px;
+            height: 14px;
+            display: block;
+        }
+
+        .reaction-picker-expanded {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 2px;
+            padding: 10px;
+            border-radius: 20px;
+            max-width: 322px;
+        }
+
+        .reaction-picker-expanded .reaction-picker-emoji {
+            font-size: 22px;
+            padding: 6px;
         }
         /* ====== КОНЕЦ стилей реакций ====== */
 
@@ -5136,7 +5190,8 @@ function getActiveElements() {
         }
 
         // === РЕАКЦИИ НА СООБЩЕНИЯ (как в Telegram) ===
-        const REACTION_EMOJIS = ['😀', '❤️', '👍', '🙏', '🔥', '🎉', '😢', '😡'];
+        const REACTION_EMOJIS = ['😁', '🩵', '👍', '🫡', '🥰', '🔥', '😱'];
+        const REACTION_EMOJIS_EXTRA = ['🎉', '❤️‍🔥', '🤩', '😻', '😢', '💯', '🤯', '😂', '🏆', '💔', '🤨', '😨', '🤓', '😎', '🦄', '💅', '👎', '🙉', '🙁', '👌', '😭', '❤️', '💋', '💩', '🙈', '🙊', '🐳', '🌚', '🗿', '👀'];
 
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
@@ -5279,28 +5334,21 @@ function getActiveElements() {
             }
         }
 
-        function openReactionPicker(messageElement, message) {
-            closeReactionPicker();
-
-            const picker = document.createElement('div');
-            picker.className = 'reaction-picker animate__animated animate__fadeInUp';
-
-            REACTION_EMOJIS.forEach(emoji => {
-                const btn = document.createElement('button');
-                btn.className = 'reaction-picker-emoji';
-                btn.type = 'button';
-                btn.textContent = emoji;
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    vibrateBubble();
-                    toggleReaction(messageElement.getAttribute('data-message-id'), emoji);
-                    closeReactionPicker();
-                });
-                picker.appendChild(btn);
+        function makeReactionEmojiButton(messageElement, emoji) {
+            const btn = document.createElement('button');
+            btn.className = 'reaction-picker-emoji';
+            btn.type = 'button';
+            btn.textContent = emoji;
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                vibrateBubble();
+                toggleReaction(messageElement.getAttribute('data-message-id'), emoji);
+                closeReactionPicker();
             });
+            return btn;
+        }
 
-            document.body.appendChild(picker);
-
+        function positionReactionPicker(picker, messageElement) {
             const rect = messageElement.getBoundingClientRect();
             const pickerWidth = picker.offsetWidth;
             const pickerHeight = picker.offsetHeight;
@@ -5311,6 +5359,52 @@ function getActiveElements() {
 
             picker.style.left = `${left}px`;
             picker.style.top = `${top}px`;
+        }
+
+        function openReactionPicker(messageElement, message) {
+            closeReactionPicker();
+
+            const picker = document.createElement('div');
+            picker.className = 'reaction-picker animate__animated animate__fadeInUp';
+
+            REACTION_EMOJIS.forEach(emoji => {
+                picker.appendChild(makeReactionEmojiButton(messageElement, emoji));
+            });
+
+            const expandBtn = document.createElement('button');
+            expandBtn.className = 'reaction-picker-expand';
+            expandBtn.type = 'button';
+            expandBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+            expandBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openExpandedReactionPicker(messageElement, message);
+            });
+            picker.appendChild(expandBtn);
+
+            document.body.appendChild(picker);
+            positionReactionPicker(picker, messageElement);
+
+            activeReactionPicker = picker;
+
+            setTimeout(() => {
+                document.addEventListener('click', closeReactionPicker, true);
+                document.addEventListener('scroll', closeReactionPicker, true);
+            }, 0);
+        }
+
+        function openExpandedReactionPicker(messageElement, message) {
+            closeReactionPicker();
+
+            const picker = document.createElement('div');
+            picker.className = 'reaction-picker reaction-picker-expanded animate__animated animate__fadeInUp';
+
+            const allEmojis = REACTION_EMOJIS.concat(REACTION_EMOJIS_EXTRA);
+            allEmojis.forEach(emoji => {
+                picker.appendChild(makeReactionEmojiButton(messageElement, emoji));
+            });
+
+            document.body.appendChild(picker);
+            positionReactionPicker(picker, messageElement);
 
             activeReactionPicker = picker;
 
