@@ -15,7 +15,10 @@ const EXCLUDE = [
   'vercel.json',
   '.git',
   '.gitignore',
-  'README.md'
+  'README.md',
+  '.github',
+  'dist',
+  'minify.js',
 ];
 
 async function build() {
