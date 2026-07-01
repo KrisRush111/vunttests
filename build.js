@@ -18,7 +18,7 @@ const EXCLUDE = [
   'README.md',
   '.github',
   'dist',
-  'minify.js',
+  'minify.js'
 ];
 
 async function build() {
