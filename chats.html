@@ -6711,30 +6711,6 @@ function getActiveElements() {
                         const wasAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 80;
                         renderMessages(currentMessages);
                         if (wasAtBottom || localMsgs.length === 0) scrollToBottom();
-                    } else {
-                        // Состав сообщений не изменился, но реакции на существующих
-                        // сообщениях могли поменяться (например, собеседник поставил
-                        // реакцию, пока чат был закрыт) — подхватываем их отдельно,
-                        // иначе они останутся в устаревшем виде из локального кэша.
-                        let reactionsOnlyChanged = false;
-                        freshMessages.forEach(nm => {
-                            const target = messagesContainer.querySelector(`.message[data-message-id="${nm.id}"]`);
-                            if (target) renderReactionsOnElement(target, nm.reactions);
-
-                            const cachedMsg = currentMessages.find(m => String(m.id) === String(nm.id));
-                            if (cachedMsg) {
-                                if (JSON.stringify(cachedMsg.reactions || []) !== JSON.stringify(nm.reactions || [])) {
-                                    reactionsOnlyChanged = true;
-                                }
-                                cachedMsg.reactions = nm.reactions;
-                            }
-                        });
-
-                        if (reactionsOnlyChanged) {
-                            if (isCancelled()) return;
-                            messagesCache[chatId] = currentMessages;
-                            await saveMessagesToDB(chatId, currentMessages);
-                        }
                     }
 
                     if (isCancelled()) return;
@@ -6784,6 +6760,18 @@ function getActiveElements() {
             
             if (noMessages.style.display !== 'none') noMessages.style.display = 'none';
             
+            // Проверяем, нужен ли новый разделитель даты перед оптимистично добавляемым сообщением
+            const existingHeadersSM = messagesContainer.querySelectorAll('.date-header');
+            const lastExistingHeaderSM = existingHeadersSM.length > 0 ? existingHeadersSM[existingHeadersSM.length - 1] : null;
+            const needsDateHeaderSM = !lastExistingHeaderSM || formatDateHeader(tempMessage.sent_at) !== lastExistingHeaderSM.textContent;
+
+            if (needsDateHeaderSM) {
+                const dateHeaderSM = document.createElement('div');
+                dateHeaderSM.className = 'date-header animate__animated animate__fadeIn';
+                dateHeaderSM.textContent = formatDateHeader(tempMessage.sent_at);
+                messagesContainer.appendChild(dateHeaderSM);
+            }
+
             const messageElement = renderMessage(tempMessage);
             messagesContainer.appendChild(messageElement);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
