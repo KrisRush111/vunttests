@@ -5592,6 +5592,15 @@ function getActiveElements() {
                     if (msg) msg.reactions = data.reactions;
                     const el = document.querySelector(`.message[data-message-id="${messageId}"]`);
                     if (el) renderReactionsOnElement(el, data.reactions);
+
+                    // Сохраняем обновлённые реакции в локальный кэш (IndexedDB),
+                    // иначе при следующем открытии чата подгрузятся старые данные
+                    // без реакции — до тех пор пока не изменится число сообщений/ID
+                    // последнего сообщения (а на одну только реакцию это не влияет).
+                    if (currentChat) {
+                        messagesCache[currentChat.id] = currentMessages;
+                        saveMessagesToDB(currentChat.id, currentMessages);
+                    }
                 }
             } catch (e) {
                 console.error('toggleReaction error', e);
@@ -7527,12 +7536,26 @@ function stopProfileStatusPolling() {
 
                         // Синхронизация реакций при каждом тике, даже если новых сообщений нет
                         const { messagesContainer: reactionMc } = getActiveElements();
+                        let reactionsChanged = false;
                         newMessages.forEach(nm => {
                             const target = reactionMc ? reactionMc.querySelector(`.message[data-message-id="${nm.id}"]`) : null;
                             if (target) renderReactionsOnElement(target, nm.reactions);
                             const cached = currentMessages.find(m => String(m.id) === String(nm.id));
-                            if (cached) cached.reactions = nm.reactions;
+                            if (cached) {
+                                if (JSON.stringify(cached.reactions || []) !== JSON.stringify(nm.reactions || [])) {
+                                    reactionsChanged = true;
+                                }
+                                cached.reactions = nm.reactions;
+                            }
                         });
+
+                        // Реакции могли поменяться и без появления новых сообщений
+                        // (например контакт поставил/снял реакцию) — сохраняем их
+                        // в локальный кэш, иначе при следующем открытии чата они пропадут.
+                        if (reactionsChanged) {
+                            messagesCache[chatId] = currentMessages;
+                            saveMessagesToDB(chatId, currentMessages);
+                        }
 
                         const latestId = newMessages.length > 0 ? newMessages[newMessages.length - 1]?.id?.toString() : null;
                         const hasNewMessages = newMessages.length !== currentMessages.length || latestId !== lastKnownMessageId;
