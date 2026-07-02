@@ -5270,6 +5270,24 @@ function getActiveElements() {
         // ❤️ тогда убираем, чтобы не было дублей.
         const HEART_EMOJI = isEmojiSupported('🩵') ? '🩵' : '❤️';
 
+        // Карта замен: если эмодзи слева не поддерживается устройством —
+        // при ОТОБРАЖЕНИИ (в том числе чужих реакций, пришедших с сервера)
+        // показываем эмодзи справа. Сама реакция на сервере/в данных остаётся
+        // прежней (🩵) — подменяется только то, что видит конкретный пользователь.
+        const EMOJI_DISPLAY_FALLBACKS = { '🩵': '❤️' };
+        const emojiSupportCache = new Map();
+
+        function getDisplayEmoji(emoji) {
+            if (!EMOJI_DISPLAY_FALLBACKS[emoji]) return emoji;
+
+            let supported = emojiSupportCache.get(emoji);
+            if (supported === undefined) {
+                supported = isEmojiSupported(emoji);
+                emojiSupportCache.set(emoji, supported);
+            }
+            return supported ? emoji : EMOJI_DISPLAY_FALLBACKS[emoji];
+        }
+
         const REACTION_EMOJIS = ['😁', HEART_EMOJI, '👍', '🫡', '🥰', '🔥', '😱'];
         const REACTION_EMOJIS_EXTRA = ['🎉', '❤️‍🔥', '🤩', '😻', '😢', '💯', '🤯', '😂', '🏆', '💔', '🤨', '😨', '🤓', '😎', '🦄', '💅', '👎', '🙉', '🙁', '👌', '😭', '💋', '💩', '🙈', '🙊', '🐳', '🌚', '🗿', '👀']
             .filter(e => e !== HEART_EMOJI);
@@ -5293,7 +5311,7 @@ function getActiveElements() {
 
                 const emojiSpan = document.createElement('span');
                 emojiSpan.className = 'reaction-pill-emoji';
-                emojiSpan.textContent = r.emoji;
+                emojiSpan.textContent = getDisplayEmoji(r.emoji);
                 pill.appendChild(emojiSpan);
 
                 const users = r.users || [];
