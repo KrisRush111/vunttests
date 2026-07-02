@@ -5224,8 +5224,55 @@ function getActiveElements() {
         }
 
         // === РЕАКЦИИ НА СООБЩЕНИЯ (как в Telegram) ===
-        const REACTION_EMOJIS = ['😁', '🩵', '👍', '🫡', '🥰', '🔥', '😱'];
-        const REACTION_EMOJIS_EXTRA = ['🎉', '❤️‍🔥', '🤩', '😻', '😢', '💯', '🤯', '😂', '🏆', '💔', '🤨', '😨', '🤓', '😎', '🦄', '💅', '👎', '🙉', '🙁', '👌', '😭', '❤️', '💋', '💩', '🙈', '🙊', '🐳', '🌚', '🗿', '👀'];
+
+        // Проверка, умеет ли устройство/браузер отрисовывать конкретный эмодзи
+        // (а не показывает "тофу" — пустой прямоугольник вместо неизвестного символа).
+        // Идея: рисуем эмодзи на canvas и сравниваем результат с рендером заведомо
+        // неподдерживаемого символа из приватной зоны Unicode. Если картинки совпали —
+        // значит браузер отрисовал наш эмодзи тем же "заглушечным" глифом, то есть не поддерживает его.
+        function isEmojiSupported(emoji) {
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return true; // не можем проверить — считаем, что поддерживается
+
+                const size = 32;
+                canvas.width = size;
+                canvas.height = size;
+
+                function render(str) {
+                    ctx.clearRect(0, 0, size, size);
+                    ctx.textBaseline = 'top';
+                    ctx.font = `${size}px sans-serif`;
+                    ctx.fillText(str, 0, 0);
+                    return ctx.getImageData(0, 0, size, size).data;
+                }
+
+                const target = render(emoji);
+                // \uFFFF гарантированно не является валидным эмодзи и рендерится "заглушкой" (тофу)
+                const fallback = render('\uFFFF');
+
+                let identical = true;
+                for (let i = 0; i < target.length; i++) {
+                    if (target[i] !== fallback[i]) {
+                        identical = false;
+                        break;
+                    }
+                }
+                return !identical;
+            } catch (e) {
+                return true; // при любой ошибке считаем, что эмодзи поддерживается
+            }
+        }
+
+        // Если 🩵 не поддерживается устройством, используем ❤️ вместо него везде
+        // (и в быстрой реакции, и в общем списке), а из дополнительных эмодзи
+        // ❤️ тогда убираем, чтобы не было дублей.
+        const HEART_EMOJI = isEmojiSupported('🩵') ? '🩵' : '❤️';
+
+        const REACTION_EMOJIS = ['😁', HEART_EMOJI, '👍', '🫡', '🥰', '🔥', '😱'];
+        const REACTION_EMOJIS_EXTRA = ['🎉', '❤️‍🔥', '🤩', '😻', '😢', '💯', '🤯', '😂', '🏆', '💔', '🤨', '😨', '🤓', '😎', '🦄', '💅', '👎', '🙉', '🙁', '👌', '😭', '💋', '💩', '🙈', '🙊', '🐳', '🌚', '🗿', '👀']
+            .filter(e => e !== HEART_EMOJI);
 
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
@@ -5305,7 +5352,7 @@ function getActiveElements() {
             }
         }
 
-        const QUICK_REACTION_EMOJI = '🩵';
+        const QUICK_REACTION_EMOJI = HEART_EMOJI;
 
         function showQuickReactionBurst(messageElement, emoji) {
             const rect = messageElement.getBoundingClientRect();
