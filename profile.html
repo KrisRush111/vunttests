@@ -3300,14 +3300,21 @@ window.addEventListener("beforeunload", () => {
 
  
         function loadAvatar(element, userId, forceReload = false) {
-            // Если аватар уже установлен для этого элемента — не перезагружаем
+            // Версия аватара — меняется при каждой загрузке/удалении,
+            // благодаря чему URL всегда «свежий» и браузер не берёт старую картинку из кэша
+            const avatarVersion = (userData && userData.avatar_version) || 0;
+
+            // Если аватар уже установлен для этого элемента И версия не изменилась — не перезагружаем
             const currentBg = element.style.backgroundImage || '';
-            if (!forceReload && currentBg && currentBg.includes('/avatar/')) {
+            const versionMarker = `v=${avatarVersion}`;
+            if (!forceReload && currentBg && currentBg.includes('/avatar/') && currentBg.includes(versionMarker)) {
                 return;
             }
 
-            // Без ?t=Date.now() — браузер использует кэш (304 Not Modified)
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
+            // ?v=<версия> — гарантирует свежую загрузку после смены/удаления аватара,
+            // при этом при повторных заходах без изменений URL остаётся тем же самым,
+            // и браузер по-прежнему может использовать кэш (304 Not Modified)
+            const avatarUrl = `${SERVER_URL}/avatar/${userId}?v=${avatarVersion}`;
             const img = new Image();
             
             img.onload = function() {
@@ -3400,6 +3407,9 @@ window.addEventListener("beforeunload", () => {
         // Обновляем данные пользователя
         userData.has_avatar = true;
         userData.avatar_background = data.avatar_background || userData.avatar_background;
+        // Увеличиваем версию аватара — это обновит ?v= во всех будущих загрузках
+        // и не даст браузеру показать старую картинку из кэша
+        userData.avatar_version = (userData.avatar_version || 0) + 1;
         sessionStorage.setItem('userData', JSON.stringify(userData));
 
         // Освобождаем локальный URL и используем серверный (с forceReload=true — обновляем принудительно)
@@ -3459,6 +3469,9 @@ window.addEventListener("beforeunload", () => {
                 
                 userData.has_avatar = false;
                 userData.avatar_background = data.avatar_background || userData.avatar_background;
+                // Увеличиваем версию и здесь — если пользователь загрузит новый аватар,
+                // URL снова будет отличаться от закэшированного старого
+                userData.avatar_version = (userData.avatar_version || 0) + 1;
                 sessionStorage.setItem('userData', JSON.stringify(userData));
                 
                 const firstLetter = userData.nickname?.charAt(0).toUpperCase() || '?';
