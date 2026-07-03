@@ -937,10 +937,14 @@
             backdrop-filter: none !important;
         }
 
-        /* Место под "выглядывающую" пилюлю реакции снизу пузыря (как в WhatsApp) */
+        /* Место под "выглядывающую" пилюлю реакции снизу пузыря (как в WhatsApp).
+           Ряд реакций остаётся в обычном потоке (иначе браузер перестаёт
+           учитывать его ширину при расчёте ширины пузыря на коротких
+           сообщениях) — "выглядывание" за нижний край делается через
+           transform на самом ряду, а здесь просто увеличиваем зазор до
+           следующего сообщения, чтобы пилюля не наезжала на него. */
         .message.has-reactions {
-            padding-bottom: 21px;
-            margin-bottom: 13px;
+            margin-bottom: 19px;
         }
 
         @media (min-width: 768px) {
@@ -1025,23 +1029,23 @@
         /* ====== КОНЕЦ стилей пузырей ====== */
 
         /* ====== РЕАКЦИИ НА СООБЩЕНИЯ ====== */
-        /* Ряд реакций теперь "висит" на нижнем крае пузыря и частично
-           выступает за его границу — как в WhatsApp. Он абсолютно
-           спозиционирован внутри .message (у которого position: relative)
-           и растянут по всей ширине пузыря, чтобы пилюли были прижаты
-           к одному краю, а время/галочки — к противоположному. */
+        /* Ряд реакций остаётся обычным (не absolute) дочерним элементом
+           .message-content — это важно: только так браузер учитывает его
+           реальную ширину (пилюля + время) при авто-расчёте ширины пузыря
+           для коротких сообщений. "Выглядывание" пилюли за нижний край
+           пузыря — чисто визуальный эффект через transform, который не
+           меняет зарезервированное место в потоке. */
         .message-reactions-row {
-            position: absolute;
-            left: 10px;
-            right: 10px;
-            bottom: -11px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 6px;
-            margin: 0;
+            gap: 8px;
+            flex-basis: 100%;
+            width: 100%;
+            margin-top: 4px;
+            transform: translateY(12px);
+            position: relative;
             z-index: 2;
-            pointer-events: auto;
         }
 
         .reaction-pill-group {
@@ -1052,10 +1056,9 @@
             min-width: 0;
         }
 
-        /* Время и галочки прочтения, когда переехали в ряд реакций —
-           прижаты к правому краю, без лишнего отступа слева */
+        /* Время и галочки прочтения, когда переехали в ряд реакций */
         .message-reactions-row .message-time {
-            margin: 0 0 0 6px;
+            margin: 0;
             flex-shrink: 0;
         }
 
@@ -2593,16 +2596,6 @@
         .message-with-image.message-incoming {
             background: var(--their-message-gradient) !important;
             border-bottom-left-radius: 8px;
-        }
-
-        .message-with-image.has-reactions {
-            padding-bottom: 26px !important;
-        }
-
-        .message-with-image .message-reactions-row {
-            left: 16px;
-            right: 16px;
-            bottom: -11px;
         }
 
         .message-with-image .message-content {
@@ -5359,10 +5352,11 @@ function getActiveElements() {
             if (!row) {
                 row = document.createElement('div');
                 row.className = 'message-reactions-row';
-                // Ряд реакций вешаем прямо на пузырь (не на .message-content),
-                // чтобы он абсолютно позиционировался и "выглядывал" за нижний
-                // край пузыря независимо от текста сообщения
-                messageElement.appendChild(row);
+                // Ряд реакций — дочерний элемент .message-content (а не .message
+                // напрямую): так браузер учитывает его реальную ширину (пилюля +
+                // время) при авто-расчёте ширины пузыря для коротких сообщений
+                const content = messageElement.querySelector('.message-content') || messageElement;
+                content.appendChild(row);
             }
             row.innerHTML = '';
 
