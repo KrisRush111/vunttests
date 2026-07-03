@@ -1072,7 +1072,9 @@
         }
 
         .reaction-pill-avatar {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             position: relative;
             width: 20px;
             height: 20px;
@@ -1081,6 +1083,12 @@
             overflow: hidden;
             box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
             flex-shrink: 0;
+            color: #ffffff;
+            font-size: 9px;
+            font-weight: 600;
+            line-height: 1;
+            text-align: center;
+            user-select: none;
         }
 
         .reaction-pill-avatar-img {
@@ -5351,6 +5359,16 @@ function getActiveElements() {
         const REACTION_EMOJIS_EXTRA = ['🎉', '❤️‍🔥', '🤩', '😻', '😢', '💯', '🤯', '😂', '🏆', '💔', '🤨', '😨', '🤓', '😎', '🦄', '💅', '👎', '🙉', '🙁', '👌', '😭', '💋', '💩', '🙈', '🙊', '🐳', '🌚', '🗿', '👀']
             .filter(e => e !== HEART_EMOJI);
 
+        function getReactionUserInitials(u) {
+            // Пытаемся собрать 1-2 буквы из имени пользователя, как в остальных аватарках приложения
+            const source = u.initials || u.name || u.nickname || u.first_name || u.username;
+            if (!source) return '?';
+            const parts = String(source).trim().split(/\s+/).filter(Boolean);
+            if (parts.length === 0) return '?';
+            const letters = parts.slice(0, 2).map(p => p[0]).join('');
+            return letters.toUpperCase();
+        }
+
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
             if (!reactions || reactions.length === 0) {
@@ -5393,6 +5411,8 @@ function getActiveElements() {
                         av.className = 'reaction-pill-avatar';
                         av.style.backgroundColor = u.avatar_background || '#0088cc';
 
+                        const initials = getReactionUserInitials(u);
+
                         if (u.avatar_url) {
                             const img = document.createElement('img');
                             img.className = 'reaction-pill-avatar-img';
@@ -5400,10 +5420,14 @@ function getActiveElements() {
                             img.alt = '';
                             img.loading = 'lazy';
                             img.onerror = function () {
-                                // Если фото не загрузилось — остаётся цветной кружок-заглушка
+                                // Если фото не загрузилось — показываем буквы вместо кружка-заглушки
                                 this.remove();
+                                av.textContent = initials;
                             };
                             av.appendChild(img);
+                        } else {
+                            // Нет аватарки — показываем инициалы на цветном фоне
+                            av.textContent = initials;
                         }
                         avatarsWrap.appendChild(av);
                     });
