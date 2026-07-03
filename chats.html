@@ -928,12 +928,19 @@
 
                 /* ====== Форма пузырей как в Telegram (все экраны) ====== */
         .message {
+            position: relative;
             max-width: 80%;
             padding: 6px 10px 5px 12px;
             margin-bottom: 3px;
             border-radius: 18px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.12);
             backdrop-filter: none !important;
+        }
+
+        /* Место под "выглядывающую" пилюлю реакции снизу пузыря (как в WhatsApp) */
+        .message.has-reactions {
+            padding-bottom: 21px;
+            margin-bottom: 13px;
         }
 
         @media (min-width: 768px) {
@@ -1018,12 +1025,38 @@
         /* ====== КОНЕЦ стилей пузырей ====== */
 
         /* ====== РЕАКЦИИ НА СООБЩЕНИЯ ====== */
+        /* Ряд реакций теперь "висит" на нижнем крае пузыря и частично
+           выступает за его границу — как в WhatsApp. Он абсолютно
+           спозиционирован внутри .message (у которого position: relative)
+           и растянут по всей ширине пузыря, чтобы пилюли были прижаты
+           к одному краю, а время/галочки — к противоположному. */
         .message-reactions-row {
+            position: absolute;
+            left: 10px;
+            right: 10px;
+            bottom: -11px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            margin: 0;
+            z-index: 2;
+            pointer-events: auto;
+        }
+
+        .reaction-pill-group {
             display: flex;
             flex-wrap: wrap;
+            align-items: center;
             gap: 4px;
-            flex-basis: 100%;
-            margin-top: 4px;
+            min-width: 0;
+        }
+
+        /* Время и галочки прочтения, когда переехали в ряд реакций —
+           прижаты к правому краю, без лишнего отступа слева */
+        .message-reactions-row .message-time {
+            margin: 0 0 0 6px;
+            flex-shrink: 0;
         }
 
         .reaction-pill {
@@ -1038,6 +1071,7 @@
             transition: transform 0.12s ease, background 0.15s ease;
             font-size: 15px;
             line-height: 1.4;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
         }
 
         .reaction-pill:active {
@@ -2559,6 +2593,16 @@
         .message-with-image.message-incoming {
             background: var(--their-message-gradient) !important;
             border-bottom-left-radius: 8px;
+        }
+
+        .message-with-image.has-reactions {
+            padding-bottom: 26px !important;
+        }
+
+        .message-with-image .message-reactions-row {
+            left: 16px;
+            right: 16px;
+            bottom: -11px;
         }
 
         .message-with-image .message-content {
@@ -5294,17 +5338,37 @@ function getActiveElements() {
 
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
+            const timeEl = messageElement.querySelector('.message-time');
+
             if (!reactions || reactions.length === 0) {
-                if (row) row.remove();
+                if (row) {
+                    // Возвращаем время с галочками обратно в текст сообщения,
+                    // как это было до появления реакции
+                    const content = messageElement.querySelector('.message-content');
+                    if (timeEl && content && !content.contains(timeEl)) {
+                        content.appendChild(timeEl);
+                    }
+                    row.remove();
+                }
+                messageElement.classList.remove('has-reactions');
                 return;
             }
+
+            messageElement.classList.add('has-reactions');
+
             if (!row) {
                 row = document.createElement('div');
                 row.className = 'message-reactions-row';
-                const content = messageElement.querySelector('.message-content') || messageElement;
-                content.appendChild(row);
+                // Ряд реакций вешаем прямо на пузырь (не на .message-content),
+                // чтобы он абсолютно позиционировался и "выглядывал" за нижний
+                // край пузыря независимо от текста сообщения
+                messageElement.appendChild(row);
             }
             row.innerHTML = '';
+
+            const pillsGroup = document.createElement('div');
+            pillsGroup.className = 'reaction-pill-group';
+
             reactions.forEach(r => {
                 const pill = document.createElement('div');
                 pill.className = 'reaction-pill' + (r.reacted_by_me ? ' reaction-pill-mine' : '');
@@ -5359,8 +5423,14 @@ function getActiveElements() {
                     vibrateBubble();
                     toggleReaction(messageElement.getAttribute('data-message-id'), r.emoji);
                 });
-                row.appendChild(pill);
+                pillsGroup.appendChild(pill);
             });
+
+            row.appendChild(pillsGroup);
+
+            // Время и галочки прочтения переезжают в один ряд с реакцией
+            // и прижимаются к противоположному краю — как в WhatsApp
+            if (timeEl) row.appendChild(timeEl);
         }
 
         function vibrateBubble() {
