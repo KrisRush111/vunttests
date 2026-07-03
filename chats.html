@@ -5363,6 +5363,16 @@ function getActiveElements() {
                 const content = messageElement.querySelector('.message-content') || messageElement;
                 content.appendChild(row);
             }
+
+            // Если набор реакций не поменялся с прошлого рендера — ничего не трогаем,
+            // чтобы не пересоздавать <img> аватарок (это вызывало их мигание/перезагрузку
+            // на каждом тике поллинга, даже когда реакции были те же самые).
+            const reactionsKey = JSON.stringify(reactions);
+            if (row.dataset.reactionsKey === reactionsKey) {
+                return;
+            }
+            row.dataset.reactionsKey = reactionsKey;
+
             row.innerHTML = '';
             reactions.forEach(r => {
                 const pill = document.createElement('div');
@@ -7609,13 +7619,16 @@ function stopProfileStatusPolling() {
                         const { messagesContainer: reactionMc } = getActiveElements();
                         let reactionsChanged = false;
                         newMessages.forEach(nm => {
-                            const target = reactionMc ? reactionMc.querySelector(`.message[data-message-id="${nm.id}"]`) : null;
-                            if (target) renderReactionsOnElement(target, nm.reactions);
                             const cached = currentMessages.find(m => String(m.id) === String(nm.id));
+                            // Рендерим (и трогаем DOM/аватарки) только если реакции реально изменились —
+                            // иначе на каждом тике поллинга аватарки будут мигать и перезагружаться зря.
+                            const changed = !cached || JSON.stringify(cached.reactions || []) !== JSON.stringify(nm.reactions || []);
+                            if (changed) {
+                                const target = reactionMc ? reactionMc.querySelector(`.message[data-message-id="${nm.id}"]`) : null;
+                                if (target) renderReactionsOnElement(target, nm.reactions);
+                                reactionsChanged = true;
+                            }
                             if (cached) {
-                                if (JSON.stringify(cached.reactions || []) !== JSON.stringify(nm.reactions || [])) {
-                                    reactionsChanged = true;
-                                }
                                 cached.reactions = nm.reactions;
                             }
                         });
