@@ -928,23 +928,12 @@
 
                 /* ====== Форма пузырей как в Telegram (все экраны) ====== */
         .message {
-            position: relative;
             max-width: 80%;
             padding: 6px 10px 5px 12px;
             margin-bottom: 3px;
             border-radius: 18px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.12);
             backdrop-filter: none !important;
-        }
-
-        /* Место под "выглядывающую" пилюлю реакции снизу пузыря (как в WhatsApp).
-           Ряд реакций остаётся в обычном потоке (иначе браузер перестаёт
-           учитывать его ширину при расчёте ширины пузыря на коротких
-           сообщениях) — "выглядывание" за нижний край делается через
-           transform на самом ряду, а здесь просто увеличиваем зазор до
-           следующего сообщения, чтобы пилюля не наезжала на него. */
-        .message.has-reactions {
-            margin-bottom: 19px;
         }
 
         @media (min-width: 768px) {
@@ -1029,37 +1018,12 @@
         /* ====== КОНЕЦ стилей пузырей ====== */
 
         /* ====== РЕАКЦИИ НА СООБЩЕНИЯ ====== */
-        /* Ряд реакций остаётся обычным (не absolute) дочерним элементом
-           .message-content — это важно: только так браузер учитывает его
-           реальную ширину (пилюля + время) при авто-расчёте ширины пузыря
-           для коротких сообщений. "Выглядывание" пилюли за нижний край
-           пузыря — чисто визуальный эффект через transform, который не
-           меняет зарезервированное место в потоке. */
         .message-reactions-row {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            flex-basis: 100%;
-            width: 100%;
-            margin-top: 4px;
-            transform: translateY(12px);
-            position: relative;
-            z-index: 2;
-        }
-
-        .reaction-pill-group {
-            display: flex;
             flex-wrap: wrap;
-            align-items: center;
             gap: 4px;
-            min-width: 0;
-        }
-
-        /* Время и галочки прочтения, когда переехали в ряд реакций */
-        .message-reactions-row .message-time {
-            margin: 0;
-            flex-shrink: 0;
+            flex-basis: 100%;
+            margin-top: 4px;
         }
 
         .reaction-pill {
@@ -1074,7 +1038,6 @@
             transition: transform 0.12s ease, background 0.15s ease;
             font-size: 15px;
             line-height: 1.4;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
         }
 
         .reaction-pill:active {
@@ -5331,38 +5294,17 @@ function getActiveElements() {
 
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
-            const timeEl = messageElement.querySelector('.message-time');
-
             if (!reactions || reactions.length === 0) {
-                if (row) {
-                    // Возвращаем время с галочками обратно в текст сообщения,
-                    // как это было до появления реакции
-                    const content = messageElement.querySelector('.message-content');
-                    if (timeEl && content && !content.contains(timeEl)) {
-                        content.appendChild(timeEl);
-                    }
-                    row.remove();
-                }
-                messageElement.classList.remove('has-reactions');
+                if (row) row.remove();
                 return;
             }
-
-            messageElement.classList.add('has-reactions');
-
             if (!row) {
                 row = document.createElement('div');
                 row.className = 'message-reactions-row';
-                // Ряд реакций — дочерний элемент .message-content (а не .message
-                // напрямую): так браузер учитывает его реальную ширину (пилюля +
-                // время) при авто-расчёте ширины пузыря для коротких сообщений
                 const content = messageElement.querySelector('.message-content') || messageElement;
                 content.appendChild(row);
             }
             row.innerHTML = '';
-
-            const pillsGroup = document.createElement('div');
-            pillsGroup.className = 'reaction-pill-group';
-
             reactions.forEach(r => {
                 const pill = document.createElement('div');
                 pill.className = 'reaction-pill' + (r.reacted_by_me ? ' reaction-pill-mine' : '');
@@ -5417,14 +5359,8 @@ function getActiveElements() {
                     vibrateBubble();
                     toggleReaction(messageElement.getAttribute('data-message-id'), r.emoji);
                 });
-                pillsGroup.appendChild(pill);
+                row.appendChild(pill);
             });
-
-            row.appendChild(pillsGroup);
-
-            // Время и галочки прочтения переезжают в один ряд с реакцией
-            // и прижимаются к противоположному краю — как в WhatsApp
-            if (timeEl) row.appendChild(timeEl);
         }
 
         function vibrateBubble() {
