@@ -1185,6 +1185,110 @@
             padding: 6px;
         }
 
+        /* ===== Контекстное меню сообщения (Скопировать / Удалить) ===== */
+        .message-action-menu {
+            position: fixed;
+            z-index: 5000;
+            min-width: 200px;
+            padding: 6px 0;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.85);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+            animation-duration: 0.16s;
+            overflow: hidden;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .message-action-menu {
+                background: rgba(48, 48, 50, 0.85);
+            }
+        }
+
+        .message-action-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            border: none;
+            background: none;
+            padding: 11px 16px;
+            font-size: 16px;
+            font-family: inherit;
+            color: var(--text-color, #1c1c1e);
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.1s ease;
+        }
+
+        .message-action-item:active,
+        .message-action-item:hover {
+            background: rgba(120, 120, 128, 0.16);
+        }
+
+        .message-action-item.destructive {
+            color: #ff3b30;
+        }
+
+        .message-action-item-icon {
+            font-size: 15px;
+            width: 18px;
+            text-align: center;
+            opacity: 0.8;
+            margin-left: 12px;
+        }
+
+        .message-action-divider {
+            height: 1px;
+            margin: 4px 0;
+            background: rgba(120, 120, 128, 0.24);
+        }
+
+        /* ===== Выбор варианта удаления (у себя / у всех) ===== */
+        .delete-choice-menu {
+            position: fixed;
+            z-index: 5001;
+            min-width: 240px;
+            padding: 6px 0;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.9);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+            animation-duration: 0.16s;
+            overflow: hidden;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .delete-choice-menu {
+                background: rgba(48, 48, 50, 0.9);
+            }
+        }
+
+        .delete-choice-item {
+            display: block;
+            width: 100%;
+            border: none;
+            background: none;
+            padding: 13px 16px;
+            font-size: 16px;
+            font-family: inherit;
+            color: #ff3b30;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.1s ease;
+        }
+
+        .delete-choice-item:active,
+        .delete-choice-item:hover {
+            background: rgba(120, 120, 128, 0.16);
+        }
+
+        .delete-choice-item + .delete-choice-item {
+            border-top: 1px solid rgba(120, 120, 128, 0.24);
+        }
+
         .quick-reaction-burst {
             position: fixed;
             z-index: 6000;
@@ -5502,7 +5606,7 @@ function getActiveElements() {
                 pressTimer = setTimeout(() => {
                     longPressTriggered = true;
                     if (navigator.vibrate) navigator.vibrate(15);
-                    openReactionPicker(messageElement, message);
+                    openMessageMenus(messageElement, message);
                 }, 450);
             };
 
@@ -5560,18 +5664,219 @@ function getActiveElements() {
             messageElement.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 if (navigator.vibrate) navigator.vibrate(15);
-                openReactionPicker(messageElement, message);
+                openMessageMenus(messageElement, message);
             });
         }
 
         let activeReactionPicker = null;
+        let activeMessageActionMenu = null;
+        let activeDeleteChoiceMenu = null;
 
         function closeReactionPicker() {
+            // Закрывает весь набор всплывающих меню сообщения: реакции, меню действий и выбор удаления
             if (activeReactionPicker) {
                 activeReactionPicker.remove();
                 activeReactionPicker = null;
-                document.removeEventListener('click', closeReactionPicker, true);
-                document.removeEventListener('scroll', closeReactionPicker, true);
+            }
+            if (activeMessageActionMenu) {
+                activeMessageActionMenu.remove();
+                activeMessageActionMenu = null;
+            }
+            if (activeDeleteChoiceMenu) {
+                activeDeleteChoiceMenu.remove();
+                activeDeleteChoiceMenu = null;
+            }
+            document.removeEventListener('click', closeReactionPicker, true);
+            document.removeEventListener('scroll', closeReactionPicker, true);
+        }
+
+        // Открывает вместе панель реакций и меню действий (Скопировать / Удалить) — как в Telegram
+        function openMessageMenus(messageElement, message) {
+            openReactionPicker(messageElement, message, { skipOutsideListeners: true });
+            openMessageActionMenu(messageElement, message);
+
+            setTimeout(() => {
+                document.addEventListener('click', closeReactionPicker, true);
+                document.addEventListener('scroll', closeReactionPicker, true);
+            }, 0);
+        }
+
+        function isTextMessage(message) {
+            return !message.is_image && !(message.content && isImageUrl(message.content));
+        }
+
+        function positionMessageActionMenu(menu, messageElement) {
+            const rect = messageElement.getBoundingClientRect();
+            const menuWidth = menu.offsetWidth;
+            const menuHeight = menu.offsetHeight;
+            const isOutgoing = messageElement.classList.contains('message-outgoing');
+
+            let left = isOutgoing ? (rect.right - menuWidth) : rect.left;
+            left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+
+            let top = rect.bottom + 8;
+            if (top + menuHeight > window.innerHeight - 8) {
+                top = Math.max(8, rect.top - menuHeight - 8);
+            }
+
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+        }
+
+        function openMessageActionMenu(messageElement, message) {
+            const menu = document.createElement('div');
+            menu.className = 'message-action-menu animate__animated animate__fadeInUp';
+
+            if (isTextMessage(message)) {
+                const copyBtn = document.createElement('button');
+                copyBtn.type = 'button';
+                copyBtn.className = 'message-action-item';
+                copyBtn.innerHTML = '<span>Скопировать</span><span class="message-action-item-icon"><i class="fa-solid fa-copy"></i></span>';
+                copyBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    copyMessageText(message);
+                    closeReactionPicker();
+                });
+                menu.appendChild(copyBtn);
+                menu.appendChild(Object.assign(document.createElement('div'), { className: 'message-action-divider' }));
+            }
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'message-action-item destructive';
+            deleteBtn.innerHTML = '<span>Удалить</span><span class="message-action-item-icon"><i class="fa-solid fa-trash-can"></i></span>';
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openDeleteChoiceMenu(messageElement, message);
+            });
+            menu.appendChild(deleteBtn);
+
+            document.body.appendChild(menu);
+            positionMessageActionMenu(menu, messageElement);
+            activeMessageActionMenu = menu;
+        }
+
+        function copyMessageText(message) {
+            const text = message.content || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(() => {});
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } catch {}
+                ta.remove();
+            }
+        }
+
+        function getOtherParticipantName() {
+            if (!currentChat || !currentChat.participants) return 'собеседника';
+            const other = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            return (other && (other.nickname || other.name)) || currentChat.name || 'собеседника';
+        }
+
+        function positionDeleteChoiceMenu(menu, messageElement) {
+            const rect = messageElement.getBoundingClientRect();
+            const menuWidth = menu.offsetWidth;
+            const menuHeight = menu.offsetHeight;
+            const isOutgoing = messageElement.classList.contains('message-outgoing');
+
+            let left = isOutgoing ? (rect.right - menuWidth) : rect.left;
+            left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+
+            let top = rect.bottom + 8;
+            if (top + menuHeight > window.innerHeight - 8) {
+                top = Math.max(8, rect.top - menuHeight - 8);
+            }
+
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+        }
+
+        function openDeleteChoiceMenu(messageElement, message) {
+            // Закрываем панель реакций и меню действий, но не сбрасываем возможность
+            // повторно открыть выбор удаления, поэтому чистим только их вручную
+            if (activeReactionPicker) { activeReactionPicker.remove(); activeReactionPicker = null; }
+            if (activeMessageActionMenu) { activeMessageActionMenu.remove(); activeMessageActionMenu = null; }
+
+            const menu = document.createElement('div');
+            menu.className = 'delete-choice-menu animate__animated animate__fadeInUp';
+
+            const canDeleteForEveryone = !!message.is_me;
+
+            if (canDeleteForEveryone) {
+                const everyoneBtn = document.createElement('button');
+                everyoneBtn.type = 'button';
+                everyoneBtn.className = 'delete-choice-item';
+                everyoneBtn.textContent = `Удалить у меня и у ${getOtherParticipantName()}`;
+                everyoneBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    performDeleteMessage(messageElement, message, 'everyone');
+                });
+                menu.appendChild(everyoneBtn);
+            }
+
+            const meBtn = document.createElement('button');
+            meBtn.type = 'button';
+            meBtn.className = 'delete-choice-item';
+            meBtn.textContent = 'Удалить у меня';
+            meBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                performDeleteMessage(messageElement, message, 'me');
+            });
+            menu.appendChild(meBtn);
+
+            document.body.appendChild(menu);
+            positionDeleteChoiceMenu(menu, messageElement);
+            activeDeleteChoiceMenu = menu;
+
+            setTimeout(() => {
+                document.addEventListener('click', closeReactionPicker, true);
+                document.addEventListener('scroll', closeReactionPicker, true);
+            }, 0);
+        }
+
+        async function performDeleteMessage(messageElement, message, mode) {
+            closeReactionPicker();
+            if (!currentChat) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/delete_message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: currentChat.id,
+                        message_id: message.id,
+                        platform_user_id: userData.platform_user_id,
+                        mode
+                    }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    console.error('deleteMessage error', data.error);
+                    return;
+                }
+
+                // Убираем сообщение из локального состояния и DOM для текущего пользователя
+                // (для режима 'everyone' у собеседника оно пропадёт при следующем обновлении списка,
+                // так как его уже не будет в ответе /get_messages)
+                currentMessages = currentMessages.filter(m => String(m.id) !== String(message.id));
+                if (messageElement && messageElement.parentNode) {
+                    messageElement.style.transition = 'opacity 0.15s ease';
+                    messageElement.style.opacity = '0';
+                    setTimeout(() => messageElement.remove(), 150);
+                }
+
+                if (currentChat) {
+                    messagesCache[currentChat.id] = currentMessages;
+                    saveMessagesToDB(currentChat.id, currentMessages);
+                }
+            } catch (e) {
+                console.error('deleteMessage error', e);
             }
         }
 
@@ -5610,7 +5915,7 @@ function getActiveElements() {
             picker.style.top = `${top}px`;
         }
 
-        function openReactionPicker(messageElement, message) {
+        function openReactionPicker(messageElement, message, options = {}) {
             closeReactionPicker();
 
             const picker = document.createElement('div');
@@ -5635,14 +5940,17 @@ function getActiveElements() {
 
             activeReactionPicker = picker;
 
-            setTimeout(() => {
-                document.addEventListener('click', closeReactionPicker, true);
-                document.addEventListener('scroll', closeReactionPicker, true);
-            }, 0);
+            if (!options.skipOutsideListeners) {
+                setTimeout(() => {
+                    document.addEventListener('click', closeReactionPicker, true);
+                    document.addEventListener('scroll', closeReactionPicker, true);
+                }, 0);
+            }
         }
 
         function openExpandedReactionPicker(messageElement, message) {
-            closeReactionPicker();
+            // Убираем только маленькую панель реакций, меню действий (Скопировать/Удалить) оставляем открытым
+            if (activeReactionPicker) { activeReactionPicker.remove(); activeReactionPicker = null; }
 
             const picker = document.createElement('div');
             picker.className = 'reaction-picker reaction-picker-expanded animate__animated animate__fadeInUp';
