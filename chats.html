@@ -5839,6 +5839,18 @@ function getActiveElements() {
             }, 0);
         }
 
+        async function deleteMessageFromDB(chatId, messageId) {
+            // Физически убираем запись из локального кэша (IndexedDB), а не только из
+            // текущего массива в памяти — иначе saveMessagesToDB (которая делает только put)
+            // не тронет старую запись, и при следующем заходе в чат сообщение снова
+            // мелькнёт на экране до завершения фоновой синхронизации с сервером.
+            try {
+                const db = await openDB();
+                const tx = db.transaction('messages', 'readwrite');
+                tx.objectStore('messages').delete(messageId);
+            } catch (e) {}
+        }
+
         async function performDeleteMessage(messageElement, message, mode) {
             closeReactionPicker();
             if (!currentChat) return;
@@ -5873,7 +5885,7 @@ function getActiveElements() {
 
                 if (currentChat) {
                     messagesCache[currentChat.id] = currentMessages;
-                    saveMessagesToDB(currentChat.id, currentMessages);
+                    await deleteMessageFromDB(currentChat.id, message.id);
                 }
             } catch (e) {
                 console.error('deleteMessage error', e);
