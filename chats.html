@@ -3176,11 +3176,40 @@
             font-size: 13px;
             font-weight: 500;
             width: max-content;
-            max-width: 85vw;
+            max-width: min(85vw, 320px);
             text-align: left;
             box-shadow: 0 4px 16px rgba(238, 104, 111, 0.35);
             z-index: 99;
             pointer-events: none;
+            opacity: 0;
+        }
+
+        /* Вход: лёгкое появление сверху вниз, центр всегда сохраняется (translateX(-50%) в каждом кадре) */
+        @keyframes charLimitToastIn {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        /* Уход: только затухание, transform не анимируется вовсе — позиция не смещается */
+        @keyframes charLimitToastOut {
+            from { opacity: 1; }
+            to   { opacity: 0; }
+        }
+
+        .char-limit-toast.toast-in {
+            animation: charLimitToastIn 0.25s var(--animation-timing) forwards;
+        }
+
+        .char-limit-toast.toast-out {
+            /* transform фиксируется на конечном состоянии входа и больше не трогается */
+            transform: translateX(-50%) translateY(0);
+            animation: charLimitToastOut 0.3s ease forwards;
         }
 
         .char-limit-toast i {
@@ -7738,7 +7767,7 @@ function getActiveElements() {
             wrapper.classList.add('limit-exceeded', 'animate__animated', 'animate__shakeX');
 
             const toast = document.createElement('div');
-            toast.className = 'char-limit-toast animate__animated animate__fadeInDown';
+            toast.className = 'char-limit-toast toast-in';
             toast.innerHTML = `
                 <i class="fas fa-times-circle"></i>
                 <div class="char-limit-toast-text">
@@ -7746,7 +7775,27 @@ function getActiveElements() {
                     <span class="char-limit-toast-count">${currentLength} / ${MAX_MESSAGE_LENGTH}</span>
                 </div>
             `;
+            // Сбрасываем возможную ручную коррекцию центрирования от предыдущего показа
+            toast.style.left = '50%';
             wrapper.appendChild(toast);
+
+            // Если тост не помещается по ширине экрана — подвинуть его так, чтобы он остался
+            // в пределах viewport, но при этом не трогать transform (чтобы анимация ухода
+            // не смещала его — только затухала).
+            const clampToastToViewport = () => {
+                const rect = toast.getBoundingClientRect();
+                const edgeMargin = 8;
+                let shift = 0;
+                if (rect.right > window.innerWidth - edgeMargin) {
+                    shift = (window.innerWidth - edgeMargin) - rect.right;
+                } else if (rect.left < edgeMargin) {
+                    shift = edgeMargin - rect.left;
+                }
+                if (shift !== 0) {
+                    toast.style.left = `calc(50% + ${shift}px)`;
+                }
+            };
+            requestAnimationFrame(clampToastToViewport);
 
             setTimeout(() => {
                 wrapper.classList.remove('animate__shakeX');
@@ -7757,8 +7806,8 @@ function getActiveElements() {
             }, 2000);
 
             setTimeout(() => {
-                toast.classList.remove('animate__fadeInDown');
-                toast.classList.add('animate__fadeOutUp');
+                toast.classList.remove('toast-in');
+                toast.classList.add('toast-out');
                 setTimeout(() => toast.remove(), 300);
             }, 2500);
         }
