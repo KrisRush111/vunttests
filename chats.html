@@ -1289,6 +1289,74 @@
             border-top: 1px solid rgba(120, 120, 128, 0.24);
         }
 
+        /* ===== Тост "Скопировано" с анимированной галочкой ===== */
+        .copy-toast {
+            position: fixed;
+            top: 90px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-10px) scale(0.94);
+            z-index: 6000;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 10px 18px;
+            border-radius: 14px;
+            background: rgba(28, 28, 30, 0.92);
+            color: #fff;
+            font-size: 15px;
+            font-weight: 500;
+            white-space: nowrap;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .copy-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) scale(1);
+        }
+
+        .copy-toast-check {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .copy-toast-check circle {
+            stroke: #34c759;
+            stroke-width: 2;
+            fill: none;
+            stroke-dasharray: 63;
+            stroke-dashoffset: 63;
+        }
+
+        .copy-toast-check path {
+            stroke: #34c759;
+            stroke-width: 2.5;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 20;
+            stroke-dashoffset: 20;
+        }
+
+        .copy-toast.show .copy-toast-check circle {
+            animation: copyCheckCircle 0.4s ease forwards;
+        }
+
+        .copy-toast.show .copy-toast-check path {
+            animation: copyCheckPath 0.3s ease 0.32s forwards;
+        }
+
+        @keyframes copyCheckCircle {
+            to { stroke-dashoffset: 0; }
+        }
+
+        @keyframes copyCheckPath {
+            to { stroke-dashoffset: 0; }
+        }
+
         .quick-reaction-burst {
             position: fixed;
             z-index: 6000;
@@ -5756,6 +5824,31 @@ function getActiveElements() {
             activeMessageActionMenu = menu;
         }
 
+        function showCopyToast() {
+            const existing = document.querySelector('.copy-toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'copy-toast';
+            toast.innerHTML = `
+                <svg class="copy-toast-check" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M7 12.5l3 3 7-7"></path>
+                </svg>
+                <span>Скопировано</span>
+            `;
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => toast.classList.add('show'));
+            });
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 250);
+            }, 1400);
+        }
+
         function copyMessageText(message) {
             const text = message.content || '';
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -5770,6 +5863,7 @@ function getActiveElements() {
                 try { document.execCommand('copy'); } catch {}
                 ta.remove();
             }
+            showCopyToast();
         }
 
         function getOtherParticipantName() {
