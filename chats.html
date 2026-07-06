@@ -991,6 +991,7 @@
             flex: 1;
             min-width: 0;
             word-break: break-word;
+            white-space: pre-wrap;
         }
 
         .message-outgoing .message-time {
@@ -2781,6 +2782,7 @@
             color: inherit;
             opacity: 0.9;
             line-height: 1.4;
+            white-space: pre-wrap;
         }
 
         .message-with-image .image-caption {
@@ -3130,9 +3132,9 @@
 
         .message-input-wrapper {
             display: flex;
-            align-items: center;
+            align-items: flex-end;
             gap: 8px;
-            border-radius: 50px;
+            border-radius: 24px;
             padding: 10px 14px 8px 18px;
             max-width: 380px;
             width: 85%;
@@ -3159,6 +3161,11 @@
             color: #000;
             border-radius: 0;
             background: transparent;
+            resize: none;
+            font-family: inherit;
+            line-height: 1.35;
+            max-height: 120px;
+            overflow-y: auto;
         }
 
         .send-button {
@@ -4076,7 +4083,7 @@
                     <button id="attachButtonDesktop" class="attach-button">
                         <i class="fas fa-paperclip"></i>
                     </button>
-                    <input type="text" id="messageInputDesktop" class="message-input" placeholder="Сообщение">
+                    <textarea id="messageInputDesktop" class="message-input" placeholder="Сообщение" rows="1"></textarea>
                     <button id="sendMessageButtonDesktop" class="send-button">
                         <i class="fas fa-paper-plane"></i>
                     </button>
@@ -4214,7 +4221,7 @@
                 <button id="attachButtonMobile" class="attach-button">
                     <i class="fas fa-paperclip"></i>
                 </button>
-                <input type="text" id="messageInputMobile" class="message-input" placeholder="Сообщение">
+                <textarea id="messageInputMobile" class="message-input" placeholder="Сообщение" rows="1"></textarea>
                 <button id="sendMessageButtonMobile" class="send-button">
                     <i class="fas fa-paper-plane"></i>
                 </button>
@@ -7655,6 +7662,11 @@ function getActiveElements() {
             }
         }
 
+        function autoResizeMessageInput(input) {
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        }
+
         async function sendMessage() {
             const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
             const content = messageInput.value.trim();
@@ -7665,6 +7677,7 @@ function getActiveElements() {
             
             const messageContent = content;
             messageInput.value = '';
+            autoResizeMessageInput(messageInput);
             
             const tempMessageId = `temp_${Date.now()}`;
             const tempMessage = {
@@ -8784,12 +8797,17 @@ function stopProfileStatusPolling() {
 
             if (sendMessageButton && messageInput) {
                 sendMessageButton.addEventListener('click', sendMessage);
-                messageInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
+
+                // Enter всегда просто переносит строку — сообщение отправляется
+                // только по нажатию на кнопку отправки.
+                messageInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.stopPropagation();
                     }
                 });
+
+                autoResizeMessageInput(messageInput);
+                messageInput.addEventListener('input', () => autoResizeMessageInput(messageInput));
                 
                 messageInput.addEventListener('focus', () => {
                     setTimeout(() => {
