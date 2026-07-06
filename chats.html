@@ -4491,6 +4491,9 @@
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        // Id ещё не отправленных (temp_) сообщений, которые пользователь уже попросил удалить.
+        // Когда сервер подтвердит отправку и пришлёт настоящий id — сразу удаляем его без показа сообщения.
+        const pendingDeleteTempIds = new Set();
         let userData = null;
         let currentViewedUser = null;
 
@@ -5534,7 +5537,26 @@ function getActiveElements() {
                 
                 const messageData = await messageResponse.json();
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
-                
+
+                // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
+                // тихо удаляем его на сервере, ничего не показывая в UI.
+                if (pendingDeleteTempIds.has(tempMessageId)) {
+                    pendingDeleteTempIds.delete(tempMessageId);
+                    if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+                    fetch(`${SERVER_URL}/delete_message`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chat_id: actualChatId,
+                            message_id: messageData.message_id,
+                            platform_user_id: userData.platform_user_id,
+                            mode: 'everyone'
+                        }),
+                        credentials: 'include'
+                    }).catch(e => console.error('deleteMessage error', e));
+                    return;
+                }
+
                 const newMessage = {
                     id: messageData.message_id,
                     sender_id: userData.platform_user_id,
@@ -6450,33 +6472,23 @@ function getActiveElements() {
             }, 0);
         }
 
-        async function performBatchDelete(mode) {
+        function performBatchDelete(mode) {
             if (!currentChat) return;
 
+            const chatId = currentChat.id;
             const idKeys = Array.from(selectedMessageIds);
-            let messagesToDelete = idKeys.map(id => getMessageById(id)).filter(Boolean);
+            const messagesToDelete = idKeys.map(id => getMessageById(id)).filter(Boolean);
             if (messagesToDelete.length === 0) { exitSelectionMode(); return; }
 
-            // Сообщения, которые ещё отправляются (temp_-id), пропускаем — сервер их не знает
-            const stillSending = messagesToDelete.some(m => isTempMessageId(m.id));
-            messagesToDelete = messagesToDelete.filter(m => !isTempMessageId(m.id));
-            if (stillSending) {
-                showSimpleToast('Некоторые сообщения ещё отправляются, подождите немного');
-            }
-            if (messagesToDelete.length === 0) { exitSelectionMode(); return; }
+            const allKeys = messagesToDelete.map(m => String(m.id));
 
-            const results = await Promise.all(messagesToDelete.map(m => deleteMessageOnServer(m.id, mode)));
-            const successful = messagesToDelete.filter((m, i) => results[i]);
-            const successfulKeys = successful.map(m => String(m.id));
-
-            currentMessages = currentMessages.filter(m => !successfulKeys.includes(String(m.id)));
-            messagesCache[currentChat.id] = currentMessages;
-            // Используем оригинальный m.id (а не строковый ключ) — тип должен совпадать
-            // с тем, что был записан в IndexedDB (keyPath 'id'), иначе delete() тихо не сработает
-            await Promise.all(successful.map(m => deleteMessageFromDB(currentChat.id, m.id)));
+            // Мгновенно убираем все выбранные сообщения из UI и локального состояния —
+            // без ожидания ответа сервера и без сообщений о том, что что-то ещё отправляется.
+            currentMessages = currentMessages.filter(m => !allKeys.includes(String(m.id)));
+            messagesCache[chatId] = currentMessages;
 
             const { messagesContainer } = getActiveElements();
-            successfulKeys.forEach(id => {
+            allKeys.forEach(id => {
                 const bubble = messagesContainer.querySelector(`.message[data-message-id="${id}"]`);
                 if (bubble) {
                     const row = bubble.closest('.message-select-row');
@@ -6485,58 +6497,74 @@ function getActiveElements() {
             });
 
             exitSelectionMode();
+
+            // Сообщения, которые ещё отправляются (temp_-id): реального id в БД пока нет.
+            // Как только отправка завершится и придёт настоящий id — удалим его сразу же в фоне.
+            messagesToDelete.filter(m => isTempMessageId(m.id))
+                .forEach(m => pendingDeleteTempIds.add(m.id));
+
+            const realMessages = messagesToDelete.filter(m => !isTempMessageId(m.id));
+            if (realMessages.length === 0) return;
+
+            // Используем оригинальный m.id (а не строковый ключ) — тип должен совпадать
+            // с тем, что был записан в IndexedDB (keyPath 'id'), иначе delete() тихо не сработает
+            realMessages.forEach(m => {
+                deleteMessageFromDB(chatId, m.id).catch(e => console.error('deleteMessageFromDB error', e));
+            });
+
+            // Запросы к серверу уходят в фоне, UI уже обновлён.
+            realMessages.forEach(m => {
+                deleteMessageOnServer(m.id, mode).catch(e => console.error('deleteMessage error', e));
+            });
         }
 
         function isTempMessageId(id) {
             return typeof id === 'string' && id.startsWith('temp_');
         }
 
-        async function performDeleteMessage(messageElement, message, mode) {
+        function performDeleteMessage(messageElement, message, mode) {
             closeReactionPicker();
             if (!currentChat) return;
 
-            // Сообщение ещё отправляется (оптимистичный UI): настоящего id в БД пока нет,
-            // отправлять запрос на сервер бессмысленно — он вернёт ошибку.
+            const chatId = currentChat.id;
+
+            // Сначала — мгновенно убираем сообщение из UI и локального состояния,
+            // не дожидаясь ответа сервера. Никаких тостов про ожидание не показываем.
+            currentMessages = currentMessages.filter(m => String(m.id) !== String(message.id));
+            messagesCache[chatId] = currentMessages;
+            if (messageElement && messageElement.parentNode) {
+                messageElement.remove();
+            }
+
+            // Сообщение ещё отправляется (оптимистичный UI, temp_-id): настоящего id в БД пока нет.
+            // Запоминаем намерение удалить — как только придёт реальный id, удалим его сразу же,
+            // без какого-либо сообщения пользователю.
             if (isTempMessageId(message.id)) {
-                showSimpleToast('Сообщение ещё отправляется, подождите немного');
+                pendingDeleteTempIds.add(message.id);
                 return;
             }
 
-            try {
-                const response = await fetch(`${SERVER_URL}/delete_message`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: currentChat.id,
-                        message_id: message.id,
-                        platform_user_id: userData.platform_user_id,
-                        mode
-                    }),
-                    credentials: 'include'
-                });
-                const data = await response.json();
-                if (data.status !== 'success') {
-                    console.error('deleteMessage error', data.error);
-                    return;
-                }
+            deleteMessageFromDB(chatId, message.id).catch(e => console.error('deleteMessageFromDB error', e));
 
-                // Убираем сообщение из локального состояния и DOM для текущего пользователя
-                // (для режима 'everyone' у собеседника оно пропадёт при следующем обновлении списка,
-                // так как его уже не будет в ответе /get_messages)
-                currentMessages = currentMessages.filter(m => String(m.id) !== String(message.id));
-                if (messageElement && messageElement.parentNode) {
-                    messageElement.style.transition = 'opacity 0.15s ease';
-                    messageElement.style.opacity = '0';
-                    setTimeout(() => messageElement.remove(), 150);
-                }
-
-                if (currentChat) {
-                    messagesCache[currentChat.id] = currentMessages;
-                    await deleteMessageFromDB(currentChat.id, message.id);
-                }
-            } catch (e) {
-                console.error('deleteMessage error', e);
-            }
+            // Запрос к серверу уходит в фоне — UI уже обновлён и ждать нечего.
+            fetch(`${SERVER_URL}/delete_message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    message_id: message.id,
+                    platform_user_id: userData.platform_user_id,
+                    mode
+                }),
+                credentials: 'include'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status !== 'success') {
+                        console.error('deleteMessage error', data.error);
+                    }
+                })
+                .catch(e => console.error('deleteMessage error', e));
         }
 
         function makeReactionEmojiButton(messageElement, emoji) {
@@ -7950,7 +7978,25 @@ function getActiveElements() {
                     
                     const messageData = await messageResponse.json();
                     if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить сообщение');
-                    
+
+                    // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
+                    // тихо удаляем его на сервере, ничего не показывая в UI.
+                    if (pendingDeleteTempIds.has(tempMessageId)) {
+                        pendingDeleteTempIds.delete(tempMessageId);
+                        fetch(`${SERVER_URL}/delete_message`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                chat_id: actualChatId,
+                                message_id: messageData.message_id,
+                                platform_user_id: userData.platform_user_id,
+                                mode: 'everyone'
+                            }),
+                            credentials: 'include'
+                        }).catch(e => console.error('deleteMessage error', e));
+                        return;
+                    }
+
                     const index = currentMessages.findIndex(msg => msg.id === tempMessageId);
                     if (index !== -1) {
                         currentMessages[index] = {
