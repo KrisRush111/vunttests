@@ -6040,6 +6040,33 @@ function getActiveElements() {
             activeMessageActionMenu = menu;
         }
 
+        function showSimpleToast(text) {
+            const existing = document.querySelector('.copy-toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'copy-toast';
+            toast.innerHTML = `<span>${text}</span>`;
+            document.body.appendChild(toast);
+
+            const { chatModal } = getActiveElements();
+            if (isDesktop && chatModal) {
+                const rect = chatModal.getBoundingClientRect();
+                toast.style.left = `${rect.left + rect.width / 2}px`;
+            } else {
+                toast.style.left = '50%';
+            }
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => toast.classList.add('show'));
+            });
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 250);
+            }, 1400);
+        }
+
         function showCopyToast() {
             const existing = document.querySelector('.copy-toast');
             if (existing) existing.remove();
@@ -6427,7 +6454,15 @@ function getActiveElements() {
             if (!currentChat) return;
 
             const idKeys = Array.from(selectedMessageIds);
-            const messagesToDelete = idKeys.map(id => getMessageById(id)).filter(Boolean);
+            let messagesToDelete = idKeys.map(id => getMessageById(id)).filter(Boolean);
+            if (messagesToDelete.length === 0) { exitSelectionMode(); return; }
+
+            // Сообщения, которые ещё отправляются (temp_-id), пропускаем — сервер их не знает
+            const stillSending = messagesToDelete.some(m => isTempMessageId(m.id));
+            messagesToDelete = messagesToDelete.filter(m => !isTempMessageId(m.id));
+            if (stillSending) {
+                showSimpleToast('Некоторые сообщения ещё отправляются, подождите немного');
+            }
             if (messagesToDelete.length === 0) { exitSelectionMode(); return; }
 
             const results = await Promise.all(messagesToDelete.map(m => deleteMessageOnServer(m.id, mode)));
@@ -6452,9 +6487,20 @@ function getActiveElements() {
             exitSelectionMode();
         }
 
+        function isTempMessageId(id) {
+            return typeof id === 'string' && id.startsWith('temp_');
+        }
+
         async function performDeleteMessage(messageElement, message, mode) {
             closeReactionPicker();
             if (!currentChat) return;
+
+            // Сообщение ещё отправляется (оптимистичный UI): настоящего id в БД пока нет,
+            // отправлять запрос на сервер бессмысленно — он вернёт ошибку.
+            if (isTempMessageId(message.id)) {
+                showSimpleToast('Сообщение ещё отправляется, подождите немного');
+                return;
+            }
 
             try {
                 const response = await fetch(`${SERVER_URL}/delete_message`, {
