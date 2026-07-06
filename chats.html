@@ -3152,6 +3152,37 @@
             border-color: var(--telegram-blue);
         }
 
+        .message-input-wrapper.limit-exceeded {
+            border: 1px solid var(--telegram-destructive) !important;
+            box-shadow: 0 0 0 3px rgba(238, 104, 111, 0.35), 0 4px 20px rgba(238, 104, 111, 0.25) !important;
+        }
+
+        .char-limit-toast {
+            position: absolute;
+            bottom: calc(100% + 10px);
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--telegram-destructive);
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 14px;
+            font-size: 13px;
+            font-weight: 500;
+            max-width: 90%;
+            text-align: center;
+            box-shadow: 0 4px 16px rgba(238, 104, 111, 0.35);
+            z-index: 99;
+            pointer-events: none;
+        }
+
+        .char-limit-toast i {
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
         .message-input {
             flex: 1;
             border: none;
@@ -7669,11 +7700,52 @@ function getActiveElements() {
             input.style.height = Math.min(input.scrollHeight, 120) + 'px';
         }
 
+        const MAX_MESSAGE_LENGTH = 2096;
+
+        function showCharLimitExceeded(messageInput) {
+            const wrapper = messageInput.closest('.message-input-wrapper');
+            if (!wrapper) return;
+
+            const container = wrapper.parentElement;
+
+            // Убираем предыдущий тост, если он ещё не исчез
+            const existingToast = container.querySelector('.char-limit-toast');
+            if (existingToast) existingToast.remove();
+
+            wrapper.classList.remove('animate__animated', 'animate__shakeX');
+            void wrapper.offsetWidth; // перезапуск анимации
+            wrapper.classList.add('limit-exceeded', 'animate__animated', 'animate__shakeX');
+
+            const toast = document.createElement('div');
+            toast.className = 'char-limit-toast animate__animated animate__fadeInDown';
+            toast.innerHTML = `<i class="fas fa-times-circle"></i><span>Превышен лимит символов (макс. ${MAX_MESSAGE_LENGTH})</span>`;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                wrapper.classList.remove('animate__shakeX');
+            }, 600);
+
+            setTimeout(() => {
+                wrapper.classList.remove('limit-exceeded');
+            }, 2000);
+
+            setTimeout(() => {
+                toast.classList.remove('animate__fadeInDown');
+                toast.classList.add('animate__fadeOutUp');
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
         async function sendMessage() {
             const { messageInput, sendMessageButton, messagesContainer, noMessages } = getActiveElements();
             const content = messageInput.value.trim();
             
             if (!content || !currentChat || isSendingMessage) return;
+
+            if (content.length > MAX_MESSAGE_LENGTH) {
+                showCharLimitExceeded(messageInput);
+                return;
+            }
             
             isSendingMessage = true;
             
