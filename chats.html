@@ -1358,6 +1358,114 @@
             to { stroke-dashoffset: 0; }
         }
 
+        /* ===== Режим множественного выбора сообщений ===== */
+        .message-select-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            width: 100%;
+            animation: fadeIn 0.15s ease;
+        }
+
+        .message-select-row .message {
+            align-self: flex-start !important;
+            margin-bottom: 4px !important;
+        }
+
+        .message-select-circle {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            margin-bottom: 8px;
+            border-radius: 50%;
+            border: 2px solid rgba(120, 120, 128, 0.5);
+            background: rgba(120, 120, 128, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+
+        .message-select-row.selected .message-select-circle {
+            background: #34aadc;
+            border-color: #34aadc;
+        }
+
+        .message-select-circle svg {
+            width: 14px;
+            height: 14px;
+            stroke: #fff;
+            fill: none;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            opacity: 0;
+            transform: scale(0.4);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+
+        .message-select-row.selected .message-select-circle svg {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .selection-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 0 4px;
+        }
+
+        .selection-header .selection-cancel-btn,
+        .selection-header .selection-count {
+            background: none;
+            border: none;
+            font-size: 16px;
+            color: var(--telegram-blue, #34aadc);
+            cursor: pointer;
+            font-family: inherit;
+            padding: 6px 4px;
+        }
+
+        .selection-header .selection-count {
+            font-weight: 600;
+            color: inherit;
+            cursor: default;
+        }
+
+        .selection-bottom-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 10px 16px;
+            border-top: 1px solid rgba(120, 120, 128, 0.24);
+        }
+
+        .selection-delete-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            background: none;
+            color: #ff3b30;
+            font-size: 19px;
+            cursor: pointer;
+            transition: background 0.15s ease, opacity 0.15s ease;
+        }
+
+        .selection-delete-btn:active {
+            background: rgba(255, 59, 48, 0.12);
+        }
+
+        .selection-delete-btn.disabled {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
         .quick-reaction-burst {
             position: fixed;
             z-index: 6000;
@@ -5820,6 +5928,19 @@ function getActiveElements() {
             });
             menu.appendChild(deleteBtn);
 
+            menu.appendChild(Object.assign(document.createElement('div'), { className: 'message-action-divider' }));
+
+            const selectBtn = document.createElement('button');
+            selectBtn.type = 'button';
+            selectBtn.className = 'message-action-item';
+            selectBtn.innerHTML = '<span>Выбрать</span><span class="message-action-item-icon"><i class="fa-solid fa-circle-check"></i></span>';
+            selectBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeReactionPicker();
+                enterSelectionMode(message.id);
+            });
+            menu.appendChild(selectBtn);
+
             document.body.appendChild(menu);
             positionMessageActionMenu(menu, messageElement);
             activeMessageActionMenu = menu;
@@ -5954,6 +6075,284 @@ function getActiveElements() {
                 const tx = db.transaction('messages', 'readwrite');
                 tx.objectStore('messages').delete(messageId);
             } catch (e) {}
+        }
+
+        // ================= МНОЖЕСТВЕННЫЙ ВЫБОР СООБЩЕНИЙ =================
+        let selectionModeActive = false;
+        let selectedMessageIds = new Set();
+        let _savedHeaderEl = null;
+        let _hiddenHeaderChildren = [];
+        let _selectionHeaderEl = null;
+        let _savedInputContainerEl = null;
+        let _selectionBottomBar = null;
+
+        function makeSelectCircle() {
+            const circle = document.createElement('div');
+            circle.className = 'message-select-circle';
+            circle.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"></polyline></svg>';
+            return circle;
+        }
+
+        // Оборачивает каждое видимое сообщение в строку с кружком выбора слева,
+        // не трогая при этом сам элемент .message (сохраняются все его обработчики и данные)
+        function applySelectionWrappers() {
+            const { messagesContainer } = getActiveElements();
+            if (!messagesContainer) return;
+            Array.from(messagesContainer.children).forEach(bubble => {
+                if (!bubble.classList || !bubble.classList.contains('message')) return;
+
+                const row = document.createElement('div');
+                row.className = 'message-select-row';
+                const msgId = bubble.getAttribute('data-message-id');
+                if (selectedMessageIds.has(String(msgId))) row.classList.add('selected');
+
+                bubble.parentNode.insertBefore(row, bubble);
+                row.appendChild(makeSelectCircle());
+                row.appendChild(bubble);
+
+                row.addEventListener('click', (e) => {
+                    if (!selectionModeActive) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleMessageSelection(msgId, row);
+                }, true);
+            });
+        }
+
+        function removeSelectionWrappers() {
+            const { messagesContainer } = getActiveElements();
+            if (!messagesContainer) return;
+            messagesContainer.querySelectorAll('.message-select-row').forEach(row => {
+                const bubble = row.querySelector('.message');
+                if (bubble) row.parentNode.insertBefore(bubble, row);
+                row.remove();
+            });
+        }
+
+        function toggleMessageSelection(messageId, row) {
+            const key = String(messageId);
+            if (selectedMessageIds.has(key)) {
+                selectedMessageIds.delete(key);
+                row.classList.remove('selected');
+            } else {
+                selectedMessageIds.add(key);
+                row.classList.add('selected');
+            }
+            updateSelectionHeader();
+        }
+
+        function updateSelectionHeader() {
+            if (_selectionHeaderEl) {
+                const countEl = _selectionHeaderEl.querySelector('.selection-count');
+                if (countEl) countEl.textContent = `Выбрано: ${selectedMessageIds.size}`;
+            }
+            if (_selectionBottomBar) {
+                const deleteBtn = _selectionBottomBar.querySelector('.selection-delete-btn');
+                if (deleteBtn) deleteBtn.classList.toggle('disabled', selectedMessageIds.size === 0);
+            }
+        }
+
+        function enterSelectionMode(initialMessageId) {
+            if (selectionModeActive) return;
+            closeReactionPicker();
+
+            selectionModeActive = true;
+            selectedMessageIds = new Set();
+            if (initialMessageId !== undefined && initialMessageId !== null) {
+                selectedMessageIds.add(String(initialMessageId));
+            }
+
+            const { chatModal, messageInputContainer } = getActiveElements();
+            if (!chatModal) return;
+
+            // Прячем (но не удаляем!) обычные элементы хедера — их DOM-узлы переиспользуются
+            // остальным кодом приложения по сохранённым ссылкам, поэтому нельзя их пересоздавать
+            const headerEl = chatModal.querySelector('.chat-header');
+            if (headerEl) {
+                _savedHeaderEl = headerEl;
+                _hiddenHeaderChildren = Array.from(headerEl.children);
+                _hiddenHeaderChildren.forEach(ch => {
+                    ch.dataset._prevDisplay = ch.style.display || '';
+                    ch.style.display = 'none';
+                });
+
+                const selHeader = document.createElement('div');
+                selHeader.className = 'selection-header';
+                selHeader.innerHTML = `
+                    <button type="button" class="selection-cancel-btn">Отмена</button>
+                    <span class="selection-count">Выбрано: ${selectedMessageIds.size}</span>
+                `;
+                headerEl.appendChild(selHeader);
+                _selectionHeaderEl = selHeader;
+                selHeader.querySelector('.selection-cancel-btn').addEventListener('click', exitSelectionMode);
+            }
+
+            // Прячем строку ввода сообщения и показываем вместо неё только кнопку удаления
+            if (messageInputContainer) {
+                _savedInputContainerEl = messageInputContainer;
+                messageInputContainer.style.display = 'none';
+
+                const bar = document.createElement('div');
+                bar.className = 'selection-bottom-bar';
+                bar.innerHTML = `
+                    <button type="button" class="selection-delete-btn disabled">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                `;
+                messageInputContainer.parentNode.insertBefore(bar, messageInputContainer.nextSibling);
+                bar.querySelector('.selection-delete-btn').addEventListener('click', handleBatchDeleteClick);
+                _selectionBottomBar = bar;
+            }
+
+            applySelectionWrappers();
+            updateSelectionHeader();
+        }
+
+        function exitSelectionMode() {
+            if (!selectionModeActive) return;
+            selectionModeActive = false;
+            selectedMessageIds = new Set();
+
+            removeSelectionWrappers();
+
+            if (_savedHeaderEl) {
+                if (_selectionHeaderEl) { _selectionHeaderEl.remove(); _selectionHeaderEl = null; }
+                _hiddenHeaderChildren.forEach(ch => {
+                    ch.style.display = ch.dataset._prevDisplay || '';
+                    delete ch.dataset._prevDisplay;
+                });
+                _hiddenHeaderChildren = [];
+                _savedHeaderEl = null;
+            }
+
+            if (_savedInputContainerEl) {
+                _savedInputContainerEl.style.display = '';
+                _savedInputContainerEl = null;
+            }
+
+            if (_selectionBottomBar) {
+                _selectionBottomBar.remove();
+                _selectionBottomBar = null;
+            }
+        }
+
+        async function deleteMessageOnServer(messageId, mode) {
+            try {
+                const response = await fetch(`${SERVER_URL}/delete_message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: currentChat.id,
+                        message_id: messageId,
+                        platform_user_id: userData.platform_user_id,
+                        mode
+                    }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                return data.status === 'success';
+            } catch (e) {
+                console.error('deleteMessage error', e);
+                return false;
+            }
+        }
+
+        function handleBatchDeleteClick(e) {
+            e.stopPropagation();
+            if (selectedMessageIds.size === 0) return;
+
+            const selected = Array.from(selectedMessageIds)
+                .map(id => getMessageById(id))
+                .filter(Boolean);
+            if (selected.length === 0) return;
+
+            const canDeleteForEveryone = selected.every(m => m.is_me);
+            openBatchDeleteChoiceMenu(canDeleteForEveryone);
+        }
+
+        function getMessageById(id) {
+            return currentMessages.find(m => String(m.id) === String(id));
+        }
+
+        function openBatchDeleteChoiceMenu(canDeleteForEveryone) {
+            const existing = document.querySelector('.delete-choice-menu');
+            if (existing) existing.remove();
+
+            const menu = document.createElement('div');
+            menu.className = 'delete-choice-menu animate__animated animate__fadeInUp';
+
+            if (canDeleteForEveryone) {
+                const everyoneBtn = document.createElement('button');
+                everyoneBtn.type = 'button';
+                everyoneBtn.className = 'delete-choice-item';
+                everyoneBtn.textContent = `Удалить у меня и у ${getOtherParticipantName()}`;
+                everyoneBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    menu.remove();
+                    performBatchDelete('everyone');
+                });
+                menu.appendChild(everyoneBtn);
+            }
+
+            const meBtn = document.createElement('button');
+            meBtn.type = 'button';
+            meBtn.className = 'delete-choice-item';
+            meBtn.textContent = 'Удалить у меня';
+            meBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                menu.remove();
+                performBatchDelete('me');
+            });
+            menu.appendChild(meBtn);
+
+            document.body.appendChild(menu);
+
+            // Позиционируем над панелью удаления, по центру панели чата
+            const { chatModal } = getActiveElements();
+            const anchorRect = (_selectionBottomBar || chatModal).getBoundingClientRect();
+            const menuWidth = menu.offsetWidth;
+            const left = Math.max(8, Math.min(anchorRect.left + anchorRect.width / 2 - menuWidth / 2, window.innerWidth - menuWidth - 8));
+            const top = Math.max(8, anchorRect.top - menu.offsetHeight - 10);
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+
+            setTimeout(() => {
+                const closeThisMenu = (ev) => {
+                    if (menu.contains(ev.target)) return;
+                    menu.remove();
+                    document.removeEventListener('click', closeThisMenu, true);
+                };
+                document.addEventListener('click', closeThisMenu, true);
+            }, 0);
+        }
+
+        async function performBatchDelete(mode) {
+            if (!currentChat) return;
+
+            const idKeys = Array.from(selectedMessageIds);
+            const messagesToDelete = idKeys.map(id => getMessageById(id)).filter(Boolean);
+            if (messagesToDelete.length === 0) { exitSelectionMode(); return; }
+
+            const results = await Promise.all(messagesToDelete.map(m => deleteMessageOnServer(m.id, mode)));
+            const successful = messagesToDelete.filter((m, i) => results[i]);
+            const successfulKeys = successful.map(m => String(m.id));
+
+            currentMessages = currentMessages.filter(m => !successfulKeys.includes(String(m.id)));
+            messagesCache[currentChat.id] = currentMessages;
+            // Используем оригинальный m.id (а не строковый ключ) — тип должен совпадать
+            // с тем, что был записан в IndexedDB (keyPath 'id'), иначе delete() тихо не сработает
+            await Promise.all(successful.map(m => deleteMessageFromDB(currentChat.id, m.id)));
+
+            const { messagesContainer } = getActiveElements();
+            successfulKeys.forEach(id => {
+                const bubble = messagesContainer.querySelector(`.message[data-message-id="${id}"]`);
+                if (bubble) {
+                    const row = bubble.closest('.message-select-row');
+                    (row || bubble).remove();
+                }
+            });
+
+            exitSelectionMode();
         }
 
         async function performDeleteMessage(messageElement, message, mode) {
@@ -8026,6 +8425,12 @@ function stopProfileStatusPolling() {
                         });
                     });
                 }
+            }
+
+            // Если в этот момент активен режим множественного выбора — новые/перерисованные
+            // сообщения тоже должны получить кружок выбора слева
+            if (selectionModeActive) {
+                applySelectionWrappers();
             }
         }
 
