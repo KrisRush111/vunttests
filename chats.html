@@ -4491,9 +4491,16 @@
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
-        // Id ещё не отправленных (temp_) сообщений, которые пользователь уже попросил удалить.
+        // Id ещё не отправленных (temp_) сообщений, которые пользователь уже попросил удалить,
+        // вместе с выбранным режимом удаления ('me' | 'everyone').
         // Когда сервер подтвердит отправку и пришлёт настоящий id — сразу удаляем его без показа сообщения.
-        const pendingDeleteTempIds = new Set();
+        const pendingDeleteTempIds = new Map();
+        // Id реальных сообщений, которые только что удалены локально, но запрос на сервер
+        // ещё может быть не завершён. Пока id здесь — сообщение ВСЕГДА исключается из любых
+        // данных, пришедших с сервера (polling, фоновая синхронизация), иначе удалённое
+        // сообщение может "воскреснуть" из-за гонки: сервер ответит старыми данными до того,
+        // как DELETE успеет примениться, и сообщение снова попадёт в IndexedDB и на экран.
+        const locallyDeletedMessageIds = new Set();
         let userData = null;
         let currentViewedUser = null;
 
@@ -5541,7 +5548,11 @@ function getActiveElements() {
                 // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
                 // тихо удаляем его на сервере, ничего не показывая в UI.
                 if (pendingDeleteTempIds.has(tempMessageId)) {
+                    const pendingMode = pendingDeleteTempIds.get(tempMessageId) || 'everyone';
                     pendingDeleteTempIds.delete(tempMessageId);
+                    // Помечаем реальный id как удалённый ДО запроса на удаление — см. комментарий
+                    // в отправке текстовых сообщений выше.
+                    locallyDeletedMessageIds.add(String(messageData.message_id));
                     if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
                     fetch(`${SERVER_URL}/delete_message`, {
                         method: 'POST',
@@ -5550,7 +5561,7 @@ function getActiveElements() {
                             chat_id: actualChatId,
                             message_id: messageData.message_id,
                             platform_user_id: userData.platform_user_id,
-                            mode: 'everyone'
+                            mode: pendingMode
                         }),
                         credentials: 'include'
                     }).catch(e => console.error('deleteMessage error', e));
@@ -6501,10 +6512,13 @@ function getActiveElements() {
             // Сообщения, которые ещё отправляются (temp_-id): реального id в БД пока нет.
             // Как только отправка завершится и придёт настоящий id — удалим его сразу же в фоне.
             messagesToDelete.filter(m => isTempMessageId(m.id))
-                .forEach(m => pendingDeleteTempIds.add(m.id));
+                .forEach(m => pendingDeleteTempIds.set(m.id, mode));
 
             const realMessages = messagesToDelete.filter(m => !isTempMessageId(m.id));
             if (realMessages.length === 0) return;
+
+            // Помечаем как удалённые СРАЗУ, до похода на сервер — см. комментарий в performDeleteMessage.
+            realMessages.forEach(m => locallyDeletedMessageIds.add(String(m.id)));
 
             // Используем оригинальный m.id (а не строковый ключ) — тип должен совпадать
             // с тем, что был записан в IndexedDB (keyPath 'id'), иначе delete() тихо не сработает
@@ -6540,9 +6554,14 @@ function getActiveElements() {
             // Запоминаем намерение удалить — как только придёт реальный id, удалим его сразу же,
             // без какого-либо сообщения пользователю.
             if (isTempMessageId(message.id)) {
-                pendingDeleteTempIds.add(message.id);
+                pendingDeleteTempIds.set(message.id, mode);
                 return;
             }
+
+            // Помечаем как удалённое СРАЗУ, до похода на сервер — иначе тик polling-а или
+            // фоновой синхронизации, стартовавший чуть раньше, может вернуть старые данные
+            // (сообщение ещё не удалено на сервере) и записать его обратно в IndexedDB/UI.
+            locallyDeletedMessageIds.add(String(message.id));
 
             deleteMessageFromDB(chatId, message.id).catch(e => console.error('deleteMessageFromDB error', e));
 
@@ -7773,7 +7792,10 @@ function getActiveElements() {
                     if (isCancelled()) return;
                     if (messagesData.status !== 'success') return;
 
-                    const freshMessages = messagesData.messages || [];
+                    // Исключаем сообщения, которые пользователь только что удалил локально:
+                    // сервер мог ответить данными, снятыми ДО того, как DELETE применился там.
+                    const freshMessages = (messagesData.messages || [])
+                        .filter(m => !locallyDeletedMessageIds.has(String(m.id)));
                     const freshLastId = freshMessages.length > 0
                         ? freshMessages[freshMessages.length - 1]?.id?.toString()
                         : null;
@@ -7982,7 +8004,12 @@ function getActiveElements() {
                     // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
                     // тихо удаляем его на сервере, ничего не показывая в UI.
                     if (pendingDeleteTempIds.has(tempMessageId)) {
+                        const pendingMode = pendingDeleteTempIds.get(tempMessageId) || 'everyone';
                         pendingDeleteTempIds.delete(tempMessageId);
+                        // Помечаем реальный id как удалённый ДО запроса на удаление — иначе тик
+                        // polling-а, случившийся между сохранением сообщения и его удалением,
+                        // успеет вернуть это сообщение с сервера и записать его обратно.
+                        locallyDeletedMessageIds.add(String(messageData.message_id));
                         fetch(`${SERVER_URL}/delete_message`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -7990,7 +8017,7 @@ function getActiveElements() {
                                 chat_id: actualChatId,
                                 message_id: messageData.message_id,
                                 platform_user_id: userData.platform_user_id,
-                                mode: 'everyone'
+                                mode: pendingMode
                             }),
                             credentials: 'include'
                         }).catch(e => console.error('deleteMessage error', e));
@@ -8726,7 +8753,11 @@ function stopProfileStatusPolling() {
                     if (startMessagePolling._token !== pollToken) return;
 
                     if (data.status === 'success') {
-                        const newMessages = data.messages || [];
+                        // Исключаем сообщения, которые пользователь только что удалил локально:
+                        // сервер мог ответить данными, снятыми ДО того, как DELETE применился там,
+                        // иначе удалённое сообщение "воскреснет" на экране и в IndexedDB.
+                        const newMessages = (data.messages || [])
+                            .filter(m => !locallyDeletedMessageIds.has(String(m.id)));
 
                         // Синхронизация реакций при каждом тике, даже если новых сообщений нет
                         const { messagesContainer: reactionMc } = getActiveElements();
