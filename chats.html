@@ -6483,6 +6483,28 @@ function getActiveElements() {
             }, 0);
         }
 
+        // После точечного удаления сообщений из DOM (без полной перерисовки) под какой-то
+        // датой-разделителем может не остаться ни одного сообщения — сам разделитель при
+        // этом никто не убирал, и он "зависает" пустым. Проверяем и убираем такие разделители.
+        function cleanupOrphanedDateHeaders() {
+            const { messagesContainer } = getActiveElements();
+            if (!messagesContainer) return;
+            const children = Array.from(messagesContainer.children);
+            children.forEach((el, idx) => {
+                if (!el.classList || !el.classList.contains('date-header')) return;
+                let hasMessage = false;
+                for (let i = idx + 1; i < children.length; i++) {
+                    const next = children[i];
+                    if (next.classList && next.classList.contains('date-header')) break;
+                    if (next.classList && (next.classList.contains('message') || next.classList.contains('message-select-row'))) {
+                        hasMessage = true;
+                        break;
+                    }
+                }
+                if (!hasMessage) el.remove();
+            });
+        }
+
         function performBatchDelete(mode) {
             if (!currentChat) return;
 
@@ -6506,6 +6528,14 @@ function getActiveElements() {
                     (row || bubble).remove();
                 }
             });
+            cleanupOrphanedDateHeaders();
+            if (currentMessages.length === 0) {
+                const { noMessages } = getActiveElements();
+                if (noMessages) {
+                    noMessages.style.display = 'block';
+                    noMessages.textContent = 'Сообщений пока нет...';
+                }
+            }
 
             exitSelectionMode();
 
@@ -6547,7 +6577,16 @@ function getActiveElements() {
             currentMessages = currentMessages.filter(m => String(m.id) !== String(message.id));
             messagesCache[chatId] = currentMessages;
             if (messageElement && messageElement.parentNode) {
-                messageElement.remove();
+                const row = messageElement.closest('.message-select-row');
+                (row || messageElement).remove();
+            }
+            cleanupOrphanedDateHeaders();
+            if (currentMessages.length === 0) {
+                const { noMessages } = getActiveElements();
+                if (noMessages) {
+                    noMessages.style.display = 'block';
+                    noMessages.textContent = 'Сообщений пока нет...';
+                }
             }
 
             // Сообщение ещё отправляется (оптимистичный UI, temp_-id): настоящего id в БД пока нет.
