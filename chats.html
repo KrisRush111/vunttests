@@ -6536,6 +6536,7 @@ function getActiveElements() {
                     noMessages.textContent = 'Сообщений пока нет...';
                 }
             }
+            syncChatListPreviewAfterDelete(chatId);
 
             exitSelectionMode();
 
@@ -6566,6 +6567,41 @@ function getActiveElements() {
             return typeof id === 'string' && id.startsWith('temp_');
         }
 
+        // После удаления сообщения(й) актуализируем превью в списке чатов слева,
+        // иначе там до перезагрузки страницы продолжает висеть текст уже удалённого сообщения.
+        function syncChatListPreviewAfterDelete(chatId) {
+            const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
+            if (chatIndex === -1) return;
+            if (chatId !== currentChat?.id) return; // берём актуальный список только для открытого чата
+
+            const newLast = currentMessages[currentMessages.length - 1];
+
+            if (!newLast) {
+                currentChatsList[chatIndex].last_message = null;
+                currentChatsList[chatIndex].last_message_time = null;
+                currentChatsList[chatIndex].last_message_type = null;
+            } else {
+                const isImage = newLast.type === 'image' || !!newLast.image_url;
+                currentChatsList[chatIndex].last_message = isImage
+                    ? (newLast.caption ? `📷 ${newLast.caption}` : '📷 Фото')
+                    : (newLast.content || '');
+                currentChatsList[chatIndex].last_message_time = newLast.sent_at || null;
+                currentChatsList[chatIndex].last_message_type = isImage ? 'image' : 'text';
+            }
+
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+
+            [chatsListDesktop, chatsListMobile].forEach(listEl => {
+                if (!listEl) return;
+                const chatItem = listEl.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+                if (!chatItem) return;
+                const lastMessageEl = chatItem.querySelector('.last-message');
+                if (lastMessageEl) {
+                    lastMessageEl.textContent = currentChatsList[chatIndex].last_message || '';
+                }
+            });
+        }
+
         function performDeleteMessage(messageElement, message, mode) {
             closeReactionPicker();
             if (!currentChat) return;
@@ -6588,6 +6624,7 @@ function getActiveElements() {
                     noMessages.textContent = 'Сообщений пока нет...';
                 }
             }
+            syncChatListPreviewAfterDelete(chatId);
 
             // Сообщение ещё отправляется (оптимистичный UI, temp_-id): настоящего id в БД пока нет.
             // Запоминаем намерение удалить — как только придёт реальный id, удалим его сразу же,
