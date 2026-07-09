@@ -425,6 +425,13 @@
             flex: 1;
             min-width: 0;
         }
+
+        .chat-top-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
         
         .chat-name {
             font-weight: 600;
@@ -434,6 +441,14 @@
             overflow: hidden;
             text-overflow: ellipsis;
             color: var(--telegram-text);
+            min-width: 0;
+        }
+
+        .chat-time-label {
+            flex-shrink: 0;
+            font-size: 12.5px;
+            color: var(--telegram-hint);
+            white-space: nowrap;
         }
         
         .last-message {
@@ -449,6 +464,13 @@
             font-size: 12px;
             color: var(--telegram-hint);
             margin-top: 4px;
+        }
+
+        /* Статус "в сети" / "был(а) недавно" больше не показываем в списке чатов,
+           но элемент оставляем в DOM скрытым — он используется как кэш при
+           открытии чата (см. openChat), чтобы шапка чата подхватила статус мгновенно. */
+        .chat-item .chat-status.user-status {
+            display: none;
         }
         
         .unread-badge {
@@ -4874,6 +4896,31 @@
             return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         }
 
+        // Время/дата рядом с именем в списке чатов:
+        // сегодня — время (ЧЧ:ММ), в течение последней недели — короткий день недели,
+        // иначе — дата (дд.мм.гг).
+        function formatChatListDate(timestamp) {
+            if (!timestamp) return '';
+            const date = new Date(timestamp);
+            date.setHours(date.getHours() + 3);
+
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            const diffDays = Math.round((today - msgDay) / 86400000);
+
+            if (diffDays === 0) {
+                return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+            }
+
+            if (diffDays > 0 && diffDays < 7) {
+                const weekdays = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
+                return weekdays[date.getDay()];
+            }
+
+            return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        }
+
         function adjustColor(hex, percent) {
             const num = parseInt(hex.replace("#", ""), 16);
             const amt = Math.round(2.55 * percent);
@@ -7481,10 +7528,15 @@ function getActiveElements() {
                 
                 if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') lastMessageText = '📷 Фото';
 
+                const timeLabel = formatChatListDate(chat.last_message_time);
+
                 chatItem.innerHTML = `
                     <div class="chat-avatar" style="background: ${avatarStyle}">${initials}</div>
                     <div class="chat-info">
-                        <div class="chat-name">${chat.name || 'Новый чат'}</div>
+                        <div class="chat-top-row">
+                            <div class="chat-name">${chat.name || 'Новый чат'}</div>
+                            <div class="chat-time-label">${timeLabel}</div>
+                        </div>
                         <div class="last-message">${lastMessageText}</div>
                         <div class="chat-status user-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
                     </div>
@@ -8687,6 +8739,11 @@ function stopProfileStatusPolling() {
                         let lastMessageText = chatData.last_message || 'Нет сообщений';
                         if (chatData.last_message && (isImageUrl(lastMessageText) || chatData.last_message_type === 'image')) lastMessageText = '📷 Фото';
                         lastMessageEl.textContent = lastMessageText;
+                    }
+
+                    if (chatData.last_message_time !== undefined) {
+                        const timeLabelEl = chatItem.querySelector('.chat-time-label');
+                        if (timeLabelEl) timeLabelEl.textContent = formatChatListDate(chatData.last_message_time);
                     }
                     
                     if (chatData.unread_count > 0) {
