@@ -6539,6 +6539,10 @@ function getActiveElements() {
 
             exitSelectionMode();
 
+            // Сразу обновляем превью в списке чатов слева, чтобы удалённые сообщения
+            // не продолжали отображаться там до перезагрузки страницы.
+            syncChatListPreviewAfterDelete(chatId);
+
             // Сообщения, которые ещё отправляются (temp_-id): реального id в БД пока нет.
             // Как только отправка завершится и придёт настоящий id — удалим его сразу же в фоне.
             messagesToDelete.filter(m => isTempMessageId(m.id))
@@ -6566,6 +6570,42 @@ function getActiveElements() {
             return typeof id === 'string' && id.startsWith('temp_');
         }
 
+        // Пересчитывает превью последнего сообщения для чата из currentMessages
+        // и сразу же обновляет и локальный список чатов, и DOM — чтобы удаление
+        // сообщения мгновенно отражалось в списке чатов, а не только после перезагрузки.
+        function syncChatListPreviewAfterDelete(chatId) {
+            const chat = currentChatsList.find(c => String(c.id) === String(chatId));
+            if (!chat) return;
+
+            // currentMessages хранится в хронологическом порядке (старые -> новые),
+            // поэтому последний элемент — актуальное последнее сообщение чата.
+            const lastMsg = currentMessages.length > 0 ? currentMessages[currentMessages.length - 1] : null;
+
+            let previewText = '';
+            let previewType = 'text';
+
+            if (lastMsg) {
+                if (lastMsg.is_image || (lastMsg.content && isImageUrl(lastMsg.content))) {
+                    previewText = lastMsg.caption ? `📷 ${lastMsg.caption}` : '📷 Фото';
+                    previewType = 'image';
+                } else {
+                    previewText = lastMsg.content || '';
+                }
+            }
+
+            chat.last_message = previewText;
+            chat.last_message_time = lastMsg ? lastMsg.sent_at : chat.last_message_time;
+            chat.last_message_type = previewType;
+
+            updateChatItemInDOM(chatId, {
+                last_message: previewText,
+                last_message_time: chat.last_message_time,
+                last_message_type: previewType
+            });
+
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+        }
+
         function performDeleteMessage(messageElement, message, mode) {
             closeReactionPicker();
             if (!currentChat) return;
@@ -6588,6 +6628,10 @@ function getActiveElements() {
                     noMessages.textContent = 'Сообщений пока нет...';
                 }
             }
+
+            // Сразу обновляем превью в списке чатов слева, чтобы удалённое сообщение
+            // не продолжало отображаться там до перезагрузки страницы.
+            syncChatListPreviewAfterDelete(chatId);
 
             // Сообщение ещё отправляется (оптимистичный UI, temp_-id): настоящего id в БД пока нет.
             // Запоминаем намерение удалить — как только придёт реальный id, удалим его сразу же,
@@ -8639,9 +8683,9 @@ function stopProfileStatusPolling() {
                 if (chatItem) {
                     const lastMessageEl = chatItem.querySelector('.last-message');
                     
-                    if (lastMessageEl && chatData.last_message) {
-                        let lastMessageText = chatData.last_message;
-                        if (isImageUrl(lastMessageText) || chatData.last_message_type === 'image') lastMessageText = '📷 Фото';
+                    if (lastMessageEl && chatData.last_message !== undefined) {
+                        let lastMessageText = chatData.last_message || 'Нет сообщений';
+                        if (chatData.last_message && (isImageUrl(lastMessageText) || chatData.last_message_type === 'image')) lastMessageText = '📷 Фото';
                         lastMessageEl.textContent = lastMessageText;
                     }
                     
