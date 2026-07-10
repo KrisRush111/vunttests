@@ -444,11 +444,31 @@
             min-width: 0;
         }
 
+        .chat-time-wrap {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
         .chat-time-label {
             flex-shrink: 0;
             font-size: 12.5px;
             color: var(--telegram-hint);
             white-space: nowrap;
+        }
+
+        .chat-read-status {
+            font-size: 13px;
+            line-height: 1;
+        }
+
+        .chat-read-status.sent {
+            color: var(--telegram-hint);
+        }
+
+        .chat-read-status.read {
+            color: var(--telegram-success);
         }
         
         .last-message {
@@ -4925,6 +4945,24 @@
             return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
         }
 
+        // Иконка-галочка рядом со временем в списке чатов: показывается только если
+        // последнее сообщение в чате отправлено самим пользователем (исходящее).
+        // Одна серая галочка — отправлено, две зелёные — прочитано собеседником.
+        function getChatReadStatusIcon(chat) {
+            const isOwn = chat.last_message_is_me === true;
+
+            if (!isOwn) {
+                return { visible: false, iconClass: 'fa-check', statusClass: '' };
+            }
+
+            const isRead = chat.last_message_is_read === true;
+            return {
+                visible: true,
+                iconClass: isRead ? 'fa-check-double' : 'fa-check',
+                statusClass: isRead ? 'read' : 'sent'
+            };
+        }
+
         function adjustColor(hex, percent) {
             const num = parseInt(hex.replace("#", ""), 16);
             const amt = Math.round(2.55 * percent);
@@ -6659,11 +6697,15 @@ function getActiveElements() {
             chat.last_message = previewText;
             chat.last_message_time = lastMsg ? lastMsg.sent_at : chat.last_message_time;
             chat.last_message_type = previewType;
+            chat.last_message_is_me = lastMsg ? !!lastMsg.is_me : false;
+            chat.last_message_is_read = lastMsg ? !!lastMsg.is_read : false;
 
             updateChatItemInDOM(chatId, {
                 last_message: previewText,
                 last_message_time: chat.last_message_time,
-                last_message_type: previewType
+                last_message_type: previewType,
+                last_message_is_me: chat.last_message_is_me,
+                last_message_is_read: chat.last_message_is_read
             });
 
             setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
@@ -7545,13 +7587,17 @@ function getActiveElements() {
                 if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') lastMessageText = '📷 Фото';
 
                 const timeLabel = formatChatListDate(chat.last_message_time);
+                const readStatusIcon = getChatReadStatusIcon(chat);
 
                 chatItem.innerHTML = `
                     <div class="chat-avatar" style="background: ${avatarStyle}">${initials}</div>
                     <div class="chat-info">
                         <div class="chat-top-row">
                             <div class="chat-name">${chat.name || 'Новый чат'}</div>
-                            <div class="chat-time-label">${timeLabel}</div>
+                            <div class="chat-time-wrap">
+                                <i class="fas ${readStatusIcon.iconClass} chat-read-status ${readStatusIcon.statusClass}" style="${readStatusIcon.visible ? '' : 'display:none;'}"></i>
+                                <div class="chat-time-label">${timeLabel}</div>
+                            </div>
                         </div>
                         <div class="last-message">${lastMessageText}</div>
                         <div class="chat-status user-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
@@ -8131,6 +8177,8 @@ function getActiveElements() {
                             name: currentChat.name,
                             last_message: messageContent,
                             last_message_time: new Date().toISOString(),
+                            last_message_is_me: true,
+                            last_message_is_read: false,
                             unread_count: 0,
                             participants: currentChat.participants,
                             has_avatar_photo: currentChat.has_avatar_photo,
@@ -8193,12 +8241,14 @@ function getActiveElements() {
                     saveMessagesToDB(actualChatId, currentMessages);
                     
                     if (!currentChat.is_temp) {
-                        updateChatItemInDOM(currentChat.id, { last_message: messageContent, last_message_time: new Date().toISOString(), unread_count: 0 });
+                        updateChatItemInDOM(currentChat.id, { last_message: messageContent, last_message_time: new Date().toISOString(), last_message_is_me: true, last_message_is_read: false, unread_count: 0 });
                         
                         const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
                         if (chatIndex !== -1) {
                             currentChatsList[chatIndex].last_message = messageContent;
                             currentChatsList[chatIndex].last_message_time = new Date().toISOString();
+                            currentChatsList[chatIndex].last_message_is_me = true;
+                            currentChatsList[chatIndex].last_message_is_read = false;
                             currentChatsList[chatIndex].unread_count = 0;
                             
                             const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
@@ -8761,6 +8811,18 @@ function stopProfileStatusPolling() {
                         const timeLabelEl = chatItem.querySelector('.chat-time-label');
                         if (timeLabelEl) timeLabelEl.textContent = formatChatListDate(chatData.last_message_time);
                     }
+
+                    if (chatData.last_message_is_me !== undefined || chatData.last_message_is_read !== undefined) {
+                        const statusIconEl = chatItem.querySelector('.chat-read-status');
+                        if (statusIconEl) {
+                            const status = getChatReadStatusIcon({
+                                last_message_is_me: chatData.last_message_is_me,
+                                last_message_is_read: chatData.last_message_is_read
+                            });
+                            statusIconEl.className = `fas ${status.iconClass} chat-read-status ${status.statusClass}`;
+                            statusIconEl.style.display = status.visible ? '' : 'none';
+                        }
+                    }
                     
                     if (chatData.unread_count > 0) {
                         let badge = chatItem.querySelector('.unread-badge');
@@ -8976,12 +9038,16 @@ function stopProfileStatusPolling() {
                                     last_message: previewText,
                                     last_message_time: lastRealMsg.sent_at,
                                     last_message_type: lastRealMsg.is_image ? 'image' : undefined,
+                                    last_message_is_me: !!lastRealMsg.is_me,
+                                    last_message_is_read: !!lastRealMsg.is_read,
                                     unread_count: 0
                                 });
                                 const chatIdxPoll = currentChatsList.findIndex(c => String(c.id) === String(chatId));
                                 if (chatIdxPoll !== -1) {
                                     currentChatsList[chatIdxPoll].last_message = previewText;
                                     currentChatsList[chatIdxPoll].last_message_time = lastRealMsg.sent_at;
+                                    currentChatsList[chatIdxPoll].last_message_is_me = !!lastRealMsg.is_me;
+                                    currentChatsList[chatIdxPoll].last_message_is_read = !!lastRealMsg.is_read;
                                     currentChatsList[chatIdxPoll].unread_count = 0;
                                     const movedChat = currentChatsList.splice(chatIdxPoll, 1)[0];
                                     currentChatsList.unshift(movedChat);
