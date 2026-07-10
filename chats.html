@@ -8960,7 +8960,33 @@ function stopProfileStatusPolling() {
 
                             if (startMessagePolling._token !== pollToken) return; // последняя проверка перед рендером
                             renderMessages(currentMessages);
-                            updateChatItemInDOM(chatId, { unread_count: 0 });
+
+                            // Обновляем превью в списке чатов слева — раньше здесь трогали только
+                            // unread_count, из-за чего текст последнего сообщения не обновлялся в
+                            // реальном времени, пока чат был открыт (только после его закрытия/перезахода).
+                            const lastRealMsg = newMessages[newMessages.length - 1];
+                            if (lastRealMsg) {
+                                let previewText = lastRealMsg.content || '';
+                                if (lastRealMsg.is_image || isImageUrl(previewText)) previewText = '📷 Фото';
+                                updateChatItemInDOM(chatId, {
+                                    last_message: previewText,
+                                    last_message_time: lastRealMsg.sent_at,
+                                    last_message_type: lastRealMsg.is_image ? 'image' : undefined,
+                                    unread_count: 0
+                                });
+                                const chatIdxPoll = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+                                if (chatIdxPoll !== -1) {
+                                    currentChatsList[chatIdxPoll].last_message = previewText;
+                                    currentChatsList[chatIdxPoll].last_message_time = lastRealMsg.sent_at;
+                                    currentChatsList[chatIdxPoll].unread_count = 0;
+                                    const movedChat = currentChatsList.splice(chatIdxPoll, 1)[0];
+                                    currentChatsList.unshift(movedChat);
+                                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                                }
+                                moveChatToTop(chatId);
+                            } else {
+                                updateChatItemInDOM(chatId, { unread_count: 0 });
+                            }
                             markAllMessagesAsRead(chatId);
                         }
                     }
