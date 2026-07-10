@@ -9006,6 +9006,27 @@ function stopProfileStatusPolling() {
                         const latestId = newMessages.length > 0 ? newMessages[newMessages.length - 1]?.id?.toString() : null;
                         const hasNewMessages = newMessages.length !== currentMessages.length || latestId !== lastKnownMessageId;
 
+                        // Отдельно проверяем: не появилось ли новых сообщений, но собеседник мог
+                        // только что прочитать наше последнее сообщение — тогда галочку в списке
+                        // чатов нужно обновить на "прочитано" сразу же, не дожидаясь новых сообщений.
+                        if (!hasNewMessages && newMessages.length > 0) {
+                            const lastMsgForRead = newMessages[newMessages.length - 1];
+                            if (lastMsgForRead.is_me) {
+                                const cachedLastMsg = currentMessages.find(m => String(m.id) === String(lastMsgForRead.id));
+                                const wasRead = cachedLastMsg ? !!cachedLastMsg.is_read : false;
+                                if (!!lastMsgForRead.is_read !== wasRead) {
+                                    if (cachedLastMsg) cachedLastMsg.is_read = lastMsgForRead.is_read;
+                                    updateChatItemInDOM(chatId, { last_message_is_me: true, last_message_is_read: !!lastMsgForRead.is_read });
+                                    const chatIdxRead = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+                                    if (chatIdxRead !== -1) {
+                                        currentChatsList[chatIdxRead].last_message_is_me = true;
+                                        currentChatsList[chatIdxRead].last_message_is_read = !!lastMsgForRead.is_read;
+                                        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                                    }
+                                }
+                            }
+                        }
+
                         // Если в DOM ещё есть элемент с is_uploading — пропускаем тик, чтобы не создать дубль
                         const { messagesContainer: pollMc } = getActiveElements();
                         if (pollMc && pollMc.querySelector('.upload-spinner-overlay')) return;
@@ -9533,11 +9554,24 @@ if (profileCloseDesktop) {
                                     last_message: serverChat.last_message, 
                                     last_message_time: serverChat.last_message_time,
                                     last_message_type: serverChat.last_message_type,
+                                    last_message_is_me: serverChat.last_message_is_me,
+                                    last_message_is_read: serverChat.last_message_is_read,
                                     unread_count: newCount
                                 });
                                 localChat.last_message = serverChat.last_message;
                                 localChat.last_message_time = serverChat.last_message_time;
                                 localChat.last_message_type = serverChat.last_message_type;
+                                localChat.last_message_is_me = serverChat.last_message_is_me;
+                                localChat.last_message_is_read = serverChat.last_message_is_read;
+                            } else if (localChat && localChat.last_message_is_read !== serverChat.last_message_is_read) {
+                                // Текст последнего сообщения не изменился, но собеседник мог только что
+                                // его прочитать — обновляем галочку в списке чатов на "прочитано".
+                                updateChatItemInDOM(serverChat.id, {
+                                    last_message_is_me: serverChat.last_message_is_me,
+                                    last_message_is_read: serverChat.last_message_is_read
+                                });
+                                localChat.last_message_is_me = serverChat.last_message_is_me;
+                                localChat.last_message_is_read = serverChat.last_message_is_read;
                             }
                         });
                     }
