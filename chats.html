@@ -6023,7 +6023,19 @@ function getActiveElements() {
         let activeMessageActionMenu = null;
         let activeDeleteChoiceMenu = null;
 
-        function closeReactionPicker() {
+        function closeReactionPicker(e) {
+            // Если клик пришёл из document-обработчика (есть e) и целится ВНУТРЬ ещё
+            // открытого меню — ничего не закрываем. Иначе на capture-фазе меню (и его
+            // кнопки) удаляются из DOM раньше, чем клик доходит до самой кнопки, из-за
+            // чего действие (например, "Удалить у меня") не срабатывает с первого раза.
+            if (e && e.target && (
+                (activeReactionPicker && activeReactionPicker.contains(e.target)) ||
+                (activeMessageActionMenu && activeMessageActionMenu.contains(e.target)) ||
+                (activeDeleteChoiceMenu && activeDeleteChoiceMenu.contains(e.target))
+            )) {
+                return;
+            }
+
             // Закрывает весь набор всплывающих меню сообщения: реакции, меню действий и выбор удаления
             if (activeReactionPicker) {
                 activeReactionPicker.remove();
