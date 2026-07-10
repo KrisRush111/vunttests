@@ -1062,6 +1062,65 @@
             padding-bottom: 3px;
         }
 
+        /* Пометка "изменено" рядом со временем сообщения (как в Telegram/WhatsApp) */
+        .message-time .edited-label {
+            font-size: 11px;
+            line-height: 1;
+            opacity: 0.85;
+            font-style: normal;
+        }
+
+        /* ===== Панель редактирования сообщения над полем ввода ===== */
+        .edit-message-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: var(--telegram-secondary-bg, rgba(0,0,0,0.04));
+            border-radius: 10px;
+            margin: 0 0 6px 0;
+        }
+
+        .edit-message-bar .edit-message-icon {
+            color: var(--telegram-blue);
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .edit-message-bar .edit-message-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .edit-message-bar .edit-message-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--telegram-blue);
+        }
+
+        .edit-message-bar .edit-message-preview {
+            font-size: 13px;
+            color: var(--telegram-hint);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .edit-message-bar .edit-message-cancel {
+            flex-shrink: 0;
+            background: none;
+            border: none;
+            color: var(--telegram-hint);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         @media (prefers-color-scheme: dark) {
             .message-incoming .message-time {
                 color: rgba(255, 255, 255, 0.55);
@@ -4550,6 +4609,8 @@
         let activityPollInterval;
         let currentActivityData = {};
         let isSendingMessage = false;
+        // Сообщение, которое сейчас редактируется пользователем (null — режим редактирования выключен)
+        let editingMessage = null;
         // Id ещё не отправленных (temp_) сообщений, которые пользователь уже попросил удалить,
         // вместе с выбранным режимом удаления ('me' | 'everyone').
         // Когда сервер подтвердит отправку и пришлёт настоящий id — сразу удаляем его без показа сообщения.
@@ -5764,7 +5825,8 @@ function getActiveElements() {
             }
             
             let messageContent = '';
-            const timeHtml = `<span class="message-time">${messageTime}${message.is_me ? statusIcons : ''}</span>`;
+            const editedLabelHtml = message.is_edited ? `<span class="edited-label">изменено</span>` : '';
+            const timeHtml = `<span class="message-time">${editedLabelHtml}${messageTime}${message.is_me ? statusIcons : ''}</span>`;
             
             if (message.is_image || (message.content && isImageUrl(message.content))) {
                 const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
@@ -6160,6 +6222,22 @@ function getActiveElements() {
                     closeReactionPicker();
                 });
                 menu.appendChild(copyBtn);
+                menu.appendChild(Object.assign(document.createElement('div'), { className: 'message-action-divider' }));
+            }
+
+            // "Изменить" доступно только для своих текстовых сообщений (не фото),
+            // и только пока сообщение реально сохранено на сервере (не temp_-id)
+            if (isTextMessage(message) && message.is_me && !isTempMessageId(message.id)) {
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'message-action-item';
+                editBtn.innerHTML = '<span>Изменить</span><span class="message-action-item-icon"><i class="fa-solid fa-pen"></i></span>';
+                editBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeReactionPicker();
+                    enterEditMode(message);
+                });
+                menu.appendChild(editBtn);
                 menu.appendChild(Object.assign(document.createElement('div'), { className: 'message-action-divider' }));
             }
 
@@ -6789,6 +6867,133 @@ function getActiveElements() {
                     }
                 })
                 .catch(e => console.error('deleteMessage error', e));
+        }
+
+        // ================= РЕДАКТИРОВАНИЕ СООБЩЕНИЯ =================
+
+        function truncateForPreview(text, maxLen = 60) {
+            if (!text) return '';
+            return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
+        }
+
+        function enterEditMode(message) {
+            const { messageInput, messageInputContainer } = getActiveElements();
+            if (!messageInput || !messageInputContainer) return;
+
+            editingMessage = { id: message.id, chatId: currentChat ? currentChat.id : null, originalContent: message.content };
+
+            messageInput.value = message.content || '';
+            autoResizeMessageInput(messageInput);
+            messageInput.focus();
+            // Курсор — в конец текста
+            const len = messageInput.value.length;
+            try { messageInput.setSelectionRange(len, len); } catch (e) {}
+
+            showEditBar(message, messageInputContainer);
+        }
+
+        function showEditBar(message, messageInputContainer) {
+            hideEditBar(messageInputContainer);
+
+            const bar = document.createElement('div');
+            bar.className = 'edit-message-bar';
+            bar.innerHTML = `
+                <span class="edit-message-icon"><i class="fa-solid fa-pen"></i></span>
+                <div class="edit-message-info">
+                    <span class="edit-message-title">Редактирование сообщения</span>
+                    <span class="edit-message-preview"></span>
+                </div>
+                <button type="button" class="edit-message-cancel" aria-label="Отмена"><i class="fa-solid fa-xmark"></i></button>
+            `;
+            bar.querySelector('.edit-message-preview').textContent = truncateForPreview(message.content || '');
+            bar.querySelector('.edit-message-cancel').addEventListener('click', (e) => {
+                e.stopPropagation();
+                cancelEditMode();
+            });
+
+            messageInputContainer.insertBefore(bar, messageInputContainer.firstChild);
+        }
+
+        function hideEditBar(messageInputContainer) {
+            const container = messageInputContainer || getActiveElements().messageInputContainer;
+            if (!container) return;
+            const existing = container.querySelector('.edit-message-bar');
+            if (existing) existing.remove();
+        }
+
+        function cancelEditMode() {
+            const { messageInput, messageInputContainer } = getActiveElements();
+            editingMessage = null;
+            if (messageInput) {
+                messageInput.value = '';
+                autoResizeMessageInput(messageInput);
+            }
+            hideEditBar(messageInputContainer);
+        }
+
+        // Применяет отредактированный текст к сообщению локально (DOM + массив + кэш), не дожидаясь сервера
+        function applyEditedContentLocally(chatId, messageId, newContent, editedAtIso) {
+            const msg = currentMessages.find(m => String(m.id) === String(messageId));
+            if (msg) {
+                msg.content = newContent;
+                msg.is_edited = true;
+                msg.edited_at = editedAtIso || new Date().toISOString();
+            }
+            messagesCache[chatId] = currentMessages;
+            saveMessagesToDB(chatId, currentMessages);
+
+            const { messagesContainer } = getActiveElements();
+            const el = messagesContainer ? messagesContainer.querySelector(`.message[data-message-id="${messageId}"]`) : null;
+            if (el) {
+                const textEl = el.querySelector('.message-text');
+                if (textEl) textEl.textContent = newContent;
+
+                const timeEl = el.querySelector('.message-time');
+                if (timeEl && !timeEl.querySelector('.edited-label')) {
+                    const label = document.createElement('span');
+                    label.className = 'edited-label';
+                    label.textContent = 'изменено';
+                    timeEl.insertBefore(label, timeEl.firstChild);
+                }
+            }
+        }
+
+        async function performEditMessage(chatId, messageId, newContent) {
+            // Мгновенно применяем изменения в UI, запрос к серверу уходит в фоне
+            applyEditedContentLocally(chatId, messageId, newContent);
+
+            try {
+                const response = await fetch(`${SERVER_URL}/edit_message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        message_id: messageId,
+                        platform_user_id: userData.platform_user_id,
+                        content: newContent
+                    }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    console.error('editMessage error', data.error);
+                    showMessage('Не удалось изменить сообщение', 'error');
+                    return;
+                }
+                // Синхронизируем точным временем редактирования с сервера
+                applyEditedContentLocally(chatId, messageId, data.content, data.edited_at);
+
+                // Обновляем превью последнего сообщения в списке чатов, если это оно и есть
+                const chatIndex = currentChatsList.findIndex(chat => String(chat.id) === String(chatId));
+                if (chatIndex !== -1 && currentMessages.length > 0 && String(currentMessages[currentMessages.length - 1].id) === String(messageId)) {
+                    currentChatsList[chatIndex].last_message = data.content;
+                    updateChatItemInDOM(chatId, { last_message: data.content });
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                }
+            } catch (e) {
+                console.error('editMessage error', e);
+                showMessage('Не удалось изменить сообщение', 'error');
+            }
         }
 
         function makeReactionEmojiButton(messageElement, emoji) {
@@ -8019,7 +8224,18 @@ function getActiveElements() {
 
                     const lastIdChanged = freshLastId !== lastKnownMessageId;
                     const countChanged = freshCount !== localMsgs.length;
-                    const needsSync = lastIdChanged || countChanged;
+
+                    // Отдельно проверяем, не изменился ли текст/статус "изменено" у какого-то
+                    // из уже загруженных сообщений (правка могла произойти, пока чат был закрыт)
+                    let editChanged = false;
+                    freshMessages.forEach(nm => {
+                        const cached = localMsgs.find(m => String(m.id) === String(nm.id));
+                        if (cached && (cached.content !== nm.content || !!cached.is_edited !== !!nm.is_edited)) {
+                            editChanged = true;
+                        }
+                    });
+
+                    const needsSync = lastIdChanged || countChanged || editChanged;
 
                     if (needsSync) {
                         if (freshCount < localMsgs.length) {
@@ -8132,6 +8348,20 @@ function getActiveElements() {
 
             if (content.length > MAX_MESSAGE_LENGTH) {
                 showCharLimitExceeded(messageInput, content.length);
+                return;
+            }
+
+            // Режим редактирования: вместо отправки нового сообщения — обновляем существующее
+            if (editingMessage) {
+                const { id: editingId, chatId: editingChatId, originalContent } = editingMessage;
+                messageInput.value = '';
+                autoResizeMessageInput(messageInput);
+                hideEditBar();
+                editingMessage = null;
+
+                if (content !== originalContent) {
+                    performEditMessage(editingChatId || currentChat.id, editingId, content);
+                }
                 return;
             }
             
@@ -8351,6 +8581,7 @@ async function openChat(chatId) {
     const isStale = () => openChat._lastToken !== openToken || signal.aborted;
 
     stopMessagePolling(); // сразу останавливаем polling предыдущего чата
+    cancelEditMode(); // выходим из режима редактирования при смене чата
 
     if (isDesktop) profileModalDesktop.classList.remove('visible');
 
@@ -8916,14 +9147,30 @@ function stopProfileStatusPolling() {
             messages.forEach((message, index) => {
                 const msgId = message.id?.toString();
                 if (!needsFullRender && existingIds.has(msgId)) {
+                    const el = messagesContainer.querySelector(`[data-message-id="${msgId}"]`);
+
                     // Update read status of existing outgoing messages
-                    if (message.is_me && message.is_read) {
-                        const el = messagesContainer.querySelector(`[data-message-id="${msgId}"]`);
-                        if (el) {
-                            const icon = el.querySelector('.status-icon');
-                            if (icon && !icon.classList.contains('read')) {
-                                icon.classList.remove('fa-check', 'sent');
-                                icon.classList.add('fa-check-double', 'read');
+                    if (message.is_me && message.is_read && el) {
+                        const icon = el.querySelector('.status-icon');
+                        if (icon && !icon.classList.contains('read')) {
+                            icon.classList.remove('fa-check', 'sent');
+                            icon.classList.add('fa-check-double', 'read');
+                        }
+                    }
+
+                    // Обновляем текст и метку "изменено", если сообщение было отредактировано
+                    if (el) {
+                        const textEl = el.querySelector('.message-text');
+                        if (textEl && textEl.textContent !== message.content) {
+                            textEl.textContent = message.content;
+                        }
+                        if (message.is_edited) {
+                            const timeEl = el.querySelector('.message-time');
+                            if (timeEl && !timeEl.querySelector('.edited-label')) {
+                                const label = document.createElement('span');
+                                label.className = 'edited-label';
+                                label.textContent = 'изменено';
+                                timeEl.insertBefore(label, timeEl.firstChild);
                             }
                         }
                     }
@@ -9018,6 +9265,16 @@ function stopProfileStatusPolling() {
                             }
                             if (cached) {
                                 cached.reactions = nm.reactions;
+                            }
+
+                            // Сообщение могло быть отредактировано (в том числе собеседником) —
+                            // обновляем текст и метку "изменено" прямо в открытом чате, без полного ре-рендера
+                            const editChanged = cached && (cached.content !== nm.content || !!cached.is_edited !== !!nm.is_edited);
+                            if (editChanged) {
+                                applyEditedContentLocally(chatId, nm.id, nm.content, nm.edited_at);
+                            } else if (cached) {
+                                cached.is_edited = nm.is_edited;
+                                cached.edited_at = nm.edited_at;
                             }
                         });
 
