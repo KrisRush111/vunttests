@@ -1455,12 +1455,7 @@
             position: fixed;
             inset: 0;
             z-index: 4990;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-            overflow-y: auto;
+            overflow: hidden;
             background: rgba(0, 0, 0, 0);
             -webkit-backdrop-filter: blur(0px);
             backdrop-filter: blur(0px);
@@ -1475,14 +1470,18 @@
             backdrop-filter: blur(3px);
         }
 
+        /* Стопка (реакции сверху / сообщение / меню действий снизу) больше не
+           центрируется по экрану — она позиционируется через JS (position: fixed,
+           left/right и top считаются от реального места сообщения в ленте),
+           поэтому сообщение остаётся слева или справа, там же, где было. */
         .message-context-stack {
+            position: fixed;
             display: flex;
             flex-direction: column;
             gap: 10px;
-            max-width: min(92%, 420px);
-            margin: auto 0;
+            max-width: min(92vw, 420px);
             opacity: 0;
-            transform: scale(0.92);
+            transform: scale(0.94);
             transition: opacity 0.2s ease, transform 0.22s cubic-bezier(.22, .9, .3, 1);
         }
 
@@ -6613,14 +6612,74 @@ function getActiveElements() {
             document.removeEventListener('scroll', closeReactionPicker, true);
         }
 
+        // Безопасные отступы сверху (шапка чата) и снизу (поле ввода), чтобы стопка
+        // (реакции / сообщение / меню) никогда не пряталась под ними.
+        const MESSAGE_CONTEXT_TOP_SAFE = 68;
+        const MESSAGE_CONTEXT_BOTTOM_SAFE = 76;
+        const MESSAGE_CONTEXT_SIDE_PADDING = 10;
+        const MESSAGE_CONTEXT_GAP = 10;
+
+        // Считает и применяет позицию стопки так, чтобы сообщение осталось на том же
+        // месте по горизонтали (слева или справа — как было в ленте), а по вертикали
+        // сдвигается лишь настолько, насколько нужно, чтобы верхняя панель реакций
+        // (и нижнее меню действий) не перекрывались краями экрана. Если сообщение было
+        // у самого верха и реакции туда не помещались — стопка автоматически "приподнимается"
+        // вниз ровно настолько, чтобы реакции стали видны целиком.
+        function positionMessageContextStack(ctx) {
+            const { stack, picker, menu, isOutgoing, originalRect } = ctx;
+
+            const viewportW = window.innerWidth;
+            const viewportH = window.innerHeight;
+
+            // --- горизонталь: якорим к тому краю сообщения, где оно и было ---
+            const naturalWidth = stack.getBoundingClientRect().width || originalRect.width;
+            const maxWidth = viewportW - MESSAGE_CONTEXT_SIDE_PADDING * 2;
+            const width = Math.min(naturalWidth, maxWidth);
+
+            if (isOutgoing) {
+                let right = viewportW - originalRect.right;
+                right = Math.max(MESSAGE_CONTEXT_SIDE_PADDING, Math.min(right, viewportW - width - MESSAGE_CONTEXT_SIDE_PADDING));
+                stack.style.right = right + 'px';
+                stack.style.left = 'auto';
+            } else {
+                let left = originalRect.left;
+                left = Math.max(MESSAGE_CONTEXT_SIDE_PADDING, Math.min(left, viewportW - width - MESSAGE_CONTEXT_SIDE_PADDING));
+                stack.style.left = left + 'px';
+                stack.style.right = 'auto';
+            }
+
+            // --- вертикаль: стараемся оставить сообщение там же, где оно было ---
+            const pickerH = picker.offsetHeight;
+            const menuH = menu.offsetHeight;
+            const stackHeight = pickerH + MESSAGE_CONTEXT_GAP + originalRect.height + MESSAGE_CONTEXT_GAP + menuH;
+
+            let top = originalRect.top - pickerH - MESSAGE_CONTEXT_GAP;
+
+            // Сообщение у самого верха и панель реакций перекрывается шапкой —
+            // автоматически приподнимаем всю стопку вниз, чтобы реакции стали видны.
+            if (top < MESSAGE_CONTEXT_TOP_SAFE) {
+                top = MESSAGE_CONTEXT_TOP_SAFE;
+            }
+
+            // Если снизу всё упирается в поле ввода — сдвигаем стопку вверх (но не выше шапки).
+            const bottomLimit = viewportH - MESSAGE_CONTEXT_BOTTOM_SAFE;
+            if (top + stackHeight > bottomLimit) {
+                top = Math.max(MESSAGE_CONTEXT_TOP_SAFE, bottomLimit - stackHeight);
+            }
+
+            stack.style.top = top + 'px';
+        }
+
         // Открывает вместе панель реакций и меню действий (Скопировать / Удалить) — как в Telegram.
-        // Сообщение "поднимается" по центру экрана на затемнённом/размытом фоне вместе с обеими
-        // панелями: реакции складываются сверху, меню действий — снизу, через flex-колонку, поэтому
-        // они физически не могут перекрыть друг друга — даже когда сообщение было у самого края чата.
+        // Сообщение "поднимается" на затемнённый/размытый фон вместе с обеими панелями (реакции
+        // сверху, меню действий снизу), но остаётся на том же месте по горизонтали (слева или
+        // справа — как было в ленте) и по вертикали сдвигается лишь чуть-чуть, если у самого края
+        // экрана иначе перекрылась бы панель реакций.
         function openMessageMenus(messageElement, message) {
             closeReactionPicker();
 
             const isOutgoing = messageElement.classList.contains('message-outgoing');
+            const originalRect = messageElement.getBoundingClientRect();
 
             const overlay = document.createElement('div');
             overlay.className = 'message-context-overlay';
@@ -6630,20 +6689,24 @@ function getActiveElements() {
             stack.style.alignItems = isOutgoing ? 'flex-end' : 'flex-start';
             overlay.appendChild(stack);
 
-            // Визуальная "витрина" сообщения — точная копия исходного элемента. Сам оригинал
-            // остаётся на своём месте в ленте (просто прячем его), чтобы список сообщений не
-            // "прыгал" и ничего не приходилось пересчитывать заново, когда меню закроется.
+            // Визуальная "витрина" сообщения — точная копия исходного элемента, с той же
+            // шириной, что и в ленте. Сам оригинал остаётся на своём месте (просто прячем его),
+            // чтобы список сообщений не "прыгал" и ничего не приходилось пересчитывать заново,
+            // когда меню закроется.
             const floatEl = messageElement.cloneNode(true);
             floatEl.classList.add('message-context-float');
             floatEl.style.position = 'static';
             floatEl.style.pointerEvents = 'none';
+            floatEl.style.width = originalRect.width + 'px';
+            floatEl.style.maxWidth = originalRect.width + 'px';
 
             const picker = buildReactionPicker(messageElement, message);
             picker.style.position = 'static';
-            picker.style.alignSelf = 'center';
+            picker.style.alignSelf = isOutgoing ? 'flex-end' : 'flex-start';
 
             const menu = buildMessageActionMenu(messageElement, message);
             menu.style.position = 'static';
+            menu.style.alignSelf = isOutgoing ? 'flex-end' : 'flex-start';
 
             stack.appendChild(picker);
             stack.appendChild(floatEl);
@@ -6652,11 +6715,14 @@ function getActiveElements() {
             document.body.appendChild(overlay);
             messageElement.style.visibility = 'hidden';
 
+            const ctx = { overlay, stack, picker, menu, floatEl, isOutgoing, originalRect, originalEl: messageElement };
+            positionMessageContextStack(ctx);
+
             requestAnimationFrame(() => overlay.classList.add('visible'));
 
             activeReactionPicker = picker;
             activeMessageActionMenu = menu;
-            activeContextOverlay = { overlay, stack, floatEl, originalEl: messageElement };
+            activeContextOverlay = ctx;
 
             setTimeout(() => {
                 document.addEventListener('click', closeReactionPicker, true);
@@ -7532,7 +7598,7 @@ function getActiveElements() {
             const picker = document.createElement('div');
             picker.className = 'reaction-picker reaction-picker-expanded animate__animated animate__fadeIn';
             picker.style.position = 'static';
-            picker.style.alignSelf = 'center';
+            picker.style.alignSelf = activeContextOverlay.isOutgoing ? 'flex-end' : 'flex-start';
 
             const allEmojis = REACTION_EMOJIS.concat(REACTION_EMOJIS_EXTRA);
             allEmojis.forEach(emoji => {
@@ -7541,6 +7607,11 @@ function getActiveElements() {
 
             if (activeReactionPicker) activeReactionPicker.replaceWith(picker);
             activeReactionPicker = picker;
+
+            // Панель реакций стала выше — пересчитываем позицию всей стопки,
+            // чтобы она снова не перекрывалась шапкой чата или полем ввода.
+            activeContextOverlay.picker = picker;
+            positionMessageContextStack(activeContextOverlay);
         }
 
         async function toggleReaction(messageId, emoji) {
