@@ -3171,6 +3171,92 @@
             }
         }
 
+        /* ===== Альбом из 2-3 фото в одном сообщении (как в Telegram) ===== */
+        .media-grid {
+            display: grid;
+            gap: 2px;
+            overflow: hidden;
+            border-radius: 16px;
+            position: relative;
+            background: var(--telegram-secondary-bg);
+            width: 100%;
+        }
+
+        .media-grid[data-count="2"] {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr;
+            aspect-ratio: 4 / 3;
+        }
+
+        .media-grid[data-count="3"] {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            aspect-ratio: 4 / 3;
+        }
+
+        .media-grid[data-count="3"] .media-grid-item:first-child {
+            grid-row: 1 / 3;
+        }
+
+        .media-grid-item {
+            position: relative;
+            overflow: hidden;
+            min-width: 0;
+            min-height: 0;
+            line-height: 0;
+        }
+
+        .media-grid-item .message-image {
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            max-height: none;
+            min-height: 0;
+            object-fit: cover;
+            border-radius: 0;
+            margin: 0;
+        }
+
+        .media-grid-item .upload-spinner-overlay {
+            z-index: 3;
+        }
+
+        .media-grid-time {
+            position: absolute;
+            right: 6px;
+            bottom: 6px;
+            display: inline-flex !important;
+            align-items: center;
+            gap: 3px;
+            padding: 3px 7px;
+            background: rgba(0, 0, 0, 0.42);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.92);
+            font-size: 11px;
+            z-index: 2;
+        }
+
+        .media-grid-time .status-icon.sent {
+            color: rgba(255, 255, 255, 0.75) !important;
+        }
+
+        .media-grid-time .status-icon.read {
+            color: #4fc3f7 !important;
+        }
+
+        .message-group.message-with-image .message-content {
+            border-radius: 16px;
+        }
+
+        @media (max-width: 480px) {
+            .media-grid[data-count="2"],
+            .media-grid[data-count="3"] {
+                aspect-ratio: 5 / 4;
+            }
+        }
+
         .image-modal-overlay {
             position: fixed;
             top: 0;
@@ -5626,7 +5712,13 @@ function getActiveElements() {
                 e.stopPropagation();
                 const caption = captionInput.value.trim();
                 items.forEach(it => URL.revokeObjectURL(it.url));
-                files.forEach(file => sendImageMessage(file, caption));
+                if (files.length > 1) {
+                    // 2-3 фото отправляем одним альбомом, чтобы они отобразились
+                    // как единое сообщение с сеткой фото (как в Telegram)
+                    sendMediaGroupMessage(files, caption);
+                } else {
+                    sendImageMessage(files[0], caption);
+                }
                 if (overlay.parentNode) document.body.removeChild(overlay);
                 document.removeEventListener('keydown', handleKeydown);
             });
@@ -5857,6 +5949,179 @@ function getActiveElements() {
             }
         }
 
+        // Отправляет 2-3 фото одним альбомом: физически это несколько отдельных
+        // сообщений в БД (по одному на фото), но на клиенте они рендерятся как
+        // единая сетка в одном пузыре сообщения — как в Telegram.
+        async function sendMediaGroupMessage(files, caption = '') {
+            if (!currentChat || isSendingMessage) return;
+            if (!files || files.length < 2) return;
+
+            isSendingMessage = true;
+            const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
+            const localPreviewUrls = [];
+
+            try {
+                const tempGroupId = `temp_group_${Date.now()}`;
+                const tempMessages = files.map((file, idx) => {
+                    const url = URL.createObjectURL(file);
+                    localPreviewUrls.push(url);
+                    return {
+                        id: `${tempGroupId}_${idx}`,
+                        sender_id: userData.platform_user_id,
+                        content: url,
+                        caption: idx === files.length - 1 ? caption : '',
+                        sent_at: new Date().toISOString(),
+                        is_read: false,
+                        is_me: true,
+                        is_image: true,
+                        is_uploading: true,
+                        media_group_id: tempGroupId
+                    };
+                });
+
+                currentMessages = [...currentMessages, ...tempMessages];
+                noMessages.style.display = 'none';
+                renderMessages(currentMessages);
+
+                let actualChatId = currentChat.id;
+                if (currentChat.is_temp) {
+                    const response = await fetch(`${SERVER_URL}/create_chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ platform_user_id: userData.platform_user_id, contact_id: currentChat.participants[0].platform_user_id }),
+                        credentials: 'include'
+                    });
+
+                    const data = await response.json();
+                    if (data.status !== 'success') throw new Error(data.error || 'Не удалось создать чат');
+
+                    actualChatId = data.chat_id;
+                    currentChat.id = data.chat_id;
+                    currentChat.is_temp = false;
+
+                    const newChat = {
+                        id: data.chat_id,
+                        name: currentChat.name,
+                        last_message: caption ? `📷 ${caption}` : `📷 ${files.length} фото`,
+                        last_message_time: new Date().toISOString(),
+                        unread_count: 0,
+                        participants: currentChat.participants,
+                        has_avatar_photo: currentChat.has_avatar_photo,
+                        avatar_background: currentChat.avatar_background,
+                        last_message_type: 'image'
+                    };
+
+                    currentChatsList.unshift(newChat);
+                    updateChatItemInDOM(data.chat_id, newChat);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                }
+
+                const formData = new FormData();
+                formData.append('chat_id', actualChatId);
+                formData.append('sender_id', userData.platform_user_id);
+                if (caption) formData.append('caption', caption);
+                files.forEach(file => formData.append('images', file));
+
+                const messageResponse = await fetch(`${SERVER_URL}/send_media_group`, {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+
+                const messageData = await messageResponse.json();
+                if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить фотографии');
+
+                const newMessages = messageData.messages.map((m) => ({
+                    id: m.message_id,
+                    sender_id: userData.platform_user_id,
+                    content: m.image_url,
+                    caption: m.caption || '',
+                    sent_at: m.sent_at || new Date().toISOString(),
+                    is_read: false,
+                    is_me: true,
+                    is_image: true,
+                    media_group_id: messageData.media_group_id
+                }));
+
+                // Меняем temp-сообщения на реальные в массиве — до любых DOM-манипуляций
+                const tempIds = new Set(tempMessages.map(m => m.id));
+                currentMessages = currentMessages.filter(msg => !tempIds.has(msg.id));
+                currentMessages.push(...newMessages);
+                currentMessages.sort((a, b) => {
+                    const ta = new Date(a.sent_at).getTime();
+                    const tb = new Date(b.sent_at).getTime();
+                    return ta - tb;
+                });
+                localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+                saveMessagesToDB(actualChatId, currentMessages);
+
+                // Обновляем DOM на месте: заменяем временный альбом на реальный,
+                // без полной перерисовки всей ленты сообщений
+                const mc = messagesContainer;
+                const groupEl = mc ? mc.querySelector(`[data-message-id="${tempMessages[0].id}"]`) : null;
+                if (groupEl) {
+                    groupEl.setAttribute('data-message-id', String(newMessages[0].id));
+                    groupEl.setAttribute('data-group-id', String(messageData.media_group_id));
+                    const gridItems = groupEl.querySelectorAll('.media-grid-item');
+                    gridItems.forEach((itemEl, idx) => {
+                        const realMsg = newMessages[idx];
+                        if (!realMsg) return;
+                        itemEl.setAttribute('data-message-id', String(realMsg.id));
+                        const imgEl = itemEl.querySelector('img.message-image');
+                        const spinner = itemEl.querySelector('.upload-spinner-overlay');
+                        if (imgEl) {
+                            const imageIndex = currentMessages.filter(m => m.is_image || (m.content && isImageUrl(m.content))).findIndex(m => m.id === realMsg.id);
+                            imgEl.setAttribute('onclick', `openImageModal('${realMsg.content}', ${imageIndex})`);
+                            fetch(realMsg.content)
+                                .then(r => r.blob())
+                                .then(blob => {
+                                    const blobUrl = URL.createObjectURL(blob);
+                                    imgEl.src = blobUrl;
+                                    imgEl.style.opacity = '1';
+                                    if (spinner) spinner.remove();
+                                })
+                                .catch(() => {
+                                    imgEl.src = realMsg.content;
+                                    imgEl.style.opacity = '1';
+                                    if (spinner) spinner.remove();
+                                });
+                        } else if (spinner) {
+                            spinner.remove();
+                        }
+                    });
+                }
+
+                const lastMessagePreview = caption ? `📷 ${caption}` : `📷 ${files.length} фото`;
+                if (!currentChat.is_temp) {
+                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessages[newMessages.length - 1].sent_at, unread_count: 0, last_message_type: 'image' });
+
+                    const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+                    if (chatIndex !== -1) {
+                        currentChatsList[chatIndex].last_message = lastMessagePreview;
+                        currentChatsList[chatIndex].last_message_time = newMessages[newMessages.length - 1].sent_at;
+                        currentChatsList[chatIndex].last_message_type = 'image';
+                        currentChatsList[chatIndex].unread_count = 0;
+
+                        const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
+                        currentChatsList.unshift(updatedChat);
+                        moveChatToTop(currentChat.id);
+                        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    }
+                }
+
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            } catch (error) {
+                showMessage('Ошибка отправки фотографий: ' + error.message, 'error');
+                currentMessages = currentMessages.filter(msg => !msg.is_uploading);
+                renderMessages(currentMessages);
+                localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+            } finally {
+                isSendingMessage = false;
+                sendMessageButton.disabled = false;
+            }
+        }
+
         function renderMessage(message) {
             const messageElement = document.createElement('div');
             messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
@@ -5906,6 +6171,61 @@ function getActiveElements() {
 
             renderReactionsOnElement(messageElement, message.reactions);
             attachMessageLongPress(messageElement, message);
+
+            return messageElement;
+        }
+
+        // Рендерит "альбом" из 2-3 фото одним пузырём сообщения (как в Telegram).
+        // Подпись физически хранится только у последнего фото группы в БД, но
+        // визуально показывается как общая подпись всего альбома.
+        function renderMessageGroup(groupMessages) {
+            const lastMsg = groupMessages[groupMessages.length - 1];
+            const firstMsg = groupMessages[0];
+            const groupCaption = groupMessages.map(m => m.caption).find(c => c);
+
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${lastMsg.is_me ? 'message-outgoing' : 'message-incoming'} message-with-image message-group`;
+            messageElement.setAttribute('data-message-id', firstMsg.id);
+            if (firstMsg.media_group_id) messageElement.setAttribute('data-group-id', firstMsg.media_group_id);
+            if (!groupCaption) messageElement.classList.add('no-caption');
+
+            const messageTime = formatChatMessageTime(lastMsg.sent_at);
+            let statusIcons = '';
+            if (lastMsg.is_me) {
+                const isRead = lastMsg.is_read;
+                statusIcons = `<div class="message-status"><div class="status-icons"><i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i></div></div>`;
+            }
+            const editedLabelHtml = lastMsg.is_edited ? `<span class="edited-label">изменено</span>` : '';
+            const timeHtml = `<span class="message-time">${editedLabelHtml}${messageTime}${lastMsg.is_me ? statusIcons : ''}</span>`;
+
+            const imageMessagesAll = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+
+            const gridItemsHtml = groupMessages.map(msg => {
+                const imageUrl = msg.content;
+                const isUploading = !!msg.is_uploading;
+                const imageIndex = imageMessagesAll.findIndex(m => m.id === msg.id);
+                const imgTag = `<img src="${imageUrl}" alt="Изображение" class="message-image" draggable="false" oncontextmenu="return false;" ${isUploading ? '' : `onclick="openImageModal('${imageUrl}', ${imageIndex})"`} loading="lazy" onload="this.style.opacity='1'; this.closest('.media-grid-item') && this.closest('.media-grid-item').classList.add('image-loaded');" onerror="this.onerror=null; this.style.opacity='1'; this.alt='Не удалось загрузить изображение';" style="opacity: 0.15; transition: opacity 0.3s ease;">`;
+                const spinnerHtml = isUploading ? `<div class="upload-spinner-overlay"><div class="upload-spinner"></div></div>` : '';
+                return `<div class="media-grid-item" data-message-id="${msg.id}">${imgTag}${spinnerHtml}</div>`;
+            }).join('');
+
+            const timeBadgeHtml = !groupCaption ? `<div class="media-grid-time">${timeHtml}</div>` : '';
+            const gridHtml = `<div class="media-grid" data-count="${groupMessages.length}">${gridItemsHtml}${timeBadgeHtml}</div>`;
+
+            let contentHtml;
+            if (groupCaption) {
+                const captionHtml = `<div class="image-caption">${escapeHtml(groupCaption)}${timeHtml}</div>`;
+                contentHtml = `<div class="message-content">${gridHtml}${captionHtml}</div>`;
+            } else {
+                contentHtml = `<div class="message-content">${gridHtml}</div>`;
+            }
+
+            messageElement.innerHTML = contentHtml;
+            messageElement.style.opacity = '1';
+            messageElement.style.transform = 'translateY(0)';
+
+            renderReactionsOnElement(messageElement, lastMsg.reactions);
+            attachMessageLongPress(messageElement, lastMsg);
 
             return messageElement;
         }
@@ -9162,6 +9482,38 @@ function stopProfileStatusPolling() {
             });
         }
 
+        // Группирует подряд идущие фото-сообщения с одинаковым media_group_id в один
+        // визуальный "альбом" (как в Telegram), чтобы 2-3 фото рендерились одним пузырём.
+        function groupMessagesForRender(messages) {
+            const groups = [];
+            let i = 0;
+            while (i < messages.length) {
+                const message = messages[i];
+                const isImageMsg = message.is_image || (message.content && isImageUrl(message.content));
+                const gid = message.media_group_id;
+
+                if (isImageMsg && gid) {
+                    const items = [message];
+                    let j = i + 1;
+                    while (j < messages.length && messages[j].media_group_id === gid &&
+                           (messages[j].is_image || (messages[j].content && isImageUrl(messages[j].content)))) {
+                        items.push(messages[j]);
+                        j++;
+                    }
+                    if (items.length > 1) {
+                        groups.push({ type: 'group', key: String(items[0].id), items });
+                    } else {
+                        groups.push({ type: 'single', key: String(message.id), item: message });
+                    }
+                    i = j;
+                } else {
+                    groups.push({ type: 'single', key: String(message.id), item: message });
+                    i++;
+                }
+            }
+            return groups;
+        }
+
         function renderMessages(messages) {
             const { messagesContainer, noMessages } = getActiveElements();
             
@@ -9174,6 +9526,8 @@ function stopProfileStatusPolling() {
             
             noMessages.style.display = 'none';
 
+            const renderGroups = groupMessagesForRender(messages);
+
             // === SMART INCREMENTAL RENDER ===
             // Finds existing messages by data-message-id and only appends new ones
             const existingIds = new Set();
@@ -9183,9 +9537,9 @@ function stopProfileStatusPolling() {
 
             // Check if we need a full re-render (e.g. messages were deleted or order changed)
             const existingCount = existingIds.size;
-            const newCount = messages.length;
+            const newCount = renderGroups.length;
             const firstExistingId = existingCount > 0 ? messagesContainer.querySelector('.message[data-message-id]')?.getAttribute('data-message-id') : null;
-            const firstNewId = messages[0]?.id?.toString();
+            const firstNewId = renderGroups[0]?.key;
             
             // Only do full re-render if existing count is more than new (deletion happened)
             // OR if first IDs mismatch AND neither is a temp message (temp IDs start with "temp_")
@@ -9208,13 +9562,15 @@ function stopProfileStatusPolling() {
                 if (lastHeader) lastDateHeader = lastHeader.textContent;
             }
 
-            messages.forEach((message, index) => {
-                const msgId = message.id?.toString();
+            renderGroups.forEach((entry) => {
+                const msgId = entry.key;
+                const representativeMessage = entry.type === 'group' ? entry.items[entry.items.length - 1] : entry.item;
+
                 if (!needsFullRender && existingIds.has(msgId)) {
                     const el = messagesContainer.querySelector(`[data-message-id="${msgId}"]`);
 
                     // Update read status of existing outgoing messages
-                    if (message.is_me && message.is_read && el) {
+                    if (representativeMessage.is_me && representativeMessage.is_read && el) {
                         const icon = el.querySelector('.status-icon');
                         if (icon && !icon.classList.contains('read')) {
                             icon.classList.remove('fa-check', 'sent');
@@ -9223,7 +9579,8 @@ function stopProfileStatusPolling() {
                     }
 
                     // Обновляем текст и метку "изменено", если сообщение было отредактировано
-                    if (el) {
+                    if (el && entry.type === 'single') {
+                        const message = entry.item;
                         const textEl = el.querySelector('.message-text');
                         if (textEl && textEl.textContent !== message.content) {
                             textEl.textContent = message.content;
@@ -9241,7 +9598,7 @@ function stopProfileStatusPolling() {
                     return;
                 }
 
-                const currentDateHeader = formatDateHeader(message.sent_at);
+                const currentDateHeader = formatDateHeader(representativeMessage.sent_at);
                 
                 if (currentDateHeader !== lastDateHeader) {
                     const dateHeader = document.createElement('div');
@@ -9251,7 +9608,7 @@ function stopProfileStatusPolling() {
                     lastDateHeader = currentDateHeader;
                 }
                 
-                const messageElement = renderMessage(message);
+                const messageElement = entry.type === 'group' ? renderMessageGroup(entry.items) : renderMessage(entry.item);
                 fragment.appendChild(messageElement);
                 addedAny = true;
             });
