@@ -7178,9 +7178,19 @@ function getActiveElements() {
 
             const chatId = currentChat.id;
 
-            // Сначала — мгновенно убираем сообщение из UI и локального состояния,
-            // не дожидаясь ответа сервера. Никаких тостов про ожидание не показываем.
-            currentMessages = currentMessages.filter(m => String(m.id) !== String(message.id));
+            // Если сообщение — часть альбома (2-3 фото, отправленные одним media_group_id),
+            // удаляем ВЕСЬ альбом разом, а не одну фотографию из него: собираем все
+            // сообщения группы и дальше работаем с ними как с единым целым.
+            const groupId = message.media_group_id;
+            const groupMessages = groupId
+                ? currentMessages.filter(m => m.media_group_id === groupId)
+                : [message];
+            const groupIds = groupMessages.map(m => String(m.id));
+
+            // Сначала — мгновенно убираем ВЕСЬ альбом (или одиночное сообщение) из UI и
+            // локального состояния одним действием, не дожидаясь ответа сервера. Визуально
+            // альбом и так один DOM-элемент (.message-group), поэтому он исчезает целиком.
+            currentMessages = currentMessages.filter(m => !groupIds.includes(String(m.id)));
             messagesCache[chatId] = currentMessages;
             if (messageElement && messageElement.parentNode) {
                 const row = messageElement.closest('.message-select-row');
@@ -7199,40 +7209,46 @@ function getActiveElements() {
             // не продолжало отображаться там до перезагрузки страницы.
             syncChatListPreviewAfterDelete(chatId);
 
-            // Сообщение ещё отправляется (оптимистичный UI, temp_-id): настоящего id в БД пока нет.
-            // Запоминаем намерение удалить — как только придёт реальный id, удалим его сразу же,
-            // без какого-либо сообщения пользователю.
-            if (isTempMessageId(message.id)) {
-                pendingDeleteTempIds.set(message.id, mode);
-                return;
-            }
+            // Удаляем на сервере и в локальном кэше КАЖДОЕ сообщение альбома — единого
+            // bulk-эндпоинта для удаления группы нет, поэтому запросы уходят по одному
+            // на фото, но все синхронно, одним "залпом" сразу после клика. Пользователь
+            // при этом видит удаление альбома целиком, без поштучного мигания фото.
+            groupMessages.forEach(m => {
+                // Сообщение ещё отправляется (оптимистичный UI, temp_-id): настоящего id в
+                // БД пока нет. Запоминаем намерение удалить — как только придёт реальный id,
+                // удалим его сразу же, без какого-либо сообщения пользователю.
+                if (isTempMessageId(m.id)) {
+                    pendingDeleteTempIds.set(m.id, mode);
+                    return;
+                }
 
-            // Помечаем как удалённое СРАЗУ, до похода на сервер — иначе тик polling-а или
-            // фоновой синхронизации, стартовавший чуть раньше, может вернуть старые данные
-            // (сообщение ещё не удалено на сервере) и записать его обратно в IndexedDB/UI.
-            locallyDeletedMessageIds.add(String(message.id));
+                // Помечаем как удалённое СРАЗУ, до похода на сервер — иначе тик polling-а или
+                // фоновой синхронизации, стартовавший чуть раньше, может вернуть старые данные
+                // (сообщение ещё не удалено на сервере) и записать его обратно в IndexedDB/UI.
+                locallyDeletedMessageIds.add(String(m.id));
 
-            deleteMessageFromDB(chatId, message.id).catch(e => console.error('deleteMessageFromDB error', e));
+                deleteMessageFromDB(chatId, m.id).catch(e => console.error('deleteMessageFromDB error', e));
 
-            // Запрос к серверу уходит в фоне — UI уже обновлён и ждать нечего.
-            fetch(`${SERVER_URL}/delete_message`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    message_id: message.id,
-                    platform_user_id: userData.platform_user_id,
-                    mode
-                }),
-                credentials: 'include'
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status !== 'success') {
-                        console.error('deleteMessage error', data.error);
-                    }
+                // Запрос к серверу уходит в фоне — UI уже обновлён и ждать нечего.
+                fetch(`${SERVER_URL}/delete_message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        message_id: m.id,
+                        platform_user_id: userData.platform_user_id,
+                        mode
+                    }),
+                    credentials: 'include'
                 })
-                .catch(e => console.error('deleteMessage error', e));
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status !== 'success') {
+                            console.error('deleteMessage error', data.error);
+                        }
+                    })
+                    .catch(e => console.error('deleteMessage error', e));
+            });
         }
 
         // ================= РЕДАКТИРОВАНИЕ СООБЩЕНИЯ =================
