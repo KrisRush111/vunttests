@@ -306,26 +306,32 @@
         }
         
         .add-chat-button {
-            background-color: transparent;
-            color: var(--telegram-blue);
+            background-color: #0a84ff;
+            color: #fff;
             border: none;
-            width: auto;
-            height: auto;
+            width: 30px;
+            height: 30px;
+            min-width: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 0;
-            font-size: 24px;
+            font-size: 14px;
             cursor: pointer;
+            box-shadow: 0 2px 6px rgba(10, 132, 255, 0.35);
             transition: all var(--animation-duration) var(--animation-timing);
             animation: bounceIn 0.5s var(--animation-timing);
         }
         
         .add-chat-button:hover {
-            background-color: transparent;
-            transform: translateY(-1px) scale(1.1) rotate(90deg);
-            box-shadow: none;
+            background-color: #0a84ff;
+            transform: translateY(-1px) scale(1.08) rotate(90deg);
+            box-shadow: 0 4px 12px rgba(10, 132, 255, 0.45);
         }
 
         .add-chat-button:active {
-            transform: scale(0.95) rotate(90deg);
+            transform: scale(0.92) rotate(90deg);
         }
         
         .chats-content {
@@ -1751,11 +1757,21 @@
         .close-contacts {
             background: none;
             border: none;
-            color: var(--telegram-blue);
+            color: var(--telegram-text);
             font-size: 20px;
-            margin-right: 16px;
+            font-weight: 600;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
             transition: transform var(--animation-duration) var(--animation-timing);
+        }
+
+        .contacts-header-spacer {
+            width: 36px;
+            flex-shrink: 0;
         }
 
         .close-contacts:hover {
@@ -1767,8 +1783,8 @@
         }
 
         .contacts-title {
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 19px;
+            font-weight: 700;
             flex: 1;
             text-align: center;
         }
@@ -1786,10 +1802,76 @@
             transform: scale(1.1);
         }
 
+        /* Поисковая строка в списке контактов — крупная скруглённая "капсула",
+           как на макете: серый фон, лупа и плейсхолдер по центру. */
+        .contacts-modal .search-input-container {
+            padding: 8px 16px 12px;
+        }
+
+        .contacts-modal .search-input {
+            border: none;
+            border-radius: 20px;
+            padding: 11px 16px 11px 40px;
+            background-color: var(--telegram-secondary-bg);
+        }
+
+        .contacts-modal .search-input:focus {
+            box-shadow: none;
+            background-color: var(--telegram-secondary-bg);
+        }
+
+        .contacts-modal .search-icon {
+            left: 30px;
+        }
+
         .contacts-list {
             flex: 1;
             overflow-y: auto;
             padding-bottom: 60px;
+            position: relative;
+        }
+
+        /* Буквенный заголовок раздела списка контактов ("К", "М", "Р"...) —
+           прилипает к верху во время прокрутки, как в контактах iOS/Telegram. */
+        .contacts-section-header {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            padding: 4px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--telegram-hint);
+            background: var(--telegram-bg);
+        }
+
+        /* Вертикальный буквенный указатель справа для быстрого перехода к разделу —
+           как на макете. Не двигает список, а лежит поверх него. */
+        .contacts-index-bar {
+            position: absolute;
+            top: 132px;
+            bottom: 8px;
+            right: 4px;
+            width: 18px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            z-index: 3;
+        }
+
+        .contacts-index-bar .index-letter {
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1.3;
+            color: var(--telegram-blue);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .contacts-index-bar .index-letter.disabled {
+            opacity: 0.35;
+            cursor: default;
         }
 
         .contact-item {
@@ -2088,7 +2170,10 @@
             }
             
             .add-chat-button {
-                font-size: 24px;
+                width: 30px;
+                height: 30px;
+                min-width: 30px;
+                font-size: 14px;
             }
 
             .chat-header .back-button:active {
@@ -4638,12 +4723,10 @@
     <div id="contactsModal" class="contacts-modal">
         <div class="contacts-header">
             <button id="closeContacts" class="close-contacts">
-                <i class="fas fa-arrow-left"></i>
+                <i class="fas fa-xmark"></i>
             </button>
-            <div class="contacts-title">Контакты</div>
-            <button class="contacts-search-btn">
-                <i class="fas fa-search"></i>
-            </button>
+            <div class="contacts-title">Написать сообщение</div>
+            <div class="contacts-header-spacer"></div>
         </div>
         
         <div class="search-input-container">
@@ -4652,6 +4735,7 @@
         </div>
         
         <div id="contactsList" class="contacts-list"></div>
+        <div id="contactsIndexBar" class="contacts-index-bar"></div>
     </div>
 
     <div id="modalOverlay" class="modal-overlay"></div>
@@ -4755,6 +4839,7 @@
         const modalOverlay = document.getElementById('modalOverlay');
         const closeContacts = document.getElementById('closeContacts');
         const contactsList = document.getElementById('contactsList');
+        const contactsIndexBar = document.getElementById('contactsIndexBar');
         const contactsSearchInput = document.getElementById('contactsSearchInput');
 
         const desktopSidebar = document.querySelector('.desktop-sidebar');
@@ -8540,18 +8625,70 @@ function getActiveElements() {
             }
         }
 
+        // Русский алфавит для указателя справа от списка контактов (как в макете) —
+        // показываем целиком, буквы без контактов просто становятся тусклее и некликабельны.
+        const CONTACTS_INDEX_ALPHABET = ['А','Б','В','Г','Д','Е','Ж','З','И','Й','К','Л','М','Н','О','П','Р','С','Т','У','Ф','Х','Ц','Ч','Ш','Щ','Ъ','Ы','Ь','Э','Ю','Я'];
+
+        function getContactIndexLetter(name) {
+            const trimmed = (name || '').trim();
+            if (!trimmed) return '#';
+            return trimmed.charAt(0).toUpperCase();
+        }
+
+        function renderContactsIndexBar(sectionHeaders) {
+            if (!contactsIndexBar) return;
+            contactsIndexBar.innerHTML = '';
+
+            CONTACTS_INDEX_ALPHABET.forEach(letter => {
+                const el = document.createElement('span');
+                el.className = 'index-letter';
+                el.textContent = letter;
+
+                const header = sectionHeaders[letter];
+                if (header) {
+                    el.addEventListener('click', () => {
+                        header.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                    });
+                } else {
+                    el.classList.add('disabled');
+                }
+
+                contactsIndexBar.appendChild(el);
+            });
+        }
+
         async function renderContacts(contacts) {
             if (!contacts || contacts.length === 0) {
                 contactsList.innerHTML = '<div style="text-align: center; color: var(--telegram-hint); padding: 20px;">Нет контактов</div>';
+                renderContactsIndexBar({});
                 return;
             }
 
-            const userIds = contacts.map(contact => contact.platform_user_id);
+            // Сортируем по имени — список идёт по алфавиту, чтобы совпадать с буквенными
+            // заголовками разделов и с указателем справа.
+            const sortedContacts = [...contacts].sort((a, b) =>
+                (a.nickname || '').localeCompare(b.nickname || '', 'ru')
+            );
+
+            const userIds = sortedContacts.map(contact => contact.platform_user_id);
             const activityData = await getCachedActivityStatus(userIds);
 
             const fragment = document.createDocumentFragment();
+            const sectionHeaders = {};
+            let lastLetter = null;
 
-            contacts.forEach((contact, index) => {
+            sortedContacts.forEach((contact, index) => {
+                const letter = getContactIndexLetter(contact.nickname);
+
+                if (letter !== lastLetter) {
+                    const sectionHeader = document.createElement('div');
+                    sectionHeader.className = 'contacts-section-header';
+                    sectionHeader.textContent = letter;
+                    fragment.appendChild(sectionHeader);
+                    sectionHeaders[letter] = sectionHeader;
+                    lastLetter = letter;
+                }
+
                 const contactItem = document.createElement('div');
                 contactItem.className = 'contact-item';
                 contactItem.style.animationDelay = `${index * 0.05}s`;
@@ -8590,7 +8727,10 @@ function getActiveElements() {
                 fragment.appendChild(contactItem);
             });
             
+            contactsList.innerHTML = '';
             contactsList.appendChild(fragment);
+
+            renderContactsIndexBar(sectionHeaders);
         }
 
         async function createChatWithContact(contact) {
@@ -10526,18 +10666,37 @@ if (profileCloseDesktop) {
         }
 
         function filterContacts(searchTerm) {
-            const contactItems = contactsList.querySelectorAll('.contact-item');
-            
-            contactItems.forEach(item => {
-                const contactName = item.querySelector('.contact-name').textContent.toLowerCase();
-                
-                if (contactName.includes(searchTerm.toLowerCase())) {
-                    item.style.display = 'flex';
-                    item.classList.add('animate__animated', 'animate__fadeIn');
+            const term = searchTerm.toLowerCase();
+            const children = Array.from(contactsList.children);
+            let currentHeader = null;
+            let currentHeaderHasVisible = false;
+
+            const finalizeHeader = () => {
+                if (currentHeader) currentHeader.style.display = currentHeaderHasVisible ? '' : 'none';
+            };
+
+            children.forEach(el => {
+                if (el.classList.contains('contacts-section-header')) {
+                    finalizeHeader();
+                    currentHeader = el;
+                    currentHeaderHasVisible = false;
+                    return;
+                }
+
+                if (!el.classList.contains('contact-item')) return;
+
+                const contactName = el.querySelector('.contact-name').textContent.toLowerCase();
+
+                if (contactName.includes(term)) {
+                    el.style.display = 'flex';
+                    el.classList.add('animate__animated', 'animate__fadeIn');
+                    currentHeaderHasVisible = true;
                 } else {
-                    item.style.display = 'none';
+                    el.style.display = 'none';
                 }
             });
+
+            finalizeHeader();
         }
 
         document.addEventListener('DOMContentLoaded', initializePage);
