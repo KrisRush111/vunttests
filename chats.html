@@ -1141,6 +1141,13 @@
             text-overflow: ellipsis;
         }
 
+        /* На фиолетовых, фиолетово-розовых, сине-зелёных и тёмных обоях фон под
+           панелью редактирования темнее — делаем текст превью белым, чтобы было видно.
+           На остальных обоях (и без обоев) цвет остаётся прежним. */
+        .wallpaper-light-text .edit-message-bar .edit-message-preview {
+            color: rgba(255, 255, 255, 0.82);
+        }
+
         .edit-message-bar .edit-message-cancel {
             flex-shrink: 0;
             align-self: center;
@@ -3547,6 +3554,12 @@
             overflow-y: auto;
         }
 
+        /* На фиолетовых, фиолетово-розовых, сине-зелёных и тёмных обоях делаем
+           плейсхолдер "Сообщение" чуть белее — на остальных обоях цвет не меняется. */
+        .wallpaper-light-text .message-input::placeholder {
+            color: rgba(255, 255, 255, 0.65);
+        }
+
         .send-button {
             width: 34px;
             height: 34px;
@@ -4838,6 +4851,11 @@
             { id: 'wall7', name: 'жёлто-зелёные', url: 'фон9.jpg' }
         ];
 
+        // Обои, на фоне которых текст под "Редактирование" и плейсхолдер поля ввода
+        // должны становиться белее (фиолетовые, фиолетово-розовые, сине-зелёные, тёмные) —
+        // на остальных обоях (и без обоев) цвет остаётся стандартным.
+        const WALLPAPERS_LIGHT_TEXT_IDS = ['wall1', 'wall6', 'wall5', 'wall4'];
+
         let wallpaperState = { enabled: false, selectedWallpaper: 'default' };
 
         function setCookie(name, value, days = 7) {
@@ -5057,10 +5075,12 @@
             const chatModalDesktop = document.getElementById('chatModalDesktop');
             const chatModalMobile = document.getElementById('chatModalMobile');
             const isMobile = window.matchMedia("(max-width: 767px)").matches;
+            const needsLightText = WALLPAPERS_LIGHT_TEXT_IDS.includes(selectedWallpaper.id);
             
             if (wallpaperState.enabled) {
                 if (!isMobile) {
                     document.body.classList.add('wallpaper-enabled');
+                    document.body.classList.toggle('wallpaper-light-text', needsLightText);
                     document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
                     document.body.style.backgroundSize = 'cover';
                     document.body.style.backgroundPosition = 'center';
@@ -5070,6 +5090,7 @@
                 
                 if (desktopPlaceholder && !isMobile) {
                     desktopPlaceholder.classList.add('wallpaper-enabled');
+                    desktopPlaceholder.classList.toggle('wallpaper-light-text', needsLightText);
                     desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
                     desktopPlaceholder.style.backgroundSize = 'cover';
                     desktopPlaceholder.style.backgroundPosition = 'center';
@@ -5078,6 +5099,7 @@
                 
                 if (chatModalDesktop && !isMobile) {
                     chatModalDesktop.classList.add('wallpaper-enabled');
+                    chatModalDesktop.classList.toggle('wallpaper-light-text', needsLightText);
                     chatModalDesktop.style.backgroundImage = `url('${selectedWallpaper.url}')`;
                     chatModalDesktop.style.backgroundSize = 'cover';
                     chatModalDesktop.style.backgroundPosition = 'center';
@@ -5086,30 +5108,31 @@
                 
                 if (chatModalMobile && isMobile) {
                     chatModalMobile.classList.add('wallpaper-enabled');
+                    chatModalMobile.classList.toggle('wallpaper-light-text', needsLightText);
                     chatModalMobile.style.backgroundImage = `url('${selectedWallpaper.url}')`;
                     chatModalMobile.style.backgroundSize = 'cover';
                     chatModalMobile.style.backgroundPosition = 'center';
                     chatModalMobile.style.backgroundRepeat = 'no-repeat';
                 }
             } else {
-                document.body.classList.remove('wallpaper-enabled');
+                document.body.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
                 document.body.style.backgroundImage = '';
                 document.body.style.backgroundColor = 'var(--telegram-secondary-bg)';
                 
                 if (desktopPlaceholder) {
-                    desktopPlaceholder.classList.remove('wallpaper-enabled');
+                    desktopPlaceholder.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
                     desktopPlaceholder.style.backgroundImage = '';
                     desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
                 }
                 
                 if (chatModalDesktop) {
-                    chatModalDesktop.classList.remove('wallpaper-enabled');
+                    chatModalDesktop.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
                     chatModalDesktop.style.backgroundImage = '';
                     chatModalDesktop.style.backgroundColor = 'var(--telegram-secondary-bg)';
                 }
                 
                 if (chatModalMobile) {
-                    chatModalMobile.classList.remove('wallpaper-enabled');
+                    chatModalMobile.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
                     chatModalMobile.style.backgroundImage = '';
                     chatModalMobile.style.backgroundColor = 'var(--telegram-secondary-bg)';
                 }
@@ -5134,13 +5157,21 @@
         function updateChatWallpaper() {
             const chatModalDesktop = document.getElementById('chatModalDesktop');
             const chatModalMobile = document.getElementById('chatModalMobile');
+            const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+            const needsLightText = wallpaperState.enabled && !!selectedWallpaper && WALLPAPERS_LIGHT_TEXT_IDS.includes(selectedWallpaper.id);
             
             if (wallpaperState.enabled) {
-                if (chatModalDesktop && chatModalDesktop.style.display === 'flex') chatModalDesktop.classList.add('wallpaper-enabled');
-                if (chatModalMobile && chatModalMobile.classList.contains('active')) chatModalMobile.classList.add('wallpaper-enabled');
+                if (chatModalDesktop && chatModalDesktop.style.display === 'flex') {
+                    chatModalDesktop.classList.add('wallpaper-enabled');
+                    chatModalDesktop.classList.toggle('wallpaper-light-text', needsLightText);
+                }
+                if (chatModalMobile && chatModalMobile.classList.contains('active')) {
+                    chatModalMobile.classList.add('wallpaper-enabled');
+                    chatModalMobile.classList.toggle('wallpaper-light-text', needsLightText);
+                }
             } else {
-                if (chatModalDesktop) chatModalDesktop.classList.remove('wallpaper-enabled');
-                if (chatModalMobile) chatModalMobile.classList.remove('wallpaper-enabled');
+                if (chatModalDesktop) chatModalDesktop.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
+                if (chatModalMobile) chatModalMobile.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
             }
         }
 
