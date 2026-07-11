@@ -1448,6 +1448,58 @@
             border-top: 1px solid rgba(120, 120, 128, 0.24);
         }
 
+        /* ===== Всплывающее меню сообщения (реакции + действия) поверх затемнённого фона,
+           как в Telegram: сообщение "поднимается" по центру, реакции складываются сверху,
+           меню действий — снизу, так что они никогда не перекрывают друг друга ===== */
+        .message-context-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 4990;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0);
+            -webkit-backdrop-filter: blur(0px);
+            backdrop-filter: blur(0px);
+            transition: background 0.22s ease, -webkit-backdrop-filter 0.22s ease, backdrop-filter 0.22s ease;
+            box-sizing: border-box;
+            cursor: default;
+        }
+
+        .message-context-overlay.visible {
+            background: rgba(0, 0, 0, 0.45);
+            -webkit-backdrop-filter: blur(3px);
+            backdrop-filter: blur(3px);
+        }
+
+        .message-context-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: min(92%, 420px);
+            margin: auto 0;
+            opacity: 0;
+            transform: scale(0.92);
+            transition: opacity 0.2s ease, transform 0.22s cubic-bezier(.22, .9, .3, 1);
+        }
+
+        .message-context-overlay.visible .message-context-stack {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .message-context-float {
+            pointer-events: none !important;
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+            margin: 0 !important;
+            box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4) !important;
+        }
+
         /* ===== Тост "Скопировано" с анимированной галочкой ===== */
         .copy-toast {
             position: fixed;
@@ -6516,6 +6568,10 @@ function getActiveElements() {
         let activeMessageActionMenu = null;
         let activeDeleteChoiceMenu = null;
 
+        // Держит элементы затемнённого фона, "поднятой" копии сообщения и стопки
+        // (реакции сверху / сообщение / меню действий снизу), пока меню открыто.
+        let activeContextOverlay = null;
+
         function closeReactionPicker(e) {
             // Если клик пришёл из document-обработчика (есть e) и целится ВНУТРЬ ещё
             // открытого меню — ничего не закрываем. Иначе на capture-фазе меню (и его
@@ -6542,14 +6598,65 @@ function getActiveElements() {
                 activeDeleteChoiceMenu.remove();
                 activeDeleteChoiceMenu = null;
             }
+
+            // Если сообщение было "поднято" на затемнённый фон (реакции/меню как в Telegram) —
+            // плавно гасим оверлей и возвращаем видимость оригиналу в ленте сообщений.
+            if (activeContextOverlay) {
+                const { overlay, originalEl } = activeContextOverlay;
+                activeContextOverlay = null;
+                overlay.classList.remove('visible');
+                if (originalEl) originalEl.style.visibility = '';
+                setTimeout(() => overlay.remove(), 220);
+            }
+
             document.removeEventListener('click', closeReactionPicker, true);
             document.removeEventListener('scroll', closeReactionPicker, true);
         }
 
-        // Открывает вместе панель реакций и меню действий (Скопировать / Удалить) — как в Telegram
+        // Открывает вместе панель реакций и меню действий (Скопировать / Удалить) — как в Telegram.
+        // Сообщение "поднимается" по центру экрана на затемнённом/размытом фоне вместе с обеими
+        // панелями: реакции складываются сверху, меню действий — снизу, через flex-колонку, поэтому
+        // они физически не могут перекрыть друг друга — даже когда сообщение было у самого края чата.
         function openMessageMenus(messageElement, message) {
-            openReactionPicker(messageElement, message, { skipOutsideListeners: true });
-            openMessageActionMenu(messageElement, message);
+            closeReactionPicker();
+
+            const isOutgoing = messageElement.classList.contains('message-outgoing');
+
+            const overlay = document.createElement('div');
+            overlay.className = 'message-context-overlay';
+
+            const stack = document.createElement('div');
+            stack.className = 'message-context-stack';
+            stack.style.alignItems = isOutgoing ? 'flex-end' : 'flex-start';
+            overlay.appendChild(stack);
+
+            // Визуальная "витрина" сообщения — точная копия исходного элемента. Сам оригинал
+            // остаётся на своём месте в ленте (просто прячем его), чтобы список сообщений не
+            // "прыгал" и ничего не приходилось пересчитывать заново, когда меню закроется.
+            const floatEl = messageElement.cloneNode(true);
+            floatEl.classList.add('message-context-float');
+            floatEl.style.position = 'static';
+            floatEl.style.pointerEvents = 'none';
+
+            const picker = buildReactionPicker(messageElement, message);
+            picker.style.position = 'static';
+            picker.style.alignSelf = 'center';
+
+            const menu = buildMessageActionMenu(messageElement, message);
+            menu.style.position = 'static';
+
+            stack.appendChild(picker);
+            stack.appendChild(floatEl);
+            stack.appendChild(menu);
+
+            document.body.appendChild(overlay);
+            messageElement.style.visibility = 'hidden';
+
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+
+            activeReactionPicker = picker;
+            activeMessageActionMenu = menu;
+            activeContextOverlay = { overlay, stack, floatEl, originalEl: messageElement };
 
             setTimeout(() => {
                 document.addEventListener('click', closeReactionPicker, true);
@@ -6561,27 +6668,9 @@ function getActiveElements() {
             return !message.is_image && !(message.content && isImageUrl(message.content));
         }
 
-        function positionMessageActionMenu(menu, messageElement) {
-            const rect = messageElement.getBoundingClientRect();
-            const menuWidth = menu.offsetWidth;
-            const menuHeight = menu.offsetHeight;
-            const isOutgoing = messageElement.classList.contains('message-outgoing');
-
-            let left = isOutgoing ? (rect.right - menuWidth) : rect.left;
-            left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
-
-            let top = rect.bottom + 8;
-            if (top + menuHeight > window.innerHeight - 8) {
-                top = Math.max(8, rect.top - menuHeight - 8);
-            }
-
-            menu.style.left = `${left}px`;
-            menu.style.top = `${top}px`;
-        }
-
-        function openMessageActionMenu(messageElement, message) {
+        function buildMessageActionMenu(messageElement, message) {
             const menu = document.createElement('div');
-            menu.className = 'message-action-menu animate__animated animate__fadeInUp';
+            menu.className = 'message-action-menu animate__animated animate__fadeIn';
 
             if (isTextMessage(message)) {
                 const copyBtn = document.createElement('button');
@@ -6636,9 +6725,7 @@ function getActiveElements() {
             });
             menu.appendChild(selectBtn);
 
-            document.body.appendChild(menu);
-            positionMessageActionMenu(menu, messageElement);
-            activeMessageActionMenu = menu;
+            return menu;
         }
 
         function showSimpleToast(text) {
@@ -6778,7 +6865,8 @@ function getActiveElements() {
             menu.appendChild(meBtn);
 
             document.body.appendChild(menu);
-            positionDeleteChoiceMenu(menu, messageElement);
+            const anchorEl = (activeContextOverlay && activeContextOverlay.floatEl) || messageElement;
+            positionDeleteChoiceMenu(menu, anchorEl);
             activeDeleteChoiceMenu = menu;
 
             setTimeout(() => {
@@ -7414,32 +7502,9 @@ function getActiveElements() {
             return btn;
         }
 
-        let activeReactionSide = null; // 'above' | 'below' — запоминаем сторону, чтобы расширенная сетка не "прыгала" под сообщение
-
-        function positionReactionPicker(picker, messageElement, forceSide) {
-            const rect = messageElement.getBoundingClientRect();
-            const pickerWidth = picker.offsetWidth;
-            const pickerHeight = picker.offsetHeight;
-            let left = rect.left + rect.width / 2 - pickerWidth / 2;
-            left = Math.max(8, Math.min(left, window.innerWidth - pickerWidth - 8));
-
-            // Сторону (сверху/снизу) решаем один раз для маленького пикера и переиспользуем
-            // для расширенного, чтобы он раскрывался в том же месте, а не съезжал под сообщение
-            let side = forceSide || (rect.top - pickerHeight - 10 >= 8 ? 'above' : 'below');
-            activeReactionSide = side;
-
-            let top = side === 'above' ? (rect.top - pickerHeight - 10) : (rect.bottom + 10);
-            top = Math.max(8, Math.min(top, window.innerHeight - pickerHeight - 8));
-
-            picker.style.left = `${left}px`;
-            picker.style.top = `${top}px`;
-        }
-
-        function openReactionPicker(messageElement, message, options = {}) {
-            closeReactionPicker();
-
+        function buildReactionPicker(messageElement, message) {
             const picker = document.createElement('div');
-            picker.className = 'reaction-picker animate__animated animate__fadeInUp';
+            picker.className = 'reaction-picker animate__animated animate__fadeIn';
 
             REACTION_EMOJIS.forEach(emoji => {
                 picker.appendChild(makeReactionEmojiButton(messageElement, emoji));
@@ -7455,40 +7520,27 @@ function getActiveElements() {
             });
             picker.appendChild(expandBtn);
 
-            document.body.appendChild(picker);
-            positionReactionPicker(picker, messageElement);
-
-            activeReactionPicker = picker;
-
-            if (!options.skipOutsideListeners) {
-                setTimeout(() => {
-                    document.addEventListener('click', closeReactionPicker, true);
-                    document.addEventListener('scroll', closeReactionPicker, true);
-                }, 0);
-            }
+            return picker;
         }
 
+        // Разворачивает панель реакций в полную сетку эмодзи прямо на её месте в стопке
+        // (реакции сверху / сообщение / меню действий снизу) — сообщение и меню действий
+        // при этом не двигаются, расширяется только сама панель реакций.
         function openExpandedReactionPicker(messageElement, message) {
-            // Убираем только маленькую панель реакций, меню действий (Скопировать/Удалить) оставляем открытым
-            if (activeReactionPicker) { activeReactionPicker.remove(); activeReactionPicker = null; }
+            if (!activeContextOverlay) return;
 
             const picker = document.createElement('div');
-            picker.className = 'reaction-picker reaction-picker-expanded animate__animated animate__fadeInUp';
+            picker.className = 'reaction-picker reaction-picker-expanded animate__animated animate__fadeIn';
+            picker.style.position = 'static';
+            picker.style.alignSelf = 'center';
 
             const allEmojis = REACTION_EMOJIS.concat(REACTION_EMOJIS_EXTRA);
             allEmojis.forEach(emoji => {
                 picker.appendChild(makeReactionEmojiButton(messageElement, emoji));
             });
 
-            document.body.appendChild(picker);
-            positionReactionPicker(picker, messageElement, activeReactionSide);
-
+            if (activeReactionPicker) activeReactionPicker.replaceWith(picker);
             activeReactionPicker = picker;
-
-            setTimeout(() => {
-                document.addEventListener('click', closeReactionPicker, true);
-                document.addEventListener('scroll', closeReactionPicker, true);
-            }, 0);
         }
 
         async function toggleReaction(messageId, emoji) {
