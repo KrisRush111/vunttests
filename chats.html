@@ -1073,17 +1073,20 @@
         /* ===== Панель редактирования сообщения над полем ввода ===== */
         .edit-message-bar {
             display: flex;
-            align-items: center;
+            align-items: stretch;
             gap: 10px;
-            padding: 8px 12px;
-            background: var(--telegram-secondary-bg, rgba(0,0,0,0.04));
-            border-radius: 10px;
+            padding: 6px 10px;
+            background: var(--telegram-secondary-bg, rgba(255,255,255,0.05));
+            border-radius: 12px;
             margin: 0 0 6px 0;
         }
 
-        .edit-message-bar .edit-message-icon {
-            color: var(--telegram-blue);
-            font-size: 16px;
+        .edit-message-bar::before {
+            content: '';
+            width: 3px;
+            align-self: stretch;
+            border-radius: 2px;
+            background: var(--telegram-blue);
             flex-shrink: 0;
         }
 
@@ -1092,17 +1095,22 @@
             min-width: 0;
             display: flex;
             flex-direction: column;
+            justify-content: center;
+            gap: 1px;
+            padding: 2px 0;
         }
 
         .edit-message-bar .edit-message-title {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--telegram-blue);
+            line-height: 1.25;
         }
 
         .edit-message-bar .edit-message-preview {
-            font-size: 13px;
+            font-size: 14px;
             color: var(--telegram-hint);
+            line-height: 1.25;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -1110,6 +1118,7 @@
 
         .edit-message-bar .edit-message-cancel {
             flex-shrink: 0;
+            align-self: center;
             background: none;
             border: none;
             color: var(--telegram-hint);
@@ -6876,8 +6885,21 @@ function getActiveElements() {
             return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
         }
 
+        function setSendButtonEditMode(sendMessageButton, isEditing) {
+            if (!sendMessageButton) return;
+            const icon = sendMessageButton.querySelector('i');
+            if (!icon) return;
+            if (isEditing) {
+                icon.classList.remove('fa-paper-plane');
+                icon.classList.add('fa-check');
+            } else {
+                icon.classList.remove('fa-check');
+                icon.classList.add('fa-paper-plane');
+            }
+        }
+
         function enterEditMode(message) {
-            const { messageInput, messageInputContainer } = getActiveElements();
+            const { messageInput, messageInputContainer, sendMessageButton } = getActiveElements();
             if (!messageInput || !messageInputContainer) return;
 
             editingMessage = { id: message.id, chatId: currentChat ? currentChat.id : null, originalContent: message.content };
@@ -6890,6 +6912,7 @@ function getActiveElements() {
             try { messageInput.setSelectionRange(len, len); } catch (e) {}
 
             showEditBar(message, messageInputContainer);
+            setSendButtonEditMode(sendMessageButton, true);
         }
 
         function showEditBar(message, messageInputContainer) {
@@ -6898,9 +6921,8 @@ function getActiveElements() {
             const bar = document.createElement('div');
             bar.className = 'edit-message-bar';
             bar.innerHTML = `
-                <span class="edit-message-icon"><i class="fa-solid fa-pen"></i></span>
                 <div class="edit-message-info">
-                    <span class="edit-message-title">Редактирование сообщения</span>
+                    <span class="edit-message-title">Редактирование</span>
                     <span class="edit-message-preview"></span>
                 </div>
                 <button type="button" class="edit-message-cancel" aria-label="Отмена"><i class="fa-solid fa-xmark"></i></button>
@@ -6922,13 +6944,14 @@ function getActiveElements() {
         }
 
         function cancelEditMode() {
-            const { messageInput, messageInputContainer } = getActiveElements();
+            const { messageInput, messageInputContainer, sendMessageButton } = getActiveElements();
             editingMessage = null;
             if (messageInput) {
                 messageInput.value = '';
                 autoResizeMessageInput(messageInput);
             }
             hideEditBar(messageInputContainer);
+            setSendButtonEditMode(sendMessageButton, false);
         }
 
         // Применяет отредактированный текст к сообщению локально (DOM + массив + кэш), не дожидаясь сервера
@@ -8357,6 +8380,7 @@ function getActiveElements() {
                 messageInput.value = '';
                 autoResizeMessageInput(messageInput);
                 hideEditBar();
+                setSendButtonEditMode(sendMessageButton, false);
                 editingMessage = null;
 
                 if (content !== originalContent) {
