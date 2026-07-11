@@ -8537,15 +8537,16 @@ function getActiveElements() {
 
                     const index = currentMessages.findIndex(msg => msg.id === tempMessageId);
                     if (index !== -1) {
-                        currentMessages[index] = {
-                            id: messageData.message_id,
-                            sender_id: userData.platform_user_id,
-                            content: messageContent,
-                            sent_at: messageData.sent_at || new Date().toISOString(),
-                            is_read: false,
-                            is_me: true
-                        };
-                        
+                        // Важно: мутируем СУЩЕСТВУЮЩИЙ объект сообщения, а не заменяем его новым.
+                        // Обработчики долгого нажатия (attachMessageLongPress) захватывают этот объект
+                        // по ссылке в момент рендера — если подставить новый объект, кнопка "Изменить"
+                        // будет видеть старый temp_-id вплоть до перезахода в чат.
+                        const msgObj = currentMessages[index];
+                        msgObj.id = messageData.message_id;
+                        msgObj.sent_at = messageData.sent_at || new Date().toISOString();
+                        msgObj.is_read = false;
+                        delete msgObj.is_temp;
+
                         const msgElement = messagesContainer.querySelector(`[data-message-id="${tempMessageId}"]`);
                         if (msgElement) msgElement.setAttribute('data-message-id', messageData.message_id);
                     }
