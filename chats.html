@@ -9316,6 +9316,9 @@ function stopProfileStatusPolling() {
                         // Синхронизация реакций при каждом тике, даже если новых сообщений нет
                         const { messagesContainer: reactionMc } = getActiveElements();
                         let reactionsChanged = false;
+                        const latestNewMsgId = newMessages.length > 0 ? newMessages[newMessages.length - 1].id : null;
+                        let lastMessageEdited = false;
+
                         newMessages.forEach(nm => {
                             const cached = currentMessages.find(m => String(m.id) === String(nm.id));
                             // Рендерим (и трогаем DOM/аватарки) только если реакции реально изменились —
@@ -9335,11 +9338,28 @@ function stopProfileStatusPolling() {
                             const editChanged = cached && (cached.content !== nm.content || !!cached.is_edited !== !!nm.is_edited);
                             if (editChanged) {
                                 applyEditedContentLocally(chatId, nm.id, nm.content, nm.edited_at);
+                                if (String(nm.id) === String(latestNewMsgId)) lastMessageEdited = true;
                             } else if (cached) {
                                 cached.is_edited = nm.is_edited;
                                 cached.edited_at = nm.edited_at;
                             }
                         });
+
+                        // Если отредактировано именно последнее сообщение чата — обновляем его
+                        // превью в списке чатов слева сразу же, не дожидаясь появления новых сообщений
+                        // (иначе список слева "застревал" на старом тексте, пока чат был открыт).
+                        if (lastMessageEdited) {
+                            const lastMsg = newMessages[newMessages.length - 1];
+                            let previewText = lastMsg.content || '';
+                            if (lastMsg.is_image || isImageUrl(previewText)) previewText = '📷 Фото';
+                            updateChatItemInDOM(chatId, { last_message: previewText, last_message_time: lastMsg.sent_at });
+                            const chatIdxEdit = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+                            if (chatIdxEdit !== -1) {
+                                currentChatsList[chatIdxEdit].last_message = previewText;
+                                currentChatsList[chatIdxEdit].last_message_time = lastMsg.sent_at;
+                                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                            }
+                        }
 
                         // Реакции могли поменяться и без появления новых сообщений
                         // (например контакт поставил/снял реакцию) — сохраняем их
