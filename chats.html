@@ -8498,6 +8498,70 @@ function getActiveElements() {
             } catch (error) {}
         }
 
+        // Синхронная версия getCachedActivityStatus — берёт только то, что уже
+        // лежит в памяти (CACHE.statuses), без единого сетевого запроса.
+        // Нужна, чтобы renderChats мог отрисовать список чатов мгновенно:
+        // раньше renderChats всегда ждал fetch к /get_activity_status для
+        // ВСЕХ участников (а после перезагрузки страницы CACHE.statuses всегда
+        // пуст, т.к. это просто переменная в памяти) — именно это и было
+        // причиной долгой загрузки чатов после reload, а не сам список чатов.
+        function getCachedActivityStatusSync(userIds) {
+            const now = Date.now();
+            const result = {};
+            userIds.forEach(id => {
+                const cached = CACHE.statuses.get(id);
+                const timestamp = CACHE.statusesTimestamp.get(id);
+                if (cached && timestamp && (now - timestamp < CACHE.STATUS_TTL)) result[id] = cached;
+            });
+            return result;
+        }
+
+        // Донагружает недостающие статусы в фоне (не блокируя отрисовку списка)
+        // и точечно обновляет уже вставленные в DOM элементы чатов.
+        async function refreshChatStatusesInBackground(chats, userIds) {
+            const now = Date.now();
+            const uncachedIds = userIds.filter(id => {
+                const timestamp = CACHE.statusesTimestamp.get(id);
+                return !(timestamp && (now - timestamp < CACHE.STATUS_TTL));
+            });
+            if (uncachedIds.length === 0) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/get_activity_status`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_ids: uncachedIds }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') return;
+
+                Object.entries(data.activity_data).forEach(([id, status]) => {
+                    CACHE.statuses.set(id, status);
+                    CACHE.statusesTimestamp.set(id, now);
+                });
+
+                chats.forEach(chat => {
+                    const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                    if (!otherParticipant) return;
+                    const status = data.activity_data[otherParticipant.platform_user_id];
+                    if (!status) return;
+
+                    const chatItem = document.querySelector(`.chat-item[data-chat-id="${chat.id}"]`);
+                    const statusEl = chatItem ? chatItem.querySelector('.chat-status') : null;
+                    if (!statusEl) return;
+
+                    if (status.is_online) {
+                        statusEl.classList.add('online');
+                        statusEl.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    } else {
+                        statusEl.classList.remove('online');
+                        statusEl.textContent = formatLastSeen(status.last_online);
+                    }
+                });
+            } catch (e) {}
+        }
+
         async function renderChats(chats) {
             const { chatsList, noChats } = getActiveElements();
             chatsList.innerHTML = '';
@@ -8518,7 +8582,9 @@ function getActiveElements() {
                 }
             });
             
-            const activityData = await getCachedActivityStatus(userIds);
+            // Мгновенно, без сети — статусы, которых ещё нет в памяти, донагрузятся
+            // и точечно обновятся в фоне через refreshChatStatusesInBackground.
+            const activityData = getCachedActivityStatusSync(userIds);
             
             const fragment = document.createDocumentFragment();
             
@@ -8589,6 +8655,11 @@ function getActiveElements() {
             });
             
             chatsList.appendChild(fragment);
+
+            // Статусы "в сети"/"был(а) недавно", которых не было в памяти, —
+            // донагружаем и подставляем в уже отрисованные элементы отдельно,
+            // не блокируя появление самого списка чатов.
+            refreshChatStatusesInBackground(chats, userIds);
         }
 
         async function updateUserActivity(isOnline = true) {
