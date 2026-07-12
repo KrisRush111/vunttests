@@ -2507,19 +2507,10 @@ function createRecommendationUserElement(user) {
     const avatarElement = document.createElement('div');
     avatarElement.className = 'recommendation-avatar';
 
-    if (user.has_avatar_photo || user.has_avatar) {
-        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-        avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-        avatarElement.textContent = '';
-    } else {
+    {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-        avatarElement.textContent = initial;
-        if (user.avatar_background) {
-            const colors = [user.avatar_background, adjustColor(user.avatar_background, 20)];
-            avatarElement.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
-        } else {
-            avatarElement.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
-        }
+        const hasAvatar = !!(user.has_avatar_photo || user.has_avatar);
+        AvatarCache.render(SERVER_URL, avatarElement, user.platform_user_id, initial, user.avatar_background, hasAvatar);
     }
 
     // Информация
@@ -3284,25 +3275,25 @@ async function updateProfileModalUI(user) {
     currentViewedUser = user;
     console.log('Updating profile UI with:', user);
 
-    // Обновление аватара
-    if (user.has_avatar_photo || user.has_avatar) {
-        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-        activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        activeElements.modalProfileAvatar.textContent = '';
-        activeElements.modalProfileAvatar.style.backgroundColor = '';
-        activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
-        activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
-    } else {
+    // Обновление аватара — мгновенно из локального кэша, затем тихая
+    // проверка версии на сервере и обновление, только если фото реально сменилось
+    {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-        activeElements.modalProfileAvatar.textContent = initial;
-        activeElements.modalProfileAvatar.style.backgroundImage = 'none';
-        
-        if (user.avatar_background) {
-            const lighterColor = adjustColor(user.avatar_background, 20);
-            activeElements.modalProfileAvatar.style.background = 
-                `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+        const hasAvatar = !!(user.has_avatar_photo || user.has_avatar);
+        if (hasAvatar) {
+            AvatarCache.render(SERVER_URL, activeElements.modalProfileAvatar, user.platform_user_id, initial, user.avatar_background, true);
+            activeElements.modalProfileAvatar.style.backgroundColor = '';
         } else {
-            activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+            activeElements.modalProfileAvatar.textContent = initial;
+            activeElements.modalProfileAvatar.style.backgroundImage = 'none';
+
+            if (user.avatar_background) {
+                const lighterColor = adjustColor(user.avatar_background, 20);
+                activeElements.modalProfileAvatar.style.background =
+                    `linear-gradient(135deg, ${user.avatar_background}, ${lighterColor})`;
+            } else {
+                activeElements.modalProfileAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+            }
         }
     }
 
@@ -3380,11 +3371,12 @@ async function updateProfileModalUI(user) {
         console.log('Предмет: скрыто (роль не учитель)');
     }
 
-    // Обработчик клика на аватар
-    activeElements.modalProfileAvatar.onclick = () => {
+    // Обработчик клика на аватар — открываем то, что сейчас отображается
+    activeElements.modalProfileAvatar.onclick = async () => {
         if (user.has_avatar_photo || user.has_avatar) {
-            const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-            openPhotoViewer(avatarUrl);
+            const local = await AvatarCache.getLocal(user.platform_user_id);
+            const src = local?.dataUrl || `${SERVER_URL}/avatar/${user.platform_user_id}`;
+            openPhotoViewer(src);
         }
     };
 
@@ -3532,19 +3524,10 @@ async function updateProfileModalUI(user) {
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
 
-            if (user.has_avatar_photo || user.has_avatar) {
-                const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-                avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-                avatarElement.textContent = '';
-            } else {
+            {
                 const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                avatarElement.textContent = initial;
-                if (user.avatar_background) {
-                    const colors = [user.avatar_background, adjustColor(user.avatar_background, 20)];
-                    avatarElement.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
-                } else {
-                    avatarElement.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
-                }
+                const hasAvatar = !!(user.has_avatar_photo || user.has_avatar);
+                AvatarCache.render(SERVER_URL, avatarElement, user.platform_user_id, initial, user.avatar_background, hasAvatar);
             }
 
  
@@ -3624,19 +3607,10 @@ async function updateProfileModalUI(user) {
             const avatarElement = document.createElement('div');
             avatarElement.className = 'user-avatar';
 
-            if (user.has_avatar_photo || user.has_avatar) {
-                const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-                avatarElement.style.backgroundImage = `url(${avatarUrl})`;
-                avatarElement.textContent = '';
-            } else {
+            {
                 const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-                avatarElement.textContent = initial;
-                if (user.avatar_background) {
-                    const colors = [user.avatar_background, adjustColor(user.avatar_background, 20)];
-                    avatarElement.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
-                } else {
-                    avatarElement.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
-                }
+                const hasAvatar = !!(user.has_avatar_photo || user.has_avatar);
+                AvatarCache.render(SERVER_URL, avatarElement, user.platform_user_id, initial, user.avatar_background, hasAvatar);
             }
 
       
@@ -4068,5 +4042,6 @@ function setupSearchHandlers() {
     </script>
 
       <script src="activity-tracker.js"></script>
+      <script src="avatar-cache.js"></script>
 </body>
 </html>
