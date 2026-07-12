@@ -5085,6 +5085,31 @@
             return null;
         }
 
+        // Мгновенное чтение кэша БЕЗ учёта TTL и БЕЗ гонки с фоновой предзагрузкой
+        // _memCache при старте страницы: напрямую дожидается открытия IndexedDB.
+        // Нужно для первого отображения (списка чатов и т.п.) — контент должен
+        // появиться сразу же, даже если он формально "устарел" по TTL; свежесть
+        // проверит последующий фоновый запрос к серверу.
+        async function getCacheItemIgnoreTTL(key) {
+            const mem = _memCache.get(key);
+            if (mem) return mem.value;
+            try {
+                const db = await openDB();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('cache', 'readonly');
+                    const req = tx.objectStore('cache').get(key);
+                    req.onsuccess = () => resolve(req.result ? req.result.value : null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch (e) {
+                try {
+                    const raw = localStorage.getItem('c_' + key);
+                    if (!raw) return null;
+                    return JSON.parse(raw).value;
+                } catch (e2) { return null; }
+            }
+        }
+
         async function getCacheItemAsync(key) {
             const mem = _memCache.get(key);
             if (mem) {
@@ -8402,30 +8427,22 @@ function getActiveElements() {
 
         async function loadChats() {
             const cacheKey = 'chats_list';
-            const cached = getCacheItem(cacheKey);
             const { chatsList, noChats } = getActiveElements();
-            
-            if (cached) {
-                const sortedChats = sortChats(cached);
+
+            // ── 1. Мгновенный показ того, что уже сохранено локально ─────
+            // Без сети и без ожидания TTL — чаты должны появиться сразу же
+            // при открытии страницы, даже если кэш формально "устарел".
+            const cachedChats = await getCacheItemIgnoreTTL(cacheKey);
+            const hadCache = !!(cachedChats && cachedChats.length);
+
+            if (hadCache) {
+                const sortedChats = sortChats(cachedChats);
                 currentChatsList = sortedChats;
                 renderChats(sortedChats);
                 preloadAllMessages(sortedChats);
-                
-                fetch(`${SERVER_URL}/get_chats`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({platform_user_id: userData.platform_user_id}),
-                    credentials: 'include'
-                }).then(async response => {
-                    const data = await response.json();
-                    if (data.status === 'success') {
-                        setCacheItem(cacheKey, data.chats, CACHE.CHATS_TTL);
-                    }
-                }).catch(() => {});
-                
-                return;
             }
-            
+
+            // ── 2. Фоновая сверка с сервером — всегда ─────────────────────
             try {
                 const response = await fetch(`${SERVER_URL}/get_chats`, {
                     method: 'POST',
@@ -8433,22 +8450,25 @@ function getActiveElements() {
                     body: JSON.stringify({platform_user_id: userData.platform_user_id}),
                     credentials: 'include'
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     const sortedChats = sortChats(data.chats);
                     currentChatsList = sortedChats;
                     renderChats(sortedChats);
                     preloadAllMessages(sortedChats);
                     setCacheItem(cacheKey, sortedChats, CACHE.CHATS_TTL);
-                } else {
+                } else if (!hadCache) {
                     currentChatsList = [];
                     renderChats([]);
                 }
             } catch (error) {
-                currentChatsList = [];
-                renderChats([]);
+                // Нет сети — если локальный кэш уже показан, оставляем его как есть
+                if (!hadCache) {
+                    currentChatsList = [];
+                    renderChats([]);
+                }
             }
         }
 
