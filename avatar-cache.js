@@ -159,9 +159,15 @@ const AvatarCache = (function () {
 
     async function checkAndUpdate(serverUrl, userId, local) {
         try {
-            const versionRes = await fetch(`${serverUrl}/avatar_version/${userId}`, {
-                credentials: 'include'
-            });
+            // Ни /avatar_version, ни /avatar не проверяют сессию на сервере,
+            // поэтому credentials здесь не нужны. Это важно для /avatar:
+            // он делает redirect на Cloudinary (другой домен), а fetch с
+            // credentials:'include' по кросс-доменному редиректу браузер
+            // блокирует политикой CORS, если у конечного ответа нет
+            // Access-Control-Allow-Credentials — из-за этого скачивание
+            // реальной картинки молча падало в catch, и локально
+            // сохранялся только фон-плейсхолдер, а не само фото.
+            const versionRes = await fetch(`${serverUrl}/avatar_version/${userId}`);
             if (!versionRes.ok) return null;
             const versionData = await versionRes.json();
             const remoteVersion = versionData.version;
@@ -177,9 +183,7 @@ const AvatarCache = (function () {
             }
 
             // Версия изменилась (или локальной копии не было) — скачиваем фото
-            const imgRes = await fetch(`${serverUrl}/avatar/${userId}`, {
-                credentials: 'include'
-            });
+            const imgRes = await fetch(`${serverUrl}/avatar/${userId}`);
             if (!imgRes.ok) return null;
             const blob = await imgRes.blob();
             const dataUrl = await blobToDataURL(blob);
