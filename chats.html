@@ -5171,6 +5171,39 @@
             } catch(e) { return null; }
         }
 
+        // Дешёвая проверка версии чата на сервере (аналог /avatar_version для аватарок).
+        // Возвращает короткий хэш состояния чата или null при ошибке сети —
+        // в этом случае вызывающий код должен просто пойти по обычному пути
+        // (полный /get_messages), как будто версии не существует.
+        async function getRemoteChatVersion(chatId) {
+            try {
+                const res = await fetch(
+                    `${SERVER_URL}/chat_version/${chatId}?platform_user_id=${encodeURIComponent(userData.platform_user_id)}`
+                );
+                if (!res.ok) return null;
+                const data = await res.json();
+                return data.version || null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // Сохраняет версию чата в chat_meta, не затирая остальные поля записи
+        // (last_id/count/updated_at), которые пишет saveMessagesToDB.
+        async function saveChatVersion(chatId, version) {
+            if (!version) return;
+            try {
+                const db = await openDB();
+                const tx = db.transaction('chat_meta', 'readwrite');
+                const store = tx.objectStore('chat_meta');
+                const req = store.get(String(chatId));
+                req.onsuccess = () => {
+                    const existing = req.result || { chat_id: String(chatId) };
+                    store.put({ ...existing, version });
+                };
+            } catch (e) {}
+        }
+
         async function deleteMissingMessages(chatId, serverMessages) {
             try {
                 const db = await openDB();
@@ -8337,12 +8370,20 @@ function getActiveElements() {
 
         function preloadAllMessages(chats) {
             if (!chats || chats.length === 0) return;
-            // Фоновая синхронизация: только для чатов где мета устарела (>30 сек)
+            // Фоновая синхронизация: только для чатов где мета устарела (>30 сек) —
+            // и даже тогда сперва дешёвая проверка версии, полный /get_messages
+            // только если версия реально отличается от локально сохранённой.
             chats.forEach(async (chat) => {
                 try {
                     const meta = await getChatMeta(chat.id);
                     const stale = !meta || (Date.now() - (meta.updated_at || 0) > 30000);
                     if (!stale) return; // свежие данные — пропускаем
+
+                    const remoteVersion = await getRemoteChatVersion(chat.id);
+                    if (remoteVersion && meta && meta.version && meta.version === remoteVersion) {
+                        return; // ничего не изменилось — не тянем сообщения целиком
+                    }
+
                     const response = await fetch(`${SERVER_URL}/get_messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -8353,6 +8394,7 @@ function getActiveElements() {
                     if (data.status === 'success' && data.messages) {
                         messagesCache[chat.id] = data.messages;
                         await saveMessagesToDB(chat.id, data.messages);
+                        await saveChatVersion(chat.id, remoteVersion);
                     }
                 } catch (e) {}
             });
@@ -8924,6 +8966,22 @@ function getActiveElements() {
             // ── 2. Фоновая синхронизация с сервером ──────────────────────
             const syncWithServer = async () => {
                 try {
+                    // 2a. Сначала — дешёвая проверка версии чата (без сообщений/фото).
+                    // Если она совпадает с тем, что уже сохранено локально —
+                    // тяжёлый /get_messages вообще не вызываем, только помечаем
+                    // сообщения прочитанными.
+                    const remoteVersion = await getRemoteChatVersion(chatId);
+                    if (isCancelled()) return;
+
+                    if (remoteVersion) {
+                        const meta = await getChatMeta(chatId);
+                        if (isCancelled()) return;
+                        if (meta && meta.version && meta.version === remoteVersion) {
+                            markAllMessagesAsRead(chatId);
+                            return;
+                        }
+                    }
+
                     const response = await fetch(`${SERVER_URL}/get_messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -8981,6 +9039,7 @@ function getActiveElements() {
                     noMessages.style.display = freshMessages.length === 0 ? 'block' : 'none';
                     if (freshMessages.length === 0) noMessages.textContent = 'Сообщений пока нет...';
 
+                    await saveChatVersion(chatId, remoteVersion);
                     markAllMessagesAsRead(chatId);
                 } catch(e) {
                     if (e.name === 'AbortError') return; // нормальная отмена
@@ -9993,6 +10052,22 @@ function stopProfileStatusPolling() {
                 if (!currentChat || String(currentChat.id) !== String(chatId) || isSendingMessage) return;
 
                 try {
+                    // Сначала — дешёвая проверка версии чата. Если она совпадает с
+                    // локально сохранённой, ничего на сервере не изменилось — не
+                    // тянем полный /get_messages (сообщения, фото, реакции) впустую
+                    // каждые 2.5 секунды, а просто ждём следующего тика.
+                    const pollRemoteVersion = await getRemoteChatVersion(chatId);
+                    if (startMessagePolling._token !== pollToken) return;
+                    if (!currentChat || String(currentChat.id) !== String(chatId)) return;
+
+                    if (pollRemoteVersion) {
+                        const pollMeta = await getChatMeta(chatId);
+                        if (startMessagePolling._token !== pollToken) return;
+                        if (pollMeta && pollMeta.version && pollMeta.version === pollRemoteVersion) {
+                            return; // ничего не изменилось
+                        }
+                    }
+
                     const response = await fetch(`${SERVER_URL}/get_messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -10008,6 +10083,7 @@ function stopProfileStatusPolling() {
                     if (startMessagePolling._token !== pollToken) return;
 
                     if (data.status === 'success') {
+                        await saveChatVersion(chatId, pollRemoteVersion);
                         // Исключаем сообщения, которые пользователь только что удалил локально:
                         // сервер мог ответить данными, снятыми ДО того, как DELETE применился там,
                         // иначе удалённое сообщение "воскреснет" на экране и в IndexedDB.
