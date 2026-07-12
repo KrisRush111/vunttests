@@ -5978,41 +5978,13 @@ function getActiveElements() {
             document.addEventListener('keydown', handleKeydown);
         }
 
-        async function getCachedAvatar(userId) {
-            const cacheKey = `avatar_${userId}`;
-            const cached = getCacheItem(cacheKey);
-            if (cached) return cached;
-            try {
-                const response = await fetch(`${SERVER_URL}/avatar/${userId}`, { credentials: 'include' });
-                const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-                setCacheItem(cacheKey, url, CACHE.AVATAR_TTL);
-                return url;
-            } catch (error) {
-                return null;
-            }
-        }
-
+        // Аватарки теперь хранятся локально (IndexedDB, между открытиями страницы)
+        // через AvatarCache: сразу показываем то, что сохранено на устройстве,
+        // а в фоне дёшево проверяем на сервере, не изменился ли аватар, и
+        // перекачиваем/перерисовываем только если он реально сменился.
         function loadChatAvatar(avatarElement, userId, initials, bgColor) {
-            const cacheKey = `avatar_${userId}`;
-            const cached = getCacheItem(cacheKey);
-            
-            avatarElement.style.background = bgColor ? `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 'linear-gradient(135deg, #0088cc, #40a7e3)';
-            avatarElement.textContent = initials;
-
-            if (cached) {
-                avatarElement.style.background = `url(${cached}) center/cover no-repeat`;
-                avatarElement.textContent = '';
-            } else {
-                const avatarUrl = `${SERVER_URL}/avatar/${userId}`;
-                const img = new Image();
-                img.onload = function() {
-                    avatarElement.style.background = `url(${avatarUrl}) center/cover no-repeat`;
-                    avatarElement.textContent = '';
-                    setCacheItem(cacheKey, avatarUrl, CACHE.AVATAR_TTL);
-                };
-                img.src = avatarUrl;
-            }
+            if (!avatarElement) return;
+            AvatarCache.render(SERVER_URL, avatarElement, userId, initials, bgColor, true);
         }
 
         function loadContactAvatar(avatarElement, userId, initials, bgColor) {
@@ -8895,23 +8867,7 @@ function getActiveElements() {
                 
                 if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
                     const userId = tempChat.participants[0].platform_user_id;
-                    const avatarUrl = `${SERVER_URL}/avatar/${userId}?t=${Date.now()}`;
-                    const img = new Image();
-                    
-                    img.onload = function() {
-                        chatAvatar.style.backgroundImage = `url(${avatarUrl})`;
-                        chatAvatar.style.backgroundSize = 'cover';
-                        chatAvatar.style.backgroundPosition = 'center';
-                        chatAvatar.textContent = '';
-                    };
-                    
-                    img.onerror = function() {
-                        chatAvatar.style.backgroundImage = '';
-                        chatAvatar.textContent = initials;
-                        chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                    };
-                    
-                    img.src = avatarUrl;
+                    loadChatAvatar(chatAvatar, userId, initials, bgColor);
                 }
             }
             
@@ -9500,18 +9456,19 @@ async function updateProfileModalUI(user) {
     currentViewedUser = user;
     console.log('Updating profile UI with:', user);
 
-    // Обновление аватара
-    if (user.has_avatar_photo || user.has_avatar) {
-        const avatarUrl = `${SERVER_URL}/avatar/${user.platform_user_id}?t=${Date.now()}`;
-        activeElements.modalProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        activeElements.modalProfileAvatar.textContent = '';
+    // Обновление аватара — мгновенно из локального кэша, затем тихая
+    // проверка версии на сервере и обновление, только если фото реально сменилось
+    const hasAvatar = !!(user.has_avatar_photo || user.has_avatar);
+    if (hasAvatar) {
+        const initial = user.nickname?.charAt(0).toUpperCase() || '?';
+        AvatarCache.render(SERVER_URL, activeElements.modalProfileAvatar, user.platform_user_id, initial, user.avatar_background, true);
         activeElements.modalProfileAvatar.style.backgroundColor = '';
-        activeElements.modalProfileAvatar.style.backgroundSize = 'cover';
-        activeElements.modalProfileAvatar.style.backgroundPosition = 'center';
-        
-        // Добавляем обработчик клика на аватар
-        activeElements.modalProfileAvatar.onclick = () => {
-            openPhotoViewer(avatarUrl);
+
+        // Обработчик клика на аватар — открываем то, что сейчас отображается
+        activeElements.modalProfileAvatar.onclick = async () => {
+            const local = await AvatarCache.getLocal(user.platform_user_id);
+            const src = local?.dataUrl || `${SERVER_URL}/avatar/${user.platform_user_id}`;
+            openPhotoViewer(src);
         };
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
@@ -10776,5 +10733,6 @@ if (profileCloseDesktop) {
         });
     </script>
     <script src="activity-tracker.js"></script>
+    <script src="avatar-cache.js"></script>
 </body>
 </html>
