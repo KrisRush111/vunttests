@@ -2411,6 +2411,7 @@ input:checked + .toggle-slider:before {
 
 
 
+ <script src="avatar-cache.js"></script>
  <script>
      
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
@@ -3369,53 +3370,6 @@ window.addEventListener("beforeunload", () => {
         }
 
  
-        function loadAvatar(element, userId, forceReload = false) {
-            // Версия аватара — меняется при каждой загрузке/удалении,
-            // благодаря чему URL всегда «свежий» и браузер не берёт старую картинку из кэша
-            const avatarVersion = (userData && userData.avatar_version) || 0;
-
-            // Если аватар уже установлен для этого элемента И версия не изменилась — не перезагружаем
-            const currentBg = element.style.backgroundImage || '';
-            const versionMarker = `v=${avatarVersion}`;
-            if (!forceReload && currentBg && currentBg.includes('/avatar/') && currentBg.includes(versionMarker)) {
-                return;
-            }
-
-            // ?v=<версия> — гарантирует свежую загрузку после смены/удаления аватара,
-            // при этом при повторных заходах без изменений URL остаётся тем же самым,
-            // и браузер по-прежнему может использовать кэш (304 Not Modified)
-            const avatarUrl = `${SERVER_URL}/avatar/${userId}?v=${avatarVersion}`;
-            const img = new Image();
-            
-            img.onload = function() {
-                element.style.backgroundImage = `url(${avatarUrl})`;
-                element.style.backgroundSize = 'cover';
-                element.style.backgroundPosition = 'center';
-                element.textContent = '';
-                element.style.backgroundColor = '';
-                
-                if (userData) {
-                    userData.has_avatar = true;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
-                }
-            };
-            
-            img.onerror = function() {
-                console.error('Failed to load avatar from server, generating background.');
-                if (userData) {
-                    setAvatarBackground(
-                        element,
-                        userData.avatar_background,
-                        userData.nickname?.charAt(0).toUpperCase() || '?'
-                    );
-                    userData.has_avatar = false;
-                    sessionStorage.setItem('userData', JSON.stringify(userData));
-                }
-            };
-            
-            img.src = avatarUrl;
-        }
-
    
      async function handleAvatarUpload(event) {
     const file = event.target.files[0];
@@ -3489,16 +3443,23 @@ window.addEventListener("beforeunload", () => {
         });
         
         URL.revokeObjectURL(localImageUrl);
-        
+
+        // Локальная копия в IndexedDB устарела (аватар только что сменился) —
+        // удаляем её, чтобы на следующем заходе (или в другой вкладке/устройстве)
+        // AvatarCache скачал и сохранил уже новую картинку, а не старую
+        AvatarCache.removeLocal(userData.platform_user_id);
+
         showMessage('Аватар успешно загружен!', 'success');
 
     } catch (error) {
         // В случае ошибки откатываем к предыдущему состоянию
         if (userData.has_avatar) {
-            loadAvatar(profileAvatarMobile, userData.platform_user_id);
-            loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
-            loadAvatar(desktopProfileAvatar, userData.platform_user_id);
-            loadAvatar(mobileSidebarProfileAvatar, userData.platform_user_id);
+            const uid = userData.platform_user_id;
+            const initial = userData.nickname?.charAt(0).toUpperCase() || '?';
+            AvatarCache.render(SERVER_URL, profileAvatarMobile, uid, initial, userData.avatar_background, true);
+            AvatarCache.render(SERVER_URL, sidebarProfileAvatar, uid, initial, userData.avatar_background, true);
+            AvatarCache.render(SERVER_URL, desktopProfileAvatar, uid, initial, userData.avatar_background, true);
+            AvatarCache.render(SERVER_URL, mobileSidebarProfileAvatar, uid, initial, userData.avatar_background, true);
         } else {
             const firstLetter = userData.nickname?.charAt(0).toUpperCase() || '?';
             setAvatarBackground(profileAvatarMobile, userData.avatar_background, firstLetter);
@@ -3557,6 +3518,9 @@ window.addEventListener("beforeunload", () => {
                 setAvatarBackground(desktopProfileAvatar, userData.avatar_background, firstLetter);
                 setAvatarBackground(mobileSidebarProfileAvatar, userData.avatar_background, firstLetter);
                 
+                // Локальная копия больше не актуальна — убираем из IndexedDB
+                AvatarCache.removeLocal(userData.platform_user_id);
+
                 showMessage('Аватар успешно удален!', 'success');
             } catch (error) {
                 showMessage('Ошибка удаления: ' + error.message);
@@ -3636,11 +3600,7 @@ function updateProfileUI() {
     const subjectText = subjects.join(', ');
 
     // Update mobile profile elements (used in profileModalMobile)
-    if (userData.has_avatar) {
-        loadAvatar(profileAvatarMobile, userData.platform_user_id);
-    } else {
-        setAvatarBackground(profileAvatarMobile, bgColor, firstLetter);
-    }
+    AvatarCache.render(SERVER_URL, profileAvatarMobile, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
     profileNicknameMobile.textContent = nickname || 'Не указано';
     profileIdMobile.textContent = `ID: ${platformId}`;
     
@@ -3729,29 +3689,17 @@ function updateProfileUI() {
     }
 
     // Update desktop sidebar elements
-    if (userData.has_avatar) {
-        loadAvatar(sidebarProfileAvatar, userData.platform_user_id);
-    } else {
-        setAvatarBackground(sidebarProfileAvatar, bgColor, firstLetter);
-    }
+    AvatarCache.render(SERVER_URL, sidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
     sidebarProfileNickname.textContent = nickname || 'Не указано';
     sidebarProfileId.textContent = `id: ${platformId}`; 
 
     // Update mobile sidebar elements (new)
-    if (userData.has_avatar) {
-        loadAvatar(mobileSidebarProfileAvatar, userData.platform_user_id);
-    } else {
-        setAvatarBackground(mobileSidebarProfileAvatar, bgColor, firstLetter);
-    }
+    AvatarCache.render(SERVER_URL, mobileSidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
     mobileSidebarProfileNickname.textContent = nickname || 'Не указано';
     mobileSidebarProfileId.textContent = `id: ${platformId}`; 
 
     // Update desktop profile modal elements
-    if (userData.has_avatar) {
-        loadAvatar(desktopProfileAvatar, userData.platform_user_id);
-    } else {
-        setAvatarBackground(desktopProfileAvatar, bgColor, firstLetter);
-    }
+    AvatarCache.render(SERVER_URL, desktopProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
     desktopProfileNickname.textContent = nickname || 'Не указано';
     desktopProfileId.textContent = `ID: ${platformId}`;
     
@@ -3841,21 +3789,25 @@ function updateProfileUI() {
 }
 
    
-        function openAvatarModal(targetAvatarElement) {
+        async function openAvatarModal(targetAvatarElement) {
             if (!userData.has_avatar) {
                
                 avatarInput.click();
                 return;
             }
-            
-            // Та же версия ?v=, что и в loadAvatar() — иначе модалка берёт картинку
-            // из другой кэш-записи браузера и может показать другой, более старый аватар
-            const avatarVersion = (userData && userData.avatar_version) || 0;
-            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}?v=${avatarVersion}`;
-            
-            avatarModalImage.src = avatarUrl;
+
             avatarModal.classList.add('active');
             document.body.style.overflow = 'hidden';
+
+            // Мгновенно показываем то, что уже лежит в локальном кэше (IndexedDB),
+            // пока в фоне подтягивается полноразмерная версия с сервера
+            const local = await AvatarCache.getLocal(userData.platform_user_id);
+            if (local && local.dataUrl) {
+                avatarModalImage.src = local.dataUrl;
+            }
+
+            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}`;
+            avatarModalImage.src = avatarUrl;
         }
 
         function closeAvatarModal() {
@@ -3892,16 +3844,23 @@ function updateProfileUI() {
         }
 
         async function loadProfileData() {
-            // Removed showLoading call
             try {
-                const dataUpdated = await fetchUserData();
-                
-                if (!dataUpdated) {
-                    console.warn('Using cached data from sessionStorage');
-                }
-                
+                // 1) Мгновенно отрисовываем то, что уже есть в sessionStorage
+                //    (никакой сети, никакого ожидания загрузки)
                 updateProfileUI();
                 fixStickyBottomNav();
+
+                // 2) В фоне тихо освежаем данные с сервера. Если что-то
+                //    поменялось (например, с другого устройства) —
+                //    перерисовываем ещё раз, уже в реальном времени,
+                //    без перезагрузки страницы
+                const dataUpdated = await fetchUserData();
+                if (dataUpdated) {
+                    updateProfileUI();
+                    fixStickyBottomNav();
+                } else {
+                    console.warn('Не удалось обновить данные с сервера — остаёмся на кэше из sessionStorage');
+                }
             } catch (error) {
                 console.error('Profile loading error:', error);
                 showMessage('Ошибка загрузки профиля. Пожалуйста, попробуйте войти снова.', 'error');
