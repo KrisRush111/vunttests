@@ -10601,6 +10601,59 @@ function stopProfileStatusPolling() {
                 chatModalMobile.classList.remove('active'); 
             }
 
+            // ВАЖНО: обработчик клика по хедеру чата навешивается здесь же,
+            // СРАЗУ и синхронно — до await Promise.all([loadUserData(), loadChats()])
+            // ниже. Раньше он навешивался уже ПОСЛЕ этой загрузки, и если
+            // пользователь кликал по хедеру, пока список чатов/данные
+            // пользователя ещё грузились с сервера, клик просто ни на что
+            // не был подписан и ничего не происходило — без единой ошибки.
+            // Именно поэтому открытие профиля срабатывало только "со второго
+            // раза", после повторной инициализации страницы (например, после
+            // восстановления из bfcache по событию pageshow). Сами функции
+            // getOtherParticipantForHeaderClick/currentChat/currentChatsList
+            // читаются в момент клика, а не в момент подписки, поэтому ранняя
+            // подписка безопасна и не требует, чтобы данные уже были загружены.
+            const chatHeaderDesktop = document.querySelector('#chatModalDesktop .chat-header');
+            const chatHeaderMobile = document.querySelector('#chatModalMobile .chat-header');
+
+            function getOtherParticipantForHeaderClick() {
+                const fromCurrentChat = currentChat && currentChat.participants;
+                if (fromCurrentChat && fromCurrentChat.length > 0) {
+                    const found = fromCurrentChat.find(p => p.platform_user_id !== userData.platform_user_id);
+                    if (found) return found;
+                }
+                const cachedChat = currentChatsList.find(c => c.id === currentChatId);
+                const fromCache = cachedChat && cachedChat.participants;
+                if (fromCache && fromCache.length > 0) {
+                    return fromCache.find(p => p.platform_user_id !== userData.platform_user_id);
+                }
+                return null;
+            }
+
+            if (chatHeaderDesktop && !chatHeaderDesktop.dataset.clickBound) {
+                chatHeaderDesktop.dataset.clickBound = '1';
+                chatHeaderDesktop.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (selectionModeActive) return;
+                    const otherParticipant = getOtherParticipantForHeaderClick();
+                    if (otherParticipant) {
+                        openProfileModal(otherParticipant.platform_user_id);
+                    }
+                });
+            }
+
+            if (chatHeaderMobile && !chatHeaderMobile.dataset.clickBound) {
+                chatHeaderMobile.dataset.clickBound = '1';
+                chatHeaderMobile.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (selectionModeActive) return;
+                    const otherParticipant = getOtherParticipantForHeaderClick();
+                    if (otherParticipant) {
+                        openProfileModal(otherParticipant.platform_user_id);
+                    }
+                });
+            }
+
             await Promise.all([ loadUserData(), loadChats() ]);
             
             const openChatId = sessionStorage.getItem('openChatId');
@@ -10644,57 +10697,9 @@ function stopProfileStatusPolling() {
                 profileBackButtonDesktop.addEventListener('click', closeProfileModal);
             }
 
-            const chatHeaderDesktop = document.querySelector('#chatModalDesktop .chat-header');
-            const chatHeaderMobile = document.querySelector('#chatModalMobile .chat-header');
-
-            // Раньше клик по хедеру срабатывал ТОЛЬКО если currentChat.participants
-            // уже успели прийти с сервера (после loadMessages + get_chat_info).
-            // Пока это не произошло, клик молча ничего не делал — отсюда
-            // ощущение, что профиль "очень долго" не открывается: на самом деле
-            // он не открывался вообще, пока не подгрузятся данные чата.
-            // Теперь при отсутствии currentChat.participants берём участника
-            // из уже закэшированного списка чатов (currentChatsList), который
-            // доступен сразу же при открытии чата.
-            function getOtherParticipantForHeaderClick() {
-                const fromCurrentChat = currentChat && currentChat.participants;
-                if (fromCurrentChat && fromCurrentChat.length > 0) {
-                    const found = fromCurrentChat.find(p => p.platform_user_id !== userData.platform_user_id);
-                    if (found) return found;
-                }
-                const cachedChat = currentChatsList.find(c => c.id === currentChatId);
-                const fromCache = cachedChat && cachedChat.participants;
-                if (fromCache && fromCache.length > 0) {
-                    return fromCache.find(p => p.platform_user_id !== userData.platform_user_id);
-                }
-                return null;
-            }
-
-            if (chatHeaderDesktop) {
-                chatHeaderDesktop.addEventListener('click', (e) => {
-           
-                    e.stopPropagation();
-
-                    if (selectionModeActive) return;
-
-                    const otherParticipant = getOtherParticipantForHeaderClick();
-                    if (otherParticipant) {
-                        openProfileModal(otherParticipant.platform_user_id);
-                    }
-                });
-            }
-
-            if (chatHeaderMobile) {
-                chatHeaderMobile.addEventListener('click', (e) => {
-                    e.stopPropagation();
-
-                    if (selectionModeActive) return;
-
-                    const otherParticipant = getOtherParticipantForHeaderClick();
-                    if (otherParticipant) {
-                        openProfileModal(otherParticipant.platform_user_id);
-                    }
-                });
-            }
+            // (Обработчик клика по хедеру чата теперь подписывается раньше —
+            // см. начало initializePage(), до await Promise.all(...) — чтобы
+            // он был готов сразу, а не только после загрузки чатов.)
 
             addChatButton.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -11032,4 +11037,4 @@ if (profileCloseDesktop) {
     <script src="activity-tracker.js"></script>
     <script src="avatar-cache.js"></script>
 </body>
-</html> 
+</html>
