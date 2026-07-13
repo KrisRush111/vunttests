@@ -2,25 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <script>
-        // Реальная высота видимой области экрана через JS, а не CSS vh/dvh —
-        // на iOS в standalone/PWA-режиме dvh может не совпадать с фактически
-        // видимой областью (появляется лишнее пустое место снизу под футером).
-        // Выполняется синхронно в <head>, до первой отрисовки страницы.
-        (function () {
-            function setAppHeight() {
-                var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-                document.documentElement.style.setProperty('--app-height', h + 'px');
-            }
-            setAppHeight();
-            window.addEventListener('resize', setAppHeight);
-            window.addEventListener('orientationchange', setAppHeight);
-            if (window.visualViewport) {
-                window.visualViewport.addEventListener('resize', setAppHeight);
-            }
-        })();
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Контакты - TheVuntgram</title>
     <link rel="stylesheet" href="assets/animate/animate.min.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
@@ -98,25 +80,6 @@
             padding: 0;
             box-sizing: border-box;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            /* Запрет выделения и копирования текста */
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-            /* Убираем всплывающее меню (Copy/Look Up) при долгом тапе на iOS */
-            -webkit-touch-callout: none;
-            /* Блокируем двойной тап и pinch-zoom жестами (доп. к viewport meta) */
-            touch-action: pan-x pan-y;
-        }
-
-        /* В полях ввода выделение текста нужно оставить, иначе нельзя
-           будет нормально редактировать/выделять то, что печатаешь сам */
-        input, textarea {
-            -webkit-user-select: text;
-            -moz-user-select: text;
-            -ms-user-select: text;
-            user-select: text;
-            touch-action: manipulation;
         }
 
 
@@ -1892,12 +1855,7 @@ body {
         background: var(--telegram-bg);
         border-bottom: 1px solid var(--telegram-divider);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        /* env(safe-area-inset-top) равен 0 в обычной вкладке Safari (там уже
-           есть панель браузера) и положительному значению в standalone/PWA
-           режиме (apple-mobile-web-app-status-bar-style: black-translucent),
-           где контент рисуется под системным статус-баром — без этого отступа
-           заголовок "Контакты" прячется под часами/индикаторами. */
-        padding: calc(16px + env(safe-area-inset-top)) 12px 12px 12px;
+        padding: 16px 12px 12px 12px; /* Добавляем горизонтальные паддинги */
         width: 100%;
         box-sizing: border-box;
         margin: 0;
@@ -1982,7 +1940,7 @@ body {
         }
         
         .contacts-header-sticky {
-            padding: calc(12px + env(safe-area-inset-top)) 8px 8px 8px;
+            padding: 12px 8px 8px 8px;
         }
         
         .contacts-container.mobile-only .contacts-content {
@@ -1992,37 +1950,26 @@ body {
     }
 }
 
-/* ИСПРАВЛЕНИЕ: переходим на ту же схему, что и в profile.html — она
-   проверенно корректно ведёт себя в PWA/standalone-режиме на iOS.
-   body заблокирован по высоте (100dvh + overflow:hidden) БЕЗ
-   position:fixed и БЕЗ transform на body/html (важно: любой transform
-   на body превращает position:fixed у потомков — в частности, у
-   .bottom-nav — в position:absolute относительно body, из-за чего
-   футер "уезжает" от реального низа экрана). Прокручивается только
-   внутренний блок .contacts-content, а не вся страница целиком. */
+/* ИСПРАВЛЕНИЕ: раскладка 1:1 как в chats.html — страница
+   зафиксирована по высоте экрана, список контактов скроллится
+   внутри своего блока с запасом снизу под футер, а сам футер
+   не sticky, а position:fixed — он просто плавает поверх контента
+   и никогда не "выталкивается" и не огораживается пустым полем. */
 @media (max-width: 767px) {
-    html {
-        height: 100%;
-        height: var(--app-height, 100%);
-        overscroll-behavior: none;
-    }
-
     body {
-        min-height: 0;
         height: 100vh;
-        height: 100dvh;
-        height: var(--app-height, 100dvh);
         overflow: hidden;
-        overscroll-behavior: none;
+        position: fixed;
+        width: 100%;
     }
 
     .contacts-container.mobile-only {
         flex: 1;
-        min-height: 0;
         max-width: 480px;
         margin: 0 auto;
         width: 100%;
         padding: 0;
+        height: 100vh;
         display: flex;
         flex-direction: column;
         position: relative;
@@ -2035,15 +1982,17 @@ body {
 
     .contacts-container.mobile-only .contacts-content {
         flex: 1;
-        min-height: 0;
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
-        overscroll-behavior-y: contain;
+        scroll-behavior: smooth;
+        overscroll-behavior: contain;
         padding: 12px;
-        padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
         height: auto;
-        display: block;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
     }
 
     .bottom-nav.mobile-only-nav {
@@ -4235,16 +4184,7 @@ function setupSearchHandlers() {
         }
 
 
-        // Страховка: на некоторых версиях iOS Safari страница успевает
-        // чуть прокрутиться (из-за скрытия адресной строки) ДО того, как
-        // применится position:fixed на body, из-за чего весь фиксированный
-        // макет "замерзает" со сдвигом. Сбрасываем скролл до 0,0 сразу же,
-        // до и после инициализации.
-        window.scrollTo(0, 0);
-        document.addEventListener('DOMContentLoaded', () => {
-            window.scrollTo(0, 0);
-            initializePage();
-        });
+        document.addEventListener('DOMContentLoaded', initializePage);
 
 
         window.addEventListener('pageshow', (event) => {
@@ -4256,66 +4196,5 @@ function setupSearchHandlers() {
 
       <script src="activity-tracker.js"></script>
       <script src="avatar-cache.js"></script>
-
-      <script>
-        // ==== Запрет масштабирования страницы ====
-
-        // 1. Ctrl/Cmd + колесо мыши (десктоп, Chrome/Firefox/Edge)
-        window.addEventListener('wheel', (e) => {
-            if (e.ctrlKey) {
-                e.preventDefault();
-            }
-        }, { passive: false });
-
-        // 2. Ctrl/Cmd + "+"/"-"/"0" и Ctrl/Cmd + прокрутка через клавиатуру
-        window.addEventListener('keydown', (e) => {
-            const isZoomKey = ['+', '-', '=', '0', 'Add', 'Subtract'].includes(e.key);
-            if ((e.ctrlKey || e.metaKey) && isZoomKey) {
-                e.preventDefault();
-            }
-        }, { passive: false });
-
-        // 3. Pinch-zoom в Safari (десктоп и iOS шлют gesture-события)
-        ['gesturestart', 'gesturechange', 'gestureend'].forEach((evt) => {
-            document.addEventListener(evt, (e) => e.preventDefault());
-        });
-
-        // 4. Pinch-zoom двумя пальцами на мобильных, где gesture-событий нет
-        document.addEventListener('touchmove', (e) => {
-            if (e.touches && e.touches.length > 1) {
-                e.preventDefault();
-            }
-        }, { passive: false });
-
-        // 5. Двойной тап для зума (страховка поверх touch-action в CSS)
-        let lastTouchEnd = 0;
-        document.addEventListener('touchend', (e) => {
-            const now = Date.now();
-            if (now - lastTouchEnd <= 300) {
-                e.preventDefault();
-            }
-            lastTouchEnd = now;
-        }, { passive: false });
-
-        // ==== Запрет копирования текста ====
-
-        // Блокируем сами события копирования/вырезания и выделения
-        ['copy', 'cut', 'selectstart', 'dragstart'].forEach((evt) => {
-            document.addEventListener(evt, (e) => {
-                // Поля ввода оставляем рабочими (можно печатать и выделять свой текст)
-                const tag = e.target.tagName;
-                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-                e.preventDefault();
-            });
-        });
-
-        // Блокируем контекстное меню (правый клик / долгий тап) вне полей ввода,
-        // чтобы убрать пункт "Копировать"
-        document.addEventListener('contextmenu', (e) => {
-            const tag = e.target.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-            e.preventDefault();
-        });
-      </script>
 </body>
 </html>
