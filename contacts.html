@@ -2728,70 +2728,11 @@ async function sendFriendRequestFromRecommendation(receiverId, button) {
 
 
 
-function startActivityPolling() {
-    // Останавливаем предыдущий интервал если есть
-    if (activityPollInterval) {
-        clearInterval(activityPollInterval);
-    }
-    
-    // Опрашиваем статусы каждые 10 секунд
-    activityPollInterval = setInterval(async () => {
-        await refreshOnlineStatuses();
-    }, 10000);
-}
-
-async function refreshOnlineStatuses() {
-    const { searchResults } = getActiveElements();
-    const userElements = searchResults.querySelectorAll('.user-result');
-    const userIds = [];
-    
-    // Собираем ID всех отображенных пользователей
-    userElements.forEach(element => {
-        const userId = element.getAttribute('data-user-id');
-        if (userId) userIds.push(userId);
-    });
-    
-    if (userIds.length === 0) return;
-    
-    try {
-        const response = await fetch(`${SERVER_URL}/get_bulk_activity_status`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ user_ids: userIds }),
-            credentials: 'include'
-        });
-        
-        const data = await response.json();
-        if (data.status === 'success') {
-            updateOnlineStatusesUI(data.activity_data);
-        }
-    } catch (error) {
-        console.error('Error refreshing online statuses:', error);
-    }
-}
-
-function updateOnlineStatusesUI(activityData) {
-    const { searchResults } = getActiveElements();
-    const userElements = searchResults.querySelectorAll('.user-result');
-    
-    userElements.forEach(element => {
-        const userId = element.getAttribute('data-user-id');
-        const statusElement = element.querySelector('.user-status');
-        
-        if (userId && statusElement && activityData[userId]) {
-            const userActivity = activityData[userId];
-            
-            if (userActivity.is_online) {
-                statusElement.textContent = 'В сети';
-                statusElement.className = 'user-status online';
-            } else {
-                const lastSeenText = formatLastSeen(userActivity.last_online);
-                statusElement.textContent = lastSeenText;
-                statusElement.className = 'user-status';
-            }
-        }
-    });
-}
+// (Дублирующаяся реализация startActivityPolling/refreshOnlineStatuses/
+// updateOnlineStatusesUI была удалена: она полностью перекрывалась второй
+// функцией startActivityPolling(), объявленной ниже рядом с initializePage,
+// поэтому реально никогда не выполнялась — это был мёртвый код, который
+// вводил в заблуждение при чтении логики статусов "в сети".)
 
 
 
@@ -3262,30 +3203,47 @@ async function sendOfflineStatus() {
         }
 
         // Функция для получения статусов всех контактов
+        let activityFetchInFlight = null;
         async function updateAllContactsActivity() {
             if (allContactIds.size === 0) return;
 
-            try {
-                const response = await fetch(`${SERVER_URL}/get_bulk_activity_status`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        user_ids: Array.from(allContactIds)
-                    }),
-                    credentials: 'include'
-                });
-
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    currentActivityData = data.activity_data;
-                    updateContactsUI();
-                }
-            } catch (error) {
-                console.error('Error updating contacts activity:', error);
+            // Если контакты только что были перерисованы (сначала из кэша,
+            // затем повторно после фоновой синхронизации), эта функция может
+            // вызваться почти одновременно дважды. Переиспользуем уже
+            // запущенный запрос вместо того, чтобы плодить параллельные
+            // /get_bulk_activity_status и лишний раз задерживать отображение
+            // статуса.
+            if (activityFetchInFlight) {
+                return activityFetchInFlight;
             }
+
+            activityFetchInFlight = (async () => {
+                try {
+                    const response = await fetch(`${SERVER_URL}/get_bulk_activity_status`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            user_ids: Array.from(allContactIds)
+                        }),
+                        credentials: 'include'
+                    });
+
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        currentActivityData = data.activity_data;
+                        updateContactsUI();
+                    }
+                } catch (error) {
+                    console.error('Error updating contacts activity:', error);
+                } finally {
+                    activityFetchInFlight = null;
+                }
+            })();
+
+            return activityFetchInFlight;
         }
 
         // Функция для обновления UI контактов
@@ -3722,9 +3680,24 @@ async function updateProfileModalUI(user) {
             // Добавьте элемент для статуса
             const statusElement = document.createElement('div');
             statusElement.className = 'user-status';
-            
-            // Изначально устанавливаем "Загрузка..."
-            statusElement.textContent = 'Загрузка...';
+
+            // Если статус этого пользователя уже известен (получен раньше в
+            // этой сессии) — показываем его сразу, без "Загрузка...".
+            // Это главная причина долгой "загрузки" статуса: раньше здесь
+            // всегда стояла заглушка, даже если currentActivityData уже
+            // содержал актуальные данные (например, при повторной отрисовке
+            // после фоновой синхронизации контактов).
+            const knownActivity = currentActivityData[user.platform_user_id];
+            if (knownActivity) {
+                if (knownActivity.is_online) {
+                    statusElement.textContent = 'В сети';
+                    statusElement.classList.add('online');
+                } else {
+                    statusElement.textContent = formatLastSeen(knownActivity.last_online);
+                }
+            } else {
+                statusElement.textContent = 'Загрузка...';
+            }
 
             infoElement.appendChild(statusElement);
 
