@@ -1974,51 +1974,55 @@ body {
     }
 }
 
-/* ИСПРАВЛЕНИЕ: отказываемся от блокировки скролла body (position:fixed +
-   overflow:hidden + 100vh/100dvh). На iOS Safari эта связка нестабильно
-   считает высоту при показе/скрытии адресной строки — из-за этого верх
-   страницы уезжал под системную панель, а низ обрезался нижней навигацией.
-   Вместо этого используем обычный, "естественный" скролл страницы:
-   заголовок — position:sticky прямо в потоке, нижняя панель — position:fixed
-   поверх контента, а место под неё резервируем обычным padding-bottom. */
+/* ИСПРАВЛЕНИЕ: переходим на ту же схему, что и в profile.html — она
+   проверенно корректно ведёт себя в PWA/standalone-режиме на iOS.
+   body заблокирован по высоте (100dvh + overflow:hidden) БЕЗ
+   position:fixed и БЕЗ transform на body/html (важно: любой transform
+   на body превращает position:fixed у потомков — в частности, у
+   .bottom-nav — в position:absolute относительно body, из-за чего
+   футер "уезжает" от реального низа экрана). Прокручивается только
+   внутренний блок .contacts-content, а не вся страница целиком. */
 @media (max-width: 767px) {
-    html, body {
-        height: auto;
-        min-height: 100%;
-        overflow-x: hidden;
-        overflow-y: auto;
-        overscroll-behavior-y: none;
+    html {
+        height: 100%;
+        overscroll-behavior: none;
+    }
+
+    body {
+        min-height: 0;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+        overscroll-behavior: none;
     }
 
     .contacts-container.mobile-only {
         flex: 1;
+        min-height: 0;
         max-width: 480px;
         margin: 0 auto;
         width: 100%;
         padding: 0;
-        height: auto;
-        min-height: 100%;
-        min-height: 100dvh;
-        display: block;
+        display: flex;
+        flex-direction: column;
         position: relative;
-        overflow: visible;
-        padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+        overflow: hidden;
     }
 
     .contacts-header-sticky {
-        position: sticky;
-        top: 0;
+        flex-shrink: 0;
     }
 
     .contacts-container.mobile-only .contacts-content {
-        flex: none;
-        overflow: visible;
-        -webkit-overflow-scrolling: auto;
-        overscroll-behavior: auto;
-        padding: 12px;
-        padding-bottom: 0;
-        height: auto;
+        flex: 1;
         min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+        padding: 12px;
+        padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+        height: auto;
         display: block;
     }
 
