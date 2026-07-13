@@ -38,6 +38,40 @@ const AvatarCache = (function () {
         return dbPromise;
     }
 
+    const LS_PREFIX = 'vg_avatar_';
+
+    // Синхронный "быстрый" кэш поверх IndexedDB — localStorage читается
+    // мгновенно (без Promise), поэтому фото можно применить ДО первого
+    // await и до первой отрисовки элемента браузером — так фон вообще
+    // не успевает мелькнуть. IndexedDB остаётся источником истины и
+    // резервным хранилищем (на случай переполнения localStorage).
+    function getLocalSync(userId) {
+        try {
+            const raw = localStorage.getItem(LS_PREFIX + String(userId));
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function saveLocalSync(userId, version, dataUrl) {
+        try {
+            localStorage.setItem(
+                LS_PREFIX + String(userId),
+                JSON.stringify({ version, dataUrl })
+            );
+        } catch (e) {
+            // Квота localStorage превышена или недоступен — не критично,
+            // IndexedDB всё равно продолжит работать как обычно
+        }
+    }
+
+    function removeLocalSync(userId) {
+        try {
+            localStorage.removeItem(LS_PREFIX + String(userId));
+        } catch (e) {}
+    }
+
     async function getLocal(userId) {
         try {
             const db = await openDB();
@@ -53,6 +87,8 @@ const AvatarCache = (function () {
     }
 
     async function saveLocal(userId, version, dataUrl) {
+        // Синхронный L1-кэш — обновляем сразу, не дожидаясь IndexedDB
+        saveLocalSync(userId, version, dataUrl);
         try {
             const db = await openDB();
             const tx = db.transaction(STORE, 'readwrite');
@@ -63,11 +99,13 @@ const AvatarCache = (function () {
                 savedAt: Date.now()
             });
         } catch (e) {
-            /* IndexedDB недоступен — просто не кэшируем на диск */
+            /* IndexedDB недоступен — но localStorage уже обновлён, так что
+               мгновенное отображение при следующем заходе всё равно сработает */
         }
     }
 
     async function removeLocal(userId) {
+        removeLocalSync(userId);
         try {
             const db = await openDB();
             const tx = db.transaction(STORE, 'readwrite');
@@ -135,14 +173,24 @@ const AvatarCache = (function () {
             return;
         }
 
-        // 1) Мгновенно показываем локально сохранённую копию (если есть) —
-        //    без сети, без мигания плейсхолдером.
-        const local = await getLocal(userId);
-        if (local && local.dataUrl) {
+        // 0) Синхронно, ДО первого await — если в localStorage уже есть
+        //    закэшированное фото, рисуем его немедленно, в том же тике,
+        //    что и вызов render(). Браузер просто не успевает нарисовать
+        //    элемент без фото — фон вообще не мелькает.
+        const syncLocal = getLocalSync(userId);
+        if (syncLocal && syncLocal.dataUrl) {
+            applyImage(el, syncLocal.dataUrl);
+        }
+
+        // 1) Сверяемся с IndexedDB (источник истины). Обычно совпадает с
+        //    тем, что уже показано синхронно, но так надёжнее переживает
+        //    случаи, когда localStorage был очищен или переполнен.
+        const local = syncLocal || await getLocal(userId);
+        if (!syncLocal && local && local.dataUrl) {
             applyImage(el, local.dataUrl);
         }
-        // Если локальной копии нет, но у пользователя точно есть фото —
-        // плейсхолдер-фон НЕ показываем: он всё равно будет тут же
+        // Если локальной копии нет вовсе, но у пользователя точно есть
+        // фото — плейсхолдер-фон НЕ показываем: он всё равно будет тут же
         // перекрыт настоящей фотографией, и получится лишнее мигание.
         // Просто ждём саму фотографию (см. checkAndUpdate ниже — она
         // качается максимально быстро, параллельно с проверкой версии).
@@ -235,5 +283,5 @@ const AvatarCache = (function () {
         }
     }
 
-    return { render, removeLocal, getLocal, saveLocal };
+    return { render, removeLocal, getLocal, saveLocal, getLocalSync, saveLocalSync, removeLocalSync };
 })();
