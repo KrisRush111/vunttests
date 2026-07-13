@@ -4958,6 +4958,7 @@
         
         let currentMessages = [];
         let currentChat = null;
+        let currentChatId = null; // id открытого чата, известен сразу — до того как currentChat.participants подгрузятся с сервера
         let currentChatsList = [];
         let messagesCache = {};
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
@@ -5612,6 +5613,7 @@ function closeChat() {
     if (!chatModal) return;
 
     currentChat = null;
+    currentChatId = null;
     currentMessages = [];
 
     if (chatAvatar) {
@@ -9088,6 +9090,7 @@ function getActiveElements() {
             }
             
             currentChat = tempChat;
+            currentChatId = tempChat.id;
             
             if (chatModal.classList.contains('changing')) chatModal.classList.remove('changing');
 
@@ -9575,6 +9578,7 @@ async function openChat(chatId) {
 
     // Сбрасываем UI мгновенно
     currentChat = null;
+    currentChatId = chatId; // доступен сразу — по нему хедер может найти участника из кэша списка чатов
     currentMessages = [];
     messagesContainer.innerHTML = '';
     noMessages.style.display = 'none';
@@ -9608,21 +9612,25 @@ async function openChat(chatId) {
     }
 
     try {
-        // Загружаем сообщения (с signal — отменится если снова сменят чат)
-        await loadMessages(chatId, signal);
-        if (isStale()) return; // пользователь уже переключился — выходим
-
-        // Запрашиваем мета-данные чата
-        const response = await fetch(`${SERVER_URL}/get_chat_info`, {
+        // Сообщения и метаданные чата (включая participants, нужные хедеру
+        // для открытия профиля) раньше запрашивались строго по очереди —
+        // сначала сообщения, потом /get_chat_info. Из-за этого клик по
+        // хедеру чата долго не срабатывал: currentChat.participants
+        // появлялись только после двух последовательных сетевых запросов.
+        // Теперь запускаем оба запроса параллельно.
+        const messagesPromise = loadMessages(chatId, signal);
+        const chatInfoPromise = fetch(`${SERVER_URL}/get_chat_info`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
             credentials: 'include',
             signal: signal
-        });
-        if (isStale()) return;
+        }).then(r => r.json());
 
-        const chatData = await response.json();
+        await messagesPromise;
+        if (isStale()) return; // пользователь уже переключился — выходим
+
+        const chatData = await chatInfoPromise;
         if (isStale()) return;
 
         if (chatData.status === 'success' && chatData.chat) {
@@ -10639,6 +10647,28 @@ function stopProfileStatusPolling() {
             const chatHeaderDesktop = document.querySelector('#chatModalDesktop .chat-header');
             const chatHeaderMobile = document.querySelector('#chatModalMobile .chat-header');
 
+            // Раньше клик по хедеру срабатывал ТОЛЬКО если currentChat.participants
+            // уже успели прийти с сервера (после loadMessages + get_chat_info).
+            // Пока это не произошло, клик молча ничего не делал — отсюда
+            // ощущение, что профиль "очень долго" не открывается: на самом деле
+            // он не открывался вообще, пока не подгрузятся данные чата.
+            // Теперь при отсутствии currentChat.participants берём участника
+            // из уже закэшированного списка чатов (currentChatsList), который
+            // доступен сразу же при открытии чата.
+            function getOtherParticipantForHeaderClick() {
+                const fromCurrentChat = currentChat && currentChat.participants;
+                if (fromCurrentChat && fromCurrentChat.length > 0) {
+                    const found = fromCurrentChat.find(p => p.platform_user_id !== userData.platform_user_id);
+                    if (found) return found;
+                }
+                const cachedChat = currentChatsList.find(c => c.id === currentChatId);
+                const fromCache = cachedChat && cachedChat.participants;
+                if (fromCache && fromCache.length > 0) {
+                    return fromCache.find(p => p.platform_user_id !== userData.platform_user_id);
+                }
+                return null;
+            }
+
             if (chatHeaderDesktop) {
                 chatHeaderDesktop.addEventListener('click', (e) => {
            
@@ -10646,11 +10676,9 @@ function stopProfileStatusPolling() {
 
                     if (selectionModeActive) return;
 
-                    if (currentChat && currentChat.participants && currentChat.participants.length > 0) {
-                        const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-                        if (otherParticipant) {
-                            openProfileModal(otherParticipant.platform_user_id);
-                        }
+                    const otherParticipant = getOtherParticipantForHeaderClick();
+                    if (otherParticipant) {
+                        openProfileModal(otherParticipant.platform_user_id);
                     }
                 });
             }
@@ -10661,11 +10689,9 @@ function stopProfileStatusPolling() {
 
                     if (selectionModeActive) return;
 
-                    if (currentChat && currentChat.participants && currentChat.participants.length > 0) {
-                        const otherParticipant = currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-                        if (otherParticipant) {
-                            openProfileModal(otherParticipant.platform_user_id);
-                        }
+                    const otherParticipant = getOtherParticipantForHeaderClick();
+                    if (otherParticipant) {
+                        openProfileModal(otherParticipant.platform_user_id);
                     }
                 });
             }
