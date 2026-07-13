@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Контакты - TheVuntgram</title>
     <link rel="stylesheet" href="assets/animate/animate.min.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
@@ -80,6 +80,25 @@
             padding: 0;
             box-sizing: border-box;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            /* Запрет выделения и копирования текста */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            /* Убираем всплывающее меню (Copy/Look Up) при долгом тапе на iOS */
+            -webkit-touch-callout: none;
+            /* Блокируем двойной тап и pinch-zoom жестами (доп. к viewport meta) */
+            touch-action: pan-x pan-y;
+        }
+
+        /* В полях ввода выделение текста нужно оставить, иначе нельзя
+           будет нормально редактировать/выделять то, что печатаешь сам */
+        input, textarea {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+            touch-action: manipulation;
         }
 
 
@@ -4196,5 +4215,66 @@ function setupSearchHandlers() {
 
       <script src="activity-tracker.js"></script>
       <script src="avatar-cache.js"></script>
+
+      <script>
+        // ==== Запрет масштабирования страницы ====
+
+        // 1. Ctrl/Cmd + колесо мыши (десктоп, Chrome/Firefox/Edge)
+        window.addEventListener('wheel', (e) => {
+            if (e.ctrlKey) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // 2. Ctrl/Cmd + "+"/"-"/"0" и Ctrl/Cmd + прокрутка через клавиатуру
+        window.addEventListener('keydown', (e) => {
+            const isZoomKey = ['+', '-', '=', '0', 'Add', 'Subtract'].includes(e.key);
+            if ((e.ctrlKey || e.metaKey) && isZoomKey) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // 3. Pinch-zoom в Safari (десктоп и iOS шлют gesture-события)
+        ['gesturestart', 'gesturechange', 'gestureend'].forEach((evt) => {
+            document.addEventListener(evt, (e) => e.preventDefault());
+        });
+
+        // 4. Pinch-zoom двумя пальцами на мобильных, где gesture-событий нет
+        document.addEventListener('touchmove', (e) => {
+            if (e.touches && e.touches.length > 1) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // 5. Двойной тап для зума (страховка поверх touch-action в CSS)
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 300) {
+                e.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, { passive: false });
+
+        // ==== Запрет копирования текста ====
+
+        // Блокируем сами события копирования/вырезания и выделения
+        ['copy', 'cut', 'selectstart', 'dragstart'].forEach((evt) => {
+            document.addEventListener(evt, (e) => {
+                // Поля ввода оставляем рабочими (можно печатать и выделять свой текст)
+                const tag = e.target.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                e.preventDefault();
+            });
+        });
+
+        // Блокируем контекстное меню (правый клик / долгий тап) вне полей ввода,
+        // чтобы убрать пункт "Копировать"
+        document.addEventListener('contextmenu', (e) => {
+            const tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            e.preventDefault();
+        });
+      </script>
 </body>
 </html>
