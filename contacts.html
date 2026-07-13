@@ -1874,7 +1874,12 @@ body {
         background: var(--telegram-bg);
         border-bottom: 1px solid var(--telegram-divider);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        padding: 16px 12px 12px 12px; /* Добавляем горизонтальные паддинги */
+        /* env(safe-area-inset-top) равен 0 в обычной вкладке Safari (там уже
+           есть панель браузера) и положительному значению в standalone/PWA
+           режиме (apple-mobile-web-app-status-bar-style: black-translucent),
+           где контент рисуется под системным статус-баром — без этого отступа
+           заголовок "Контакты" прячется под часами/индикаторами. */
+        padding: calc(16px + env(safe-area-inset-top)) 12px 12px 12px;
         width: 100%;
         box-sizing: border-box;
         margin: 0;
@@ -1959,7 +1964,7 @@ body {
         }
         
         .contacts-header-sticky {
-            padding: 12px 8px 8px 8px;
+            padding: calc(12px + env(safe-area-inset-top)) 8px 8px 8px;
         }
         
         .contacts-container.mobile-only .contacts-content {
@@ -1969,26 +1974,20 @@ body {
     }
 }
 
-/* ИСПРАВЛЕНИЕ: раскладка 1:1 как в chats.html — страница
-   зафиксирована по высоте экрана, список контактов скроллится
-   внутри своего блока с запасом снизу под футер, а сам футер
-   не sticky, а position:fixed — он просто плавает поверх контента
-   и никогда не "выталкивается" и не огораживается пустым полем. */
+/* ИСПРАВЛЕНИЕ: отказываемся от блокировки скролла body (position:fixed +
+   overflow:hidden + 100vh/100dvh). На iOS Safari эта связка нестабильно
+   считает высоту при показе/скрытии адресной строки — из-за этого верх
+   страницы уезжал под системную панель, а низ обрезался нижней навигацией.
+   Вместо этого используем обычный, "естественный" скролл страницы:
+   заголовок — position:sticky прямо в потоке, нижняя панель — position:fixed
+   поверх контента, а место под неё резервируем обычным padding-bottom. */
 @media (max-width: 767px) {
-    html {
-        height: 100%;
-        height: 100dvh;
-        overflow: hidden;
-        overscroll-behavior: none;
-    }
-
-    body {
-        min-height: 0;
-        height: 100%;
-        height: 100dvh;
-        overflow: hidden;
-        overscroll-behavior: none;
-        width: 100%;
+    html, body {
+        height: auto;
+        min-height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: none;
     }
 
     .contacts-container.mobile-only {
@@ -1997,31 +1996,30 @@ body {
         margin: 0 auto;
         width: 100%;
         padding: 0;
-        height: 100%;
-        height: 100dvh;
-        display: flex;
-        flex-direction: column;
+        height: auto;
+        min-height: 100%;
+        min-height: 100dvh;
+        display: block;
         position: relative;
-        overflow: hidden;
+        overflow: visible;
+        padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
     }
 
     .contacts-header-sticky {
-        flex-shrink: 0;
+        position: sticky;
+        top: 0;
     }
 
     .contacts-container.mobile-only .contacts-content {
-        flex: 1;
-        overflow-y: auto;
-        overflow-x: hidden;
-        -webkit-overflow-scrolling: touch;
-        scroll-behavior: smooth;
-        overscroll-behavior: contain;
+        flex: none;
+        overflow: visible;
+        -webkit-overflow-scrolling: auto;
+        overscroll-behavior: auto;
         padding: 12px;
-        padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: 0;
         height: auto;
         min-height: 0;
-        display: flex;
-        flex-direction: column;
+        display: block;
     }
 
     .bottom-nav.mobile-only-nav {
