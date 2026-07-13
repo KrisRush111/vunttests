@@ -2271,6 +2271,95 @@ body {
       
         const SERVER_URL = 'https://vuntserver-479v.onrender.com';
 
+        // ═══════════════════════════════════════════════════════════
+        // PERSISTENT LOCAL STORAGE (IndexedDB) — та же база и те же ключи,
+        // что и в chats.html (vuntgram_db / хранилище 'cache'), поэтому
+        // список контактов, один раз загруженный на любой из двух страниц,
+        // мгновенно доступен и на другой — без сети и без "мигания" пустого
+        // списка при открытии.
+        // ═══════════════════════════════════════════════════════════
+        const DB_NAME = 'vuntgram_db';
+        const DB_VERSION = 2;
+        let _db = null;
+
+        function openDB() {
+            if (_db) return Promise.resolve(_db);
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, DB_VERSION);
+                req.onupgradeneeded = e => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('cache')) {
+                        db.createObjectStore('cache', { keyPath: 'key' });
+                    }
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id' });
+                        ms.createIndex('chat_id', 'chat_id', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('chat_meta')) {
+                        db.createObjectStore('chat_meta', { keyPath: 'chat_id' });
+                    }
+                };
+                req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        const _memCache = new Map();
+
+        function setCacheItem(key, value, ttl) {
+            const item = { key, value, timestamp: Date.now(), ttl };
+            _memCache.set(key, item);
+            openDB().then(db => {
+                const tx = db.transaction('cache', 'readwrite');
+                tx.objectStore('cache').put(item);
+            }).catch(() => {
+                try { localStorage.setItem('c_' + key, JSON.stringify(item)); } catch(e) {}
+            });
+        }
+
+        function getCacheItem(key) {
+            const mem = _memCache.get(key);
+            if (mem) {
+                if (Date.now() - mem.timestamp > mem.ttl) { _memCache.delete(key); return null; }
+                return mem.value;
+            }
+            return null;
+        }
+
+        // Мгновенное чтение кэша БЕЗ учёта TTL — контент должен появиться
+        // сразу же при открытии страницы, даже если формально "устарел";
+        // свежесть проверит последующий фоновый запрос к серверу.
+        async function getCacheItemIgnoreTTL(key) {
+            const mem = _memCache.get(key);
+            if (mem) return mem.value;
+            try {
+                const db = await openDB();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('cache', 'readonly');
+                    const req = tx.objectStore('cache').get(key);
+                    req.onsuccess = () => resolve(req.result ? req.result.value : null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch (e) {
+                try {
+                    const raw = localStorage.getItem('c_' + key);
+                    if (!raw) return null;
+                    return JSON.parse(raw).value;
+                } catch (e2) { return null; }
+            }
+        }
+
+        // Предзагрузка кэша в память при старте страницы
+        openDB().then(db => {
+            const tx = db.transaction('cache', 'readonly');
+            const req = tx.objectStore('cache').getAll();
+            req.onsuccess = () => {
+                (req.result || []).forEach(item => {
+                    if (Date.now() - item.timestamp <= item.ttl) _memCache.set(item.key, item);
+                });
+            };
+        }).catch(() => {});
+
         
         const loadingOverlay = document.getElementById('loadingOverlay');
        
@@ -3416,14 +3505,94 @@ async function updateProfileModalUI(user) {
         }
 
 
-        async function loadContacts() {
-            showLoading('Загрузка контактов...');
+        const CONTACTS_CACHE_KEY = 'contacts_list';
+        const CONTACTS_VERSION_CACHE_KEY = 'contacts_list_version';
+        const CONTACTS_CACHE_TTL = 2 * 60 * 1000;
+
+        // Отрисовывает список контактов (друзья + входящие заявки) из уже
+        // готовых данных — используется и при мгновенном показе из кэша,
+        // и после фоновой синхронизации с сервером.
+        async function renderContactsData(data) {
             const { searchResults, noContacts } = getActiveElements();
             searchResults.innerHTML = '';
             noContacts.style.display = 'none';
-            allContactIds.clear(); // Очищаем список ID контактов перед загрузкой
+            allContactIds.clear(); // Очищаем список ID контактов перед перерисовкой
 
+            const friends = data.friends || [];
+            const incomingRequests = data.incoming_requests || [];
+
+            if (friends.length > 0) {
+                for (const user of friends) {
+                    await displayUserResult(user, 'added');
+                }
+            }
+
+            if (incomingRequests.length > 0) {
+                for (const user of incomingRequests) {
+                    await displayFriendRequest(user);
+                }
+            }
+
+            if (friends.length === 0 && incomingRequests.length === 0) {
+                noContacts.textContent = 'Нет контактов';
+                noContacts.style.display = 'block';
+            }
+
+            // После отрисовки контактов обновляем их статусы (в сети/не в сети)
+            updateAllContactsActivity();
+        }
+
+        // Дешёвая проверка версии списка контактов на сервере (аналог
+        // /avatar_version и /chat_version) — учитывает не только добавление/
+        // удаление контактов, но и смену ника/аватарки любым из них.
+        async function getRemoteContactsVersion() {
             try {
+                const res = await fetch(
+                    `${SERVER_URL}/friends_version/${encodeURIComponent(userData.platform_user_id)}`
+                );
+                if (!res.ok) return null;
+                const data = await res.json();
+                return data.version || null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function loadContacts() {
+            const { searchResults, noContacts } = getActiveElements();
+
+            // 1. Мгновенный показ того, что уже сохранено локально (IndexedDB) —
+            //    без сети, без спиннера и без учёта TTL, контакты должны
+            //    появиться сразу же при открытии страницы.
+            const cached = await getCacheItemIgnoreTTL(CONTACTS_CACHE_KEY);
+            const hasCached = !!(cached && ((cached.friends && cached.friends.length) || (cached.incoming_requests && cached.incoming_requests.length)));
+
+            if (hasCached) {
+                await renderContactsData(cached);
+            } else {
+                showLoading('Загрузка контактов...');
+                searchResults.innerHTML = '';
+                noContacts.style.display = 'none';
+                allContactIds.clear();
+            }
+
+            // 2. Фоновая сверка с сервером (полный /get_friends только если
+            //    что-то реально изменилось, иначе — только дешёвый маркер версии).
+            await syncContactsWithServer(!hasCached);
+        }
+
+        async function syncContactsWithServer(forceFullFetch) {
+            try {
+                if (!forceFullFetch) {
+                    const remoteVersion = await getRemoteContactsVersion();
+                    if (remoteVersion) {
+                        const localVersion = await getCacheItemIgnoreTTL(CONTACTS_VERSION_CACHE_KEY);
+                        if (localVersion && localVersion === remoteVersion) {
+                            return; // ничего не изменилось — полный /get_friends не нужен
+                        }
+                    }
+                }
+
                 const response = await fetch(`${SERVER_URL}/get_friends`, {
                     method: 'POST',
                     headers: {
@@ -3443,37 +3612,45 @@ async function updateProfileModalUI(user) {
 
                 if (data.status === 'success') {
                     sessionStorage.setItem('userContacts', JSON.stringify(data.friends));
-                  
-                    if (data.friends.length > 0) {
-                        for (const user of data.friends) {
-                            await displayUserResult(user, 'added');
-                        }
-                    }
 
-                
-                    if (data.incoming_requests.length > 0) {
-                        for (const user of data.incoming_requests) {
-                            await displayFriendRequest(user);
-                        }
-                    }
+                    await renderContactsData(data);
 
-                   
-                    if (data.friends.length === 0 && data.incoming_requests.length === 0) {
-                        noContacts.textContent = 'Нет контактов';
-                        noContacts.style.display = 'block';
-                    }
-                    // После загрузки всех контактов, обновляем их статусы
-                    updateAllContactsActivity();
+                    setCacheItem(CONTACTS_CACHE_KEY, data, CONTACTS_CACHE_TTL);
+                    const v = await getRemoteContactsVersion();
+                    if (v) setCacheItem(CONTACTS_VERSION_CACHE_KEY, v, CONTACTS_CACHE_TTL);
                 } else {
                     throw new Error(data.error || 'Ошибка загрузки контактов');
                 }
             } catch (error) {
                 console.error('Load contacts error:', error);
-             
-                noContacts.textContent = 'Ошибка при загрузке контактов';
-                noContacts.style.display = 'block';
+                if (forceFullFetch) {
+                    const { noContacts } = getActiveElements();
+                    noContacts.textContent = 'Ошибка при загрузке контактов';
+                    noContacts.style.display = 'block';
+                }
+                // иначе — просто оставляем то, что уже показано локально
             } finally {
                 hideLoading();
+            }
+        }
+
+        let contactsPollInterval = null;
+
+        // Пока страница контактов открыта и видна — раз в 6 сек дёшево
+        // проверяем версию списка (см. syncContactsWithServer), чтобы увидеть
+        // изменения от другой стороны (принятую заявку, новый контакт, смену
+        // ника/аватарки другом и т.п.) без перезагрузки страницы.
+        function startContactsPolling() {
+            if (contactsPollInterval) clearInterval(contactsPollInterval);
+            contactsPollInterval = setInterval(() => {
+                syncContactsWithServer(false);
+            }, 6000);
+        }
+
+        function stopContactsPolling() {
+            if (contactsPollInterval) {
+                clearInterval(contactsPollInterval);
+                contactsPollInterval = null;
             }
         }
 
@@ -3708,7 +3885,7 @@ async function updateProfileModalUI(user) {
                 if (data.status === 'success') {
                     console.log('Запрос на дружбу отправлен'); 
                    
-                    loadContacts();
+                    await syncContactsWithServer(true);
                     await loadFriendsRecommendations();
                 } else {
                     throw new Error(data.error || 'Ошибка отправки запроса');
@@ -3747,7 +3924,7 @@ async function updateProfileModalUI(user) {
                 if (data.status === 'success') {
                     console.log(action === 'accept' ? 'Запрос принят! Пользователь добавлен в контакты' : 'Запрос отклонен'); // Log success
                  
-                    loadContacts();
+                    await syncContactsWithServer(true);
                     await loadFriendsRecommendations();
                 } else {
                     throw new Error(data.error || 'Ошибка обработки запроса');
@@ -3910,11 +4087,13 @@ function setupSearchHandlers() {
             if (activityPollInterval) {
                 clearInterval(activityPollInterval);
             }
+            stopContactsPolling();
             sendOfflineStatus();
         });
 
         window.addEventListener('pagehide', () => {
             stopActivityPolling();
+            stopContactsPolling();
             if (activityUpdateInterval) {
                 clearInterval(activityUpdateInterval);
             }
@@ -3928,8 +4107,11 @@ function setupSearchHandlers() {
                     updateUserActivity(true);
                     startActivityUpdates(); // Перезапускаем интервал для своего статуса
                     startActivityPolling(); // Перезапускаем интервал для статусов других
+                    syncContactsWithServer(false); // Сразу подтягиваем изменения, пока страница была скрыта
+                    startContactsPolling(); // Перезапускаем поллинг списка контактов
                 } else {
                     stopActivityPolling(); // Останавливаем интервал при скрытии страницы
+                    stopContactsPolling();
                     if (activityUpdateInterval) {
                         clearInterval(activityUpdateInterval);
                     }
@@ -3988,6 +4170,7 @@ function setupSearchHandlers() {
                 await loadUserData();
                 console.log('Loading contacts...');
                 await loadContacts();
+                startContactsPolling();
                 console.log('Loading recommendations...');
                 await loadFriendsRecommendations();
 
