@@ -196,5 +196,5 @@ const AvatarCache = (function () {
         }
     }
 
-    return { render, removeLocal, getLocal };
+    return { render, removeLocal, getLocal, saveLocal };
 })();
