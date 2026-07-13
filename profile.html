@@ -4,6 +4,52 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Профиль - TheVuntgram</title>
+
+    <!--
+        Максимально ранняя отрисовка аватарки — ДО парсинга остального HTML/CSS
+        и ДО выполнения основного скрипта внизу страницы. Читаем localStorage
+        синхронно (без единого await) и, если фото уже закэшировано локально,
+        сразу прописываем его через CSS-правило по id. Браузер применит это
+        правило в тот же момент, когда элементы аватарок появятся в разметке —
+        то есть на самом первом кадре отрисовки уже будет фото, а не фон.
+        (Тот же принцип, что и в chats.html: там просто новых элементов с
+        "пустым" фоном никогда не существует, потому что аватар ставится
+        сразу при создании DOM-узла. Здесь элементы статичные, поэтому
+        нужно опередить их первую отрисовку явно.)
+    -->
+    <script>
+        (function () {
+            try {
+                var raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                if (!raw) return;
+                var userData = JSON.parse(raw);
+                var userId = userData && userData.platform_user_id;
+                if (!userId) return;
+
+                var cachedRaw = localStorage.getItem('vg_avatar_' + String(userId));
+                if (!cachedRaw) return;
+                var cached = JSON.parse(cachedRaw);
+                if (!cached || !cached.dataUrl) return;
+
+                // Без !important: ниже это правило проиграет обычному
+                // inline-style, который AvatarCache проставит из основного
+                // скрипта, если аватар реально успел смениться — иначе
+                // старое фото "залипло" бы навсегда.
+                var css = '#profile-avatar,#desktop-profile-avatar,' +
+                    '#sidebar-profile-avatar,#mobile-sidebar-profile-avatar{' +
+                    'background-image:url(' + JSON.stringify(cached.dataUrl) + ');' +
+                    'background-size:cover;background-position:center;' +
+                    'background-repeat:no-repeat;}';
+                var style = document.createElement('style');
+                style.textContent = css;
+                document.head.appendChild(style);
+            } catch (e) {
+                // Что-то пошло не так — просто ничего не делаем,
+                // дальше сработает обычная логика через AvatarCache
+            }
+        })();
+    </script>
+
     <link rel="stylesheet" href="assets/animate/animate.min.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 
