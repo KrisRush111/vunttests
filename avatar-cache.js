@@ -140,9 +140,12 @@ const AvatarCache = (function () {
         const local = await getLocal(userId);
         if (local && local.dataUrl) {
             applyImage(el, local.dataUrl);
-        } else {
-            applyPlaceholder(el, initials, bgColor);
         }
+        // Если локальной копии нет, но у пользователя точно есть фото —
+        // плейсхолдер-фон НЕ показываем: он всё равно будет тут же
+        // перекрыт настоящей фотографией, и получится лишнее мигание.
+        // Просто ждём саму фотографию (см. checkAndUpdate ниже — она
+        // качается максимально быстро, параллельно с проверкой версии).
 
         // 2) В фоне — дешёвая проверка версии на сервере
         const key = String(userId);
@@ -154,6 +157,10 @@ const AvatarCache = (function () {
         const result = await pending.get(key);
         if (result && result.changed) {
             applyImage(el, result.dataUrl);
+        } else if (!local) {
+            // Сети нет / запрос не удался, а показать вообще нечего —
+            // на крайний случай не оставляем пустой круг
+            applyPlaceholder(el, initials, bgColor);
         }
     }
 
@@ -167,6 +174,38 @@ const AvatarCache = (function () {
             // Access-Control-Allow-Credentials — из-за этого скачивание
             // реальной картинки молча падало в catch, и локально
             // сохранялся только фон-плейсхолдер, а не само фото.
+
+            if (!local) {
+                // Локальной копии нет вообще (первый заход, новое устройство/
+                // браузер) — значит фото придётся скачать в любом случае,
+                // независимо от того, что скажет /avatar_version. Поэтому
+                // не ждём версию перед тем как начать качать саму картинку,
+                // а запускаем оба запроса ОДНОВРЕМЕННО — это почти вдвое
+                // быстрее, чем последовательно.
+                const [versionRes, imgRes] = await Promise.all([
+                    fetch(`${serverUrl}/avatar_version/${userId}`).catch(() => null),
+                    fetch(`${serverUrl}/avatar/${userId}`)
+                ]);
+
+                if (!imgRes.ok) return null;
+                const blob = await imgRes.blob();
+                const dataUrl = await blobToDataURL(blob);
+
+                let version = null;
+                if (versionRes && versionRes.ok) {
+                    const versionData = await versionRes.json();
+                    version = versionData.version;
+                }
+                // version может быть null, если проверка версии не удалась —
+                // тогда просто не кэшируем хэш, следующий заход перепроверит
+                if (version && version !== 'none') {
+                    await saveLocal(userId, version, dataUrl);
+                }
+                return { changed: true, dataUrl };
+            }
+
+            // Локальная копия уже есть — сначала дешёвая проверка хэша,
+            // и только если он отличается, качаем саму картинку
             const versionRes = await fetch(`${serverUrl}/avatar_version/${userId}`);
             if (!versionRes.ok) return null;
             const versionData = await versionRes.json();
@@ -177,12 +216,12 @@ const AvatarCache = (function () {
                 return null;
             }
 
-            if (local && local.version === remoteVersion) {
+            if (local.version === remoteVersion) {
                 // Аватар не менялся — ничего не перезагружаем и не перерисовываем
                 return null;
             }
 
-            // Версия изменилась (или локальной копии не было) — скачиваем фото
+            // Версия изменилась — скачиваем фото
             const imgRes = await fetch(`${serverUrl}/avatar/${userId}`);
             if (!imgRes.ok) return null;
             const blob = await imgRes.blob();
