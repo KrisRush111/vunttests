@@ -3799,11 +3799,16 @@ function updateProfileUI() {
             avatarModal.classList.add('active');
             document.body.style.overflow = 'hidden';
 
-            // Мгновенно показываем то, что уже лежит в локальном кэше (IndexedDB),
-            // пока в фоне подтягивается полноразмерная версия с сервера
-            const local = await AvatarCache.getLocal(userData.platform_user_id);
-            if (local && local.dataUrl) {
-                avatarModalImage.src = local.dataUrl;
+            // Мгновенно, без ожидания промиса — если уже есть в быстром
+            // (localStorage) кэше, показываем сразу же
+            const syncLocal = AvatarCache.getLocalSync(userData.platform_user_id);
+            if (syncLocal && syncLocal.dataUrl) {
+                avatarModalImage.src = syncLocal.dataUrl;
+            } else {
+                const local = await AvatarCache.getLocal(userData.platform_user_id);
+                if (local && local.dataUrl) {
+                    avatarModalImage.src = local.dataUrl;
+                }
             }
 
             const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}`;
