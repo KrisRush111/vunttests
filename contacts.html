@@ -451,9 +451,21 @@
             border-bottom: 1px solid var(--telegram-divider);
             margin: 0;
             background-color: var(--telegram-bg);
-            animation: fadeIn 0.3s ease-out;
+            animation: slideInRight 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            animation-fill-mode: both;
             cursor: pointer;
             transition: all 0.2s ease;
+        }
+
+        /* Запасной вариант задержки по CSS (на случай, если по какой-то
+           причине JS не проставит animation-delay точечно по индексу —
+           см. displayUserResult/displayFriendRequest) */
+        .user-result:nth-child(odd) {
+            animation-delay: 0.05s;
+        }
+
+        .user-result:nth-child(even) {
+            animation-delay: 0.1s;
         }
 
         .user-result:last-child {
@@ -1133,6 +1145,19 @@
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        /* Та же анимация появления списка контактов, что в chats.html:
+           лёгкое выезжание сбоку с масштабированием и пружинистым таймингом. */
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(50px) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0) scale(1);
             }
         }
 
@@ -1924,7 +1949,8 @@ body {
         border-bottom: 1px solid var(--telegram-divider);
         margin: 0;
         background-color: var(--telegram-bg);
-        animation: fadeIn 0.3s ease-out;
+        animation: slideInRight 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        animation-fill-mode: both;
         cursor: pointer;
         transition: all 0.2s ease;
         width: 100%;
@@ -3476,15 +3502,20 @@ async function updateProfileModalUI(user) {
             const friends = data.friends || [];
             const incomingRequests = data.incoming_requests || [];
 
+            // Сквозной индекс по всем элементам (сначала друзья, потом заявки) —
+            // даёт красивую "каскадную" анимацию появления списком, как в
+            // chats.html, а не одновременное появление всех элементов разом.
+            let animationIndex = 0;
+
             if (friends.length > 0) {
                 for (const user of friends) {
-                    await displayUserResult(user, 'added');
+                    await displayUserResult(user, 'added', animationIndex++);
                 }
             }
 
             if (incomingRequests.length > 0) {
                 for (const user of incomingRequests) {
-                    await displayFriendRequest(user);
+                    await displayFriendRequest(user, animationIndex++);
                 }
             }
 
@@ -3610,11 +3641,12 @@ async function updateProfileModalUI(user) {
         }
 
     
-        async function displayUserResult(user, status = 'default') {
+        async function displayUserResult(user, status = 'default', animationIndex = 0) {
             const { searchResults } = getActiveElements();
             const userElement = document.createElement('div');
             userElement.className = 'user-result';
             userElement.setAttribute('data-user-id', user.platform_user_id); // Добавляем data-атрибут
+            userElement.style.animationDelay = `${animationIndex * 0.05}s`;
             
             // Добавляем ID в множество для отслеживания
             allContactIds.add(user.platform_user_id);
@@ -3733,11 +3765,12 @@ async function updateProfileModalUI(user) {
             searchResults.appendChild(userElement);
         }
 
-        async function displayFriendRequest(user) {
+        async function displayFriendRequest(user, animationIndex = 0) {
             const { searchResults } = getActiveElements();
             const requestElement = document.createElement('div');
             requestElement.className = 'user-result';
             requestElement.dataset.userId = user.platform_user_id;
+            requestElement.style.animationDelay = `${animationIndex * 0.05}s`;
             
             // Добавляем ID в множество для отслеживания
             allContactIds.add(user.platform_user_id);
