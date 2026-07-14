@@ -8774,6 +8774,7 @@ function getActiveElements() {
         }
 
         let contactsPollInterval = null;
+        let contactsDataPollInterval = null;
 
         function showContactsModal() {
             contactsModal.classList.add('active');
@@ -8788,6 +8789,17 @@ function getActiveElements() {
             contactsPollInterval = setInterval(() => {
                 syncContactsWithServer(false);
             }, 6000);
+
+            // Версия списка (friends_version) меняется только при добавлении/
+            // удалении контактов, но НЕ при изменении ника/аватара у уже
+            // существующего контакта. Поэтому отдельно, раз в 15 секунд, пока
+            // рамка открыта, тихо перепроверяем данные контактов и точечно
+            // обновляем в реальном времени только то, что реально изменилось
+            // (без полной перерисовки списка — без мигания и потери скролла).
+            if (contactsDataPollInterval) clearInterval(contactsDataPollInterval);
+            contactsDataPollInterval = setInterval(() => {
+                refreshContactsDataInBackground();
+            }, 15000);
         }
 
         function hideContactsModal() {
@@ -8797,6 +8809,10 @@ function getActiveElements() {
             if (contactsPollInterval) {
                 clearInterval(contactsPollInterval);
                 contactsPollInterval = null;
+            }
+            if (contactsDataPollInterval) {
+                clearInterval(contactsDataPollInterval);
+                contactsDataPollInterval = null;
             }
         }
 
@@ -9013,8 +9029,12 @@ function getActiveElements() {
                         <div class="contact-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
                     </div>
                 `;
-                
-                if (contact.has_avatar_photo) loadContactAvatar(contactItem.querySelector('.contact-avatar'), contact.platform_user_id, initials, bgColor);
+
+                const avatarEl = contactItem.querySelector('.contact-avatar');
+                avatarEl.dataset.bgColor = bgColor;
+                avatarEl.dataset.hasAvatar = contact.has_avatar_photo ? '1' : '0';
+
+                if (contact.has_avatar_photo) loadContactAvatar(avatarEl, contact.platform_user_id, initials, bgColor);
                 
                 contactItem.addEventListener('click', () => createChatWithContact(contact));
                 
@@ -9027,6 +9047,73 @@ function getActiveElements() {
             renderContactsIndexBar(sectionHeaders);
 
             refreshContactStatusesInBackground(userIds);
+        }
+
+        // Пока рамка "Написать сообщение" открыта — тихо перепроверяем данные
+        // контактов (ник/аватар) и точечно обновляем в реальном времени только
+        // то, что реально изменилось. Состав списка (кто добавился/пропал)
+        // отслеживает syncContactsWithServer через версию — сюда это не относится,
+        // если состав поменялся, просто перерисовываем список целиком.
+        async function refreshContactsDataInBackground() {
+            try {
+                const response = await fetch(`${SERVER_URL}/get_friends`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success' || !data.friends) return;
+
+                // Кэш обновляем в любом случае — свежие данные валиднее старых
+                setCacheItem(CONTACTS_CACHE_KEY, data.friends, CACHE.CHATS_TTL);
+
+                const renderedIds = new Set(
+                    Array.from(contactsList.querySelectorAll('.contact-item'))
+                        .map(el => el.getAttribute('data-user-id'))
+                );
+                const freshIds = new Set(data.friends.map(c => c.platform_user_id));
+
+                // Состав списка изменился (кто-то добавился/пропал) — проще
+                // и надёжнее перерисовать список целиком.
+                if (renderedIds.size !== freshIds.size || [...freshIds].some(id => !renderedIds.has(id))) {
+                    renderContacts(data.friends);
+                    return;
+                }
+
+                data.friends.forEach(contact => {
+                    const item = contactsList.querySelector(`.contact-item[data-user-id="${contact.platform_user_id}"]`);
+                    if (!item) return;
+
+                    const nameEl = item.querySelector('.contact-name');
+                    const newName = contact.nickname || 'Без имени';
+                    if (nameEl && nameEl.textContent !== newName) {
+                        nameEl.textContent = newName;
+                    }
+
+                    const avatarEl = item.querySelector('.contact-avatar');
+                    if (!avatarEl) return;
+
+                    const bgColor = contact.avatar_background || avatarEl.dataset.bgColor || getRandomColor();
+                    const hasAvatarNow = !!contact.has_avatar_photo;
+                    const changed = avatarEl.dataset.bgColor !== bgColor || avatarEl.dataset.hasAvatar !== (hasAvatarNow ? '1' : '0');
+
+                    if (changed) {
+                        avatarEl.dataset.bgColor = bgColor;
+                        avatarEl.dataset.hasAvatar = hasAvatarNow ? '1' : '0';
+                        const initials = contact.nickname ? contact.nickname.split(' ').map(n => n[0]).join('') : '?';
+                        const avatarStyle = bgColor ? `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})` : 'linear-gradient(135deg, #0088cc, #40a7e3)';
+                        avatarEl.style.background = avatarStyle;
+
+                        if (hasAvatarNow) {
+                            loadContactAvatar(avatarEl, contact.platform_user_id, initials, bgColor);
+                        } else {
+                            avatarEl.style.backgroundImage = 'none';
+                            avatarEl.textContent = initials;
+                        }
+                    }
+                });
+            } catch (e) {}
         }
 
         async function createChatWithContact(contact) {
