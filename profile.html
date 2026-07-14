@@ -12,18 +12,30 @@
         сразу прописываем его через CSS-правило по id. Браузер применит это
         правило в тот же момент, когда элементы аватарок появятся в разметке —
         то есть на самом первом кадре отрисовки уже будет фото, а не фон.
-        (Тот же принцип, что и в chats.html: там просто новых элементов с
-        "пустым" фоном никогда не существует, потому что аватар ставится
-        сразу при создании DOM-узла. Здесь элементы статичные, поэтому
-        нужно опередить их первую отрисовку явно.)
+
+        userId берём из localStorage.vg_last_user_id — этот ключ пишется в
+        checkAuthorization()/fetchUserData() и, в отличие от sessionStorage,
+        НЕ очищается браузером при закрытии вкладки/окна. Именно поэтому
+        раньше при полном закрытии и повторном открытии сайта фон успевал
+        мелькнуть: sessionStorage к этому моменту уже пуст, а старую
+        подстраховку через localStorage.rememberedUser браузер иногда не
+        успевал/не мог отдать синхронно на первом кадре в некоторых
+        сценариях (например, PWA). vg_last_user_id устраняет эту зависимость.
     -->
     <script>
         (function () {
             try {
-                var raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
-                if (!raw) return;
-                var userData = JSON.parse(raw);
-                var userId = userData && userData.platform_user_id;
+                var userId = localStorage.getItem('vg_last_user_id');
+
+                // Подстраховка на самый первый визит после обновления кода,
+                // пока vg_last_user_id ещё ни разу не был записан
+                if (!userId) {
+                    var raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                    if (raw) {
+                        var fallbackUserData = JSON.parse(raw);
+                        userId = fallbackUserData && fallbackUserData.platform_user_id;
+                    }
+                }
                 if (!userId) return;
 
                 var cachedRaw = localStorage.getItem('vg_avatar_' + String(userId));
@@ -2471,6 +2483,12 @@ input:checked + .toggle-slider:before {
                 try {
                     userData = JSON.parse(sessionUser);
                     if (userData && userData.platform_user_id) {
+                        // Отдельный "долгоживущий" ключ — специально НЕ в sessionStorage,
+                        // а в localStorage, чтобы ранний скрипт в <head> мог мгновенно
+                        // узнать userId даже после полного закрытия и повторного
+                        // открытия сайта (sessionStorage браузер очищает при закрытии
+                        // вкладки, а localStorage — нет)
+                        localStorage.setItem('vg_last_user_id', String(userData.platform_user_id));
                         return true;
                     }
                 } catch (error) {
@@ -2486,6 +2504,7 @@ input:checked + .toggle-slider:before {
                     if (userData && userData.platform_user_id) {
                         // Восстанавливаем сессию
                         sessionStorage.setItem('userData', rememberedUser);
+                        localStorage.setItem('vg_last_user_id', String(userData.platform_user_id));
                         return true;
                     }
                 } catch (error) {
@@ -3248,9 +3267,14 @@ window.addEventListener("beforeunload", () => {
 
         function performLogout() {
             // Очищаем ВСЕ данные авторизации
+            const idBeingLoggedOut = userData && userData.platform_user_id;
             sessionStorage.removeItem('userData');
             localStorage.removeItem('rememberedUser');
             localStorage.removeItem('consentAccepted'); // если нужно
+            localStorage.removeItem('vg_last_user_id');
+            if (idBeingLoggedOut) {
+                AvatarCache.removeLocal(idBeingLoggedOut);
+            }
             
             // Перенаправляем на страницу входа
             window.location.href = 'index.html';
@@ -3598,6 +3622,9 @@ window.addEventListener("beforeunload", () => {
                         has_avatar: data.user.has_avatar
                     };
                     sessionStorage.setItem('userData', JSON.stringify(userData));
+                    if (userData.platform_user_id) {
+                        localStorage.setItem('vg_last_user_id', String(userData.platform_user_id));
+                    }
                     return true;
                 } else {
                     throw new Error(data.error || 'Ошибка загрузки данных');
