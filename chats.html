@@ -9724,6 +9724,7 @@ async function openChat(chatId) {
 
     // Показываем имя/аватар из кэша немедленно (не ждём сеть)
     const cachedChat = currentChatsList.find(c => c.id === chatId);
+    let statusFetchParticipantId = null;
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
@@ -9731,15 +9732,48 @@ async function openChat(chatId) {
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
             loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
-            const statusElement = document.querySelector(`[data-chat-id="${chatId}"] .chat-status`);
-            if (statusElement) {
-                chatStatus.innerHTML = statusElement.innerHTML;
-                chatStatus.className = statusElement.className;
+            statusFetchParticipantId = otherParticipant.platform_user_id;
+
+            // Мгновенно показываем статус, только если он реально свежий
+            // (в пределах CACHE.STATUS_TTL) — иначе не тащим устаревшее
+            // "в сети" из скрытого кэша списка чатов, а ждём проверку ниже.
+            const syncStatus = getCachedActivityStatusSync([otherParticipant.platform_user_id])[otherParticipant.platform_user_id];
+            if (syncStatus) {
+                if (syncStatus.is_online) {
+                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    chatStatus.classList.add('online');
+                } else {
+                    chatStatus.textContent = formatLastSeen(syncStatus.last_online);
+                    chatStatus.classList.remove('online');
+                }
+            } else {
+                chatStatus.textContent = 'был(а) недавно';
+                chatStatus.classList.remove('online');
             }
         } else {
             chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
             chatAvatar.textContent = initials;
         }
+    }
+
+    // Всегда делаем свежий запрос статуса сети при открытии чата — не
+    // полагаемся только на кэш, чтобы не показать устаревшее "в сети".
+    if (statusFetchParticipantId) {
+        getCachedActivityStatus([statusFetchParticipantId]).then(activityData => {
+            if (isStale()) return; // пользователь уже открыл другой чат
+            const userActivity = activityData[statusFetchParticipantId];
+            const { chatStatus: freshChatStatus } = getActiveElements();
+            if (!freshChatStatus) return;
+            if (userActivity) {
+                if (userActivity.is_online) {
+                    freshChatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    freshChatStatus.classList.add('online');
+                } else {
+                    freshChatStatus.textContent = formatLastSeen(userActivity.last_online);
+                    freshChatStatus.classList.remove('online');
+                }
+            }
+        });
     }
 
     // Открываем модал
