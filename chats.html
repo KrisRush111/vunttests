@@ -4987,6 +4987,7 @@
             MESSAGES_TTL: 5 * 60 * 1000,
             CHATS_TTL: 2 * 60 * 1000,
             STATUS_TTL: 12 * 1000,
+            PROFILE_TTL: 5 * 60 * 1000,
             
             avatars: new Map(),
             messages: new Map(),
@@ -4995,6 +4996,9 @@
             statuses: new Map(),
             statusesTimestamp: new Map()
         };
+
+        // Ключ кэша профиля контакта: profile:<platform_user_id>
+        const PROFILE_CACHE_KEY = (userId) => `profile:${userId}`;
 
         const WALLPAPERS = [
             { id: 'default', name: 'Системные', url: 'фон.jpg', isDefault: true },
@@ -5575,6 +5579,16 @@ function openProfileModal(userId) {
         modalOverlay.classList.add('active');
     }
 
+    // Мгновенно показываем профиль контакта из локального кэша (если есть),
+    // не дожидаясь сети — так же, как список чатов/контактов уже делают.
+    // Свежесть проверит фоновый запрос внутри loadUserProfile ниже, а если
+    // что-то изменится, пока профиль открыт (ник, аватар, школа и т.п.),
+    // это подхватит startProfileDataPolling в реальном времени.
+    getCacheItemIgnoreTTL(PROFILE_CACHE_KEY(userId)).then(cachedUser => {
+        if (_profileLoadToken !== token) return; // успели открыть другой профиль
+        if (cachedUser) updateProfileModalUI(cachedUser);
+    });
+
     // Загружаем профиль с проверкой токена (защита от race condition)
     loadUserProfile(userId, token);
 }
@@ -5582,6 +5596,7 @@ function openProfileModal(userId) {
 
 function closeProfileModal() {
     stopProfileStatusPolling();
+    stopProfileDataPolling();
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
     if (isDesktop) {
@@ -9703,6 +9718,9 @@ async function openChat(chatId) {
                 if (data.status === 'success' && data.user) {
                     if (token && _profileLoadToken !== token) return;
                     updateProfileModalUI(data.user);
+                    // Сохраняем в кэш — при следующем открытии этого профиля
+                    // (в этом чате или в другом месте) он отобразится мгновенно
+                    setCacheItem(PROFILE_CACHE_KEY(userId), data.user, CACHE.PROFILE_TTL);
                 } else {
                     throw new Error('Пользователь не найден');
                 }
@@ -9754,6 +9772,7 @@ async function updateProfileModalUI(user) {
     // Обновление статуса
     updateProfileModalStatus(user.platform_user_id);
     startProfileStatusPolling(user.platform_user_id);
+    startProfileDataPolling(user.platform_user_id);
 
     // Функция для проверки и отображения поля
     function updateField(fieldValue, fieldElement, containerElement, fieldName) {
@@ -9979,6 +9998,66 @@ function stopProfileStatusPolling() {
         _profileStatusInterval = null;
     }
     _profileViewedUserId = null;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Live-обновление ДАННЫХ профиля (ник, аватар, школа, класс и т.п.),
+// пока он открыт — если собеседник что-то изменил у себя, это подтянется
+// сюда без перезагрузки страницы, аналогично polling'у онлайн-статуса выше.
+// ═══════════════════════════════════════════════════════════
+let _profileDataInterval = null;
+let _profileDataViewedUserId = null;
+let _profileDataLastFingerprint = null;
+
+// Лёгкая сигнатура видимых в профиле полей — чтобы не перерисовывать UI
+// (и не дёргать лишний раз аватар/статус дружбы), если по факту ничего
+// не изменилось с прошлой проверки.
+function profileFingerprint(user) {
+    return JSON.stringify([
+        user.nickname, user.avatar_background,
+        !!(user.has_avatar_photo || user.has_avatar),
+        user.main_school_name, user.class_number, user.class_letter,
+        user.additional_school_name, user.specialization, user.course,
+        user.identity, user.subject1, user.subject2
+    ]);
+}
+
+function startProfileDataPolling(userId) {
+    stopProfileDataPolling();
+    _profileDataViewedUserId = userId;
+    _profileDataLastFingerprint = (currentViewedUser && currentViewedUser.platform_user_id === userId)
+        ? profileFingerprint(currentViewedUser)
+        : null;
+
+    _profileDataInterval = setInterval(async () => {
+        if (!_profileDataViewedUserId) return;
+        try {
+            const r = await fetch(`${SERVER_URL}/get_user_data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: _profileDataViewedUserId }),
+                credentials: 'include'
+            });
+            const d = await r.json();
+            if (d.status === 'success' && d.user && _profileDataViewedUserId === userId) {
+                setCacheItem(PROFILE_CACHE_KEY(userId), d.user, CACHE.PROFILE_TTL);
+                const fp = profileFingerprint(d.user);
+                if (fp !== _profileDataLastFingerprint) {
+                    _profileDataLastFingerprint = fp;
+                    updateProfileModalUI(d.user);
+                }
+            }
+        } catch (e) {}
+    }, 15000); // проверяем изменения раз в 15 секунд, пока профиль открыт
+}
+
+function stopProfileDataPolling() {
+    if (_profileDataInterval) {
+        clearInterval(_profileDataInterval);
+        _profileDataInterval = null;
+    }
+    _profileDataViewedUserId = null;
+    _profileDataLastFingerprint = null;
 }
 
         function closeChat() {
