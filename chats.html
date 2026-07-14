@@ -10820,6 +10820,98 @@ function stopProfileDataPolling() {
                 });
             }
 
+            // ВАЖНО: то же самое касается и всех остальных кнопок/полей ввода
+            // на странице (кнопка "+", поиск, отправка сообщения, кнопки
+            // закрытия профиля и т.п.) — их подписка тоже перенесена сюда,
+            // до await Promise.all([loadUserData(), loadChats()]) ниже.
+            // Раньше все они навешивались уже ПОСЛЕ загрузки чатов, поэтому
+            // клик по "+" сразу после открытия страницы ничего не делал —
+            // обработчик ещё не был подписан. Сработает нормально они начнут
+            // только после следующей полной переинициализации страницы
+            // (например, после восстановления из bfcache), когда к моменту
+            // клика загрузка уже успевала завершиться.
+            const { addChatButton, searchInput, messageInput, sendMessageButton, attachButton } = getActiveElements();
+
+            if (addChatButton && !addChatButton.dataset.clickBound) {
+                addChatButton.dataset.clickBound = '1';
+                addChatButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    showContactsModal();
+                });
+            }
+
+            if (closeContacts && !closeContacts.dataset.clickBound) {
+                closeContacts.dataset.clickBound = '1';
+                closeContacts.addEventListener('click', hideContactsModal);
+            }
+            if (modalOverlay && !modalOverlay.dataset.clickBound) {
+                modalOverlay.dataset.clickBound = '1';
+                modalOverlay.addEventListener('click', hideContactsModal);
+            }
+            if (contactsSearchInput && !contactsSearchInput.dataset.inputBound) {
+                contactsSearchInput.dataset.inputBound = '1';
+                contactsSearchInput.addEventListener('input', (e) => filterContacts(e.target.value));
+            }
+            if (searchInput && !searchInput.dataset.inputBound) {
+                searchInput.dataset.inputBound = '1';
+                searchInput.addEventListener('input', (e) => filterChats(e.target.value));
+            }
+
+            if (sendMessageButton && messageInput && !sendMessageButton.dataset.clickBound) {
+                sendMessageButton.dataset.clickBound = '1';
+                sendMessageButton.addEventListener('click', sendMessage);
+
+                // Enter всегда просто переносит строку — сообщение отправляется
+                // только по нажатию на кнопку отправки.
+                messageInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.stopPropagation();
+                    }
+                });
+
+                autoResizeMessageInput(messageInput);
+                messageInput.addEventListener('input', () => autoResizeMessageInput(messageInput));
+
+                messageInput.addEventListener('focus', () => {
+                    setTimeout(() => {
+                        const { messagesContainer } = getActiveElements();
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 100);
+                });
+            }
+
+            if (attachButton && !attachButton.dataset.clickBound) {
+                attachButton.dataset.clickBound = '1';
+                attachButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    imageInput.click();
+                });
+            }
+
+            if (profileBackButtonMobile && !profileBackButtonMobile.dataset.clickBound) {
+                profileBackButtonMobile.dataset.clickBound = '1';
+                profileBackButtonMobile.addEventListener('click', closeProfileModal);
+            }
+            if (profileBackButtonDesktop && !profileBackButtonDesktop.dataset.clickBound) {
+                profileBackButtonDesktop.dataset.clickBound = '1';
+                profileBackButtonDesktop.addEventListener('click', closeProfileModal);
+            }
+
+            const profileCloseDesktop = document.getElementById('profileCloseDesktop');
+            if (profileCloseDesktop && !profileCloseDesktop.dataset.clickBound) {
+                profileCloseDesktop.dataset.clickBound = '1';
+                profileCloseDesktop.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeProfileModal();
+                });
+            }
+
+            if (imageInput && !imageInput.dataset.changeBound) {
+                imageInput.dataset.changeBound = '1';
+                imageInput.addEventListener('change', handleImageSelection);
+            }
+
             await Promise.all([ loadUserData(), loadChats() ]);
             
             const openChatId = sessionStorage.getItem('openChatId');
@@ -10853,85 +10945,9 @@ function stopProfileDataPolling() {
                 }
             }
 
-            const { addChatButton, searchInput, backToChats, messageInput, sendMessageButton } = getActiveElements();
-
-            // Profile modal close buttons
-            if (profileBackButtonMobile) {
-                profileBackButtonMobile.addEventListener('click', closeProfileModal);
-            }
-            if (profileBackButtonDesktop) {
-                profileBackButtonDesktop.addEventListener('click', closeProfileModal);
-            }
-
-            // (Обработчик клика по хедеру чата теперь подписывается раньше —
-            // см. начало initializePage(), до await Promise.all(...) — чтобы
-            // он был готов сразу, а не только после загрузки чатов.)
-
-            addChatButton.addEventListener('click', (e) => {
-                e.preventDefault();
-                showContactsModal();
-            });
-
-            closeContacts.addEventListener('click', hideContactsModal);
-            modalOverlay.addEventListener('click', hideContactsModal);
-            
-            contactsSearchInput.addEventListener('input', (e) => filterContacts(e.target.value));
-
-            searchInput.addEventListener('input', (e) => filterChats(e.target.value));
-
-            if (sendMessageButton && messageInput) {
-                sendMessageButton.addEventListener('click', sendMessage);
-
-                // Enter всегда просто переносит строку — сообщение отправляется
-                // только по нажатию на кнопку отправки.
-                messageInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                        e.stopPropagation();
-                    }
-                });
-
-                autoResizeMessageInput(messageInput);
-                messageInput.addEventListener('input', () => autoResizeMessageInput(messageInput));
-                
-                messageInput.addEventListener('focus', () => {
-                    setTimeout(() => {
-                        const { messagesContainer } = getActiveElements();
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 100);
-                });
-            }
-
-            const { attachButton } = getActiveElements();
-            if (attachButton) {
-                attachButton.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    imageInput.click();
-                });
-            }
-
-            if (profileBackButtonMobile) {
-    profileBackButtonMobile.addEventListener('click', closeProfileModal);
-}
-if (profileBackButtonDesktop) {
-    profileBackButtonDesktop.addEventListener('click', closeProfileModal);
-}
-
-// Добавьте этот новый обработчик для крестика
-const profileCloseDesktop = document.getElementById('profileCloseDesktop');
-if (profileCloseDesktop) {
-    // Удаляем старый обработчик, если был
-    profileCloseDesktop.removeEventListener('click', closeProfileModal);
-    // Добавляем новый
-    profileCloseDesktop.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        closeProfileModal();
-    });
-}
-
-
-            imageInput.addEventListener('change', handleImageSelection);
-
+            // (Все обработчики кликов — кнопка "+", поиск, отправка сообщений,
+            // кнопки профиля и т.д. — теперь подписываются раньше, до await
+            // Promise.all(...) выше. См. комментарий там же.)
             const statusUpdateInterval = setInterval(async () => {                const { chatModal } = getActiveElements();
                 
                 try {
