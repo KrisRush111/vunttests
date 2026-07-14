@@ -4963,6 +4963,7 @@
         let messagesCache = {};
         let isDesktop = window.matchMedia("(min-width: 768px)").matches;
         let isOpeningChat = false;
+        let isCreatingChatWithContact = false;
         let openChatAbortController = null;
         let activityPollInterval;
         let currentActivityData = {};
@@ -9036,7 +9037,7 @@ function getActiveElements() {
 
                 if (contact.has_avatar_photo) loadContactAvatar(avatarEl, contact.platform_user_id, initials, bgColor);
                 
-                contactItem.addEventListener('click', () => createChatWithContact(contact));
+                contactItem.addEventListener('click', () => createChatWithContact(contact, contactItem));
                 
                 fragment.appendChild(contactItem);
             });
@@ -9116,10 +9117,27 @@ function getActiveElements() {
             } catch (e) {}
         }
 
-        async function createChatWithContact(contact) {
-            if (isOpeningChat) return;
-            isOpeningChat = true;
-            
+        async function createChatWithContact(contact, contactEl) {
+            // Раньше здесь проверялся общий флаг isOpeningChat — тот же самый,
+            // что молча выставляет в true и обычный openChat() при открытии
+            // ЛЮБОГО чата из основного списка (без всякой проверки). Из-за
+            // этого, если вы только что открыли какой-то чат (openChat ещё не
+            // успел завершить свои сетевые запросы) и почти сразу нажали на
+            // контакт в рамке "Написать сообщение", клик молча ничего не делал —
+            // срабатывал только следующий клик, уже после того как предыдущий
+            // openChat() успевал закончиться и сбросить флаг. Теперь у создания
+            // чата с контактом свой собственный, независимый флаг.
+            if (isCreatingChatWithContact) return;
+            isCreatingChatWithContact = true;
+
+            // Мгновенная визуальная реакция на клик — раньше её не было вообще,
+            // и пока шёл сетевой запрос, было непонятно, сработал ли клик,
+            // из-за чего казалось, что чат "долго" не открывается.
+            if (contactEl) {
+                contactEl.style.opacity = '0.5';
+                contactEl.style.pointerEvents = 'none';
+            }
+
             try {
                 const response = await fetch(`${SERVER_URL}/get_or_create_chat`, {
                     method: 'POST',
@@ -9169,7 +9187,11 @@ function getActiveElements() {
                     showMessage('Ошибка загрузки чата: ' + error.message, 'error');
                 }
             } finally {
-                isOpeningChat = false;
+                isCreatingChatWithContact = false;
+                if (contactEl) {
+                    contactEl.style.opacity = '';
+                    contactEl.style.pointerEvents = '';
+                }
             }
         }
 
