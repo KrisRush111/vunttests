@@ -8584,34 +8584,30 @@ function getActiveElements() {
                 Object.entries(data.activity_data).forEach(([id, status]) => {
                     CACHE.statuses.set(id, status);
                     CACHE.statusesTimestamp.set(id, now);
-                });
 
-                chats.forEach(chat => {
-                    const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                    if (!otherParticipant) return;
-                    const status = data.activity_data[otherParticipant.platform_user_id];
-                    if (!status) return;
-
-                    const chatItem = document.querySelector(`.chat-item[data-chat-id="${chat.id}"]`);
-                    if (!chatItem) return;
-                    const statusEl = chatItem.querySelector('.chat-status');
-                    const avatarEl = chatItem.querySelector('.chat-avatar');
-
-                    if (status.is_online) {
-                        if (statusEl) {
-                            statusEl.classList.add('online');
-                            statusEl.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                        }
-                        if (avatarEl) avatarEl.classList.add('is-online');
-                    } else {
-                        if (statusEl) {
-                            statusEl.classList.remove('online');
-                            statusEl.textContent = formatLastSeen(status.last_online);
-                        }
-                        if (avatarEl) avatarEl.classList.remove('is-online');
-                    }
+                    document.querySelectorAll(`.chat-item[data-participant-id="${id}"]`).forEach(chatItem => {
+                        applyChatItemOnlineStatus(chatItem, status);
+                    });
                 });
             } catch (e) {}
+        }
+
+        function applyChatItemOnlineStatus(chatItem, userActivity) {
+            if (!chatItem) return;
+            const statusElement = chatItem.querySelector('.chat-status');
+            const avatarElement = chatItem.querySelector('.chat-avatar');
+            const isOnline = !!(userActivity && userActivity.is_online);
+
+            if (statusElement) {
+                if (isOnline) {
+                    statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                    statusElement.classList.add('online');
+                } else {
+                    statusElement.textContent = userActivity ? formatLastSeen(userActivity.last_online) : 'был(а) недавно';
+                    statusElement.classList.remove('online');
+                }
+            }
+            if (avatarElement) avatarElement.classList.toggle('is-online', isOnline);
         }
 
         async function renderChats(chats) {
@@ -8650,6 +8646,7 @@ function getActiveElements() {
                 const bgColor = chat.avatar_background || getRandomColor();
 
                 const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) chatItem.setAttribute('data-participant-id', otherParticipant.platform_user_id);
                 
                 let statusText = 'был(а) недавно';
                 let isOnline = false;
@@ -10766,53 +10763,23 @@ function stopProfileDataPolling() {
         }
 
         async function updateChatStatuses() {
-            if (!currentChatsList || currentChatsList.length === 0) return;
-
-            const userIds = [];
-            currentChatsList.forEach(chat => {
-                if (chat.participants && chat.participants.length > 0) {
-                    chat.participants.forEach(participant => {
-                        if (participant.platform_user_id !== userData.platform_user_id) userIds.push(participant.platform_user_id);
-                    });
-                }
+            const items = [];
+            [chatsListDesktop, chatsListMobile].forEach(list => {
+                if (!list) return;
+                list.querySelectorAll('.chat-item[data-participant-id]').forEach(el => items.push(el));
             });
+            if (items.length === 0) return;
 
+            const userIds = [...new Set(items.map(el => el.getAttribute('data-participant-id')).filter(Boolean))];
             if (userIds.length === 0) return;
 
             try {
                 const activityData = await getCachedActivityStatus(userIds);
                 currentActivityData = activityData;
-                
-                [chatsListDesktop, chatsListMobile].forEach(list => {
-                    if (!list) return;
-                    
-                    const chatItems = list.querySelectorAll('.chat-item');
-                    chatItems.forEach(chatItem => {
-                        const chatId = chatItem.getAttribute('data-chat-id');
-                        const chat = currentChatsList.find(c => c.id === chatId);
-                        
-                        if (chat && chat.participants) {
-                            const otherParticipant = chat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
-                            if (otherParticipant) {
-                                const userActivity = activityData[otherParticipant.platform_user_id];
-                                const statusElement = chatItem.querySelector('.chat-status');
-                                const avatarElement = chatItem.querySelector('.chat-avatar');
-                                const isNowOnline = !!(userActivity && userActivity.is_online);
 
-                                if (statusElement) {
-                                    if (isNowOnline) {
-                                        statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                                        statusElement.classList.add('online');
-                                    } else {
-                                        const statusText = userActivity ? formatLastSeen(userActivity.last_online) : 'был(а) недавно';
-                                        statusElement.innerHTML = statusText;
-                                        statusElement.classList.remove('online');
-                                    }
-                                }
-                                if (avatarElement) avatarElement.classList.toggle('is-online', isNowOnline);
-                            }
-                        }
-                    });
+                items.forEach(chatItem => {
+                    const participantId = chatItem.getAttribute('data-participant-id');
+                    applyChatItemOnlineStatus(chatItem, activityData[participantId]);
                 });
             } catch (error) {}
         }
