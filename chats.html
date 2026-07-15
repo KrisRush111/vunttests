@@ -409,6 +409,7 @@
         }
         
         .chat-avatar {
+            position: relative;
             width: 50px;
             height: 50px;
             border-radius: 25px;
@@ -430,6 +431,19 @@
 
         .chat-avatar:hover {
             transform: scale(1.04);
+        }
+
+        .chat-avatar.is-online::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            right: -1px;
+            width: 13px;
+            height: 13px;
+            background-color: var(--online-green);
+            border: 2.5px solid var(--telegram-bg);
+            border-radius: 50%;
+            box-sizing: border-box;
         }
         
         .chat-info {
@@ -8581,15 +8595,22 @@ function getActiveElements() {
                     if (!status) return;
 
                     const chatItem = document.querySelector(`.chat-item[data-chat-id="${chat.id}"]`);
-                    const statusEl = chatItem ? chatItem.querySelector('.chat-status') : null;
-                    if (!statusEl) return;
+                    if (!chatItem) return;
+                    const statusEl = chatItem.querySelector('.chat-status');
+                    const avatarEl = chatItem.querySelector('.chat-avatar');
 
                     if (status.is_online) {
-                        statusEl.classList.add('online');
-                        statusEl.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        if (statusEl) {
+                            statusEl.classList.add('online');
+                            statusEl.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        }
+                        if (avatarEl) avatarEl.classList.add('is-online');
                     } else {
-                        statusEl.classList.remove('online');
-                        statusEl.textContent = formatLastSeen(status.last_online);
+                        if (statusEl) {
+                            statusEl.classList.remove('online');
+                            statusEl.textContent = formatLastSeen(status.last_online);
+                        }
+                        if (avatarEl) avatarEl.classList.remove('is-online');
                     }
                 });
             } catch (e) {}
@@ -8658,7 +8679,7 @@ function getActiveElements() {
                 const readStatusIcon = getChatReadStatusIcon(chat);
 
                 chatItem.innerHTML = `
-                    <div class="chat-avatar" style="background: ${avatarStyle}">${initials}</div>
+                    <div class="chat-avatar ${isOnline ? 'is-online' : ''}" style="background: ${avatarStyle}">${initials}</div>
                     <div class="chat-info">
                         <div class="chat-top-row">
                             <div class="chat-name">${chat.name || 'Новый чат'}</div>
@@ -10777,9 +10798,11 @@ function stopProfileDataPolling() {
                             if (otherParticipant) {
                                 const userActivity = activityData[otherParticipant.platform_user_id];
                                 const statusElement = chatItem.querySelector('.chat-status');
-                                
+                                const avatarElement = chatItem.querySelector('.chat-avatar');
+                                const isNowOnline = !!(userActivity && userActivity.is_online);
+
                                 if (statusElement) {
-                                    if (userActivity && userActivity.is_online) {
+                                    if (isNowOnline) {
                                         statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                                         statusElement.classList.add('online');
                                     } else {
@@ -10788,6 +10811,7 @@ function stopProfileDataPolling() {
                                         statusElement.classList.remove('online');
                                     }
                                 }
+                                if (avatarElement) avatarElement.classList.toggle('is-online', isNowOnline);
                             }
                         }
                     });
