@@ -582,6 +582,7 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            transition: opacity 0.15s ease;
             max-width: 100%;
             text-align: center;
             color: var(--telegram-text);
@@ -1215,6 +1216,7 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            transition: opacity 0.15s ease;
             max-width: 100%; 
             margin-bottom: 2px; /* Adjusted margin to match contacts.html user-nickname */
         }
@@ -2503,6 +2505,113 @@ input:checked + .toggle-slider:before {
         
         let userData = null; // Initialize userData as null
 
+        // ═══════════════════════════════════════════════════════════
+        // PERSISTENT LOCAL CACHE (IndexedDB) — та же схема, что и в chats.html
+        // (общая база 'vuntgram_db'), чтобы собственный профиль кэшировался
+        // так же надёжно, как чаты/контакты/чужие профили там.
+        // Ключевая разница с прежней схемой (только sessionStorage):
+        // IndexedDB переживает то, что sessionStorage может не пережить —
+        // например, Telegram Mini App нередко открывает страницу в новом
+        // "сессионном" контексте, из-за чего sessionStorage оказывается
+        // пустым, а старое значение подтягивается из localStorage.rememberedUser,
+        // которое раньше НИКОГДА не обновлялось после первого входа —
+        // отсюда и был эффект "старый ник на секунду, потом новый".
+        // ═══════════════════════════════════════════════════════════
+        const DB_NAME = 'vuntgram_db';
+        const DB_VERSION = 2;
+        let _db = null;
+
+        function openDB() {
+            if (_db) return Promise.resolve(_db);
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, DB_VERSION);
+                req.onupgradeneeded = e => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('cache')) {
+                        db.createObjectStore('cache', { keyPath: 'key' });
+                    }
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id' });
+                        ms.createIndex('chat_id', 'chat_id', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('chat_meta')) {
+                        db.createObjectStore('chat_meta', { keyPath: 'chat_id' });
+                    }
+                };
+                req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        const _memCache = new Map();
+
+        function setCacheItem(key, value, ttl) {
+            const item = { key, value, timestamp: Date.now(), ttl };
+            _memCache.set(key, item);
+            openDB().then(db => {
+                const tx = db.transaction('cache', 'readwrite');
+                tx.objectStore('cache').put(item);
+            }).catch(() => {
+                try { localStorage.setItem('c_' + key, JSON.stringify(item)); } catch(e) {}
+            });
+        }
+
+        // Мгновенное чтение кэша БЕЗ учёта TTL — нужно для первой отрисовки:
+        // контент должен появиться сразу, даже если формально "устарел";
+        // свежесть проверит последующий фоновый запрос к серверу.
+        async function getCacheItemIgnoreTTL(key) {
+            const mem = _memCache.get(key);
+            if (mem) return mem.value;
+            try {
+                const db = await openDB();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('cache', 'readonly');
+                    const req = tx.objectStore('cache').get(key);
+                    req.onsuccess = () => resolve(req.result ? req.result.value : null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch (e) {
+                try {
+                    const raw = localStorage.getItem('c_' + key);
+                    if (!raw) return null;
+                    return JSON.parse(raw).value;
+                } catch (e2) { return null; }
+            }
+        }
+
+        const OWN_PROFILE_TTL = 5 * 60 * 1000;
+        const ownProfileCacheKey = (userId) => `own_profile:${userId}`;
+
+        // Лёгкая "сигнатура" полей, которые реально показываются в профиле.
+        // Если после фонового запроса сигнатура не изменилась — DOM не трогаем
+        // вообще, и никакого "мигания" не будет даже визуально, потому что
+        // нечего перерисовывать.
+        function profileFingerprint(user) {
+            if (!user) return '';
+            return JSON.stringify([
+                user.nickname, user.avatar_background,
+                !!(user.has_avatar_photo || user.has_avatar),
+                user.main_school_name, user.class_number, user.class_letter,
+                user.additional_school_name, user.specialization, user.course,
+                user.identity, user.subject1, user.subject2
+            ]);
+        }
+
+        // Плавная замена значений вместо мгновенного "скачка" текста —
+        // применяется только когда fingerprint реально отличается,
+        // то есть когда данные ДЕЙСТВИТЕЛЬНО изменились (например, ник
+        // был изменён через Telegram-бота с последнего визита).
+        function fadeSwap(renderFn) {
+            const els = document.querySelectorAll(
+                '.profile-nickname, .desktop-sidebar-nickname, .sidebar-profile-nickname, .mobile-sidebar-profile-nickname'
+            );
+            els.forEach(el => { el.style.opacity = '0'; });
+            setTimeout(() => {
+                renderFn();
+                els.forEach(el => { el.style.opacity = '1'; });
+            }, 150);
+        }
+
         function checkAuthorization() {
             // Сначала проверяем sessionStorage (текущая сессия)
             const sessionUser = sessionStorage.getItem('userData');
@@ -3648,9 +3757,24 @@ window.addEventListener("beforeunload", () => {
                         ...data.user,
                         has_avatar: data.user.has_avatar
                     };
+
                     sessionStorage.setItem('userData', JSON.stringify(userData));
                     if (userData.platform_user_id) {
                         localStorage.setItem('vg_last_user_id', String(userData.platform_user_id));
+                        // ВАЖНО: раньше localStorage.rememberedUser писался только один раз,
+                        // при входе, и больше никогда не обновлялся. Из-за этого при
+                        // "холодном" открытии (когда sessionStorage пуст — например,
+                        // Telegram Mini App стартует в новом сессионном контексте)
+                        // checkAuthorization() восстанавливал именно этот, потенциально
+                        // очень старый снимок — с ником/данными на момент первого входа,
+                        // а не последнего изменения. Держим его синхронизированным здесь же.
+                        if (localStorage.getItem('rememberedUser')) {
+                            localStorage.setItem('rememberedUser', JSON.stringify(userData));
+                        }
+                        // Персистентный кэш (IndexedDB) — переживает то, что не переживает
+                        // sessionStorage, и служит источником для мгновенной отрисовки
+                        // на следующей загрузке страницы.
+                        setCacheItem(ownProfileCacheKey(userData.platform_user_id), userData, OWN_PROFILE_TTL);
                     }
                     return true;
                 } else {
@@ -3950,21 +4074,42 @@ function updateProfileUI() {
 
         async function loadProfileData() {
             try {
-                // 1) Мгновенно отрисовываем то, что уже есть в sessionStorage
-                //    (никакой сети, никакого ожидания загрузки)
+                // 1) Мгновенно отрисовываем то, что уже есть локально — но берём
+                //    не только sessionStorage, а самый свежий из известных снимков.
+                //    IndexedDB-кэш переживает сброс sessionStorage (например,
+                //    Telegram Mini App иногда стартует в новом сессионном
+                //    контексте) и всегда содержит данные ПОСЛЕ последнего
+                //    успешного fetchUserData(), в отличие от localStorage.rememberedUser,
+                //    который раньше "застревал" на моменте первого входа.
+                if (userData && userData.platform_user_id) {
+                    try {
+                        const persisted = await getCacheItemIgnoreTTL(ownProfileCacheKey(userData.platform_user_id));
+                        if (persisted) {
+                            userData = { ...userData, ...persisted };
+                        }
+                    } catch (e) {}
+                }
+                let lastFingerprint = profileFingerprint(userData);
                 updateProfileUI();
                 fixStickyBottomNav();
 
-                // 2) В фоне тихо освежаем данные с сервера. Если что-то
-                //    поменялось (например, с другого устройства) —
-                //    перерисовываем ещё раз, уже в реальном времени,
-                //    без перезагрузки страницы
+                // 2) В фоне тихо освежаем данные с сервера. Перерисовываем UI,
+                //    только если реально что-то поменялось — если нет, лишний
+                //    повторный рендер не делаем, и никакого "мигания" не будет
+                //    даже для полей, которые совпали (раньше updateProfileUI()
+                //    вызывался второй раз безусловно, что и создавало видимый
+                //    "скачок" интерфейса при каждой загрузке страницы).
                 const dataUpdated = await fetchUserData();
                 if (dataUpdated) {
-                    updateProfileUI();
-                    fixStickyBottomNav();
+                    const newFingerprint = profileFingerprint(userData);
+                    if (newFingerprint !== lastFingerprint) {
+                        fadeSwap(() => {
+                            updateProfileUI();
+                            fixStickyBottomNav();
+                        });
+                    }
                 } else {
-                    console.warn('Не удалось обновить данные с сервера — остаёмся на кэше из sessionStorage');
+                    console.warn('Не удалось обновить данные с сервера — остаёмся на локальном кэше');
                 }
             } catch (error) {
                 console.error('Profile loading error:', error);
