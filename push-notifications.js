@@ -35,7 +35,12 @@ function isRunningAsInstalledPWA() {
   return isStandaloneDisplay || isIOSStandalone;
 }
 
-function isIOS() {
+// Названа isIOSDevice (не isIOS), т.к. на некоторых страницах сайта (например,
+// index.html) уже объявлена своя глобальная `const isIOS` — все <script> на
+// странице делят один и тот же global scope, и одинаковое имя вызывало
+// SyntaxError "Identifier 'isIOS' has already been declared", из-за которого
+// весь скрипт логина переставал выполняться (пустой экран вместо формы входа).
+function isIOSDevice() {
   return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 }
 
@@ -54,7 +59,7 @@ async function initPushNotifications(userId) {
   }
 
   // На iOS уведомления работают только после установки PWA на экран "Домой"
-  if (isIOS() && !isRunningAsInstalledPWA()) {
+  if (isIOSDevice() && !isRunningAsInstalledPWA()) {
     console.log('ℹ️ iOS: сайт открыт в Safari, а не как установленное приложение — пропускаем подписку');
     showInstallPromptForIOS();
     return;
