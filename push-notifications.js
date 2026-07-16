@@ -9,7 +9,7 @@
 //   });
 // </script>
 
-const API_BASE = ''; // если бэкенд на другом домене — укажите тут его origin
+const API_BASE = 'https://vuntserver-479v.onrender.com'; // бэкенд на Render, фронтенд на Vercel — домены разные
 
 // ---------------------------------------------------------
 // Преобразование VAPID public key (base64url) в Uint8Array
