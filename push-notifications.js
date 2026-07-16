@@ -14,7 +14,7 @@ const API_BASE = 'https://vuntserver-479v.onrender.com'; // бэкенд на Re
 // ---------------------------------------------------------
 // Преобразование VAPID public key (base64url) в Uint8Array
 // ---------------------------------------------------------
-function urlBase64ToUint8Array(base64String) {   
+function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
