@@ -392,12 +392,17 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// Бэкенд на другом домене (Render), а service worker обслуживает домен
+// фронтенда (Vercel) — относительный путь fetch('/save_push_subscription')
+// уходил бы на сам Vercel, где такого маршрута нет.
+const PUSH_API_BASE = 'https://vuntserver-479v.onrender.com';
+
 // Подписка была отозвана браузером (например, истёк срок) — уведомляем сервер
 self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     self.registration.pushManager.subscribe(event.oldSubscription ? event.oldSubscription.options : undefined)
       .then((subscription) => {
-        return fetch('/save_push_subscription', {
+        return fetch(`${PUSH_API_BASE}/save_push_subscription`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
