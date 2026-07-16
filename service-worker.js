@@ -330,6 +330,88 @@ function createDefaultAvatarResponse() {
 }
 
 
+// ============================
+// PUSH-УВЕДОМЛЕНИЯ
+// ============================
+
+// Приходит push-событие от сервера (через Web Push API)
+self.addEventListener('push', (event) => {
+  let data = {};
+
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = { title: 'Vuntgram', body: event.data ? event.data.text() : 'Новое сообщение' };
+  }
+
+  const title = data.title || 'Vuntgram';
+  const options = {
+    body: data.body || 'Новое сообщение',
+    icon: data.icon || '/icon-192x192.png',
+    badge: '/icon-192x192.png',
+    tag: data.tag || 'vuntgram-message',
+    data: {
+      url: data.url || '/'
+    },
+    vibrate: [100, 50, 100],
+    renotify: true,
+    requireInteraction: false
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Клик по уведомлению — открываем нужный чат (или фокусируем уже открытую вкладку)
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
+      // Если вкладка с сайтом уже открыта — фокусируем её и переходим по нужному пути
+      for (const client of clientsArr) {
+        if ('focus' in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      // Иначе открываем новое окно/PWA
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
+});
+
+// Клиентская страница сообщает service worker'у, какой пользователь сейчас
+// авторизован — нужно, чтобы пересоздать подписку после её истечения
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SET_USER_ID') {
+    self.__vuntgramUserId = event.data.userId;
+  }
+});
+
+// Подписка была отозвана браузером (например, истёк срок) — уведомляем сервер
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    self.registration.pushManager.subscribe(event.oldSubscription ? event.oldSubscription.options : undefined)
+      .then((subscription) => {
+        return fetch('/save_push_subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            user_id: self.__vuntgramUserId || null,
+            subscription: subscription.toJSON()
+          })
+        });
+      })
+      .catch((err) => console.error('❌ TheVuntgram: pushsubscriptionchange resubscribe failed', err))
+  );
+});
+
+
 // Офлайн страница
 async function showOfflinePage() {
   const cache = await caches.open(CACHE_NAME);
