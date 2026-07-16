@@ -60,7 +60,17 @@ async function initPushNotifications(userId) {
     return;
   }
 
-  const registration = await navigator.serviceWorker.ready;
+  // register() безопасно вызывать повторно — если SW уже зарегистрирован
+  // на этой странице (например, в отдельном скрипте), браузер просто
+  // вернёт существующую регистрацию и ничего не переустановит
+  let registration;
+  try {
+    registration = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+  } catch (err) {
+    console.error('❌ Не удалось зарегистрировать service worker:', err);
+    return;
+  }
+  registration = await navigator.serviceWorker.ready;
 
   // Сообщаем service worker'у, кто сейчас авторизован (нужно для
   // автоматического пересоздания подписки, если она протухнет)
