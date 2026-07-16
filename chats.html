@@ -9292,6 +9292,14 @@ function getActiveElements() {
             // Проверка: актуален ли ещё этот чат?
             const isCancelled = () => signal && signal.aborted;
 
+            // Отправляем отметку "прочитано" сразу, не дожидаясь загрузки/синхронизации
+            // сообщений и не привязывая её к signal этого открытия чата. Раньше отметка
+            // "прочитано" уходила только внутри syncWithServer(), чей /get_messages
+            // отменяется через signal при быстром переключении между чатами (обычное
+            // дело на мобильном) — из-за этого сообщение оставалось непрочитанным на
+            // сервере, и бейдж непрочитанных возвращался после перезагрузки страницы.
+            markAllMessagesAsRead(chatId);
+
             const scrollToBottom = () => {
                 if (isCancelled()) return;
                 requestAnimationFrame(() => {
@@ -10709,7 +10717,9 @@ function stopProfileDataPolling() {
                 const data = await response.json();
                 
                 if (data.status === 'success') updateMessageStatusInUI(messageId);
-            } catch (error) {}
+            } catch (error) {
+                console.warn(`[updateMessageStatus] Не удалось отметить сообщение ${messageId} прочитанным:`, error);
+            }
         }
 
         function updateMessageStatusInUI(messageId) {
@@ -10725,7 +10735,15 @@ function stopProfileDataPolling() {
             }
         }
 
-        async function markAllMessagesAsRead(chatId) {
+        // Отмечает все сообщения чата прочитанными на сервере.
+        // ВАЖНО: этот запрос намеренно НЕ привязан к AbortController чата
+        // (тому, что отменяет /get_messages при быстром переключении между
+        // чатами) — иначе при быстром открытии/закрытии чата отметка
+        // "прочитано" вообще не успевала уйти на сервер, и бейдж непрочитанных
+        // возвращался после перезагрузки страницы, хотя пользователь чат уже
+        // открывал. При сетевом сбое делаем одну повторную попытку и логируем
+        // ошибку — раньше она молча проглатывалась пустым catch.
+        async function markAllMessagesAsRead(chatId, attempt = 0) {
             try {
                 const response = await fetch(`${SERVER_URL}/mark_all_as_read`, {
                     method: 'POST',
@@ -10733,14 +10751,28 @@ function stopProfileDataPolling() {
                     body: JSON.stringify({ chat_id: chatId, reader_id: userData.platform_user_id }),
                     credentials: 'include'
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     currentMessages.forEach(message => { if (!message.is_me) message.is_read = true; });
                     updateAllMessageStatusesInUI();
+                } else {
+                    throw new Error(data.error || 'mark_all_as_read вернул статус ошибки');
                 }
-            } catch (error) {}
+            } catch (error) {
+                console.warn(`[markAllMessagesAsRead] Не удалось отметить чат ${chatId} прочитанным (попытка ${attempt + 1}):`, error);
+                if (attempt < 2) {
+                    // Частая причина — временный обрыв сети (см. историю про TTL пушей
+                    // на iOS: то же самое мобильное соединение может моргать и здесь).
+                    // Повторяем с небольшой задержкой, не блокируя интерфейс.
+                    setTimeout(() => markAllMessagesAsRead(chatId, attempt + 1), 1500 * (attempt + 1));
+                }
+                // Если и повторы не помогли — ничего страшного: фоновый опрос
+                // (startUnreadPolling, каждые 5с) и следующая загрузка списка
+                // чатов всё равно подтянут реальное состояние с сервера и вернут
+                // бейдж, если сообщение так и не было отмечено прочитанным.
+            }
         }
 
         function updateAllMessageStatusesInUI() {
