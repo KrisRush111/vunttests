@@ -278,6 +278,7 @@
     <div id="mainContent" class="main-content">
         <div id="shaderBackground"></div>
         <script src="shader-background.bundle.js"></script>
+        <script src="push-notifications.js"></script>
 
         <meta name="google-site-verification" content="h5xgMF9Gp-R1CuXVzpA6Fql6qQcubjNkBNO69m1qjwA" />
 
@@ -621,6 +622,12 @@ initializePWA();
                         console.log('Auto-login with remembered user:', userData.platform_user_id);
                         // Сохраняем в sessionStorage для текущей сессии
                         sessionStorage.setItem('userData', JSON.stringify(userData));
+                        // Не блокируем редирект — регистрация SW/подписка продолжится в фоне
+                        // и на следующей странице (SW и permission живут на уровне браузера,
+                        // а не конкретной вкладки/навигации)
+                        if (typeof initPushNotifications === 'function') {
+                            initPushNotifications(userData.platform_user_id);
+                        }
                         // Перенаправляем сразу на профиль
                         window.location.href = 'profile.html';
                         return true;
@@ -733,6 +740,10 @@ initializePWA();
                     if (rememberCheckbox && rememberCheckbox.checked) {
                         localStorage.setItem('rememberedUser', JSON.stringify(result.user));
                         console.log('User saved to localStorage for auto-login');
+                    }
+                    
+                    if (typeof initPushNotifications === 'function') {
+                        initPushNotifications(result.user.platform_user_id);
                     }
                     
                     // Перенаправляем на профиль
@@ -861,6 +872,9 @@ initializePWA();
                     try {
                         const userData = JSON.parse(sessionUser);
                         if (userData && userData.platform_user_id) {
+                            if (typeof initPushNotifications === 'function') {
+                                initPushNotifications(userData.platform_user_id);
+                            }
                             // Редиректим с небольшой задержкой для показа анимации
                             setTimeout(() => {
                                 window.location.replace('profile.html');
@@ -881,6 +895,10 @@ initializePWA();
                         if (userData && userData.platform_user_id) {
                             // Восстанавливаем сессию
                             sessionStorage.setItem('userData', rememberedUser);
+                            
+                            if (typeof initPushNotifications === 'function') {
+                                initPushNotifications(userData.platform_user_id);
+                            }
                             
                             // Редиректим с задержкой для показа анимации
                             setTimeout(() => {
