@@ -10757,6 +10757,20 @@ function stopProfileDataPolling() {
                 if (data.status === 'success') {
                     currentMessages.forEach(message => { if (!message.is_me) message.is_read = true; });
                     updateAllMessageStatusesInUI();
+
+                    // Синхронизируем бейдж и убираем системные уведомления по этому чату —
+                    // без этого они остаются висеть после того, как пользователь прочитал
+                    // сообщения прямо в приложении (а не по клику на само уведомление).
+                    try {
+                        if (typeof closeNotificationsForChat === 'function') {
+                            await closeNotificationsForChat(chatId);
+                        }
+                        if (typeof syncAppBadge === 'function' && userData?.platform_user_id) {
+                            await syncAppBadge(userData.platform_user_id);
+                        }
+                    } catch (badgeError) {
+                        console.warn('[markAllMessagesAsRead] Не удалось синхронизировать бейдж/уведомления:', badgeError);
+                    }
                 } else {
                     throw new Error(data.error || 'mark_all_as_read вернул статус ошибки');
                 }
