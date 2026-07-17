@@ -450,6 +450,21 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'CLEAR_BADGE') {
     updateAppBadge(0);
   }
+
+  // Раздел "Уведомления" в profile.html спрашивает активный service worker,
+  // поддерживает ли он push-уведомления, чтобы отличить пользователей со
+  // старой версией PWA (установлена ДО того, как появился push-код) от
+  // тех, у кого уже актуальная версия. Старый service worker, закэшированный
+  // на устройстве пользователя, ничего не знает об этом сообщении и просто
+  // не ответит — именно по отсутствию ответа клиент и определяет "старую версию".
+  if (event.data && event.data.type === 'GET_SW_VERSION') {
+    const reply = { type: 'SW_VERSION', version: CACHE_NAME, supportsPush: true };
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage(reply);
+    } else if (event.source) {
+      event.source.postMessage(reply);
+    }
+  }
 });
 
 // Бэкенд на другом домене (Render), а service worker обслуживает домен
