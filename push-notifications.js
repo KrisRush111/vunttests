@@ -54,6 +54,15 @@ async function initPushNotifications(userId) {
     return;
   }
 
+  // Нужен для visibilitychange-хендлера, который синхронизирует бейдж
+  // при возврате в приложение
+  window.__vuntgramCurrentUserId = userId;
+
+  // Актуализируем бейдж сразу при инициализации — на случай, если пуш
+  // пришёл, пока приложение было полностью закрыто, и его никто не открывал
+  // кликом по самому уведомлению
+  syncAppBadge(userId);
+
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     console.warn('⚠️ Push-уведомления не поддерживаются этим браузером');
     return;
@@ -143,6 +152,79 @@ async function sendSubscriptionToServer(userId, subscription) {
     console.error('❌ Не удалось отправить подписку на сервер:', err);
   }
 }
+
+// ---------------------------------------------------------
+// Синхронизация бейджа (значка на иконке) и системных уведомлений.
+//
+// Push обновляет бейдж только в момент ПРИХОДА нового сообщения — но когда
+// пользователь читает сообщения внутри уже открытого приложения (а не через
+// клик по самому пуш-уведомлению), ни бейдж, ни уведомление на экране
+// блокировки сами не пропадают. Эти функции нужно вызывать вручную:
+//
+// 1) syncAppBadge(userId)          — при загрузке страницы, при возврате
+//    фокуса на вкладку/PWA (visibilitychange), и сразу после успешного
+//    /mark_as_read или /mark_all_as_read
+// 2) closeNotificationsForChat(id) — сразу после того, как пользователь
+//    открыл конкретный чат и его сообщения помечены прочитанными
+// ---------------------------------------------------------
+
+async function syncAppBadge(userId) {
+  if (!userId || !('serviceWorker' in navigator)) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/get_unread_count`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ platform_user_id: userId })
+    });
+    const data = await res.json();
+    if (data.status !== 'success') return;
+
+    const registration = await navigator.serviceWorker.ready;
+    if (registration.active) {
+      registration.active.postMessage({ type: 'SET_BADGE', unreadCount: data.unread_count });
+    }
+  } catch (err) {
+    console.warn('⚠️ Не удалось синхронизировать бейдж:', err);
+  }
+}
+
+// Закрывает уведомления в системном трее/на экране блокировки для
+// конкретного чата — вызывайте это сразу после того, как пользователь
+// открыл чат (например, там же, где вы вызываете mark_as_read)
+async function closeNotificationsForChat(chatId) {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const notifications = await registration.getNotifications({ tag: `chat-${chatId}` });
+    notifications.forEach((n) => n.close());
+  } catch (err) {
+    console.warn('⚠️ Не удалось закрыть уведомления чата:', err);
+  }
+}
+
+// Закрывает вообще все показанные уведомления приложения (например, при
+// разлогине или на странице со списком всех чатов после mark_all_as_read)
+async function closeAllNotifications() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const notifications = await registration.getNotifications();
+    notifications.forEach((n) => n.close());
+  } catch (err) {
+    console.warn('⚠️ Не удалось закрыть уведомления:', err);
+  }
+}
+
+// Держим бейдж свежим, когда пользователь возвращается в приложение —
+// покрывает случай "пришло уведомление, пока телефон был заблокирован,
+// пользователь потом сам открыл приложение (не через тап по уведомлению)"
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && window.__vuntgramCurrentUserId) {
+    syncAppBadge(window.__vuntgramCurrentUserId);
+  }
+});
 
 // ---------------------------------------------------------
 // UI: кнопка "Включить уведомления" — permission можно запрашивать
