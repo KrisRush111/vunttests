@@ -372,14 +372,49 @@ self.addEventListener('push', (event) => {
     requireInteraction: false
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options),
+      updateAppBadge(data.unreadCount)
+    ])
+  );
 });
+
+// ---------------------------------------------------------
+// Badging API — красный значок с числом на иконке приложения.
+// Работает только для установленного PWA (как и сами push-уведомления
+// на iOS), и только в браузерах, где есть navigator.setAppBadge —
+// поэтому всегда проверяем наличие метода перед вызовом.
+// ---------------------------------------------------------
+async function updateAppBadge(unreadCount) {
+  if (!('setAppBadge' in self.navigator)) return;
+
+  try {
+    if (typeof unreadCount === 'number' && unreadCount > 0) {
+      await self.navigator.setAppBadge(unreadCount);
+    } else if (unreadCount === 0) {
+      // Явный ноль — все сообщения прочитаны, снимаем значок
+      await self.navigator.clearAppBadge();
+    } else {
+      // unreadCount не пришёл с сервера (null/undefined) — ставим
+      // значок без числа, просто как индикатор "есть новое"
+      await self.navigator.setAppBadge();
+    }
+  } catch (err) {
+    console.warn('⚠️ TheVuntgram: setAppBadge failed', err);
+  }
+}
 
 // Клик по уведомлению — открываем нужный чат (или фокусируем уже открытую вкладку)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+
+  // Клик по уведомлению = пользователь открывает чат, значок больше не нужен.
+  // Если непрочитанных сообщений из ДРУГИХ чатов ещё остаётся, следующий
+  // push всё равно пришлёт актуальный unreadCount и выставит бейдж заново.
+  updateAppBadge(0);
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
@@ -403,6 +438,17 @@ self.addEventListener('notificationclick', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SET_USER_ID') {
     self.__vuntgramUserId = event.data.userId;
+  }
+
+  // Клиент сам знает актуальное число непрочитанных (например, после
+  // открытия чата или фонового опроса /get_chats) и может попросить
+  // service worker пересчитать бейдж, не дожидаясь следующего push
+  if (event.data && event.data.type === 'SET_BADGE') {
+    updateAppBadge(event.data.unreadCount);
+  }
+
+  if (event.data && event.data.type === 'CLEAR_BADGE') {
+    updateAppBadge(0);
   }
 });
 
