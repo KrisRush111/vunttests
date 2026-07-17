@@ -23,12 +23,26 @@ const STATIC_RESOURCES = [
 // Установка Service Worker
 self.addEventListener('install', (event) => {
   console.log('🔄 TheVuntgram Service Worker: Installing...');
-  
+
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('📦 TheVuntgram: Caching static resources');
-        return cache.addAll(STATIC_RESOURCES);
+        // ВАЖНО: не используем cache.addAll() — он all-or-nothing: если хотя бы
+        // один URL из STATIC_RESOURCES не загрузится (404, не задеплоен,
+        // проблема с кодировкой имени и т.п.), install ЦЕЛИКОМ проваливается,
+        // service worker никогда не становится "активным", и
+        // navigator.serviceWorker.ready на клиенте зависает НАВСЕГДА на
+        // устройствах без ранее успешно установленной версии (именно это
+        // происходило на свежих iPhone). Кэшируем по одному, чтобы один
+        // недоступный ресурс не блокировал всю установку.
+        return Promise.allSettled(
+          STATIC_RESOURCES.map((url) =>
+            cache.add(url).catch((err) => {
+              console.warn('⚠️ TheVuntgram: не удалось закэшировать', url, err);
+            })
+          )
+        );
       })
       .then(() => {
         console.log('✅ TheVuntgram Service Worker: Installed');
