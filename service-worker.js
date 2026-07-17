@@ -1,6 +1,6 @@
 // service-worker.js
-const CACHE_NAME = 'vuntgram-v2.1.0';
-const API_CACHE_NAME = 'vuntgram-api-v2.1.0';
+const CACHE_NAME = 'vuntgram-v2.2.0';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.0';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
 const STATIC_RESOURCES = [
