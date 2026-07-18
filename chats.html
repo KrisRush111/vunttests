@@ -9755,7 +9755,20 @@ async function openChat(chatId, contactHint = null) {
         const bgColor = cachedChat.avatar_background || '#0088cc';
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
-            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
+            // ИСПРАВЛЕНИЕ: раньше loadChatAvatar() (= AvatarCache.render)
+            // вызывался всегда, даже если у пользователя нет фото. В этом
+            // случае AvatarCache подставлял свой дефолтный синий фон вместо
+            // переданного bgColor. Теперь фото грузим только когда оно
+            // реально есть, а иначе сразу рисуем градиент с настоящим
+            // avatar_background контакта — как в openTempChat() и ниже
+            // при синхронизации с /get_chat_info.
+            if (cachedChat.has_avatar_photo) {
+                loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
+            } else {
+                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                chatAvatar.style.backgroundImage = '';
+                chatAvatar.textContent = initials;
+            }
             statusFetchParticipantId = otherParticipant.platform_user_id;
 
             // Мгновенно показываем статус, только если он реально свежий
