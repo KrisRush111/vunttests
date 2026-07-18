@@ -9778,7 +9778,47 @@ async function openChat(chatId) {
             chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
             chatAvatar.textContent = initials;
         }
+    } else {
+        // Чат ещё не попал в currentChatsList (например, только что открыт
+        // через кнопку "Чат" в contacts.html) — до ответа сервера хедер
+        // остаётся пустым. Подстраховываемся данными, которые contacts.html
+        // заботливо оставил в sessionStorage перед редиректом.
+        let fallbackContact = null;
+        try {
+            fallbackContact = JSON.parse(sessionStorage.getItem('chatContactInfo') || 'null');
+        } catch (e) {
+            fallbackContact = null;
+        }
+
+        if (fallbackContact) {
+            const nickname = fallbackContact.nickname || 'Чат';
+            const initials = nickname.split(' ').map(n => n[0]).join('') || '?';
+            const bgColor = fallbackContact.avatar_background || '#0088cc';
+
+            chatTitle.textContent = nickname;
+
+            if (fallbackContact.has_avatar_photo && fallbackContact.platform_user_id) {
+                loadChatAvatar(chatAvatar, fallbackContact.platform_user_id, initials, bgColor);
+            } else {
+                chatAvatar.style.backgroundImage = 'none';
+                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                chatAvatar.textContent = initials;
+            }
+
+            if (fallbackContact.platform_user_id) {
+                statusFetchParticipantId = fallbackContact.platform_user_id;
+            }
+            chatStatus.textContent = 'был(а) недавно';
+            chatStatus.classList.remove('online');
+        } else {
+            chatTitle.textContent = 'Загрузка...';
+            chatAvatar.style.backgroundImage = 'none';
+            chatAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+            chatAvatar.textContent = '';
+        }
     }
+    // Это одноразовые данные — не должны "утекать" в следующий открытый чат.
+    sessionStorage.removeItem('chatContactInfo');
 
     // Всегда делаем свежий запрос статуса сети при открытии чата — не
     // полагаемся только на кэш, чтобы не показать устаревшее "в сети".
@@ -9834,7 +9874,39 @@ async function openChat(chatId) {
             currentChat = chatData.chat;
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
-            if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
+            if (chatIndex !== -1) {
+                currentChatsList[chatIndex].unread_count = 0;
+            } else {
+                // Чат открыт впервые за эту сессию (например, через
+                // contacts.html) и раньше не значился в currentChatsList —
+                // добавляем, чтобы при повторном открытии хедер собирался
+                // из кэша, как обычно.
+                currentChatsList.push(currentChat);
+            }
+
+            // Перерисовываем хедер актуальными данными с сервера — на
+            // случай, если до этого момента он был пуст (не было ни
+            // cachedChat, ни chatContactInfo из sessionStorage) или показывал
+            // временную заглушку.
+            if (!isStale()) {
+                const freshName = currentChat.name || 'Новый чат';
+                const freshInitials = freshName.split(' ').map(n => n[0]).join('') || '?';
+                const freshBgColor = currentChat.avatar_background || '#0088cc';
+                const freshOtherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                const { chatAvatar: freshChatAvatar, chatTitle: freshChatTitle } = getActiveElements();
+
+                if (freshChatTitle) freshChatTitle.textContent = freshName;
+
+                if (freshChatAvatar) {
+                    if (currentChat.has_avatar_photo && freshOtherParticipant) {
+                        loadChatAvatar(freshChatAvatar, freshOtherParticipant.platform_user_id, freshInitials, freshBgColor);
+                    } else {
+                        freshChatAvatar.style.backgroundImage = 'none';
+                        freshChatAvatar.style.background = `linear-gradient(135deg, ${freshBgColor}, ${adjustColor(freshBgColor, 20)})`;
+                        freshChatAvatar.textContent = freshInitials;
+                    }
+                }
+            }
         }
 
     } catch (error) {
