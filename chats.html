@@ -9867,24 +9867,29 @@ async function openChat(chatId, contactHint = null) {
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
             if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
 
-            // ИСПРАВЛЕНИЕ: раньше шапка (ник/аватар/фон) заполнялась только
-            // из currentChatsList выше и никогда не обновлялась из ответа
-            // сервера. Если чата не было в кэше списка (частый случай при
-            // переходе из contacts.html) — шапка так и оставалась пустой,
-            // хотя /get_chat_info уже вернул все нужные данные. Теперь
-            // всегда синхронизируем шапку с этим авторитетным ответом.
-            const c = chatData.chat;
-            const { chatAvatar: freshAvatar, chatTitle: freshTitle } = getActiveElements();
-            if (freshTitle) freshTitle.textContent = c.name || 'Чат';
-            if (freshAvatar) {
-                const initials = c.name ? c.name[0].toUpperCase() : '?';
-                const bgColor = c.avatar_background || '#0088cc';
-                if (c.avatar_url && c.participant_id) {
-                    loadChatAvatar(freshAvatar, c.participant_id, initials, bgColor);
-                } else {
-                    freshAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                    freshAvatar.style.backgroundImage = '';
-                    freshAvatar.textContent = initials;
+            // ИСПРАВЛЕНИЕ: раньше это перезаписывало шапку ПРИ КАЖДОМ
+            // открытии чата, даже когда cachedChat уже дал верные данные.
+            // Проблема в том, что /get_chat_info на сервере не сбрасывает
+            // свой внутренний кэш участников перед выборкой (в отличие от
+            // /get_chats) — из-за этого он иногда тихо возвращает дефолтный
+            // avatar_background ('#0088cc'), даже если реальный цвет другой.
+            // Это затирало корректный цвет из currentChatsList синим.
+            // Теперь используем /get_chat_info для шапки ТОЛЬКО как фолбэк —
+            // когда чата не было в currentChatsList и показать было нечего.
+            if (!cachedChat) {
+                const c = chatData.chat;
+                const { chatAvatar: freshAvatar, chatTitle: freshTitle } = getActiveElements();
+                if (freshTitle) freshTitle.textContent = c.name || 'Чат';
+                if (freshAvatar) {
+                    const initials = c.name ? c.name[0].toUpperCase() : '?';
+                    const bgColor = c.avatar_background || '#0088cc';
+                    if (c.avatar_url && c.participant_id) {
+                        loadChatAvatar(freshAvatar, c.participant_id, initials, bgColor);
+                    } else {
+                        freshAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                        freshAvatar.style.backgroundImage = '';
+                        freshAvatar.textContent = initials;
+                    }
                 }
             }
         }
