@@ -5650,12 +5650,46 @@ function closeProfileModal() {
     }
 }
 
-// ИСПРАВЛЕНИЕ: closeChat была объявлена дважды в файле (тут и ниже, ближе
-// к концу). Из-за function hoisting реально работало только второе,
-// более позднее объявление — а это, первое, было мёртвым кодом: любые
-// правки здесь ни на что не влияли. Само объявление удалено, актуальная
-// версия — ниже по файлу (искать "function closeChat()"), в неё же
-// перенесён сброс chatAvatar.style.background, которого тут не хватало.
+function closeChat() {
+    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
+
+    if (!chatModal) return;
+
+    currentChat = null;
+    currentChatId = null;
+    currentMessages = [];
+
+    if (chatAvatar) {
+        chatAvatar.style.backgroundImage = '';
+        chatAvatar.style.backgroundColor = '';
+        chatAvatar.textContent = '';
+    }
+    
+    if (chatTitle) chatTitle.textContent = '';
+    if (chatStatus) chatStatus.textContent = '';
+    
+    if (messagesContainer) messagesContainer.innerHTML = '';
+    
+    if (noMessages) {
+        noMessages.style.display = 'block';
+        noMessages.textContent = 'Сообщений пока нет...';
+    }
+
+    if (isDesktop) {
+        // Закрываем и чат, и профиль, показываем плейсхолдер
+        updateDesktopVisibility(false, false);
+    } else {
+        chatModal.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    if (openChatAbortController) {
+        openChatAbortController.abort();
+        openChatAbortController = null;
+    }
+    
+    isOpeningChat = false;
+}
 
 // Добавьте обработчик для кнопки закрытия профиля
 if (profileCloseButtonDesktop) {
@@ -9681,7 +9715,7 @@ function getActiveElements() {
             });
         }
 
-async function openChat(chatId, contactHint = null) {
+async function openChat(chatId) {
     // ── Отменяем любой предыдущий openChat ──────────────────────────
     if (openChatAbortController) openChatAbortController.abort();
     openChatAbortController = new AbortController();
@@ -9721,20 +9755,7 @@ async function openChat(chatId, contactHint = null) {
         const bgColor = cachedChat.avatar_background || '#0088cc';
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
-            // ИСПРАВЛЕНИЕ: раньше loadChatAvatar() (= AvatarCache.render)
-            // вызывался всегда, даже если у пользователя нет фото. В этом
-            // случае AvatarCache подставлял свой дефолтный синий фон вместо
-            // переданного bgColor. Теперь фото грузим только когда оно
-            // реально есть, а иначе сразу рисуем градиент с настоящим
-            // avatar_background контакта — как в openTempChat() и ниже
-            // при синхронизации с /get_chat_info.
-            if (cachedChat.has_avatar_photo) {
-                loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
-            } else {
-                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                chatAvatar.style.backgroundImage = '';
-                chatAvatar.textContent = initials;
-            }
+            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
             statusFetchParticipantId = otherParticipant.platform_user_id;
 
             // Мгновенно показываем статус, только если он реально свежий
@@ -9757,24 +9778,6 @@ async function openChat(chatId, contactHint = null) {
             chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
             chatAvatar.textContent = initials;
         }
-    } else if (contactHint) {
-        // ИСПРАВЛЕНИЕ: чат ещё не попал в currentChatsList (например, мы
-        // только что перешли сюда из contacts.html) — используем данные,
-        // переданные со страницы контактов, чтобы шапка не была пустой,
-        // пока не придёт ответ /get_chat_info.
-        const initials = contactHint.nickname ? contactHint.nickname[0].toUpperCase() : '?';
-        const bgColor = contactHint.avatar_background || '#0088cc';
-        chatTitle.textContent = contactHint.nickname || 'Чат';
-        if (contactHint.has_avatar_photo && contactHint.platform_user_id) {
-            loadChatAvatar(chatAvatar, contactHint.platform_user_id, initials, bgColor);
-            statusFetchParticipantId = contactHint.platform_user_id;
-        } else {
-            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.style.backgroundImage = '';
-            chatAvatar.textContent = initials;
-        }
-        chatStatus.textContent = 'был(а) недавно';
-        chatStatus.classList.remove('online');
     }
 
     // Всегда делаем свежий запрос статуса сети при открытии чата — не
@@ -9832,43 +9835,6 @@ async function openChat(chatId, contactHint = null) {
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
             if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
-
-            // ИСПРАВЛЕНИЕ: раньше это перезаписывало шапку ПРИ КАЖДОМ
-            // открытии чата, даже когда cachedChat уже дал верные данные.
-            // Проблема в том, что /get_chat_info на сервере не сбрасывает
-            // свой внутренний кэш участников перед выборкой (в отличие от
-            // /get_chats) — из-за этого он иногда тихо возвращает дефолтный
-            // avatar_background ('#0088cc'), даже если реальный цвет другой.
-            // Это затирало корректный цвет из currentChatsList синим.
-            // Теперь используем /get_chat_info для шапки ТОЛЬКО как фолбэк —
-            // когда чата не было в currentChatsList и показать было нечего.
-            if (!cachedChat) {
-                const c = chatData.chat;
-                const { chatAvatar: freshAvatar, chatTitle: freshTitle } = getActiveElements();
-                if (freshTitle) freshTitle.textContent = c.name || 'Чат';
-                if (freshAvatar) {
-                    const initials = c.name ? c.name[0].toUpperCase() : '?';
-                    // ИСПРАВЛЕНИЕ: /get_chat_info иногда тихо возвращает
-                    // avatar_background = null/'#0088cc' из-за того же
-                    // серверного бага с кэшем участников (см. комментарий
-                    // выше). Раньше это молча затирало уже показанный
-                    // (из contactHint, до ответа сервера) правильный цвет
-                    // дефолтным синим. Теперь при отсутствии реального
-                    // цвета от сервера сперва пробуем сохранить то, что
-                    // уже нарисовано (contactHint), и только если и его
-                    // не было — откатываемся на дефолт.
-                    const bgColor = c.avatar_background
-                        || (contactHint && contactHint.avatar_background)
-                        || '#0088cc';
-                    if (c.avatar_url && c.participant_id) {
-                        loadChatAvatar(freshAvatar, c.participant_id, initials, bgColor);
-                    } else {
-                        freshAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                        freshAvatar.style.backgroundImage = '';
-                        freshAvatar.textContent = initials;
-                    }
-                }
-            }
         }
 
     } catch (error) {
@@ -10103,22 +10069,17 @@ async function openChatWithContact(user) {
         const data = await response.json();
         
         if (data.status === 'success') {
-            const contactInfo = {
-                platform_user_id: user.platform_user_id,
-                nickname: user.nickname || 'Чат',
-                has_avatar_photo: !!(user.has_avatar_photo || user.has_avatar),
-                avatar_background: user.avatar_background || '#0088cc'
-            };
-            sessionStorage.setItem('chatContactInfo', JSON.stringify(contactInfo));
-
             if (!data.is_new) {
                 // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
                 sessionStorage.setItem('openChatId', data.chat_id);
+                sessionStorage.setItem('openChatName', user.nickname || 'Чат');
+                window.location.href = 'chats.html';
             } else {
                 // ЧАТ НОВЫЙ - создаем временный и перенаправляем
                 sessionStorage.setItem('tempChatContactId', user.platform_user_id);
+                sessionStorage.setItem('tempChatName', user.nickname || 'Новый чат');
+                window.location.href = 'chats.html';
             }
-            window.location.href = 'chats.html';
         } else {
             throw new Error(data.error || 'Не удалось проверить чат');
         }
@@ -10291,14 +10252,6 @@ function stopProfileDataPolling() {
             currentMessages = [];
 
             if (chatAvatar) {
-                // ИСПРАВЛЕНИЕ: раньше тут сбрасывались только backgroundImage
-                // и backgroundColor, но не background (шорткод-свойство, через
-                // которое рисуется градиент для аватарки без фото — см.
-                // openChat/openTempChat: chatAvatar.style.background = `linear-
-                // gradient(...)`). Из-за этого старый градиент мог на долю
-                // секунды "протекать" в следующий открытый чат, пока новый
-                // рендер его не перезапишет.
-                chatAvatar.style.background = '';
                 chatAvatar.style.backgroundImage = '';
                 chatAvatar.style.backgroundColor = '';
                 chatAvatar.textContent = '';
@@ -11073,37 +11026,30 @@ function stopProfileDataPolling() {
             await Promise.all([ loadUserData(), loadChats() ]);
             
             const openChatId = sessionStorage.getItem('openChatId');
-            // ИСПРАВЛЕНИЕ: contacts.html теперь кладёт сюда полный снимок
-            // контакта (ник, флаг наличия фото, реальный avatar_background),
-            // а не только имя — это позволяет сразу нарисовать корректную
-            // шапку чата, не дожидаясь ответа /get_chat_info, и передаётся
-            // в openChat()/openTempChat() как contactHint.
-            const contactInfoRaw = sessionStorage.getItem('chatContactInfo');
-            let contactHint = null;
-            if (contactInfoRaw) {
-                try { contactHint = JSON.parse(contactInfoRaw); } catch (e) { contactHint = null; }
-            }
+            const openChatName = sessionStorage.getItem('openChatName');
             window.addEventListener('orientationchange', handleOrientationChange);
             window.addEventListener('resize', handleOrientationChange);
             
-            if (openChatId) {
+            if (openChatId && openChatName) {
+                const tempChat = { id: openChatId, name: openChatName, is_temp: false };
                 sessionStorage.removeItem('openChatId');
-                sessionStorage.removeItem('chatContactInfo');
-                openChat(openChatId, contactHint);
+                sessionStorage.removeItem('openChatName');
+                openChat(openChatId);
             } else {
                 const tempChatContactId = sessionStorage.getItem('tempChatContactId');
+                const tempChatName = sessionStorage.getItem('tempChatName');
                 
-                if (tempChatContactId && contactHint) {
+                if (tempChatContactId && tempChatName) {
                     sessionStorage.removeItem('tempChatContactId');
-                    sessionStorage.removeItem('chatContactInfo');
+                    sessionStorage.removeItem('tempChatName');
                     
                     const tempChat = {
                         id: `temp_${Date.now()}`,
-                        name: contactHint.nickname || 'Новый чат',
+                        name: tempChatName,
                         participants: [{ platform_user_id: tempChatContactId }],
                         is_temp: true,
-                        has_avatar_photo: !!contactHint.has_avatar_photo,
-                        avatar_background: contactHint.avatar_background || '#0088cc'
+                        has_avatar_photo: false,
+                        avatar_background: '#0088cc'
                     };
                     
                     openTempChat(tempChat);
