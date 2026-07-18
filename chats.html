@@ -5650,46 +5650,12 @@ function closeProfileModal() {
     }
 }
 
-function closeChat() {
-    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-
-    if (!chatModal) return;
-
-    currentChat = null;
-    currentChatId = null;
-    currentMessages = [];
-
-    if (chatAvatar) {
-        chatAvatar.style.backgroundImage = '';
-        chatAvatar.style.backgroundColor = '';
-        chatAvatar.textContent = '';
-    }
-    
-    if (chatTitle) chatTitle.textContent = '';
-    if (chatStatus) chatStatus.textContent = '';
-    
-    if (messagesContainer) messagesContainer.innerHTML = '';
-    
-    if (noMessages) {
-        noMessages.style.display = 'block';
-        noMessages.textContent = 'Сообщений пока нет...';
-    }
-
-    if (isDesktop) {
-        // Закрываем и чат, и профиль, показываем плейсхолдер
-        updateDesktopVisibility(false, false);
-    } else {
-        chatModal.classList.remove('active');
-        document.body.style.overflow = '';
-    }
-
-    if (openChatAbortController) {
-        openChatAbortController.abort();
-        openChatAbortController = null;
-    }
-    
-    isOpeningChat = false;
-}
+// ИСПРАВЛЕНИЕ: closeChat была объявлена дважды в файле (тут и ниже, ближе
+// к концу). Из-за function hoisting реально работало только второе,
+// более позднее объявление — а это, первое, было мёртвым кодом: любые
+// правки здесь ни на что не влияли. Само объявление удалено, актуальная
+// версия — ниже по файлу (искать "function closeChat()"), в неё же
+// перенесён сброс chatAvatar.style.background, которого тут не хватало.
 
 // Добавьте обработчик для кнопки закрытия профиля
 if (profileCloseButtonDesktop) {
@@ -9882,7 +9848,18 @@ async function openChat(chatId, contactHint = null) {
                 if (freshTitle) freshTitle.textContent = c.name || 'Чат';
                 if (freshAvatar) {
                     const initials = c.name ? c.name[0].toUpperCase() : '?';
-                    const bgColor = c.avatar_background || '#0088cc';
+                    // ИСПРАВЛЕНИЕ: /get_chat_info иногда тихо возвращает
+                    // avatar_background = null/'#0088cc' из-за того же
+                    // серверного бага с кэшем участников (см. комментарий
+                    // выше). Раньше это молча затирало уже показанный
+                    // (из contactHint, до ответа сервера) правильный цвет
+                    // дефолтным синим. Теперь при отсутствии реального
+                    // цвета от сервера сперва пробуем сохранить то, что
+                    // уже нарисовано (contactHint), и только если и его
+                    // не было — откатываемся на дефолт.
+                    const bgColor = c.avatar_background
+                        || (contactHint && contactHint.avatar_background)
+                        || '#0088cc';
                     if (c.avatar_url && c.participant_id) {
                         loadChatAvatar(freshAvatar, c.participant_id, initials, bgColor);
                     } else {
@@ -10314,6 +10291,14 @@ function stopProfileDataPolling() {
             currentMessages = [];
 
             if (chatAvatar) {
+                // ИСПРАВЛЕНИЕ: раньше тут сбрасывались только backgroundImage
+                // и backgroundColor, но не background (шорткод-свойство, через
+                // которое рисуется градиент для аватарки без фото — см.
+                // openChat/openTempChat: chatAvatar.style.background = `linear-
+                // gradient(...)`). Из-за этого старый градиент мог на долю
+                // секунды "протекать" в следующий открытый чат, пока новый
+                // рендер его не перезапишет.
+                chatAvatar.style.background = '';
                 chatAvatar.style.backgroundImage = '';
                 chatAvatar.style.backgroundColor = '';
                 chatAvatar.textContent = '';
