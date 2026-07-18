@@ -9259,8 +9259,10 @@ function getActiveElements() {
                 chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
                 chatAvatar.style.backgroundImage = '';
                 chatAvatar.textContent = initials;
-                
-                if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
+
+                // Не гадаем по has_avatar_photo — всегда пытаемся загрузить фото,
+                // AvatarCache сам откатится к уже показанному выше фону, если фото нет.
+                if (tempChat.participants && tempChat.participants.length > 0) {
                     const userId = tempChat.participants[0].platform_user_id;
                     loadChatAvatar(chatAvatar, userId, initials, bgColor);
                 }
@@ -11120,14 +11122,25 @@ function stopProfileDataPolling() {
                 if (tempChatContactId && tempChatName) {
                     sessionStorage.removeItem('tempChatContactId');
                     sessionStorage.removeItem('tempChatName');
-                    
+
+                    // contacts.html кладёт настоящие has_avatar_photo/avatar_background контакта в chatContactInfo —
+                    // раньше они здесь игнорировались, и для нового чата всегда подставлялись
+                    // has_avatar_photo: false и синий фон по умолчанию — из-за этого у тех, с кем раньше не общались, не показывалась ни сама аватарка, ни умолчанный фон.
+                    let tempContactInfo = null;
+                    try {
+                        tempContactInfo = JSON.parse(sessionStorage.getItem('chatContactInfo') || 'null');
+                    } catch (e) {
+                        tempContactInfo = null;
+                    }
+                    sessionStorage.removeItem('chatContactInfo');
+
                     const tempChat = {
                         id: `temp_${Date.now()}`,
                         name: tempChatName,
                         participants: [{ platform_user_id: tempChatContactId }],
                         is_temp: true,
-                        has_avatar_photo: false,
-                        avatar_background: '#0088cc'
+                        has_avatar_photo: !!(tempContactInfo && tempContactInfo.has_avatar_photo),
+                        avatar_background: (tempContactInfo && tempContactInfo.avatar_background) || '#0088cc'
                     };
                     
                     openTempChat(tempChat);
