@@ -2796,34 +2796,6 @@ async function sendFriendRequestFromRecommendation(receiverId, button) {
 
 
 
-    // Анимация и функционал для десктопной кнопки чата
-    if (chatButtonDesktop) {
-        // Анимация при наведении
-        chatButtonDesktop.addEventListener('mouseenter', () => {
-            const icon = chatButtonDesktop.querySelector('.action-button-icon');
-            icon.style.transform = 'translateY(-3px)';
-            icon.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
-        });
-
-        chatButtonDesktop.addEventListener('mouseleave', () => {
-            const icon = chatButtonDesktop.querySelector('.action-button-icon');
-            icon.style.transform = '';
-            icon.style.boxShadow = '';
-        });
-
-        // Обработчик клика
-        chatButtonDesktop.addEventListener('click', () => {
-            openChatWithContact(currentViewedUser);
-        });
-    }
-
-    // Обработчик для мобильной кнопки чата
-    if (chatButtonMobile) {
-        chatButtonMobile.addEventListener('click', () => {
-            openChatWithContact(currentViewedUser);
-        });
-    }
-
     // Функция для открытия чата с контактом
 async function openChatWithContact(user) {
     if (!user || !user.platform_user_id) {
@@ -2857,17 +2829,27 @@ async function openChatWithContact(user) {
         const data = await response.json();
         
         if (data.status === 'success') {
+            // ИСПРАВЛЕНИЕ: раньше сюда клали только nickname, и chats.html
+            // не знал, есть ли у контакта фото аватара и какой у него
+            // avatar_background — из-за этого шапка нового/только что
+            // открытого чата показывала дефолтные инициалы на синем фоне
+            // без ника, пока не подгрузятся полные данные с сервера.
+            const contactInfo = {
+                platform_user_id: user.platform_user_id,
+                nickname: user.nickname || 'Чат',
+                has_avatar_photo: !!(user.has_avatar_photo || user.has_avatar),
+                avatar_background: user.avatar_background || '#0088cc'
+            };
+            sessionStorage.setItem('chatContactInfo', JSON.stringify(contactInfo));
+
             if (!data.is_new) {
                 // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
                 sessionStorage.setItem('openChatId', data.chat_id);
-                sessionStorage.setItem('openChatName', user.nickname || 'Чат');
-                window.location.href = 'chats.html';
             } else {
                 // ЧАТ НОВЫЙ - создаем временный и перенаправляем
                 sessionStorage.setItem('tempChatContactId', user.platform_user_id);
-                sessionStorage.setItem('tempChatName', user.nickname || 'Новый чат');
-                window.location.href = 'chats.html';
             }
+            window.location.href = 'chats.html';
         } else {
             throw new Error(data.error || 'Не удалось проверить чат');
         }
@@ -4304,4 +4286,4 @@ function setupSearchHandlers() {
         });
     </script>
 </body>
-</html>  
+</html>
