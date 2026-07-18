@@ -9715,7 +9715,7 @@ function getActiveElements() {
             });
         }
 
-async function openChat(chatId) {
+async function openChat(chatId, contactHint = null) {
     // ── Отменяем любой предыдущий openChat ──────────────────────────
     if (openChatAbortController) openChatAbortController.abort();
     openChatAbortController = new AbortController();
@@ -9778,6 +9778,24 @@ async function openChat(chatId) {
             chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
             chatAvatar.textContent = initials;
         }
+    } else if (contactHint) {
+        // ИСПРАВЛЕНИЕ: чат ещё не попал в currentChatsList (например, мы
+        // только что перешли сюда из contacts.html) — используем данные,
+        // переданные со страницы контактов, чтобы шапка не была пустой,
+        // пока не придёт ответ /get_chat_info.
+        const initials = contactHint.nickname ? contactHint.nickname[0].toUpperCase() : '?';
+        const bgColor = contactHint.avatar_background || '#0088cc';
+        chatTitle.textContent = contactHint.nickname || 'Чат';
+        if (contactHint.has_avatar_photo && contactHint.platform_user_id) {
+            loadChatAvatar(chatAvatar, contactHint.platform_user_id, initials, bgColor);
+            statusFetchParticipantId = contactHint.platform_user_id;
+        } else {
+            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+            chatAvatar.style.backgroundImage = '';
+            chatAvatar.textContent = initials;
+        }
+        chatStatus.textContent = 'был(а) недавно';
+        chatStatus.classList.remove('online');
     }
 
     // Всегда делаем свежий запрос статуса сети при открытии чата — не
@@ -9835,6 +9853,27 @@ async function openChat(chatId) {
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
             if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
+
+            // ИСПРАВЛЕНИЕ: раньше шапка (ник/аватар/фон) заполнялась только
+            // из currentChatsList выше и никогда не обновлялась из ответа
+            // сервера. Если чата не было в кэше списка (частый случай при
+            // переходе из contacts.html) — шапка так и оставалась пустой,
+            // хотя /get_chat_info уже вернул все нужные данные. Теперь
+            // всегда синхронизируем шапку с этим авторитетным ответом.
+            const c = chatData.chat;
+            const { chatAvatar: freshAvatar, chatTitle: freshTitle } = getActiveElements();
+            if (freshTitle) freshTitle.textContent = c.name || 'Чат';
+            if (freshAvatar) {
+                const initials = c.name ? c.name[0].toUpperCase() : '?';
+                const bgColor = c.avatar_background || '#0088cc';
+                if (c.avatar_url && c.participant_id) {
+                    loadChatAvatar(freshAvatar, c.participant_id, initials, bgColor);
+                } else {
+                    freshAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                    freshAvatar.style.backgroundImage = '';
+                    freshAvatar.textContent = initials;
+                }
+            }
         }
 
     } catch (error) {
@@ -10069,17 +10108,22 @@ async function openChatWithContact(user) {
         const data = await response.json();
         
         if (data.status === 'success') {
+            const contactInfo = {
+                platform_user_id: user.platform_user_id,
+                nickname: user.nickname || 'Чат',
+                has_avatar_photo: !!(user.has_avatar_photo || user.has_avatar),
+                avatar_background: user.avatar_background || '#0088cc'
+            };
+            sessionStorage.setItem('chatContactInfo', JSON.stringify(contactInfo));
+
             if (!data.is_new) {
                 // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
                 sessionStorage.setItem('openChatId', data.chat_id);
-                sessionStorage.setItem('openChatName', user.nickname || 'Чат');
-                window.location.href = 'chats.html';
             } else {
                 // ЧАТ НОВЫЙ - создаем временный и перенаправляем
                 sessionStorage.setItem('tempChatContactId', user.platform_user_id);
-                sessionStorage.setItem('tempChatName', user.nickname || 'Новый чат');
-                window.location.href = 'chats.html';
             }
+            window.location.href = 'chats.html';
         } else {
             throw new Error(data.error || 'Не удалось проверить чат');
         }
@@ -11026,30 +11070,37 @@ function stopProfileDataPolling() {
             await Promise.all([ loadUserData(), loadChats() ]);
             
             const openChatId = sessionStorage.getItem('openChatId');
-            const openChatName = sessionStorage.getItem('openChatName');
+            // ИСПРАВЛЕНИЕ: contacts.html теперь кладёт сюда полный снимок
+            // контакта (ник, флаг наличия фото, реальный avatar_background),
+            // а не только имя — это позволяет сразу нарисовать корректную
+            // шапку чата, не дожидаясь ответа /get_chat_info, и передаётся
+            // в openChat()/openTempChat() как contactHint.
+            const contactInfoRaw = sessionStorage.getItem('chatContactInfo');
+            let contactHint = null;
+            if (contactInfoRaw) {
+                try { contactHint = JSON.parse(contactInfoRaw); } catch (e) { contactHint = null; }
+            }
             window.addEventListener('orientationchange', handleOrientationChange);
             window.addEventListener('resize', handleOrientationChange);
             
-            if (openChatId && openChatName) {
-                const tempChat = { id: openChatId, name: openChatName, is_temp: false };
+            if (openChatId) {
                 sessionStorage.removeItem('openChatId');
-                sessionStorage.removeItem('openChatName');
-                openChat(openChatId);
+                sessionStorage.removeItem('chatContactInfo');
+                openChat(openChatId, contactHint);
             } else {
                 const tempChatContactId = sessionStorage.getItem('tempChatContactId');
-                const tempChatName = sessionStorage.getItem('tempChatName');
                 
-                if (tempChatContactId && tempChatName) {
+                if (tempChatContactId && contactHint) {
                     sessionStorage.removeItem('tempChatContactId');
-                    sessionStorage.removeItem('tempChatName');
+                    sessionStorage.removeItem('chatContactInfo');
                     
                     const tempChat = {
                         id: `temp_${Date.now()}`,
-                        name: tempChatName,
+                        name: contactHint.nickname || 'Новый чат',
                         participants: [{ platform_user_id: tempChatContactId }],
                         is_temp: true,
-                        has_avatar_photo: false,
-                        avatar_background: '#0088cc'
+                        has_avatar_photo: !!contactHint.has_avatar_photo,
+                        avatar_background: contactHint.avatar_background || '#0088cc'
                     };
                     
                     openTempChat(tempChat);
