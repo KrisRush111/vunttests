@@ -9259,10 +9259,8 @@ function getActiveElements() {
                 chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
                 chatAvatar.style.backgroundImage = '';
                 chatAvatar.textContent = initials;
-
-                // Не гадаем по has_avatar_photo — всегда пытаемся загрузить фото,
-                // AvatarCache сам откатится к уже показанному выше фону, если фото нет.
-                if (tempChat.participants && tempChat.participants.length > 0) {
+                
+                if (tempChat.has_avatar_photo && tempChat.participants && tempChat.participants.length > 0) {
                     const userId = tempChat.participants[0].platform_user_id;
                     loadChatAvatar(chatAvatar, userId, initials, bgColor);
                 }
@@ -9780,50 +9778,7 @@ async function openChat(chatId) {
             chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
             chatAvatar.textContent = initials;
         }
-    } else {
-        // Чат ещё не попал в currentChatsList (например, только что открыт
-        // через кнопку "Чат" в contacts.html) — до ответа сервера хедер
-        // остаётся пустым. Подстраховываемся данными, которые contacts.html
-        // заботливо оставил в sessionStorage перед редиректом.
-        let fallbackContact = null;
-        try {
-            fallbackContact = JSON.parse(sessionStorage.getItem('chatContactInfo') || 'null');
-        } catch (e) {
-            fallbackContact = null;
-        }
-
-        if (fallbackContact) {
-            const nickname = fallbackContact.nickname || 'Чат';
-            const initials = nickname.split(' ').map(n => n[0]).join('') || '?';
-            const bgColor = fallbackContact.avatar_background || '#0088cc';
-
-            chatTitle.textContent = nickname;
-
-            // Не гадаем по has_avatar_photo — как и везде в коде, loadChatAvatar/AvatarCache
-            // сам пробует загрузить фото и при ошибке/отсутствии сам покажет фон/инициалы.
-            // Гатинг по этому флагу только скрывал уже показанное фото.
-            if (fallbackContact.platform_user_id) {
-                loadChatAvatar(chatAvatar, fallbackContact.platform_user_id, initials, bgColor);
-            } else {
-                chatAvatar.style.backgroundImage = 'none';
-                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                chatAvatar.textContent = initials;
-            }
-
-            if (fallbackContact.platform_user_id) {
-                statusFetchParticipantId = fallbackContact.platform_user_id;
-            }
-            chatStatus.textContent = 'был(а) недавно';
-            chatStatus.classList.remove('online');
-        } else {
-            chatTitle.textContent = 'Загрузка...';
-            chatAvatar.style.backgroundImage = 'none';
-            chatAvatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
-            chatAvatar.textContent = '';
-        }
     }
-    // Это одноразовые данные — не должны "утекать" в следующий открытый чат.
-    sessionStorage.removeItem('chatContactInfo');
 
     // Всегда делаем свежий запрос статуса сети при открытии чата — не
     // полагаемся только на кэш, чтобы не показать устаревшее "в сети".
@@ -9879,42 +9834,7 @@ async function openChat(chatId) {
             currentChat = chatData.chat;
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
-            if (chatIndex !== -1) {
-                currentChatsList[chatIndex].unread_count = 0;
-            } else {
-                // Чат открыт впервые за эту сессию (например, через
-                // contacts.html) и раньше не значился в currentChatsList —
-                // добавляем, чтобы при повторном открытии хедер собирался
-                // из кэша, как обычно.
-                currentChatsList.push(currentChat);
-            }
-
-            // Перерисовываем хедер актуальными данными с сервера — на
-            // случай, если до этого момента он был пуст (не было ни
-            // cachedChat, ни chatContactInfo из sessionStorage) или показывал
-            // временную заглушку.
-            if (!isStale()) {
-                const freshName = currentChat.name || 'Новый чат';
-                const freshInitials = freshName.split(' ').map(n => n[0]).join('') || '?';
-                const freshBgColor = currentChat.avatar_background || '#0088cc';
-                const freshOtherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                const { chatAvatar: freshChatAvatar, chatTitle: freshChatTitle } = getActiveElements();
-
-                if (freshChatTitle) freshChatTitle.textContent = freshName;
-
-                if (freshChatAvatar) {
-                    // Не гадаем по has_avatar_photo (get_chat_info может его вообще не вернуть),
-                    // а всегда пытаемся загрузить фото через loadChatAvatar/AvatarCache —
-                    // именно он сам показывает фон и инициалы, если фото не загрузилось.
-                    if (freshOtherParticipant) {
-                        loadChatAvatar(freshChatAvatar, freshOtherParticipant.platform_user_id, freshInitials, freshBgColor);
-                    } else {
-                        freshChatAvatar.style.backgroundImage = 'none';
-                        freshChatAvatar.style.background = `linear-gradient(135deg, ${freshBgColor}, ${adjustColor(freshBgColor, 20)})`;
-                        freshChatAvatar.textContent = freshInitials;
-                    }
-                }
-            }
+            if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
         }
 
     } catch (error) {
@@ -10837,20 +10757,6 @@ function stopProfileDataPolling() {
                 if (data.status === 'success') {
                     currentMessages.forEach(message => { if (!message.is_me) message.is_read = true; });
                     updateAllMessageStatusesInUI();
-
-                    // Синхронизируем бейдж и убираем системные уведомления по этому чату —
-                    // без этого они остаются висеть после того, как пользователь прочитал
-                    // сообщения прямо в приложении (а не по клику на само уведомление).
-                    try {
-                        if (typeof closeNotificationsForChat === 'function') {
-                            await closeNotificationsForChat(chatId);
-                        }
-                        if (typeof syncAppBadge === 'function' && userData?.platform_user_id) {
-                            await syncAppBadge(userData.platform_user_id);
-                        }
-                    } catch (badgeError) {
-                        console.warn('[markAllMessagesAsRead] Не удалось синхронизировать бейдж/уведомления:', badgeError);
-                    }
                 } else {
                     throw new Error(data.error || 'mark_all_as_read вернул статус ошибки');
                 }
@@ -11122,25 +11028,14 @@ function stopProfileDataPolling() {
                 if (tempChatContactId && tempChatName) {
                     sessionStorage.removeItem('tempChatContactId');
                     sessionStorage.removeItem('tempChatName');
-
-                    // contacts.html кладёт настоящие has_avatar_photo/avatar_background контакта в chatContactInfo —
-                    // раньше они здесь игнорировались, и для нового чата всегда подставлялись
-                    // has_avatar_photo: false и синий фон по умолчанию — из-за этого у тех, с кем раньше не общались, не показывалась ни сама аватарка, ни умолчанный фон.
-                    let tempContactInfo = null;
-                    try {
-                        tempContactInfo = JSON.parse(sessionStorage.getItem('chatContactInfo') || 'null');
-                    } catch (e) {
-                        tempContactInfo = null;
-                    }
-                    sessionStorage.removeItem('chatContactInfo');
-
+                    
                     const tempChat = {
                         id: `temp_${Date.now()}`,
                         name: tempChatName,
                         participants: [{ platform_user_id: tempChatContactId }],
                         is_temp: true,
-                        has_avatar_photo: !!(tempContactInfo && tempContactInfo.has_avatar_photo),
-                        avatar_background: (tempContactInfo && tempContactInfo.avatar_background) || '#0088cc'
+                        has_avatar_photo: false,
+                        avatar_background: '#0088cc'
                     };
                     
                     openTempChat(tempChat);
@@ -11309,7 +11204,7 @@ function stopProfileDataPolling() {
                                 if (localChat) localChat.unread_count = newCount;
                             }
                             // Also update last_message preview if changed
-                            if (localChat && localChat.last_message !== serverChat.last_message) {
+                            if (localChat && (localChat.last_message !== serverChat.last_message || localChat.last_message_time !== serverChat.last_message_time)) {
                                 updateChatItemInDOM(serverChat.id, { 
                                     last_message: serverChat.last_message, 
                                     last_message_time: serverChat.last_message_time,
@@ -11323,6 +11218,18 @@ function stopProfileDataPolling() {
                                 localChat.last_message_type = serverChat.last_message_type;
                                 localChat.last_message_is_me = serverChat.last_message_is_me;
                                 localChat.last_message_is_read = serverChat.last_message_is_read;
+
+                                // Новое последнее сообщение — переносим чат в начало списка,
+                                // и в массиве currentChatsList, и в самом DOM (иначе порядок
+                                // "по убыванию времени" рассыпался бы для чатов, которые сейчас
+                                // не открыты, но получили новое сообщение в фоне).
+                                const chatIdxUnread = currentChatsList.findIndex(c => c.id === serverChat.id);
+                                if (chatIdxUnread !== -1) {
+                                    const movedChat = currentChatsList.splice(chatIdxUnread, 1)[0];
+                                    currentChatsList.unshift(movedChat);
+                                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                                }
+                                moveChatToTop(serverChat.id);
                             } else if (localChat && localChat.last_message_is_read !== serverChat.last_message_is_read) {
                                 // Текст последнего сообщения не изменился, но собеседник мог только что
                                 // его прочитать — обновляем галочку в списке чатов на "прочитано".
