@@ -9752,17 +9752,10 @@ async function openChat(chatId) {
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
-        const bgColor = cachedChat.avatar_background || window.__pendingContactAvatarBg || '#0088cc';
-        window.__pendingContactAvatarBg = null; // используем только один раз, чтобы не утёк в другой чат
+        const bgColor = cachedChat.avatar_background || '#0088cc';
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
-            // Сначала всегда ставим фон + инициалы (как в списке чатов/контактов), и только если у контакта есть фото аватарки — пытаемся загрузить профильную картинку.
-            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.style.backgroundImage = '';
-            chatAvatar.textContent = initials;
-            if (cachedChat.has_avatar_photo) {
-                loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
-            }
+            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
             statusFetchParticipantId = otherParticipant.platform_user_id;
 
             // Мгновенно показываем статус, только если он реально свежий
@@ -11020,9 +11013,6 @@ function stopProfileDataPolling() {
             
             const openChatId = sessionStorage.getItem('openChatId');
             const openChatName = sessionStorage.getItem('openChatName');
-            const openChatContactId = sessionStorage.getItem('openChatContactId');
-            const openChatAvatarPhoto = sessionStorage.getItem('openChatAvatarPhoto');
-            const openChatAvatarBg = sessionStorage.getItem('openChatAvatarBg');
             window.addEventListener('orientationchange', handleOrientationChange);
             window.addEventListener('resize', handleOrientationChange);
             
@@ -11030,66 +11020,26 @@ function stopProfileDataPolling() {
                 const tempChat = { id: openChatId, name: openChatName, is_temp: false };
                 sessionStorage.removeItem('openChatId');
                 sessionStorage.removeItem('openChatName');
-                sessionStorage.removeItem('openChatContactId');
-                sessionStorage.removeItem('openChatAvatarPhoto');
-                sessionStorage.removeItem('openChatAvatarBg');
-
-                // Показываем аватар/фон/ник/статус контакта сразу, не дожидаясь, пока
-                // openChat найдёт данные в currentChatsList (чат может быть только что создан и ещё
-                // отсутствовать в кэше списка чатов). Без этого openChat() вообще не ставит ник и статус, если чат ещё не попал в кэш списка чатов.
-                if (openChatContactId) {
-                    const { chatAvatar, chatTitle, chatStatus } = getActiveElements();
-                    if (chatTitle) chatTitle.textContent = openChatName || 'Чат';
-                    if (chatStatus) {
-                        chatStatus.textContent = 'был(а) недавно';
-                        chatStatus.classList.remove('online');
-                    }
-                    if (chatAvatar) {
-                        const initials = openChatName ? openChatName[0].toUpperCase() : '?';
-                        const bgColor = openChatAvatarBg || '#0088cc';
-                        chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-                        chatAvatar.style.backgroundImage = '';
-                        chatAvatar.textContent = initials;
-                        if (openChatAvatarPhoto === '1') {
-                            loadChatAvatar(chatAvatar, openChatContactId, initials, bgColor);
-                        }
-                        // Запоминаем реальный фон контакта, чтобы openChat() ниже не заменил его стандартным синим, если в currentChatsList у этого чата ещё нет своего avatar_background.
-                        window.__pendingContactAvatarBg = bgColor;
-                    }
-                    // Свежий статус активности, как в openChat()
-                    getCachedActivityStatus([openChatContactId]).then(activityData => {
-                        if (currentChatId !== openChatId) return; // уже переключились на другой чат
-                        const userActivity = activityData[openChatContactId];
-                        const { chatStatus: freshChatStatus } = getActiveElements();
-                        if (!freshChatStatus || !userActivity) return;
-                        if (userActivity.is_online) {
-                            freshChatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                            freshChatStatus.classList.add('online');
-                        } else {
-                            freshChatStatus.textContent = formatLastSeen(userActivity.last_online);
-                            freshChatStatus.classList.remove('online');
-                        }
-                    }).catch(() => {});
-                }
-
                 openChat(openChatId);
             } else {
                 const tempChatContactId = sessionStorage.getItem('tempChatContactId');
                 const tempChatName = sessionStorage.getItem('tempChatName');
+                const tempChatAvatarBg = sessionStorage.getItem('tempChatAvatarBg');
+                const tempChatHasAvatar = sessionStorage.getItem('tempChatHasAvatar') === '1';
                 
                 if (tempChatContactId && tempChatName) {
                     sessionStorage.removeItem('tempChatContactId');
                     sessionStorage.removeItem('tempChatName');
-                    sessionStorage.removeItem('openChatAvatarPhoto');
-                    sessionStorage.removeItem('openChatAvatarBg');
+                    sessionStorage.removeItem('tempChatAvatarBg');
+                    sessionStorage.removeItem('tempChatHasAvatar');
                     
                     const tempChat = {
                         id: `temp_${Date.now()}`,
                         name: tempChatName,
                         participants: [{ platform_user_id: tempChatContactId }],
                         is_temp: true,
-                        has_avatar_photo: openChatAvatarPhoto === '1',
-                        avatar_background: openChatAvatarBg || '#0088cc'
+                        has_avatar_photo: tempChatHasAvatar,
+                        avatar_background: tempChatAvatarBg || '#0088cc'
                     };
                     
                     openTempChat(tempChat);
