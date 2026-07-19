@@ -9752,7 +9752,8 @@ async function openChat(chatId) {
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
-        const bgColor = cachedChat.avatar_background || '#0088cc';
+        const bgColor = cachedChat.avatar_background || window.__pendingContactAvatarBg || '#0088cc';
+        window.__pendingContactAvatarBg = null; // используем только один раз, чтобы не утёк в другой чат
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
             // Сначала всегда ставим фон + инициалы (как в списке чатов/контактов), и только если у контакта есть фото аватарки — пытаемся загрузить профильную картинку.
@@ -11052,6 +11053,8 @@ function stopProfileDataPolling() {
                         if (openChatAvatarPhoto === '1') {
                             loadChatAvatar(chatAvatar, openChatContactId, initials, bgColor);
                         }
+                        // Запоминаем реальный фон контакта, чтобы openChat() ниже не заменил его стандартным синим, если в currentChatsList у этого чата ещё нет своего avatar_background.
+                        window.__pendingContactAvatarBg = bgColor;
                     }
                     // Свежий статус активности, как в openChat()
                     getCachedActivityStatus([openChatContactId]).then(activityData => {
