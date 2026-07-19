@@ -7590,7 +7590,10 @@ function getActiveElements() {
                 last_message_is_read: chat.last_message_is_read
             });
 
-            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+            // last_message_time мог стать более старым (удалили последнее сообщение,
+            // всплыло предыдущее) — пересчитываем позицию чата в списке по реальному
+            // времени, а не просто обновляем превью на месте.
+            repositionChatInList(chatId);
         }
 
         function performDeleteMessage(messageElement, message, mode) {
@@ -10292,6 +10295,37 @@ function stopProfileDataPolling() {
             });
         }
 
+        // Ставит чат в список на его АКТУАЛЬНУЮ позицию по last_message_time —
+        // в отличие от moveChatToTop() не тащит чат наверх безусловно. Если после
+        // изменения (новое сообщение, редактирование, УДАЛЕНИЕ последнего сообщения)
+        // last_message_time у чата стало более старым, чем у соседей — чат уедет
+        // вниз под них (или вообще не сдвинется), а не подскочит на первое место.
+        function repositionChatInList(chatId) {
+            const idx = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+            if (idx === -1) return;
+
+            currentChatsList = sortChats(currentChatsList);
+            const newIdx = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+            if (newIdx === -1) return;
+
+            const nextChat = newIdx + 1 < currentChatsList.length ? currentChatsList[newIdx + 1] : null;
+
+            [chatsListDesktop, chatsListMobile].forEach(list => {
+                if (!list) return;
+                const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+                if (!chatItem) return;
+
+                const referenceEl = nextChat ? list.querySelector(`.chat-item[data-chat-id="${nextChat.id}"]`) : null;
+                if (referenceEl) {
+                    if (chatItem !== referenceEl.previousElementSibling) list.insertBefore(chatItem, referenceEl);
+                } else if (list.lastElementChild !== chatItem) {
+                    list.appendChild(chatItem);
+                }
+            });
+
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+        }
+
         function updateChatItemInDOM(chatId, chatData) {
             [chatsListDesktop, chatsListMobile].forEach(list => {
                 if (!list) return;
@@ -10683,11 +10717,8 @@ function stopProfileDataPolling() {
                                     currentChatsList[chatIdxPoll].last_message_is_me = !!lastRealMsg.is_me;
                                     currentChatsList[chatIdxPoll].last_message_is_read = !!lastRealMsg.is_read;
                                     currentChatsList[chatIdxPoll].unread_count = 0;
-                                    const movedChat = currentChatsList.splice(chatIdxPoll, 1)[0];
-                                    currentChatsList.unshift(movedChat);
-                                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                                 }
-                                moveChatToTop(chatId);
+                                repositionChatInList(chatId);
                             } else {
                                 updateChatItemInDOM(chatId, { unread_count: 0 });
                             }
@@ -11223,13 +11254,7 @@ function stopProfileDataPolling() {
                                 // и в массиве currentChatsList, и в самом DOM (иначе порядок
                                 // "по убыванию времени" рассыпался бы для чатов, которые сейчас
                                 // не открыты, но получили новое сообщение в фоне).
-                                const chatIdxUnread = currentChatsList.findIndex(c => c.id === serverChat.id);
-                                if (chatIdxUnread !== -1) {
-                                    const movedChat = currentChatsList.splice(chatIdxUnread, 1)[0];
-                                    currentChatsList.unshift(movedChat);
-                                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
-                                }
-                                moveChatToTop(serverChat.id);
+                                repositionChatInList(serverChat.id);
                             } else if (localChat && localChat.last_message_is_read !== serverChat.last_message_is_read) {
                                 // Текст последнего сообщения не изменился, но собеседник мог только что
                                 // его прочитать — обновляем галочку в списке чатов на "прочитано".
