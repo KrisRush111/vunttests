@@ -11027,11 +11027,16 @@ function stopProfileDataPolling() {
                 sessionStorage.removeItem('openChatAvatarPhoto');
                 sessionStorage.removeItem('openChatAvatarBg');
 
-                // Показываем аватар/фон контакта сразу, не дожидаясь, пока
+                // Показываем аватар/фон/ник/статус контакта сразу, не дожидаясь, пока
                 // openChat найдёт данные в currentChatsList (чат может быть только что создан и ещё
-                // отсутствовать в кэше списка чатов).
+                // отсутствовать в кэше списка чатов). Без этого openChat() вообще не ставит ник и статус, если чат ещё не попал в кэш списка чатов.
                 if (openChatContactId) {
-                    const { chatAvatar } = getActiveElements();
+                    const { chatAvatar, chatTitle, chatStatus } = getActiveElements();
+                    if (chatTitle) chatTitle.textContent = openChatName || 'Чат';
+                    if (chatStatus) {
+                        chatStatus.textContent = 'был(а) недавно';
+                        chatStatus.classList.remove('online');
+                    }
                     if (chatAvatar) {
                         const initials = openChatName ? openChatName[0].toUpperCase() : '?';
                         const bgColor = openChatAvatarBg || '#0088cc';
@@ -11042,6 +11047,20 @@ function stopProfileDataPolling() {
                             loadChatAvatar(chatAvatar, openChatContactId, initials, bgColor);
                         }
                     }
+                    // Свежий статус активности, как в openChat()
+                    getCachedActivityStatus([openChatContactId]).then(activityData => {
+                        if (currentChatId !== openChatId) return; // уже переключились на другой чат
+                        const userActivity = activityData[openChatContactId];
+                        const { chatStatus: freshChatStatus } = getActiveElements();
+                        if (!freshChatStatus || !userActivity) return;
+                        if (userActivity.is_online) {
+                            freshChatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                            freshChatStatus.classList.add('online');
+                        } else {
+                            freshChatStatus.textContent = formatLastSeen(userActivity.last_online);
+                            freshChatStatus.classList.remove('online');
+                        }
+                    }).catch(() => {});
                 }
 
                 openChat(openChatId);
