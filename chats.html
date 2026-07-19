@@ -11047,7 +11047,21 @@ function stopProfileDataPolling() {
                 imageInput.addEventListener('change', handleImageSelection);
             }
 
-            await Promise.all([ loadUserData(), loadChats() ]);
+            // Раньше здесь ждали ОБА промиса — loadUserData() и loadChats() —
+            // и только потом открывали конкретный чат (если он был передан
+            // через sessionStorage из contacts.html). Из-за этого открытие
+            // чата стояло в очереди позади загрузки ВСЕГО списка чатов
+            // (тяжёлый /get_chats с N+1 запросами к главной БД на каждый
+            // чат), и аватар/ник/статус нужного одного чата заметно
+            // задерживались. Теперь ждём только userData (без неё openChat
+            // не может работать — currentChat завязан на userData.platform_user_id),
+            // а loadChats() продолжает грузиться в фоне и просто обновит
+            // список, когда будет готов. openChat()/openTempChat() умеют
+            // работать и без свежего currentChatsList — они либо берут
+            // данные из sessionStorage (temp-чат), либо сами дёргают
+            // лёгкий /get_chat_info для конкретного чата.
+            await loadUserData();
+            loadChats().catch(() => {});
             
             const openChatId = sessionStorage.getItem('openChatId');
             const openChatName = sessionStorage.getItem('openChatName');
