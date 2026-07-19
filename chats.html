@@ -9835,6 +9835,44 @@ async function openChat(chatId) {
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
             if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
+
+            // Если чата не было в локальном кэше списка (cachedChat выше не
+            // нашёлся) — хедер (имя/аватар/статус) не заполнялся вообще и
+            // оставался пустым. Подстраховываемся и заполняем его сейчас уже
+            // точными данными, полученными с сервера.
+            if (!cachedChat) {
+                chatTitle.textContent = currentChat.name || 'Чат';
+                const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
+                const bgColor = currentChat.avatar_background || '#0088cc';
+                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (otherParticipant) {
+                    loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
+                    statusFetchParticipantId = otherParticipant.platform_user_id;
+                    const { chatStatus: freshChatStatus } = getActiveElements();
+                    if (freshChatStatus) {
+                        freshChatStatus.textContent = 'был(а) недавно';
+                        freshChatStatus.classList.remove('online');
+                    }
+                    getCachedActivityStatus([statusFetchParticipantId]).then(activityData => {
+                        if (isStale()) return;
+                        const userActivity = activityData[statusFetchParticipantId];
+                        const { chatStatus: latestChatStatus } = getActiveElements();
+                        if (!latestChatStatus) return;
+                        if (userActivity) {
+                            if (userActivity.is_online) {
+                                latestChatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                                latestChatStatus.classList.add('online');
+                            } else {
+                                latestChatStatus.textContent = formatLastSeen(userActivity.last_online);
+                                latestChatStatus.classList.remove('online');
+                            }
+                        }
+                    });
+                } else {
+                    chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                    chatAvatar.textContent = initials;
+                }
+            }
         }
 
     } catch (error) {
