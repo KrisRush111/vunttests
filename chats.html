@@ -2592,6 +2592,63 @@
     color: var(--telegram-text);
 }
 
+/* Разделы "Фото" и "Файлы" в профиле контакта */
+.profile-media-section {
+    background: var(--telegram-bg);
+    border-radius: 12px;
+    padding: 0;
+    box-shadow: var(--telegram-shadow);
+    animation: fadeInUp 0.3s ease-out 0.1s;
+    animation-fill-mode: both;
+    width: 100%;
+    margin-top: 12px;
+    overflow: hidden;
+}
+
+.profile-media-section-title {
+    font-size: 15px;
+    color: var(--telegram-hint);
+    padding: 16px 16px 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.profile-photos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    padding: 0 0 2px;
+}
+
+.profile-photo-item {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--telegram-secondary-bg);
+}
+
+.profile-photo-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.15s ease;
+}
+
+.profile-photo-item:hover img {
+    transform: scale(1.04);
+}
+
+.profile-files-empty {
+    padding: 16px;
+    font-size: 14px;
+    color: var(--telegram-hint);
+    text-align: center;
+}
+
         .detail-item:nth-child(2) { animation-delay: 0.05s; }
         .detail-item:nth-child(3) { animation-delay: 0.1s; }
         .detail-item:nth-child(4) { animation-delay: 0.15s; }
@@ -4751,6 +4808,16 @@
                     <div id="modal-user-course-desktop" class="detail-value">Загрузка...</div>
                 </div>
             </div>
+
+            <div id="modal-photos-section-desktop" class="profile-media-section" style="display:none;">
+                <div class="profile-media-section-title">Фото</div>
+                <div id="modal-photos-grid-desktop" class="profile-photos-grid"></div>
+            </div>
+
+            <div id="modal-files-section-desktop" class="profile-media-section" style="display:none;">
+                <div class="profile-media-section-title">Файлы</div>
+                <div id="modal-files-list-desktop" class="profile-files-empty">Файлов пока нет</div>
+            </div>
         </div>
     </div>
     </div>
@@ -4907,6 +4974,16 @@
                     <div class="detail-label">Курс</div>
                     <div id="modal-user-course-mobile" class="detail-value">Загрузка...</div>
                 </div>
+            </div>
+
+            <div id="modal-photos-section-mobile" class="profile-media-section" style="display:none;">
+                <div class="profile-media-section-title">Фото</div>
+                <div id="modal-photos-grid-mobile" class="profile-photos-grid"></div>
+            </div>
+
+            <div id="modal-files-section-mobile" class="profile-media-section" style="display:none;">
+                <div class="profile-media-section-title">Файлы</div>
+                <div id="modal-files-list-mobile" class="profile-files-empty">Файлов пока нет</div>
             </div>
         </div>
     </div>
@@ -5585,6 +5662,9 @@ function openProfileModal(userId) {
         activeElements.modalProfileStatus.classList.remove('online');
     }
 
+    // Разделы "Фото" и "Файлы" — строим из уже загруженных сообщений текущего чата
+    renderProfileMediaSections();
+
     // Проверяем, какая версия интерфейса активна
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
@@ -5619,6 +5699,29 @@ function openProfileModal(userId) {
 
     // Загружаем профиль с проверкой токена (защита от race condition)
     loadUserProfile(userId, token);
+}
+
+
+// Заполняет разделы "Фото" и "Файлы" в профиле контакта на основе сообщений
+// текущего открытого чата. Если фото нет — оба раздела скрываются.
+function renderProfileMediaSections() {
+    const activeElements = getActiveElements();
+    if (!activeElements.modalPhotosGrid || !activeElements.modalPhotosSection || !activeElements.modalFilesSection) return;
+
+    const photoMessages = (currentMessages || []).filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+
+    if (photoMessages.length > 0) {
+        activeElements.modalPhotosGrid.innerHTML = photoMessages.map((msg, idx) => {
+            const url = msg.content;
+            return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
+        }).join('');
+        activeElements.modalPhotosSection.style.display = 'block';
+        activeElements.modalFilesSection.style.display = 'block';
+    } else {
+        activeElements.modalPhotosGrid.innerHTML = '';
+        activeElements.modalPhotosSection.style.display = 'none';
+        activeElements.modalFilesSection.style.display = 'none';
+    }
 }
 
 
@@ -5793,7 +5896,11 @@ function getActiveElements() {
             modalSpecializationContainer: document.getElementById('modal-specialization-container-desktop'),
             modalUserSpecialization: document.getElementById('modal-user-specialization-desktop'),
             modalCourseContainer: document.getElementById('modal-course-container-desktop'),
-            modalUserCourse: document.getElementById('modal-user-course-desktop')
+            modalUserCourse: document.getElementById('modal-user-course-desktop'),
+            modalPhotosSection: document.getElementById('modal-photos-section-desktop'),
+            modalPhotosGrid: document.getElementById('modal-photos-grid-desktop'),
+            modalFilesSection: document.getElementById('modal-files-section-desktop'),
+            modalFilesList: document.getElementById('modal-files-list-desktop')
         };
     } else {
         return {
@@ -5830,7 +5937,11 @@ function getActiveElements() {
             modalSpecializationContainer: document.getElementById('modal-specialization-container-mobile'),
             modalUserSpecialization: document.getElementById('modal-user-specialization-mobile'),
             modalCourseContainer: document.getElementById('modal-course-container-mobile'),
-            modalUserCourse: document.getElementById('modal-user-course-mobile')
+            modalUserCourse: document.getElementById('modal-user-course-mobile'),
+            modalPhotosSection: document.getElementById('modal-photos-section-mobile'),
+            modalPhotosGrid: document.getElementById('modal-photos-grid-mobile'),
+            modalFilesSection: document.getElementById('modal-files-section-mobile'),
+            modalFilesList: document.getElementById('modal-files-list-mobile')
         };
     }
 }
