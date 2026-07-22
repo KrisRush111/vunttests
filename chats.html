@@ -2605,13 +2605,48 @@
     overflow: hidden;
 }
 
-.profile-media-section-title {
-    font-size: 15px;
-    color: var(--telegram-hint);
-    padding: 16px 16px 8px;
+/* Овальный тонкий переключатель "Фото" / "Файлы" в одну строку под текстом */
+.profile-media-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 14px 16px 12px;
+}
+
+.profile-media-tab {
+    flex: 1;
+    text-align: center;
+    padding: 7px 0;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 136, 204, 0.35);
+    background: rgba(0, 136, 204, 0.08);
+    color: var(--telegram-blue);
+    font-size: 14px;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.profile-media-tab:active {
+    opacity: 0.85;
+}
+
+.profile-media-tab.active {
+    background: rgba(0, 136, 204, 0.85);
+    border-color: rgba(0, 136, 204, 0.85);
+    color: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+    .profile-media-tab {
+        background: rgba(64, 167, 227, 0.12);
+        border-color: rgba(64, 167, 227, 0.4);
+    }
+    .profile-media-tab.active {
+        background: rgba(64, 167, 227, 0.9);
+        border-color: rgba(64, 167, 227, 0.9);
+    }
 }
 
 .profile-photos-grid {
@@ -4809,14 +4844,13 @@
                 </div>
             </div>
 
-            <div id="modal-photos-section-desktop" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Фото</div>
+            <div id="modal-media-section-desktop" class="profile-media-section" style="display:none;">
+                <div class="profile-media-tabs">
+                    <div id="modal-media-tab-photos-desktop" class="profile-media-tab active">Фото</div>
+                    <div id="modal-media-tab-files-desktop" class="profile-media-tab">Файлы</div>
+                </div>
                 <div id="modal-photos-grid-desktop" class="profile-photos-grid"></div>
-            </div>
-
-            <div id="modal-files-section-desktop" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Файлы</div>
-                <div id="modal-files-list-desktop" class="profile-files-empty">Файлов пока нет</div>
+                <div id="modal-files-list-desktop" class="profile-files-empty" style="display:none;">Файлов пока нет</div>
             </div>
         </div>
     </div>
@@ -4976,14 +5010,13 @@
                 </div>
             </div>
 
-            <div id="modal-photos-section-mobile" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Фото</div>
+            <div id="modal-media-section-mobile" class="profile-media-section" style="display:none;">
+                <div class="profile-media-tabs">
+                    <div id="modal-media-tab-photos-mobile" class="profile-media-tab active">Фото</div>
+                    <div id="modal-media-tab-files-mobile" class="profile-media-tab">Файлы</div>
+                </div>
                 <div id="modal-photos-grid-mobile" class="profile-photos-grid"></div>
-            </div>
-
-            <div id="modal-files-section-mobile" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Файлы</div>
-                <div id="modal-files-list-mobile" class="profile-files-empty">Файлов пока нет</div>
+                <div id="modal-files-list-mobile" class="profile-files-empty" style="display:none;">Файлов пока нет</div>
             </div>
         </div>
     </div>
@@ -5703,10 +5736,12 @@ function openProfileModal(userId) {
 
 
 // Заполняет разделы "Фото" и "Файлы" в профиле контакта на основе сообщений
-// текущего открытого чата. Если фото нет — оба раздела скрываются.
+// текущего открытого чата. Если фото нет — весь блок с переключателем скрывается.
 function renderProfileMediaSections() {
     const activeElements = getActiveElements();
-    if (!activeElements.modalPhotosGrid || !activeElements.modalPhotosSection || !activeElements.modalFilesSection) return;
+    if (!activeElements.modalMediaSection || !activeElements.modalPhotosGrid) return;
+
+    bindProfileMediaTabs();
 
     const photoMessages = (currentMessages || []).filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
 
@@ -5715,12 +5750,41 @@ function renderProfileMediaSections() {
             const url = msg.content;
             return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
         }).join('');
-        activeElements.modalPhotosSection.style.display = 'block';
-        activeElements.modalFilesSection.style.display = 'block';
+        activeElements.modalMediaSection.style.display = 'block';
     } else {
         activeElements.modalPhotosGrid.innerHTML = '';
-        activeElements.modalPhotosSection.style.display = 'none';
-        activeElements.modalFilesSection.style.display = 'none';
+        activeElements.modalMediaSection.style.display = 'none';
+    }
+
+    // При каждом открытии профиля показываем сначала вкладку "Фото"
+    setProfileMediaTab('photos');
+}
+
+// Переключает видимую вкладку раздела медиа: 'photos' — сетка фото,
+// 'files' — пустой список файлов (заглушка, т.к. отправка файлов пока не поддерживается)
+function setProfileMediaTab(tab) {
+    const activeElements = getActiveElements();
+    if (!activeElements.modalMediaTabPhotos || !activeElements.modalMediaTabFiles) return;
+
+    const isPhotos = tab === 'photos';
+    activeElements.modalMediaTabPhotos.classList.toggle('active', isPhotos);
+    activeElements.modalMediaTabFiles.classList.toggle('active', !isPhotos);
+
+    if (activeElements.modalPhotosGrid) activeElements.modalPhotosGrid.style.display = isPhotos ? 'grid' : 'none';
+    if (activeElements.modalFilesList) activeElements.modalFilesList.style.display = isPhotos ? 'none' : 'block';
+}
+
+// Навешивает обработчики клика на вкладки "Фото"/"Файлы" один раз на элемент
+function bindProfileMediaTabs() {
+    const activeElements = getActiveElements();
+
+    if (activeElements.modalMediaTabPhotos && !activeElements.modalMediaTabPhotos.dataset.clickBound) {
+        activeElements.modalMediaTabPhotos.dataset.clickBound = '1';
+        activeElements.modalMediaTabPhotos.addEventListener('click', () => setProfileMediaTab('photos'));
+    }
+    if (activeElements.modalMediaTabFiles && !activeElements.modalMediaTabFiles.dataset.clickBound) {
+        activeElements.modalMediaTabFiles.dataset.clickBound = '1';
+        activeElements.modalMediaTabFiles.addEventListener('click', () => setProfileMediaTab('files'));
     }
 }
 
@@ -5897,10 +5961,11 @@ function getActiveElements() {
             modalUserSpecialization: document.getElementById('modal-user-specialization-desktop'),
             modalCourseContainer: document.getElementById('modal-course-container-desktop'),
             modalUserCourse: document.getElementById('modal-user-course-desktop'),
-            modalPhotosSection: document.getElementById('modal-photos-section-desktop'),
+            modalMediaSection: document.getElementById('modal-media-section-desktop'),
             modalPhotosGrid: document.getElementById('modal-photos-grid-desktop'),
-            modalFilesSection: document.getElementById('modal-files-section-desktop'),
-            modalFilesList: document.getElementById('modal-files-list-desktop')
+            modalFilesList: document.getElementById('modal-files-list-desktop'),
+            modalMediaTabPhotos: document.getElementById('modal-media-tab-photos-desktop'),
+            modalMediaTabFiles: document.getElementById('modal-media-tab-files-desktop')
         };
     } else {
         return {
@@ -5938,10 +6003,11 @@ function getActiveElements() {
             modalUserSpecialization: document.getElementById('modal-user-specialization-mobile'),
             modalCourseContainer: document.getElementById('modal-course-container-mobile'),
             modalUserCourse: document.getElementById('modal-user-course-mobile'),
-            modalPhotosSection: document.getElementById('modal-photos-section-mobile'),
+            modalMediaSection: document.getElementById('modal-media-section-mobile'),
             modalPhotosGrid: document.getElementById('modal-photos-grid-mobile'),
-            modalFilesSection: document.getElementById('modal-files-section-mobile'),
-            modalFilesList: document.getElementById('modal-files-list-mobile')
+            modalFilesList: document.getElementById('modal-files-list-mobile'),
+            modalMediaTabPhotos: document.getElementById('modal-media-tab-photos-mobile'),
+            modalMediaTabFiles: document.getElementById('modal-media-tab-files-mobile')
         };
     }
 }
