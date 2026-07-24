@@ -2328,6 +2328,96 @@ body {
       
         const SERVER_URL = 'https://vuntserverrr.site';
 
+        // ================================================================
+        // REALTIME (Socket.IO) -- see socket_server.py / redis_bus.py.
+        // Работает ПАРАЛЛЕЛЬНО со старым HTTP polling (не убираем его --
+        // страховка на случай недоступности WebSocket, см. chats.html).
+        // Когда сокет подключён, статусы и заявки в друзья прилетают
+        // мгновенно, а polling просто ничего нового не находит на тике.
+        // ================================================================
+        let realtimeSocket = null;
+        const realtimeWatchedPresenceIds = new Set();
+
+        function connectRealtimeSocket() {
+            if (realtimeSocket || typeof io === 'undefined' || !userData || !userData.platform_user_id) return;
+
+            realtimeSocket = io(SERVER_URL, {
+                path: '/socket.io/',
+                transports: ['websocket', 'polling'],
+                withCredentials: true,
+                query: { platform_user_id: userData.platform_user_id },
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000
+            });
+
+            realtimeSocket.on('connect', () => {
+                console.log('[WS] connected', realtimeSocket.id);
+                // После реконнекта комнаты на сервере теряются -- восстанавливаем подписки.
+                if (realtimeWatchedPresenceIds.size > 0) {
+                    realtimeSocket.emit('watch_presence', { user_ids: Array.from(realtimeWatchedPresenceIds) });
+                }
+            });
+
+            realtimeSocket.on('disconnect', (reason) => {
+                console.log('[WS] disconnected:', reason);
+            });
+
+            realtimeSocket.on('connect_error', (err) => {
+                console.warn('[WS] connect_error:', err && err.message ? err.message : err);
+            });
+
+            realtimeSocket.on('presence_update', handleRealtimePresenceUpdate);
+            realtimeSocket.on('friend_request_received', handleRealtimeFriendRequestReceived);
+            realtimeSocket.on('friend_request_responded', handleRealtimeFriendRequestResponded);
+        }
+
+        function disconnectRealtimeSocket() {
+            if (!realtimeSocket) return;
+            try { realtimeSocket.disconnect(); } catch (e) {}
+            realtimeSocket = null;
+        }
+
+        // Подписка на онлайн-статус конкретных контактов -- сервер кладёт
+        // клиента в комнату presence:<id> (см. socket_server.py on_watch_presence),
+        // после чего publish_presence(...) из redis_bus мгновенно долетает сюда.
+        function watchPresence(userIds) {
+            const fresh = (userIds || []).filter(id => id && !realtimeWatchedPresenceIds.has(id));
+            if (fresh.length === 0) return;
+            fresh.forEach(id => realtimeWatchedPresenceIds.add(id));
+            if (realtimeSocket && realtimeSocket.connected) {
+                realtimeSocket.emit('watch_presence', { user_ids: fresh });
+            }
+        }
+
+        // --- Обработчики realtime-событий (см. redis_bus.py publish_*) ---
+
+        function handleRealtimePresenceUpdate(payload) {
+            if (!payload || !payload.user_id) return;
+            const userId = String(payload.user_id);
+            currentActivityData[userId] = {
+                is_online: !!payload.is_online,
+                last_online: payload.last_online
+            };
+            updateContactsUI();
+        }
+
+        // Пришла новая заявка в друзья -- сразу перезапрашиваем список
+        // контактов вместо ожидания следующего тика 6-секундного polling'а.
+        function handleRealtimeFriendRequestReceived(payload) {
+            if (!payload) return;
+            syncContactsWithServer(true);
+        }
+
+        // Отправленную нами заявку приняли/отклонили -- тоже сразу
+        // обновляем список (новый друг появится/исходящая заявка исчезнет).
+        function handleRealtimeFriendRequestResponded(payload) {
+            if (!payload) return;
+            syncContactsWithServer(true);
+            loadFriendsRecommendations();
+        }
+
+
         // ═══════════════════════════════════════════════════════════
         // PERSISTENT LOCAL STORAGE (IndexedDB) — та же база и те же ключи,
         // что и в chats.html (vuntgram_db / хранилище 'cache'), поэтому
@@ -3559,6 +3649,9 @@ async function updateProfileModalUI(user) {
 
             // После отрисовки контактов обновляем их статусы (в сети/не в сети)
             updateAllContactsActivity();
+            // И подписываемся на их presence по WebSocket -- дальше статусы
+            // будут обновляться мгновенно, без ожидания следующего polling-тика.
+            watchPresence(Array.from(allContactIds));
         }
 
         // Дешёвая проверка версии списка контактов на сервере (аналог
@@ -4124,6 +4217,7 @@ function setupSearchHandlers() {
                 clearInterval(activityPollInterval);
             }
             stopContactsPolling();
+            disconnectRealtimeSocket();
             sendOfflineStatus();
         });
 
@@ -4133,6 +4227,7 @@ function setupSearchHandlers() {
             if (activityUpdateInterval) {
                 clearInterval(activityUpdateInterval);
             }
+            disconnectRealtimeSocket();
             sendOfflineStatus();
         });
 
@@ -4143,6 +4238,7 @@ function setupSearchHandlers() {
                     updateUserActivity(true);
                     startActivityUpdates(); // Перезапускаем интервал для своего статуса
                     startActivityPolling(); // Перезапускаем интервал для статусов других
+                    connectRealtimeSocket(); // Переподключаем WebSocket, если он был закрыт
                     syncContactsWithServer(false); // Сразу подтягиваем изменения, пока страница была скрыта
                     startContactsPolling(); // Перезапускаем поллинг списка контактов
                 } else {
@@ -4177,6 +4273,11 @@ function setupSearchHandlers() {
 
                 userData = JSON.parse(userDataFromStorage);
                 console.log('User data loaded:', userData);
+
+                // Открываем WebSocket сразу после того, как известен
+                // platform_user_id -- дальше presence/заявки в друзья будут
+                // прилетать пушем, а не только по polling-тику.
+                connectRealtimeSocket();
 
                 // Запускаем обновление статусов
                 if (userData.platform_user_id) {
@@ -4262,6 +4363,7 @@ function setupSearchHandlers() {
 
       <script src="activity-tracker.js"></script>
       <script src="avatar-cache.js"></script>
+      <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
     <!-- Блокировка масштабирования страницы -->
     <script>
