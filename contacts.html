@@ -2357,6 +2357,13 @@ body {
                 if (realtimeWatchedPresenceIds.size > 0) {
                     realtimeSocket.emit('watch_presence', { user_ids: Array.from(realtimeWatchedPresenceIds) });
                 }
+                // Шлём свой статус сразу в момент подключения, а не ждём
+                // ближайший тик 10-секундного интервала (startActivityUpdates) --
+                // иначе после открытия вкладки друзья узнают, что вы онлайн,
+                // с задержкой до 10 секунд.
+                if (userData && userData.platform_user_id) {
+                    updateUserActivity(true);
+                }
             });
 
             realtimeSocket.on('disconnect', (reason) => {
@@ -3748,15 +3755,17 @@ async function updateProfileModalUI(user) {
 
         let contactsPollInterval = null;
 
-        // Пока страница контактов открыта и видна — раз в 6 сек дёшево
-        // проверяем версию списка (см. syncContactsWithServer), чтобы увидеть
-        // изменения от другой стороны (принятую заявку, новый контакт, смену
-        // ника/аватарки другом и т.п.) без перезагрузки страницы.
+        // Реальные изменения (новая заявка, её принятие/отклонение) теперь
+        // прилетают мгновенно через WebSocket (см. handleRealtimeFriendRequest*
+        // и socket_server.py/redis_bus.py). Этот polling — только редкая
+        // подстраховка на случай, если сокет был недоступен и что-то
+        // пропустил, поэтому раз в 6 секунд больше не нужно — 45 секунд
+        // достаточно для safety net, при этом заметно меньше нагружает БД.
         function startContactsPolling() {
             if (contactsPollInterval) clearInterval(contactsPollInterval);
             contactsPollInterval = setInterval(() => {
                 syncContactsWithServer(false);
-            }, 6000);
+            }, 45000);
         }
 
         function stopContactsPolling() {
@@ -4189,12 +4198,18 @@ function setupSearchHandlers() {
 
         // Функция для запуска автоматического обновления статусов
         function startActivityPolling() {
-            // Обновляем статусы каждые 10 секунд
+            // Статусы других теперь приходят мгновенно через WebSocket:
+            // moment изменения — событие presence_update (см.
+            // handleRealtimePresenceUpdate), а начальное состояние — снимок
+            // из Redis сразу при watch_presence (см. socket_server.py). Этот
+            // REST-поллинг — лишь редкая подстраховка на случай проблем с
+            // сокетом, поэтому 10 секунд больше не нужны — 45 достаточно.
             activityPollInterval = setInterval(() => {
                 updateAllContactsActivity();
-            }, 10000);
+            }, 45000);
             
-            // Первое обновление сразу после запуска
+            // Первое обновление сразу после запуска — на случай, если WS
+            // ещё не успел подключиться/дать снимок к моменту отрисовки.
             setTimeout(() => {
                 updateAllContactsActivity();
             }, 1000);
@@ -4279,13 +4294,15 @@ function setupSearchHandlers() {
                 // прилетать пушем, а не только по polling-тику.
                 connectRealtimeSocket();
 
-                // Запускаем обновление статусов
+                // Запускаем обновление статусов сразу, без искусственной
+                // задержки в 1 секунду -- свой статус и так уже уйдёт
+                // мгновенно через socket 'connect' (см. connectRealtimeSocket),
+                // а интервалы ниже — лишь резервный механизм на случай, если
+                // WebSocket недоступен.
                 if (userData.platform_user_id) {
-                    setTimeout(() => {
-                        updateUserActivity(true);
-                        startActivityUpdates(); // Для отправки своего статуса
-                        startActivityPolling(); // Для получения статусов других пользователей
-                    }, 1000);
+                    updateUserActivity(true);
+                    startActivityUpdates(); // Для отправки своего статуса
+                    startActivityPolling(); // Резервное обновление статусов других (WS уже покрывает большинство случаев)
                 }
          
                 isDesktop = window.matchMedia("(min-width: 768px)").matches;
@@ -4305,11 +4322,15 @@ function setupSearchHandlers() {
          
                 console.log('Loading user data...');
                 await loadUserData();
-                console.log('Loading contacts...');
-                await loadContacts();
+                // Контакты и рекомендации друзей друг от друга не зависят --
+                // грузим их параллельно вместо "контакты, ПОТОМ рекомендации",
+                // это экономит один полный сетевой round-trip на старте.
+                console.log('Loading contacts and recommendations...');
+                await Promise.all([
+                    loadContacts(),
+                    loadFriendsRecommendations()
+                ]);
                 startContactsPolling();
-                console.log('Loading recommendations...');
-                await loadFriendsRecommendations();
 
            
                 const { searchInput } = getActiveElements();
