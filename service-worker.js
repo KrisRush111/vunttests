@@ -1,6 +1,6 @@
 // service-worker.js
-const CACHE_NAME = 'vuntgram-v2.2.1';
-const API_CACHE_NAME = 'vuntgram-api-v2.2.1';
+const CACHE_NAME = 'vuntgram-v2.2.2';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.2';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
 const STATIC_RESOURCES = [
@@ -146,20 +146,25 @@ async function handleApiRequest(request) {
   // ВСЕГДА идем в сеть для API, не кэшируем
   try {
     const networkResponse = await fetch(request);
-    
-    if (!networkResponse.ok) {
-      throw new Error(`API response status: ${networkResponse.status}`);
-    }
-    
+
+    // ВАЖНО: раньше здесь бросался Error на любой не-2xx статус, из-за чего
+    // страница НИКОГДА не видела настоящее тело ответа сервера (с реальным
+    // текстом ошибки от Flask, например "chat_id, sender_id and image are
+    // required"), а получала лишь общий "API response status: 400" —
+    // отлаживать реальную причину было невозможно. Теперь просто отдаём
+    // ответ как есть и для успешных, и для ошибочных (4xx/5xx) статусов —
+    // страница сама разберёт JSON с полем error.
     return networkResponse;
   } catch (error) {
-    console.error('❌ TheVuntgram: API request failed:', error);
-    
+    // Сюда попадаем только при реальном сетевом сбое (нет соединения,
+    // DNS и т.п.) — сервер вообще не ответил.
+    console.error('❌ TheVuntgram: API request failed (network error):', error);
+
     // Для GET запросов можно попробовать вернуть старые данные из localStorage
     if (request.method === 'GET') {
       return tryFallbackFromLocalStorage(request);
     }
-    
+
     throw error;
   }
 }
