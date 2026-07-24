@@ -5053,6 +5053,244 @@
 
     <script>
         const SERVER_URL = 'https://vuntserverrr.site';
+
+        // ================================================================
+        // REALTIME (Socket.IO) -- see socket_server.py / redis_bus.py / DEPLOY.md
+        // ----------------------------------------------------------------
+        // Работает ПАРАЛЛЕЛЬНО со старым HTTP polling (не удаляем его -- это
+        // страховка на случай, если WebSocket где-то не пробрасывается,
+        // корпоративные прокси и т.п., см. DEPLOY.md п.5). Когда сокет
+        // подключён и события реально приходят, всё "видно" мгновенно, а
+        // polling просто ничего нового не найдёт на очередном тике.
+        // ================================================================
+        let realtimeSocket = null;
+        let realtimeJoinedChatId = null;
+        const realtimeWatchedPresenceIds = new Set();
+
+        function connectRealtimeSocket() {
+            if (realtimeSocket || typeof io === 'undefined' || !userData || !userData.platform_user_id) return;
+
+            realtimeSocket = io(SERVER_URL, {
+                path: '/socket.io/',
+                transports: ['websocket', 'polling'],
+                withCredentials: true,
+                // Фоллбэк на случай, если cookie сессии не долетит кросс-домен --
+                // socket_server.py читает user_id либо из Flask-сессии, либо отсюда
+                // (см. _current_user_id() в socket_server.py).
+                query: { platform_user_id: userData.platform_user_id },
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000
+            });
+
+            realtimeSocket.on('connect', () => {
+                console.log('[WS] connected', realtimeSocket.id);
+                // После реконнекта комнаты на сервере теряются -- восстанавливаем.
+                if (currentChatId) realtimeSocket.emit('join_chat', { chat_id: currentChatId });
+                if (realtimeWatchedPresenceIds.size > 0) {
+                    realtimeSocket.emit('watch_presence', { user_ids: Array.from(realtimeWatchedPresenceIds) });
+                }
+            });
+
+            realtimeSocket.on('disconnect', (reason) => {
+                console.log('[WS] disconnected:', reason);
+            });
+
+            realtimeSocket.on('connect_error', (err) => {
+                console.warn('[WS] connect_error:', err && err.message ? err.message : err);
+            });
+
+            realtimeSocket.on('new_message', handleRealtimeNewMessage);
+            realtimeSocket.on('message_edited', handleRealtimeMessageEdited);
+            realtimeSocket.on('message_deleted', handleRealtimeMessageDeleted);
+            realtimeSocket.on('reaction_updated', handleRealtimeReactionUpdated);
+            realtimeSocket.on('presence_update', handleRealtimePresenceUpdate);
+        }
+
+        function disconnectRealtimeSocket() {
+            if (!realtimeSocket) return;
+            try { realtimeSocket.disconnect(); } catch (e) {}
+            realtimeSocket = null;
+            realtimeJoinedChatId = null;
+        }
+
+        function joinChatRoom(chatId) {
+            if (!chatId) return;
+            if (realtimeJoinedChatId && realtimeJoinedChatId !== chatId) leaveChatRoom(realtimeJoinedChatId);
+            realtimeJoinedChatId = chatId;
+            if (realtimeSocket && realtimeSocket.connected) {
+                realtimeSocket.emit('join_chat', { chat_id: chatId });
+            }
+        }
+
+        function leaveChatRoom(chatId) {
+            if (!chatId) return;
+            if (realtimeSocket && realtimeSocket.connected) {
+                realtimeSocket.emit('leave_chat', { chat_id: chatId });
+            }
+            if (realtimeJoinedChatId === chatId) realtimeJoinedChatId = null;
+        }
+
+        function watchPresence(userIds) {
+            const fresh = (userIds || []).filter(id => id && !realtimeWatchedPresenceIds.has(id));
+            if (fresh.length === 0) return;
+            fresh.forEach(id => realtimeWatchedPresenceIds.add(id));
+            if (realtimeSocket && realtimeSocket.connected) {
+                realtimeSocket.emit('watch_presence', { user_ids: fresh });
+            }
+        }
+
+        // --- Обработчики событий из Redis (см. redis_bus.py publish_*) ---
+
+        async function handleRealtimeNewMessage(payload) {
+            if (!payload || !payload.chat_id || !payload.message) return;
+            const chatId = payload.chat_id;
+            const message = payload.message;
+            if (locallyDeletedMessageIds.has(String(message.id))) return;
+
+            const isMe = String(message.sender_id) === String(userData.platform_user_id);
+
+            // Чат открыт прямо сейчас -- рендерим сообщение сразу, не дожидаясь polling.
+            if (currentChat && String(currentChat.id) === String(chatId)) {
+                const alreadyExists = currentMessages.some(m => String(m.id) === String(message.id));
+                if (!alreadyExists) {
+                    const normalized = Object.assign({}, message, { is_me: isMe, is_read: isMe ? !!message.is_read : true });
+                    currentMessages.push(normalized);
+                    renderMessages(currentMessages);
+                    messagesCache[chatId] = currentMessages;
+                    saveMessagesToDB(chatId, currentMessages);
+
+                    if (!isMe) {
+                        fetch(`${SERVER_URL}/mark_as_read`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                            credentials: 'include'
+                        }).catch(() => {});
+                    }
+                }
+            }
+
+            // Превью и непрочитанные в списке чатов слева -- обновляем в любом случае,
+            // даже если чат сейчас закрыт.
+            let previewText = message.content || '';
+            if (message.is_image || isImageUrl(previewText)) previewText = '📷 Фото';
+
+            const chatIdx = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+            const isChatOpen = currentChat && String(currentChat.id) === String(chatId);
+            const updateData = { last_message: previewText, last_message_time: message.sent_at };
+
+            if (chatIdx !== -1) {
+                currentChatsList[chatIdx].last_message = previewText;
+                currentChatsList[chatIdx].last_message_time = message.sent_at;
+                if (!isChatOpen && !isMe) {
+                    currentChatsList[chatIdx].unread_count = (currentChatsList[chatIdx].unread_count || 0) + 1;
+                    updateData.unread_count = currentChatsList[chatIdx].unread_count;
+                }
+                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+            }
+
+            updateChatItemInDOM(chatId, updateData);
+            moveChatToTop(chatId);
+        }
+
+        function handleRealtimeMessageEdited(payload) {
+            if (!payload || !payload.chat_id || !payload.message_id) return;
+            applyEditedContentLocally(payload.chat_id, payload.message_id, payload.content, payload.edited_at);
+
+            const cached = messagesCache[payload.chat_id];
+            const last = cached && cached[cached.length - 1];
+            if (last && String(last.id) === String(payload.message_id)) {
+                let previewText = payload.content || '';
+                if (isImageUrl(previewText)) previewText = '📷 Фото';
+                updateChatItemInDOM(payload.chat_id, { last_message: previewText });
+                const chatIdx = currentChatsList.findIndex(c => String(c.id) === String(payload.chat_id));
+                if (chatIdx !== -1) currentChatsList[chatIdx].last_message = previewText;
+            }
+        }
+
+        function handleRealtimeMessageDeleted(payload) {
+            if (!payload || !payload.chat_id || !payload.message_id) return;
+            locallyDeletedMessageIds.add(String(payload.message_id));
+
+            if (currentChat && String(currentChat.id) === String(payload.chat_id)) {
+                currentMessages = currentMessages.filter(m => String(m.id) !== String(payload.message_id));
+                const { messagesContainer, noMessages } = getActiveElements();
+                const el = messagesContainer ? messagesContainer.querySelector(`[data-message-id="${payload.message_id}"]`) : null;
+                if (el) el.remove();
+                messagesCache[payload.chat_id] = currentMessages;
+                saveMessagesToDB(payload.chat_id, currentMessages);
+                if (currentMessages.length === 0 && noMessages) {
+                    noMessages.style.display = 'block';
+                    noMessages.textContent = 'Сообщений пока нет...';
+                }
+            }
+        }
+
+        function handleRealtimeReactionUpdated(payload) {
+            if (!payload || !payload.chat_id || !payload.message_id) return;
+
+            const cached = messagesCache[payload.chat_id];
+            const cachedMsg = cached && cached.find(m => String(m.id) === String(payload.message_id));
+            if (cachedMsg) cachedMsg.reactions = payload.reactions;
+
+            if (currentChat && String(currentChat.id) === String(payload.chat_id)) {
+                const msg = currentMessages.find(m => String(m.id) === String(payload.message_id));
+                if (msg) msg.reactions = payload.reactions;
+                const { messagesContainer } = getActiveElements();
+                const el = messagesContainer ? messagesContainer.querySelector(`.message[data-message-id="${payload.message_id}"]`) : null;
+                if (el) renderReactionsOnElement(el, payload.reactions);
+                saveMessagesToDB(payload.chat_id, currentMessages);
+            }
+        }
+
+        function handleRealtimePresenceUpdate(payload) {
+            if (!payload || !payload.user_id) return;
+            const userId = String(payload.user_id);
+            const status = { is_online: !!payload.is_online, last_online: payload.last_online };
+
+            CACHE.statuses.set(userId, status);
+            CACHE.statusesTimestamp.set(userId, Date.now());
+            if (!currentActivityData) currentActivityData = {};
+            currentActivityData[userId] = status;
+
+            // Статус собеседника в открытом чате
+            if (currentChat) {
+                const otherParticipant = currentChat.participants ? currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id) : null;
+                if (otherParticipant && String(otherParticipant.platform_user_id) === userId) {
+                    const { chatStatus } = getActiveElements();
+                    if (chatStatus) {
+                        if (status.is_online) {
+                            chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                            chatStatus.classList.add('online');
+                        } else {
+                            chatStatus.textContent = formatLastSeen(status.last_online);
+                            chatStatus.classList.remove('online');
+                        }
+                    }
+                }
+            }
+
+            // Статус в списке чатов слева
+            [chatsListDesktop, chatsListMobile].forEach(list => {
+                if (!list) return;
+                const chatItem = list.querySelector(`.chat-item[data-participant-id="${userId}"]`);
+                if (!chatItem) return;
+                const statusEl = chatItem.querySelector('.chat-status');
+                const avatarEl = chatItem.querySelector('.chat-avatar');
+                if (statusEl) {
+                    if (status.is_online) {
+                        statusEl.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        statusEl.classList.add('online');
+                    } else {
+                        statusEl.textContent = formatLastSeen(status.last_online);
+                        statusEl.classList.remove('online');
+                    }
+                }
+                if (avatarEl) avatarEl.classList.toggle('is-online', status.is_online);
+            });
+        }
+
         
         const messageBox = document.getElementById('messageBox');
         const contactsModal = document.getElementById('contactsModal');
@@ -5835,6 +6073,7 @@ function closeChat() {
 
     if (!chatModal) return;
 
+    leaveChatRoom(currentChatId);
     currentChat = null;
     currentChatId = null;
     currentMessages = [];
@@ -8899,6 +9138,7 @@ function getActiveElements() {
             // донагружаем и подставляем в уже отрисованные элементы отдельно,
             // не блокируя появление самого списка чатов.
             refreshChatStatusesInBackground(chats, userIds);
+            watchPresence(userIds);
         }
 
         async function updateUserActivity(isOnline = true) {
@@ -10081,6 +10321,8 @@ async function openChat(chatId) {
     updateChatWallpaper();
     applyWallpaper();
     startMessagePolling(chatId);
+    joinChatRoom(chatId);
+    if (statusFetchParticipantId) watchPresence([statusFetchParticipantId]);
 }
 
 
@@ -10475,6 +10717,7 @@ function stopProfileDataPolling() {
             if (!chatModal) return;
 
             stopMessagePolling();
+            leaveChatRoom(currentChatId);
 
             currentChat = null;
             currentMessages = [];
@@ -11063,6 +11306,7 @@ function stopProfileDataPolling() {
             }
             
             userData = JSON.parse(userDataFromStorage);
+            connectRealtimeSocket();
 
             // Не блокируем инициализацию страницы — подписка/баннер
             // подключаются в фоне
@@ -11559,6 +11803,7 @@ function stopProfileDataPolling() {
             if (event.persisted) initializePage();
         });
     </script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="activity-tracker.js"></script>
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
