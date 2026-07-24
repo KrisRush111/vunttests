@@ -1,6 +1,6 @@
 // service-worker.js
-const CACHE_NAME = 'vuntgram-v2.2.0';
-const API_CACHE_NAME = 'vuntgram-api-v2.2.0';
+const CACHE_NAME = 'vuntgram-v2.2.1';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.1';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
 const STATIC_RESOURCES = [
@@ -110,6 +110,13 @@ function isApiRequest(request) {
     '/get_chat_info', 
     '/get_messages', 
     '/get_friends', 
+    '/get_friends_recommendations',
+    '/get_bulk_activity_status',
+    '/friends_version',
+    '/send_friend_request',
+    '/handle_friend_request',
+    '/check_friendship',
+    '/search_user',
     '/get_user_data', 
     '/get_activity_status',
     '/send_message',
@@ -470,7 +477,7 @@ self.addEventListener('message', (event) => {
 // Бэкенд на другом домене (Render), а service worker обслуживает домен
 // фронтенда (Vercel) — относительный путь fetch('/save_push_subscription')
 // уходил бы на сам Vercel, где такого маршрута нет.
-const PUSH_API_BASE = 'https://vuntserverrr.site';
+const PUSH_API_BASE = 'https://vuntserver-479v.onrender.com';
 
 // Подписка была отозвана браузером (например, истёк срок) — уведомляем сервер
 self.addEventListener('pushsubscriptionchange', (event) => {
