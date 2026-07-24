@@ -6298,12 +6298,6 @@ function getActiveElements() {
                 noMessages.style.display = 'none';
                 renderMessages(currentMessages);
                 
-                const formData = new FormData();
-                formData.append('chat_id', currentChat.id);
-                formData.append('sender_id', userData.platform_user_id);
-                formData.append('image', file);
-                if (caption) formData.append('caption', caption);
-                
                 let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
                     const response = await fetch(`${SERVER_URL}/create_chat`, {
@@ -6336,6 +6330,15 @@ function getActiveElements() {
                     updateChatItemInDOM(data.chat_id, newChat);
                     setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 }
+
+                // FormData собираем только ПОСЛЕ того, как actualChatId уже точно
+                // настоящий id чата (а не временный temp_...) — иначе для первого
+                // фото в новом чате на сервер уходил бы старый temp id.
+                const formData = new FormData();
+                formData.append('chat_id', actualChatId);
+                formData.append('sender_id', userData.platform_user_id);
+                formData.append('image', file);
+                if (caption) formData.append('caption', caption);
                 
                 const messageResponse = await fetch(`${SERVER_URL}/send_image_message`, {
                     method: 'POST',
