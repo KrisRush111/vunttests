@@ -2592,7 +2592,41 @@
     color: var(--telegram-text);
 }
 
-/* Разделы "Фото" и "Файлы" в профиле контакта */
+/* Разделы "Медиа" и "Файлы" в профиле контакта */
+.profile-media-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--telegram-secondary-bg);
+    border-radius: 14px;
+    padding: 3px;
+    width: 100%;
+    margin-top: 12px;
+    animation: fadeInUp 0.3s ease-out 0.1s;
+    animation-fill-mode: both;
+}
+
+.profile-media-tab {
+    flex: 1;
+    text-align: center;
+    padding: 8px 4px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    color: var(--telegram-text);
+    background: transparent;
+    border: none;
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.profile-media-tab.active {
+    background: var(--telegram-bg);
+    box-shadow: var(--telegram-shadow);
+}
+
 .profile-media-section {
     background: var(--telegram-bg);
     border-radius: 12px;
@@ -2601,8 +2635,12 @@
     animation: fadeInUp 0.3s ease-out 0.1s;
     animation-fill-mode: both;
     width: 100%;
-    margin-top: 12px;
+    margin-top: 8px;
     overflow: hidden;
+}
+
+.profile-media-section:not(.active) {
+    display: none !important;
 }
 
 .profile-media-section-title {
@@ -4809,13 +4847,16 @@
                 </div>
             </div>
 
-            <div id="modal-photos-section-desktop" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Фото</div>
+            <div id="modal-media-tabs-desktop" class="profile-media-tabs" style="display:none;">
+                <button type="button" class="profile-media-tab active" data-tab="media" onclick="switchProfileMediaTab('desktop','media')">Медиа</button>
+                <button type="button" class="profile-media-tab" data-tab="files" onclick="switchProfileMediaTab('desktop','files')">Файлы</button>
+            </div>
+
+            <div id="modal-photos-section-desktop" class="profile-media-section active" style="display:none;">
                 <div id="modal-photos-grid-desktop" class="profile-photos-grid"></div>
             </div>
 
             <div id="modal-files-section-desktop" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Файлы</div>
                 <div id="modal-files-list-desktop" class="profile-files-empty">Файлов пока нет</div>
             </div>
         </div>
@@ -4976,13 +5017,16 @@
                 </div>
             </div>
 
-            <div id="modal-photos-section-mobile" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Фото</div>
+            <div id="modal-media-tabs-mobile" class="profile-media-tabs" style="display:none;">
+                <button type="button" class="profile-media-tab active" data-tab="media" onclick="switchProfileMediaTab('mobile','media')">Медиа</button>
+                <button type="button" class="profile-media-tab" data-tab="files" onclick="switchProfileMediaTab('mobile','files')">Файлы</button>
+            </div>
+
+            <div id="modal-photos-section-mobile" class="profile-media-section active" style="display:none;">
                 <div id="modal-photos-grid-mobile" class="profile-photos-grid"></div>
             </div>
 
             <div id="modal-files-section-mobile" class="profile-media-section" style="display:none;">
-                <div class="profile-media-section-title">Файлы</div>
                 <div id="modal-files-list-mobile" class="profile-files-empty">Файлов пока нет</div>
             </div>
         </div>
@@ -5715,13 +5759,34 @@ function renderProfileMediaSections() {
             const url = msg.content;
             return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
         }).join('');
+        if (activeElements.modalMediaTabs) activeElements.modalMediaTabs.style.display = 'flex';
         activeElements.modalPhotosSection.style.display = 'block';
         activeElements.modalFilesSection.style.display = 'block';
+        // Каждый раз при открытии профиля возвращаемся на вкладку "Медиа"
+        const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+        switchProfileMediaTab(isDesktop ? 'desktop' : 'mobile', 'media');
     } else {
         activeElements.modalPhotosGrid.innerHTML = '';
+        if (activeElements.modalMediaTabs) activeElements.modalMediaTabs.style.display = 'none';
         activeElements.modalPhotosSection.style.display = 'none';
         activeElements.modalFilesSection.style.display = 'none';
     }
+}
+
+// Переключает вкладки "Медиа" / "Файлы" в профиле контакта
+function switchProfileMediaTab(variant, tab) {
+    const suffix = variant === 'desktop' ? 'desktop' : 'mobile';
+    const tabsEl = document.getElementById(`modal-media-tabs-${suffix}`);
+    const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
+    const filesSection = document.getElementById(`modal-files-section-${suffix}`);
+    if (!tabsEl || !photosSection || !filesSection) return;
+
+    tabsEl.querySelectorAll('.profile-media-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+
+    photosSection.classList.toggle('active', tab === 'media');
+    filesSection.classList.toggle('active', tab === 'files');
 }
 
 
@@ -5897,6 +5962,7 @@ function getActiveElements() {
             modalUserSpecialization: document.getElementById('modal-user-specialization-desktop'),
             modalCourseContainer: document.getElementById('modal-course-container-desktop'),
             modalUserCourse: document.getElementById('modal-user-course-desktop'),
+            modalMediaTabs: document.getElementById('modal-media-tabs-desktop'),
             modalPhotosSection: document.getElementById('modal-photos-section-desktop'),
             modalPhotosGrid: document.getElementById('modal-photos-grid-desktop'),
             modalFilesSection: document.getElementById('modal-files-section-desktop'),
@@ -5938,6 +6004,7 @@ function getActiveElements() {
             modalUserSpecialization: document.getElementById('modal-user-specialization-mobile'),
             modalCourseContainer: document.getElementById('modal-course-container-mobile'),
             modalUserCourse: document.getElementById('modal-user-course-mobile'),
+            modalMediaTabs: document.getElementById('modal-media-tabs-mobile'),
             modalPhotosSection: document.getElementById('modal-photos-section-mobile'),
             modalPhotosGrid: document.getElementById('modal-photos-grid-mobile'),
             modalFilesSection: document.getElementById('modal-files-section-mobile'),
