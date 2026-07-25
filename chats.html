@@ -1087,6 +1087,65 @@
             white-space: pre-wrap;
         }
 
+        /* Ссылки внутри сообщений — синие, подчёркиваются только при наведении */
+        .message-link {
+            color: #4ea3ff;
+            text-decoration: none;
+            word-break: break-all;
+            -webkit-touch-callout: none;
+        }
+
+        .message-outgoing .message-link {
+            color: #eaf4ff;
+            text-decoration: underline;
+            text-decoration-color: rgba(255, 255, 255, 0.55);
+        }
+
+        .message-link:hover,
+        .message-link:active {
+            text-decoration: underline;
+        }
+
+        /* Всплывающая кнопка "Копировать" при долгом нажатии на ссылку */
+        .link-copy-popup {
+            position: fixed;
+            z-index: 10050;
+            background: var(--telegram-secondary-bg, #232e3c);
+            color: var(--telegram-text, #fff);
+            border-radius: 10px;
+            padding: 0;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+            opacity: 0;
+            transform: translate(-50%, 4px) scale(0.92);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            pointer-events: none;
+        }
+
+        .link-copy-popup.visible {
+            opacity: 1;
+            transform: translate(-50%, 0) scale(1);
+            pointer-events: auto;
+        }
+
+        .link-copy-popup button {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: none;
+            background: transparent;
+            color: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 10px 16px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .link-copy-popup button i {
+            font-size: 13px;
+            opacity: 0.85;
+        }
+
         .message-outgoing .message-time {
             color: rgba(255, 255, 255, 0.7);
         }
@@ -6652,7 +6711,7 @@ function getActiveElements() {
                     : imgTag;
                 
                 if (message.caption) {
-                    const captionHtml = `<div class="image-caption">${escapeHtml(message.caption)}${timeHtml}</div>`;
+                    const captionHtml = `<div class="image-caption">${linkifyHtml(message.caption)}${timeHtml}</div>`;
                     messageContent = `<div class="message-content">${imgHtml}${captionHtml}</div>`;
                 } else {
                     messageContent = `<div class="message-content"><div class="photo-frame">${imgHtml}${timeHtml}</div></div>`;
@@ -6660,12 +6719,12 @@ function getActiveElements() {
                 messageElement.classList.add('message-with-image');
                 if (!message.caption) messageElement.classList.add('no-caption');
             } else {
-                messageContent = `<div class="message-content">${escapeHtml(message.content)}</div>`;
+                messageContent = `<div class="message-content">${linkifyHtml(message.content)}</div>`;
             }
             
             messageElement.innerHTML = message.is_image || (message.content && isImageUrl(message.content))
                 ? messageContent
-                : `<div class="message-content"><span class="message-text">${escapeHtml(message.content)}</span>${timeHtml}</div>`;
+                : `<div class="message-content"><span class="message-text">${linkifyHtml(message.content)}</span>${timeHtml}</div>`;
             messageElement.style.opacity = '1';
             messageElement.style.transform = 'translateY(0)';
 
@@ -6714,7 +6773,7 @@ function getActiveElements() {
 
             let contentHtml;
             if (groupCaption) {
-                const captionHtml = `<div class="image-caption">${escapeHtml(groupCaption)}${timeHtml}</div>`;
+                const captionHtml = `<div class="image-caption">${linkifyHtml(groupCaption)}${timeHtml}</div>`;
                 contentHtml = `<div class="message-content">${gridHtml}${captionHtml}</div>`;
             } else {
                 contentHtml = `<div class="message-content">${gridHtml}</div>`;
@@ -6928,6 +6987,7 @@ function getActiveElements() {
             let pressTimer = null;
             let longPressTriggered = false;
             let startX = 0, startY = 0;
+            let pressTargetLink = null;
 
             const clear = () => {
                 if (pressTimer) {
@@ -6936,15 +6996,20 @@ function getActiveElements() {
                 }
             };
 
-            const start = (clientX, clientY) => {
+            const start = (clientX, clientY, target) => {
                 longPressTriggered = false;
                 startX = clientX;
                 startY = clientY;
+                pressTargetLink = target && target.closest ? target.closest('a.message-link') : null;
                 clear();
                 pressTimer = setTimeout(() => {
                     longPressTriggered = true;
                     if (navigator.vibrate) navigator.vibrate(15);
-                    openMessageMenus(messageElement, message);
+                    if (pressTargetLink) {
+                        openLinkCopyMenu(pressTargetLink);
+                    } else {
+                        openMessageMenus(messageElement, message);
+                    }
                 }, 450);
             };
 
@@ -6959,7 +7024,7 @@ function getActiveElements() {
             let lastTapX = 0, lastTapY = 0;
 
             messageElement.addEventListener('touchstart', (e) => {
-                if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY);
+                if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY, e.target);
             }, { passive: true });
             messageElement.addEventListener('touchmove', (e) => {
                 if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY);
@@ -6988,7 +7053,7 @@ function getActiveElements() {
             messageElement.addEventListener('touchcancel', clear);
 
             // Поддержка десктопа (мышь)
-            messageElement.addEventListener('mousedown', (e) => start(e.clientX, e.clientY));
+            messageElement.addEventListener('mousedown', (e) => start(e.clientX, e.clientY, e.target));
             messageElement.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
             messageElement.addEventListener('mouseup', clear);
             messageElement.addEventListener('mouseleave', clear);
@@ -7002,7 +7067,12 @@ function getActiveElements() {
             messageElement.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 if (navigator.vibrate) navigator.vibrate(15);
-                openMessageMenus(messageElement, message);
+                const linkTarget = e.target && e.target.closest ? e.target.closest('a.message-link') : null;
+                if (linkTarget) {
+                    openLinkCopyMenu(linkTarget);
+                } else {
+                    openMessageMenus(messageElement, message);
+                }
             });
         }
 
@@ -7947,7 +8017,7 @@ function getActiveElements() {
             const el = messagesContainer ? messagesContainer.querySelector(`.message[data-message-id="${messageId}"]`) : null;
             if (el) {
                 const textEl = el.querySelector('.message-text');
-                if (textEl) textEl.textContent = newContent;
+                if (textEl) textEl.innerHTML = linkifyHtml(newContent);
 
                 const timeEl = el.querySelector('.message-time');
                 if (timeEl && !timeEl.querySelector('.edited-label')) {
@@ -8096,6 +8166,93 @@ function getActiveElements() {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Находит URL в тексте (уже эскейпнутом для безопасной вставки) и обёртывает их
+        // в <a>, чтобы они были голубыми/синими и открывались по тапу.
+        // Долгое нажатие на саму ссылку обрабатывается отдельно (см. attachMessageLongPress).
+        function linkifyHtml(text) {
+            const escaped = escapeHtml(text);
+            const urlRegex = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+            return escaped.replace(urlRegex, (match) => {
+                let url = match;
+                let trailing = '';
+                const trailingMatch = url.match(/[.,!?;:)\]}”’]+$/);
+                if (trailingMatch) {
+                    trailing = trailingMatch[0];
+                    url = url.slice(0, url.length - trailing.length);
+                }
+                if (!url) return match;
+                const href = /^www\./i.test(url) ? `https://${url}` : url;
+                return `<a href="${href}" class="message-link" target="_blank" rel="noopener noreferrer" oncontextmenu="return false;" draggable="false">${url}</a>${trailing}`;
+            });
+        }
+
+        let activeLinkCopyPopup = null;
+
+        function closeLinkCopyPopup() {
+            if (activeLinkCopyPopup) {
+                activeLinkCopyPopup.remove();
+                activeLinkCopyPopup = null;
+            }
+            document.removeEventListener('click', closeLinkCopyPopup, true);
+            document.removeEventListener('scroll', closeLinkCopyPopup, true);
+            document.removeEventListener('touchstart', closeLinkCopyPopup, true);
+        }
+
+        // Маленькая всплывашка "Копировать" рядом со ссылкой при долгом нажатии.
+        // Копирует только сам URL, а не весь текст сообщения.
+        function openLinkCopyMenu(linkEl) {
+            closeLinkCopyPopup();
+            closeReactionPicker();
+
+            const url = linkEl.getAttribute('href') || linkEl.textContent || '';
+
+            const popup = document.createElement('div');
+            popup.className = 'link-copy-popup';
+            popup.innerHTML = '<button type="button"><i class="fa-solid fa-copy"></i><span>Скопировать</span></button>';
+
+            document.body.appendChild(popup);
+
+            const rect = linkEl.getBoundingClientRect();
+            const popupWidth = popup.offsetWidth || 140;
+            let left = rect.left + rect.width / 2;
+            left = Math.max(popupWidth / 2 + 8, Math.min(window.innerWidth - popupWidth / 2 - 8, left));
+            let top = rect.top - popup.offsetHeight - 10;
+            if (top < 8) top = rect.bottom + 10;
+
+            popup.style.left = `${left}px`;
+            popup.style.top = `${top}px`;
+
+            popup.querySelector('button').addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(url).catch(() => {});
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = url;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); } catch {}
+                    ta.remove();
+                }
+                closeLinkCopyPopup();
+                showCopyToast();
+            });
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => popup.classList.add('visible'));
+            });
+
+            activeLinkCopyPopup = popup;
+
+            setTimeout(() => {
+                document.addEventListener('click', closeLinkCopyPopup, true);
+                document.addEventListener('scroll', closeLinkCopyPopup, true);
+                document.addEventListener('touchstart', closeLinkCopyPopup, true);
+            }, 0);
         }
 
         function isImageUrl(url) {
@@ -10668,7 +10825,7 @@ function stopProfileDataPolling() {
                         const message = entry.item;
                         const textEl = el.querySelector('.message-text');
                         if (textEl && textEl.textContent !== message.content) {
-                            textEl.textContent = message.content;
+                            textEl.innerHTML = linkifyHtml(message.content);
                         }
                         if (message.is_edited) {
                             const timeEl = el.querySelector('.message-time');
