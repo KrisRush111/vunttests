@@ -3177,10 +3177,17 @@ function openProfileModal(userId) {
     }
 
     loadUserProfile(userId);
+    // Подписываемся на realtime presence именно этого пользователя (он может
+    // быть не в текущем списке контактов) и запускаем прямой live-поллинг
+    // статуса, пока профиль открыт — иначе текст "был(а) в сети" тут мог
+    // расходиться с chats.html, где такой live-поллинг уже был.
+    watchPresence([userId]);
+    startProfileStatusPolling(userId);
 }
 
 // В функции closeProfileModal для мобильных устройств:
 function closeProfileModal() {
+    stopProfileStatusPolling();
     if (isDesktop) {
         desktopPlaceholder.style.display = 'flex';
         profileModalDesktop.style.display = 'none';
@@ -3249,6 +3256,10 @@ if (!isDesktop) {
    
         // Добавьте функцию для форматирования времени
         function formatLastSeen(lastOnline) {
+            // Синхронизировано с chats.html: без last_online (null/undefined)
+            // считаем, что пользователь ещё не выходил из сети — иначе тут
+            // и в chats.html текст статуса расходился.
+            if (!lastOnline) return 'в сети';
             const now = new Date();
             const lastSeen = new Date(lastOnline);
             const diffMs = now - lastSeen;
@@ -3462,6 +3473,51 @@ function updateProfileModalStatus(userId) {
 
 
 
+
+let _profileStatusInterval = null;
+let _profileViewedUserId = null;
+
+// Live-обновление статуса "в сети"/"был(а)..." пока открыт профиль контакта.
+// Раньше статус тут брался только из currentActivityData, который
+// обновлялся лишь для контактов, уже отрисованных в списке (watchPresence
+// + 45-секундный REST-поллинг). Если профиль открыт для пользователя,
+// который ещё не попал в этот кэш (или кэш успел устареть), текст статуса
+// тут отставал/отличался от chats.html. Теперь запрашиваем статус этого
+// конкретного пользователя напрямую и регулярно, пока модалка открыта.
+function startProfileStatusPolling(userId) {
+    stopProfileStatusPolling();
+    _profileViewedUserId = userId;
+
+    const fetchAndApply = async () => {
+        if (!_profileViewedUserId) return;
+        try {
+            const r = await fetch(`${SERVER_URL}/get_activity_status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_ids: [_profileViewedUserId] }),
+                credentials: 'include'
+            });
+            const d = await r.json();
+            if (d.status === 'success' && d.activity_data && _profileViewedUserId === userId) {
+                Object.entries(d.activity_data).forEach(([id, status]) => {
+                    currentActivityData[id] = status;
+                });
+                updateProfileModalStatus(userId);
+            }
+        } catch (e) {}
+    };
+
+    fetchAndApply(); // сразу, не дожидаясь первого тика интервала
+    _profileStatusInterval = setInterval(fetchAndApply, 15000);
+}
+
+function stopProfileStatusPolling() {
+    if (_profileStatusInterval) {
+        clearInterval(_profileStatusInterval);
+        _profileStatusInterval = null;
+    }
+    _profileViewedUserId = null;
+}
 
 function isNotSpecified(value) {
     if (!value || typeof value !== 'string') return true; // Покрывает NULL и не-строки
