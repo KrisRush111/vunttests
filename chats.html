@@ -7006,6 +7006,7 @@ function getActiveElements() {
                     longPressTriggered = true;
                     if (navigator.vibrate) navigator.vibrate(15);
                     if (pressTargetLink) {
+                        suppressNextLinkNavigation();
                         openLinkCopyMenu(pressTargetLink);
                     } else {
                         openMessageMenus(messageElement, message);
@@ -8190,14 +8191,26 @@ function getActiveElements() {
 
         let activeLinkCopyPopup = null;
 
-        function closeLinkCopyPopup() {
+        function closeLinkCopyPopup(e) {
+            if (e && e.target && activeLinkCopyPopup && activeLinkCopyPopup.contains(e.target)) {
+                return;
+            }
             if (activeLinkCopyPopup) {
                 activeLinkCopyPopup.remove();
                 activeLinkCopyPopup = null;
             }
             document.removeEventListener('click', closeLinkCopyPopup, true);
             document.removeEventListener('scroll', closeLinkCopyPopup, true);
-            document.removeEventListener('touchstart', closeLinkCopyPopup, true);
+        }
+
+        function suppressNextLinkNavigation() {
+            const handler = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                document.removeEventListener('click', handler, true);
+            };
+            document.addEventListener('click', handler, true);
+            setTimeout(() => document.removeEventListener('click', handler, true), 700);
         }
 
         // Маленькая всплывашка "Копировать" рядом со ссылкой при долгом нажатии.
@@ -8251,7 +8264,6 @@ function getActiveElements() {
             setTimeout(() => {
                 document.addEventListener('click', closeLinkCopyPopup, true);
                 document.addEventListener('scroll', closeLinkCopyPopup, true);
-                document.addEventListener('touchstart', closeLinkCopyPopup, true);
             }, 0);
         }
 
@@ -11710,7 +11722,7 @@ function stopProfileDataPolling() {
     </script>
     <!-- activity-tracker.js убран: страница уже имеет собственный inline-polling
          (WebSocket-first, fallback 45с), см. contacts.html — двойной поллинг
-         статуса/присутствия каждые 2-3с давал лишнюю нагрузку на сервер -->   
+         статуса/присутствия каждые 2-3с давал лишнюю нагрузку на сервер -->
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
