@@ -10117,6 +10117,17 @@ async function openChat(chatId) {
 
     // Показываем имя/аватар из кэша немедленно (не ждём сеть)
     const cachedChat = currentChatsList.find(c => c.id === chatId);
+
+    // Пользователь открыл чат — сразу гасим бейдж непрочитанных, не дожидаясь
+    // ответа сервера (get_messages/get_chat_info могут занять секунду и больше).
+    // Раньше unread_count обнулялся только после обоих запросов, из-за чего
+    // синий бейдж оставался видимым какое-то время после открытия чата.
+    if (cachedChat && cachedChat.unread_count > 0) {
+        cachedChat.unread_count = 0;
+        updateChatItemInDOM(chatId, { unread_count: 0 });
+        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+    }
+
     let statusFetchParticipantId = null;
     if (cachedChat) {
         chatTitle.textContent = cachedChat.name || 'Новый чат';
@@ -10203,7 +10214,10 @@ async function openChat(chatId) {
             currentChat = chatData.chat;
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
-            if (chatIndex !== -1) currentChatsList[chatIndex].unread_count = 0;
+            if (chatIndex !== -1 && currentChatsList[chatIndex].unread_count !== 0) {
+                currentChatsList[chatIndex].unread_count = 0;
+                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+            }
 
             // Если чата не было в локальном кэше списка (cachedChat выше не
             // нашёлся) — хедер (имя/аватар/статус) не заполнялся вообще и
