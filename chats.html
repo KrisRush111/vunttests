@@ -10091,6 +10091,13 @@ async function openChat(chatId) {
     stopMessagePolling(); // сразу останавливаем polling предыдущего чата
     cancelEditMode(); // выходим из режима редактирования при смене чата
 
+    // Пользователь открыл чат — значит он читает его сообщения прямо сейчас.
+    // Закрываем системное push-уведомление(я) этого чата сразу, не дожидаясь
+    // ответа сервера от mark_all_as_read (см. push-notifications.js).
+    if (typeof closeNotificationsForChat === 'function') {
+        closeNotificationsForChat(chatId);
+    }
+
     if (isDesktop) profileModalDesktop.classList.remove('visible');
 
     isOpeningChat = true;
@@ -11157,6 +11164,16 @@ function stopProfileDataPolling() {
                 if (data.status === 'success') {
                     currentMessages.forEach(message => { if (!message.is_me) message.is_read = true; });
                     updateAllMessageStatusesInUI();
+
+                    // Сообщения реально помечены прочитанными на сервере — теперь
+                    // можно погасить бейдж и закрыть push-уведомление(я) этого чата
+                    // (на случай, если openChat ещё не успел это сделать раньше).
+                    if (typeof closeNotificationsForChat === 'function') {
+                        closeNotificationsForChat(chatId);
+                    }
+                    if (typeof syncAppBadge === 'function' && userData && userData.platform_user_id) {
+                        syncAppBadge(userData.platform_user_id);
+                    }
                 } else {
                     throw new Error(data.error || 'mark_all_as_read вернул статус ошибки');
                 }
