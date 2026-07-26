@@ -197,8 +197,29 @@ async function closeNotificationsForChat(chatId) {
   if (!('serviceWorker' in navigator)) return;
   try {
     const registration = await navigator.serviceWorker.ready;
-    const notifications = await registration.getNotifications({ tag: `chat-${chatId}` });
-    notifications.forEach((n) => n.close());
+    const targetTag = `chat-${chatId}`;
+
+    // ВАЖНО: фильтр { tag } в getNotifications() поддерживается не везде
+    // одинаково — на iOS Safari/PWA и части старых Android WebView он может
+    // молча вернуть пустой массив, даже когда уведомление реально показано
+    // в шторке/на экране блокировки. Раньше именно из-за этого уведомление
+    // "простого прочтения" чата не закрывалось — closeNotificationsForChat
+    // ничего не находил и не вызывал close(). Поэтому теперь всегда берём
+    // ВСЕ показанные уведомления без фильтра и сравниваем tag сами (плюс
+    // подстраховка по data.url — там сервер кладёт /chats.html?chat_id=...).
+    const notifications = await registration.getNotifications();
+    let closedCount = 0;
+    notifications.forEach((n) => {
+      const matchesTag = n.tag === targetTag;
+      const matchesUrl = n.data && typeof n.data.url === 'string' && n.data.url.includes(`chat_id=${chatId}`);
+      if (matchesTag || matchesUrl) {
+        n.close();
+        closedCount++;
+      }
+    });
+    if (closedCount === 0) {
+      console.warn(`⚠️ closeNotificationsForChat: не нашли уведомлений с tag=${targetTag} (chatId=${chatId})`);
+    }
   } catch (err) {
     console.warn('⚠️ Не удалось закрыть уведомления чата:', err);
   }
