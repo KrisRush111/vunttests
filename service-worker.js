@@ -8,7 +8,7 @@ const STATIC_RESOURCES = [
   '/chats.html',
   '/contacts.html', 
   '/profile.html',
-  '/offline.html',
+  '/offline.html',  
   '/icon-192x192.png',
   '/icon-512x512.png',
   '/фон.webp',
