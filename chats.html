@@ -11037,25 +11037,40 @@ function stopProfileDataPolling() {
                         // только что прочитать наше последнее сообщение — тогда галочку в списке
                         // чатов нужно обновить на "прочитано" сразу же, не дожидаясь новых сообщений.
                         if (!hasNewMessages && newMessages.length > 0) {
-                            const lastMsgForRead = newMessages[newMessages.length - 1];
-                            if (lastMsgForRead.is_me) {
-                                const cachedLastMsg = currentMessages.find(m => String(m.id) === String(lastMsgForRead.id));
-                                const wasRead = cachedLastMsg ? !!cachedLastMsg.is_read : false;
-                                if (!!lastMsgForRead.is_read !== wasRead) {
-                                    if (cachedLastMsg) cachedLastMsg.is_read = lastMsgForRead.is_read;
+                            // ВАЖНО: раньше здесь проверялось только ПОСЛЕДНЕЕ сообщение чата.
+                            // Если пользователь отправил подряд 2+ сообщения и собеседник
+                            // прочитал их все разом (mark_all_as_read помечает is_read=TRUE
+                            // сразу у всех), то в UI "прочитано" применялось только к
+                            // последнему сообщению — остальные так и оставались с одной
+                            // галочкой до следующего полного ре-рендера. Теперь проходим по
+                            // ВСЕМ своим сообщениям и обновляем статус каждого, где он поменялся.
+                            let anyReadChanged = false;
+                            newMessages.forEach(nm => {
+                                if (!nm.is_me) return;
+                                const cachedMsg = currentMessages.find(m => String(m.id) === String(nm.id));
+                                const wasRead = cachedMsg ? !!cachedMsg.is_read : false;
+                                if (!!nm.is_read !== wasRead) {
+                                    if (cachedMsg) cachedMsg.is_read = nm.is_read;
+                                    anyReadChanged = true;
+                                    // Тот же статус нужно отразить и в самом открытом чате —
+                                    // раньше галочка "прочитано" на сообщении обновлялась только
+                                    // при полном ре-рендере (появление нового сообщения), из-за
+                                    // чего в открытом чате статус "застревал" на одной галочке.
+                                    if (nm.is_read) {
+                                        updateMessageStatusInUI(String(nm.id));
+                                    }
+                                }
+                            });
+
+                            if (anyReadChanged) {
+                                const lastMsgForRead = newMessages[newMessages.length - 1];
+                                if (lastMsgForRead.is_me) {
                                     updateChatItemInDOM(chatId, { last_message_is_me: true, last_message_is_read: !!lastMsgForRead.is_read });
                                     const chatIdxRead = currentChatsList.findIndex(c => String(c.id) === String(chatId));
                                     if (chatIdxRead !== -1) {
                                         currentChatsList[chatIdxRead].last_message_is_me = true;
                                         currentChatsList[chatIdxRead].last_message_is_read = !!lastMsgForRead.is_read;
                                         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
-                                    }
-                                    // Тот же статус нужно отразить и в самом открытом чате —
-                                    // раньше галочка "прочитано" на сообщении обновлялась только
-                                    // при полном ре-рендере (появление нового сообщения), из-за
-                                    // чего в открытом чате статус "застревал" на одной галочке.
-                                    if (lastMsgForRead.is_read) {
-                                        updateMessageStatusInUI(String(lastMsgForRead.id));
                                     }
                                 }
                             }
