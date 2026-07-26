@@ -370,6 +370,16 @@ self.addEventListener('push', (event) => {
     data = { title: 'Vuntgram', body: event.data ? event.data.text() : 'Новое сообщение' };
   }
 
+  // "Тихий" служебный пуш от сервера: сообщения чата были помечены
+  // прочитанными (пользователь открыл чат — возможно, на ДРУГОМ устройстве,
+  // или это устройство было свёрнуто/заблокировано, когда чат прочитали) —
+  // нужно САМИМ закрыть уже показанное уведомление этого чата, не показывая
+  // пользователю ничего нового.
+  if (data.type === 'read_receipt') {
+    event.waitUntil(handleReadReceiptPush(data));
+    return;
+  }
+
   const title = data.title || 'Vuntgram';
   const options = {
     body: data.body || 'Новое сообщение',
@@ -391,6 +401,48 @@ self.addEventListener('push', (event) => {
     ])
   );
 });
+
+// ---------------------------------------------------------
+// Обработка "тихого" read_receipt пуша.
+//
+// Браузеры (особенно Chrome) требуют показывать notification на КАЖДЫЙ
+// push, который приходит на "userVisibleOnly: true" подписку — иначе после
+// нескольких "молчаливых" пушей подряд они либо сами покажут дженерик-
+// уведомление вида "Сайт обновился в фоне", либо в перспективе отзовут
+// разрешение на push у сайта. Поэтому мы не можем просто взять и НЕ
+// показать notification.
+//
+// Стандартный обходной путь: показать notification с тем же tag, что и у
+// уже показанного (браузер заменит/схлопнет его в тот же объект), и сразу
+// же его закрыть в этом же push-событии — с точки зрения пользователя
+// никакого нового уведомления не появляется, а старое реально исчезает,
+// в т.ч. когда страница/приложение сейчас вообще не открыты.
+// ---------------------------------------------------------
+async function handleReadReceiptPush(data) {
+  const tag = data.tag;
+
+  if (tag) {
+    try {
+      await self.registration.showNotification('', {
+        tag,
+        silent: true,
+        requireInteraction: false,
+        renotify: false
+      });
+    } catch (err) {
+      console.warn('⚠️ TheVuntgram: showNotification (read_receipt) failed', err);
+    }
+
+    try {
+      const notifications = await self.registration.getNotifications({ tag });
+      notifications.forEach((n) => n.close());
+    } catch (err) {
+      console.warn('⚠️ TheVuntgram: не удалось закрыть уведомления по tag', tag, err);
+    }
+  }
+
+  await updateAppBadge(data.unreadCount);
+}
 
 // ---------------------------------------------------------
 // Badging API — красный значок с числом на иконке приложения.
