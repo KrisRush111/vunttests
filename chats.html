@@ -451,16 +451,20 @@
             -webkit-tap-highlight-color: transparent;
             /* Скрыта по умолчанию: фон .chat-item при hover/active становится
                полупрозрачным, и без этого кнопка "просвечивала" бы через него
-               даже без реального смахивания. Показываем только во время реального
-               драга (.dragging) или когда свайп зафиксирован открытым (.swiped). */
+               даже без реального смахивания. Появление плавно привязано к
+               прогрессу самого жеста (см. pointermove в attachChatSwipeHandlers),
+               а этот transition только "доигрывает" до конечного состояния после
+               отпускания пальца — открыт/закрыт. */
             opacity: 0;
+            transform: scale(0.75);
             pointer-events: none;
-            transition: opacity 0.15s ease;
+            transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .chat-item-swipe.swiped .chat-delete-action,
         .chat-item-swipe.dragging .chat-delete-action {
             opacity: 1;
+            transform: scale(1);
             pointer-events: auto;
         }
 
@@ -9408,8 +9412,9 @@ function getActiveElements() {
                 const item = wrapper.querySelector('.chat-item');
                 if (!item) return;
 
+                const deleteBtn = wrapper.querySelector('.chat-delete-action');
                 chatSwipeState = {
-                    wrapper, item,
+                    wrapper, item, deleteBtn,
                     pointerId: e.pointerId,
                     startX: e.clientX,
                     startY: e.clientY,
@@ -9446,11 +9451,23 @@ function getActiveElements() {
                 chatSwipeState.item.style.transition = 'none';
                 chatSwipeState.item.style.transform = `translateX(${x}px)`;
                 chatSwipeState.lastX = x;
+
+                // Кнопка "Удалить" появляется плавно вместе с самим жестом —
+                // прозрачность и масштаб растут пропорционально тому, насколько
+                // ячейка уже сдвинута влево, а не вспыхивают по таймеру сразу
+                // при начале драга.
+                const { deleteBtn } = chatSwipeState;
+                if (deleteBtn) {
+                    const progress = Math.min(1, Math.abs(x) / SWIPE_OPEN_X);
+                    deleteBtn.style.transition = 'none';
+                    deleteBtn.style.opacity = String(progress);
+                    deleteBtn.style.transform = `scale(${0.75 + progress * 0.25})`;
+                }
             }, { passive: false });
 
             const endChatSwipe = (e) => {
                 if (!chatSwipeState || chatSwipeState.pointerId !== e.pointerId) return;
-                const { wrapper, item, dragging, lastX } = chatSwipeState;
+                const { wrapper, item, deleteBtn, dragging, lastX } = chatSwipeState;
                 item.style.transition = '';
                 item.style.transform = '';
                 wrapper.classList.remove('dragging');
@@ -9461,6 +9478,14 @@ function getActiveElements() {
                     } else {
                         wrapper.classList.remove('swiped');
                     }
+                }
+                // Отдаём управление появлением/скрытием обратно CSS-переходу
+                // (transition в .chat-delete-action) — он плавно доведёт кнопку
+                // до конечного состояния (открыто/закрыто) с текущей позиции.
+                if (deleteBtn) {
+                    deleteBtn.style.transition = '';
+                    deleteBtn.style.opacity = '';
+                    deleteBtn.style.transform = '';
                 }
                 chatSwipeState = null;
             };
