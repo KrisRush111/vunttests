@@ -11063,6 +11063,14 @@ function stopProfileDataPolling() {
                             });
 
                             if (anyReadChanged) {
+                                // ВАЖНО: раньше здесь обновлялся только currentMessages в памяти —
+                                // в IndexedDB (saveMessagesToDB) изменённый is_read не сохранялся.
+                                // При перезагрузке страницы сообщения подгружались из кэша со
+                                // старым is_read: false, и все галочки, кроме последней (её статус
+                                // тянется отдельно из chats_list), снова "откатывались" на одну.
+                                messagesCache[chatId] = currentMessages;
+                                saveMessagesToDB(chatId, currentMessages);
+
                                 const lastMsgForRead = newMessages[newMessages.length - 1];
                                 if (lastMsgForRead.is_me) {
                                     updateChatItemInDOM(chatId, { last_message_is_me: true, last_message_is_read: !!lastMsgForRead.is_read });
