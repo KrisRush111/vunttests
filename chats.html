@@ -11399,8 +11399,37 @@ function stopProfileDataPolling() {
         }
 
         async function initializePage() {
-            const userDataFromStorage = sessionStorage.getItem('userData');
+            let userDataFromStorage = sessionStorage.getItem('userData');
+
+            // Клик по push-уведомлению может открыть СОВСЕМ новое окно/вкладку
+            // (если приложение не было уже запущено ни в одной вкладке —
+            // service worker в этом случае делает clients.openWindow(), а не
+            // navigate() существующего клиента). У такой новой вкладки своя
+            // пустая sessionStorage, поэтому раньше она сразу считалась
+            // неавторизованной и мгновенно улетала на profile.html, даже не
+            // дойдя до чтения ?chat_id= из URL. Восстанавливаем сессию из
+            // localStorage ("Запомнить меня"), как это уже делает index.html,
+            // и только если там тоже пусто — реально уходим на profile.html.
             if (!userDataFromStorage) {
+                const rememberedUser = localStorage.getItem('rememberedUser');
+                if (rememberedUser) {
+                    try {
+                        const parsedUser = JSON.parse(rememberedUser);
+                        if (parsedUser && parsedUser.platform_user_id) {
+                            sessionStorage.setItem('userData', rememberedUser);
+                            userDataFromStorage = rememberedUser;
+                        }
+                    } catch (error) {
+                        localStorage.removeItem('rememberedUser');
+                    }
+                }
+            }
+
+            if (!userDataFromStorage) {
+                // Не теряем адрес чата из уведомления — если понадобится потом
+                // доводить пользователя через profile.html, адрес уже сохранён.
+                const currentUrl = window.location.pathname + window.location.search;
+                sessionStorage.setItem('postLoginRedirect', currentUrl);
                 window.location.href = 'profile.html';
                 return;
             }
