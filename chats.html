@@ -429,7 +429,7 @@
         }
 
         .chat-item-swipe.swiped .chat-item {
-            transform: translateX(-76px);
+            transform: translateX(-92px);
         }
 
         .chat-delete-action {
@@ -496,6 +496,48 @@
         @media (prefers-color-scheme: dark) {
             .chat-item-context-active {
                 background-color: rgba(255, 255, 255, 0.06) !important;
+            }
+        }
+
+        /* Рамка (контур) "Удалить" по ПКМ на десктопе — не список опций, а один
+           контурный элемент, визуально в духе рамки/подсветки сообщения при удержании. */
+        .chat-delete-frame {
+            position: fixed;
+            z-index: 5000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 18px;
+            border: 1.5px solid #ff3b30;
+            border-radius: 10px;
+            background: rgba(255, 59, 48, 0.08);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+            color: #ff3b30;
+            font-size: 15px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+            animation-duration: 0.14s;
+        }
+
+        .chat-delete-frame:active {
+            background: rgba(255, 59, 48, 0.16);
+            transform: scale(0.97);
+        }
+
+        .chat-delete-frame i {
+            font-size: 14px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-delete-frame {
+                background: rgba(255, 59, 48, 0.14);
+            }
+
+            .chat-delete-frame:active {
+                background: rgba(255, 59, 48, 0.24);
             }
         }
         
@@ -9317,7 +9359,7 @@ function getActiveElements() {
         // каждый .chat-item-swipe отдельно: renderChats перерисовывает список
         // часто (polling, фоновая синхронизация), и повторная привязка на
         // каждый элемент была бы лишней работой и легко забыть при правках.
-        const SWIPE_OPEN_X = 76; // должно совпадать с шириной .chat-delete-action
+        const SWIPE_OPEN_X = 92; // должно совпадать с шириной .chat-delete-action
         const SWIPE_TRIGGER_RATIO = 0.35; // доля от SWIPE_OPEN_X, после которой свайп "защёлкивается" открытым
 
         let chatSwipeState = null;
@@ -9442,14 +9484,17 @@ function getActiveElements() {
             chatItem.classList.add('chat-item-context-active');
             activeChatContextItem = chatItem;
 
-            const menu = document.createElement('div');
-            menu.className = 'message-action-menu animate__animated animate__fadeIn';
-            menu.innerHTML = '<button type="button" class="message-action-item destructive"><span>Удалить</span><span class="message-action-item-icon"><i class="fa-solid fa-trash-can"></i></span></button>';
+            // Один контурный элемент "Удалить" (НЕ список опций/контекстное меню) —
+            // рамка с текстом, стилизованная в духе подсветки сообщения при удержании.
+            const menu = document.createElement('button');
+            menu.type = 'button';
+            menu.className = 'chat-delete-frame animate__animated animate__fadeIn';
+            menu.innerHTML = '<i class="fa-solid fa-trash-can"></i><span>Удалить</span>';
 
             document.body.appendChild(menu);
 
-            const menuWidth = menu.offsetWidth || 200;
-            const menuHeight = menu.offsetHeight || 44;
+            const menuWidth = menu.offsetWidth || 140;
+            const menuHeight = menu.offsetHeight || 40;
             let left = e.clientX;
             let top = e.clientY;
             left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, left));
@@ -9457,7 +9502,7 @@ function getActiveElements() {
             menu.style.left = `${left}px`;
             menu.style.top = `${top}px`;
 
-            menu.querySelector('.message-action-item').addEventListener('click', (ev) => {
+            menu.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 closeChatContextMenu();
                 deleteChatFromList(chatId);
