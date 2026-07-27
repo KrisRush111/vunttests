@@ -437,13 +437,12 @@
             top: 0;
             right: 0;
             bottom: 0;
-            width: 76px;
+            width: 92px;
             border: none;
             margin: 0;
             padding: 0;
-            background: #ff3b30;
+            background: var(--telegram-bg);
             color: #fff;
-            font-size: 20px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -452,8 +451,52 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        .chat-delete-action:active {
+        /* Круглая красная кнопка "Удалить" — точь-в-точь как свайп-кнопки в родном
+           приложении (iOS Messages/Telegram): круг с иконкой корзины и подписью снизу. */
+        .chat-delete-circle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: #ff3b30;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            box-shadow: 0 2px 10px rgba(255, 59, 48, 0.35);
+            transition: transform 0.12s ease, background-color 0.12s ease;
+        }
+
+        .chat-delete-circle i {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .chat-delete-circle span {
+            font-size: 10.5px;
+            font-weight: 500;
+            line-height: 1;
+        }
+
+        .chat-delete-action:active .chat-delete-circle {
+            transform: scale(0.92);
             background: #e0352c;
+        }
+
+        /* ===== Контекстное меню чата по правому клику (десктоп) =====
+           Пока меню открыто, элемент подсвечивается рамкой — так же, как
+           сообщение "поднимается" в своей рамке при удержании (message-action-menu). */
+        .chat-item-context-active {
+            outline: 2px solid rgba(36, 129, 204, 0.35);
+            outline-offset: -2px;
+            border-radius: 8px;
+            background-color: rgba(36, 129, 204, 0.06) !important;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-item-context-active {
+                background-color: rgba(255, 255, 255, 0.06) !important;
+            }
         }
         
         .chat-avatar {
@@ -9238,11 +9281,18 @@ function getActiveElements() {
                 chatDeleteBtn.type = 'button';
                 chatDeleteBtn.className = 'chat-delete-action';
                 chatDeleteBtn.setAttribute('aria-label', 'Удалить чат');
-                chatDeleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+                chatDeleteBtn.innerHTML = '<span class="chat-delete-circle"><i class="fa-solid fa-trash-can"></i><span>Удалить</span></span>';
                 chatDeleteBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     deleteChatFromList(chat.id);
+                });
+
+                // Десктоп: ПКМ по чату открывает компактное меню "Удалить"
+                // (визуально как контекстное меню сообщения), свайп на десктопе не используется.
+                chatItem.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    openChatContextMenu(e, chatItem, chat.id);
                 });
 
                 chatSwipeWrapper.appendChild(chatItem);
@@ -9290,7 +9340,10 @@ function getActiveElements() {
             listEl._swipeHandlersAttached = true;
 
             listEl.addEventListener('pointerdown', (e) => {
-                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                // Свайп-удаление — только тач (мобильные устройства). На десктопе
+                // (мышь/трекпад) удаление вызывается через ПКМ (openChatContextMenu),
+                // поэтому мышиный drag по чату не должен открывать кнопку "Удалить".
+                if (e.pointerType !== 'touch') return;
                 if (e.target.closest('.chat-delete-action')) return; // клик по корзине — не свайп
                 const wrapper = e.target.closest('.chat-item-swipe');
                 if (!wrapper || !listEl.contains(wrapper)) return;
@@ -9355,6 +9408,68 @@ function getActiveElements() {
 
             listEl.addEventListener('pointerup', endChatSwipe);
             listEl.addEventListener('pointercancel', endChatSwipe);
+        }
+
+        // ===== Контекстное меню чата по правому клику (десктоп) =====
+        // Показывает компактное меню "Удалить" рядом с курсором — тот же визуальный
+        // стиль (.message-action-menu/.message-action-item), что и у меню сообщения
+        // при удержании, плюс лёгкая рамка-подсветка вокруг самого чата, пока меню открыто.
+        let activeChatContextMenu = null;
+        let activeChatContextItem = null;
+
+        function closeChatContextMenu() {
+            if (activeChatContextMenu) {
+                activeChatContextMenu.remove();
+                activeChatContextMenu = null;
+            }
+            if (activeChatContextItem) {
+                activeChatContextItem.classList.remove('chat-item-context-active');
+                activeChatContextItem = null;
+            }
+            document.removeEventListener('click', closeChatContextMenu, true);
+            document.removeEventListener('scroll', closeChatContextMenu, true);
+            document.removeEventListener('contextmenu', closeChatContextMenuOnOutsideContext, true);
+        }
+
+        function closeChatContextMenuOnOutsideContext(e) {
+            if (activeChatContextMenu && !activeChatContextMenu.contains(e.target)) closeChatContextMenu();
+        }
+
+        function openChatContextMenu(e, chatItem, chatId) {
+            closeChatContextMenu();
+            closeAllChatSwipes();
+
+            chatItem.classList.add('chat-item-context-active');
+            activeChatContextItem = chatItem;
+
+            const menu = document.createElement('div');
+            menu.className = 'message-action-menu animate__animated animate__fadeIn';
+            menu.innerHTML = '<button type="button" class="message-action-item destructive"><span>Удалить</span><span class="message-action-item-icon"><i class="fa-solid fa-trash-can"></i></span></button>';
+
+            document.body.appendChild(menu);
+
+            const menuWidth = menu.offsetWidth || 200;
+            const menuHeight = menu.offsetHeight || 44;
+            let left = e.clientX;
+            let top = e.clientY;
+            left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, left));
+            top = Math.max(8, Math.min(window.innerHeight - menuHeight - 8, top));
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+
+            menu.querySelector('.message-action-item').addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                closeChatContextMenu();
+                deleteChatFromList(chatId);
+            });
+
+            activeChatContextMenu = menu;
+
+            setTimeout(() => {
+                document.addEventListener('click', closeChatContextMenu, true);
+                document.addEventListener('scroll', closeChatContextMenu, true);
+                document.addEventListener('contextmenu', closeChatContextMenuOnOutsideContext, true);
+            }, 0);
         }
 
         // Тап "куда-нибудь ещё" закрывает открытый свайп вместо срабатывания
