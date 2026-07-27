@@ -407,6 +407,54 @@
                 background-color: rgba(255,255,255,0.08);
             }
         }
+
+        /* ===== Свайп влево по чату -> удалить (chats.html) ===== */
+        .chat-item-swipe {
+            position: relative;
+            overflow: hidden;
+            border-bottom: 1px solid var(--telegram-divider);
+        }
+
+        .chat-item-swipe:last-child {
+            border-bottom: none;
+        }
+
+        .chat-item-swipe .chat-item {
+            border-bottom: none;
+            position: relative;
+            z-index: 1;
+            will-change: transform;
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+            touch-action: pan-y;
+        }
+
+        .chat-item-swipe.swiped .chat-item {
+            transform: translateX(-76px);
+        }
+
+        .chat-delete-action {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 76px;
+            border: none;
+            margin: 0;
+            padding: 0;
+            background: #ff3b30;
+            color: #fff;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .chat-delete-action:active {
+            background: #e0352c;
+        }
         
         .chat-avatar {
             position: relative;
@@ -5234,6 +5282,14 @@
                     applyRemoteMessageDeletion(payload.chat_id, payload.message_id);
                 });
 
+                // Чат удалён (свайп по чату — свой или другого участника, либо это же
+                // устройство/аккаунт с другой вкладки) — убираем чат из списка мгновенно,
+                // не дожидаясь следующего /get_chats, и закрываем его, если он открыт.
+                appSocket.on('chat_deleted', (payload) => {
+                    if (!payload || payload.chat_id == null) return;
+                    removeChatFromUI(payload.chat_id);
+                });
+
                 appSocket.on('connect_error', () => {}); // молча достаточно — polling уже работает как fallback
             } catch (e) {
                 console.warn('WS connect failed, staying on polling-only mode', e);
@@ -9111,6 +9167,10 @@ function getActiveElements() {
             const fragment = document.createDocumentFragment();
             
             chats.forEach((chat, index) => {
+                const chatSwipeWrapper = document.createElement('div');
+                chatSwipeWrapper.className = 'chat-item-swipe';
+                chatSwipeWrapper.setAttribute('data-chat-id', chat.id);
+
                 const chatItem = document.createElement('div');
                 chatItem.className = 'chat-item';
                 chatItem.setAttribute('data-chat-id', chat.id);
@@ -9173,8 +9233,22 @@ function getActiveElements() {
                     e.preventDefault();
                     openChat(chat.id);
                 });
-                
-                fragment.appendChild(chatItem);
+
+                const chatDeleteBtn = document.createElement('button');
+                chatDeleteBtn.type = 'button';
+                chatDeleteBtn.className = 'chat-delete-action';
+                chatDeleteBtn.setAttribute('aria-label', 'Удалить чат');
+                chatDeleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+                chatDeleteBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    deleteChatFromList(chat.id);
+                });
+
+                chatSwipeWrapper.appendChild(chatItem);
+                chatSwipeWrapper.appendChild(chatDeleteBtn);
+
+                fragment.appendChild(chatSwipeWrapper);
             });
             
             chatsList.appendChild(fragment);
@@ -9183,6 +9257,195 @@ function getActiveElements() {
             // донагружаем и подставляем в уже отрисованные элементы отдельно,
             // не блокируя появление самого списка чатов.
             refreshChatStatusesInBackground(chats, userIds);
+
+            attachChatSwipeHandlers(chatsListDesktop);
+            attachChatSwipeHandlers(chatsListMobile);
+        }
+
+        // ===== Свайп влево по чату для удаления (chats.html) =====
+        // Делегирование на весь список вместо навешивания обработчиков на
+        // каждый .chat-item-swipe отдельно: renderChats перерисовывает список
+        // часто (polling, фоновая синхронизация), и повторная привязка на
+        // каждый элемент была бы лишней работой и легко забыть при правках.
+        const SWIPE_OPEN_X = 76; // должно совпадать с шириной .chat-delete-action
+        const SWIPE_TRIGGER_RATIO = 0.35; // доля от SWIPE_OPEN_X, после которой свайп "защёлкивается" открытым
+
+        let chatSwipeState = null;
+
+        function closeChatSwipe(wrapper) {
+            if (!wrapper) return;
+            wrapper.classList.remove('swiped');
+            const item = wrapper.querySelector('.chat-item');
+            if (item) item.style.transform = '';
+        }
+
+        function closeAllChatSwipes(exceptWrapper = null) {
+            document.querySelectorAll('.chat-item-swipe.swiped').forEach(w => {
+                if (w !== exceptWrapper) closeChatSwipe(w);
+            });
+        }
+
+        function attachChatSwipeHandlers(listEl) {
+            if (!listEl || listEl._swipeHandlersAttached) return;
+            listEl._swipeHandlersAttached = true;
+
+            listEl.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                if (e.target.closest('.chat-delete-action')) return; // клик по корзине — не свайп
+                const wrapper = e.target.closest('.chat-item-swipe');
+                if (!wrapper || !listEl.contains(wrapper)) return;
+
+                const item = wrapper.querySelector('.chat-item');
+                if (!item) return;
+
+                chatSwipeState = {
+                    wrapper, item,
+                    pointerId: e.pointerId,
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    baseX: wrapper.classList.contains('swiped') ? -SWIPE_OPEN_X : 0,
+                    dragging: false,
+                    decided: false,
+                    lastX: 0,
+                };
+            });
+
+            listEl.addEventListener('pointermove', (e) => {
+                if (!chatSwipeState || chatSwipeState.pointerId !== e.pointerId) return;
+                const dx = e.clientX - chatSwipeState.startX;
+                const dy = e.clientY - chatSwipeState.startY;
+
+                if (!chatSwipeState.decided) {
+                    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+                    chatSwipeState.decided = true;
+                    // Вертикальный жест — это скролл списка, свайп не начинаем.
+                    if (Math.abs(dy) > Math.abs(dx)) {
+                        chatSwipeState = null;
+                        return;
+                    }
+                    chatSwipeState.dragging = true;
+                    closeAllChatSwipes(chatSwipeState.wrapper);
+                }
+
+                if (!chatSwipeState.dragging) return;
+
+                e.preventDefault();
+                let x = chatSwipeState.baseX + dx;
+                x = Math.max(-SWIPE_OPEN_X, Math.min(0, x));
+                chatSwipeState.item.style.transition = 'none';
+                chatSwipeState.item.style.transform = `translateX(${x}px)`;
+                chatSwipeState.lastX = x;
+            }, { passive: false });
+
+            const endChatSwipe = (e) => {
+                if (!chatSwipeState || chatSwipeState.pointerId !== e.pointerId) return;
+                const { wrapper, item, dragging, lastX } = chatSwipeState;
+                item.style.transition = '';
+                item.style.transform = '';
+                if (dragging) {
+                    const openThreshold = -SWIPE_OPEN_X * SWIPE_TRIGGER_RATIO;
+                    if ((lastX || 0) <= openThreshold) {
+                        wrapper.classList.add('swiped');
+                    } else {
+                        wrapper.classList.remove('swiped');
+                    }
+                }
+                chatSwipeState = null;
+            };
+
+            listEl.addEventListener('pointerup', endChatSwipe);
+            listEl.addEventListener('pointercancel', endChatSwipe);
+        }
+
+        // Тап "куда-нибудь ещё" закрывает открытый свайп вместо срабатывания
+        // обычного действия под пальцем (открытие чата и т.п.) — перехватываем
+        // клик на этапе capture, чтобы погасить его раньше обработчика клика
+        // самого элемента (chatItem.addEventListener('click', ...) в renderChats).
+        document.addEventListener('click', (e) => {
+            const openSwipe = document.querySelector('.chat-item-swipe.swiped');
+            if (!openSwipe) return;
+            if (openSwipe.contains(e.target) && e.target.closest('.chat-delete-action')) return; // корзина обрабатывается своим обработчиком
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllChatSwipes();
+        }, true);
+
+        // Удаляет чат у ОБОИХ участников и все его сообщения из БД (см.
+        // /delete_chat на сервере), а из UI убирает мгновенно/оптимистично —
+        // как только пользователь нажал на корзину, не дожидаясь ответа сети.
+        async function deleteChatFromList(chatId) {
+            closeAllChatSwipes();
+            removeChatFromUI(chatId);
+
+            try {
+                const response = await fetch(`${SERVER_URL}/delete_chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    showMessage(data.error || 'Не удалось удалить чат', 'error');
+                    loadChats(); // рассинхрон с сервером — перезагружаем список как есть на сервере
+                }
+            } catch (error) {
+                showMessage('Не удалось удалить чат. Проверьте соединение', 'error');
+                loadChats();
+            }
+        }
+
+        // Убирает чат из currentChatsList/кэша/DOM/IndexedDB и закрывает его
+        // экран, если он был открыт. Вызывается и оптимистично при локальном
+        // удалении, и при получении события 'chat_deleted' по сокету (когда
+        // чат удалил собеседник или то же самое, но с другого устройства).
+        function removeChatFromUI(chatId) {
+            currentChatsList = (currentChatsList || []).filter(c => String(c.id) !== String(chatId));
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+
+            [chatsListDesktop, chatsListMobile].forEach(list => {
+                if (!list) return;
+                const wrapper = list.querySelector(`.chat-item-swipe[data-chat-id="${chatId}"]`);
+                if (!wrapper) return;
+                wrapper.style.overflow = 'hidden';
+                wrapper.style.maxHeight = wrapper.offsetHeight + 'px';
+                wrapper.style.transition = 'max-height 0.22s ease, opacity 0.22s ease';
+                requestAnimationFrame(() => {
+                    wrapper.style.maxHeight = '0px';
+                    wrapper.style.opacity = '0';
+                });
+                setTimeout(() => wrapper.remove(), 240);
+            });
+
+            if (currentChatsList.length === 0) {
+                const { noChats } = getActiveElements();
+                if (noChats) noChats.style.display = 'block';
+            }
+
+            if (String(currentChatId) === String(chatId)) {
+                closeChat();
+            }
+
+            clearChatLocalDB(chatId);
+        }
+
+        // Стирает локальный кэш сообщений и метаданные удалённого чата из
+        // IndexedDB — иначе после удаления они "воскреснут" в offline-кэше
+        // при следующем открытии этого же chat_id (маловероятно, но возможно
+        // при повторном создании чата с тем же собеседником).
+        async function clearChatLocalDB(chatId) {
+            try {
+                const db = await openDB();
+                const tx = db.transaction(['messages', 'chat_meta'], 'readwrite');
+                const store = tx.objectStore('messages');
+                const idx = store.index('chat_id');
+                const req = idx.getAllKeys(String(chatId));
+                req.onsuccess = () => {
+                    (req.result || []).forEach(key => store.delete(key));
+                };
+                tx.objectStore('chat_meta').delete(String(chatId));
+            } catch (e) {}
         }
 
         async function updateUserActivity(isOnline = true) {
