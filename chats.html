@@ -449,6 +449,19 @@
             cursor: pointer;
             z-index: 0;
             -webkit-tap-highlight-color: transparent;
+            /* Скрыта по умолчанию: фон .chat-item при hover/active становится
+               полупрозрачным, и без этого кружок "просвечивал" бы через него
+               даже без реального смахивания. Показываем только во время реального
+               драга (.dragging) или когда свайп зафиксирован открытым (.swiped). */
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+        }
+
+        .chat-item-swipe.swiped .chat-delete-action,
+        .chat-item-swipe.dragging .chat-delete-action {
+            opacity: 1;
+            pointer-events: auto;
         }
 
         /* Круглая красная кнопка "Удалить" — точь-в-точь как свайп-кнопки в родном
@@ -9367,6 +9380,7 @@ function getActiveElements() {
         function closeChatSwipe(wrapper) {
             if (!wrapper) return;
             wrapper.classList.remove('swiped');
+            wrapper.classList.remove('dragging');
             const item = wrapper.querySelector('.chat-item');
             if (item) item.style.transform = '';
         }
@@ -9419,6 +9433,7 @@ function getActiveElements() {
                         return;
                     }
                     chatSwipeState.dragging = true;
+                    chatSwipeState.wrapper.classList.add('dragging');
                     closeAllChatSwipes(chatSwipeState.wrapper);
                 }
 
@@ -9437,6 +9452,7 @@ function getActiveElements() {
                 const { wrapper, item, dragging, lastX } = chatSwipeState;
                 item.style.transition = '';
                 item.style.transform = '';
+                wrapper.classList.remove('dragging');
                 if (dragging) {
                     const openThreshold = -SWIPE_OPEN_X * SWIPE_TRIGGER_RATIO;
                     if ((lastX || 0) <= openThreshold) {
