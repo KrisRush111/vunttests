@@ -5113,8 +5113,12 @@
         </a>
     </div>
 
+    <!-- Socket.IO client -- доставка события удаления сообщения в реальном времени -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         const SERVER_URL = 'https://vuntserverrr.site';
+        // WS-сервер (socket_server.py) запускается отдельным процессом, подставьте сюда его реальный адрес (порт 9001 за тем же nginx). Если оставить пустым или неверным -- WS просто не подключится, всё продолжит работать через polling.
+        const SOCKET_URL = 'https://vuntserverrr.site:9001';
         
         const messageBox = document.getElementById('messageBox');
         const contactsModal = document.getElementById('contactsModal');
@@ -5193,6 +5197,76 @@
         // как DELETE успеет примениться, и сообщение снова попадёт в IndexedDB и на экран.
         const locallyDeletedMessageIds = new Set();
         let userData = null;
+
+        // ------------------------------------------------------------------
+        // WebSocket-доставка удаления сообщений (poll остаётся как fallback).
+        // Сокет намеренно не заменяет REST-поллинг для остальных данных чата (сообщения, реакции, причётка) —
+        // он даёт только мгновенную доставку именно события удаления, не ждущись следующего тика поллинга (2.5с) и/или повторного открытия чата.
+        let appSocket = null;
+
+        function connectAppSocket() {
+            if (!userData || !userData.platform_user_id || typeof io !== 'function') return;
+            if (appSocket) return; // уже подключено/подключаемся
+            try {
+                appSocket = io(SOCKET_URL, {
+                    query: { platform_user_id: userData.platform_user_id },
+                    withCredentials: true,
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 10000,
+                });
+
+                appSocket.on('connect', () => {
+                    // При реконнекте (например после сна телефона) перезаходим в комнату текущего открытого чата, если он есть.
+                    if (currentChatId) appSocket.emit('join_chat', { chat_id: currentChatId });
+                });
+
+                // Удаление — либо чьим-то удалили в текущем чате для всех ('everyone').
+                appSocket.on('message_deleted', (payload) => {
+                    if (!payload || payload.message_id == null) return;
+                    applyRemoteMessageDeletion(payload.chat_id, payload.message_id);
+                });
+
+                // Удаление 'me' с другого устройства этого же аккаунта — приходит в личную комнату пользователя, в которую клиент и так состоит (join_room в on_connect на сервере).
+                appSocket.on('message_deleted_private', (payload) => {
+                    if (!payload || payload.message_id == null) return;
+                    applyRemoteMessageDeletion(payload.chat_id, payload.message_id);
+                });
+
+                appSocket.on('connect_error', () => {}); // молча достаточно — polling уже работает как fallback
+            } catch (e) {
+                console.warn('WS connect failed, staying on polling-only mode', e);
+            }
+        }
+
+        // Вызывается и из поллинга (как fallback-сетка после полной реконцилиации), и напрямую из WS-хендлеров выше.
+        // Мгновенно убирает сообщение из открытого чата (если он тот же) и из IndexedDB любого чата, чтобы оно не воскресло при следующем открытии этого чата на на этом же или другом устройстве.
+        async function applyRemoteMessageDeletion(chatId, messageId) {
+            const idStr = String(messageId);
+            locallyDeletedMessageIds.add(idStr);
+
+            // Чистим IndexedDB всегда, даже если чат сейчас не открыт — иначе при следующем открытии удалённое сообщение "воскреснет" из кэша.
+            try {
+                if (chatId != null) {
+                    const db = await openDB();
+                    const tx = db.transaction('messages', 'readwrite');
+                    tx.objectStore('messages').delete(Number.isNaN(Number(messageId)) ? messageId : Number(messageId));
+                }
+            } catch (e) {}
+
+            const isOpenChat = currentChat && chatId != null && String(currentChat.id) === String(chatId);
+            if (isOpenChat) {
+                const before = currentMessages.length;
+                currentMessages = currentMessages.filter(m => String(m.id) !== idStr);
+                if (currentMessages.length !== before) {
+                    messagesCache[chatId] = currentMessages;
+                    renderMessages(currentMessages);
+                }
+            } else if (chatId != null && messagesCache[chatId]) {
+                messagesCache[chatId] = messagesCache[chatId].filter(m => String(m.id) !== idStr);
+            }
+        }
         let currentViewedUser = null;
 
         const CACHE = {
@@ -10109,8 +10183,13 @@ async function openChat(chatId) {
     }
 
     // Сбрасываем UI мгновенно
+    // Если был открыт другой чат — покидаем его WS-комнату перед входом в новую.
+    if (appSocket && currentChatId != null && String(currentChatId) !== String(chatId)) {
+        appSocket.emit('leave_chat', { chat_id: currentChatId });
+    }
     currentChat = null;
     currentChatId = chatId; // доступен сразу — по нему хедер может найти участника из кэша списка чатов
+    if (appSocket) appSocket.emit('join_chat', { chat_id: chatId });
     currentMessages = [];
     messagesContainer.innerHTML = '';
     noMessages.style.display = 'none';
@@ -10669,6 +10748,10 @@ function stopProfileDataPolling() {
 
             stopMessagePolling();
 
+            if (appSocket && currentChatId != null) {
+                appSocket.emit('leave_chat', { chat_id: currentChatId });
+            }
+            currentChatId = null;
             currentChat = null;
             currentMessages = [];
 
@@ -11031,7 +11114,14 @@ function stopProfileDataPolling() {
                         }
 
                         const latestId = newMessages.length > 0 ? newMessages[newMessages.length - 1]?.id?.toString() : null;
-                        const hasNewMessages = newMessages.length !== currentMessages.length || latestId !== lastKnownMessageId;
+                        // ВАЖНО: сравнивать нужно с количеством ВО НЕТЕМП-сообщений в currentMessages, а не с currentMessages.length целиком —
+                        // раньше здесь была бага: если в currentMessages был один temp_-клон (оптимистичное отправленное сообщение), а коллега в этот же момент удалил какое-то своё сообщение —
+                        // количество currentMessages (с temp) могло случайно совпасть с newMessages.length, и удаление просто терялось.
+                        // Теперь дополнительно сравниваем наборы ID явно — это ловит удаление даже в том редком случае, когда в тот же тик одно сообщение удалили, а другое пришло (совпадающее количество/последний id совпадают).
+                        const realCurrentMessages = currentMessages.filter(m => !m.is_temp);
+                        const newIdsSet = new Set(newMessages.map(m => String(m.id)));
+                        const hasRemovedMessages = realCurrentMessages.some(m => !newIdsSet.has(String(m.id)));
+                        const hasNewMessages = newMessages.length !== realCurrentMessages.length || latestId !== lastKnownMessageId || hasRemovedMessages;
 
                         // Отдельно проверяем: не появилось ли новых сообщений, но собеседник мог
                         // только что прочитать наше последнее сообщение — тогда галочку в списке
@@ -11095,7 +11185,7 @@ function stopProfileDataPolling() {
                             tempMessages.forEach(tm => {
                                 if (!merged.find(m => m.content === tm.content && m.is_me)) merged.push(tm);
                             });
-                            if (newMessages.length < currentMessages.filter(m=>!m.is_temp).length) {
+                            if (hasRemovedMessages) {
                                 deleteMissingMessages(chatId, newMessages);
                             }
                             currentMessages = merged;
@@ -11289,6 +11379,7 @@ function stopProfileDataPolling() {
             }
             
             userData = JSON.parse(userDataFromStorage);
+            connectAppSocket();
 
             // Не блокируем инициализацию страницы — подписка/баннер
             // подключаются в фоне
