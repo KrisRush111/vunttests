@@ -11612,8 +11612,19 @@ function stopProfileDataPolling() {
             const openChatName = sessionStorage.getItem('openChatName');
             window.addEventListener('orientationchange', handleOrientationChange);
             window.addEventListener('resize', handleOrientationChange);
-            
-            if (openChatId && openChatName) {
+
+            // Клик по push-уведомлению ведёт на /chats.html?chat_id=<id> (см.
+            // notify_chat_participants на сервере и notificationclick в
+            // service-worker.js). Открываем этот чат сразу при загрузке
+            // страницы, а параметр убираем из адресной строки, чтобы
+            // обновление/повторный заход не переоткрывали тот же чат снова.
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlChatId = urlParams.get('chat_id');
+
+            if (urlChatId) {
+                window.history.replaceState({}, '', 'chats.html');
+                openChat(urlChatId);
+            } else if (openChatId && openChatName) {
                 const tempChat = { id: openChatId, name: openChatName, is_temp: false };
                 sessionStorage.removeItem('openChatId');
                 sessionStorage.removeItem('openChatName');
