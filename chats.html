@@ -8916,9 +8916,29 @@ function getActiveElements() {
                     });
                     const data = await response.json();
                     if (data.status === 'success' && data.messages) {
+                        // ВАЖНО: раньше здесь только записывались новые сообщения, но
+                        // никогда не удалялись "осиротевшие" — те, что были локально в
+                        // IndexedDB, но пропали на сервере (удалённые сообщения). Из-за
+                        // этого версия чата в chat_meta помечалась как "актуальная", и
+                        // при следующем открытии чата loadMessages/syncWithServer видел
+                        // совпадение версий и полностью пропускал сверку — удалённое
+                        // сообщение оставалось висеть на экране, пока что-то другое
+                        // (например, отправка сообщения) не меняло версию заново.
+                        // Теперь фоновая предзагрузка тоже подчищает пропавшие сообщения
+                        // и, если этот чат сейчас открыт на экране, сразу перерисовывает
+                        // его — без необходимости что-то печатать.
+                        const localMsgsBefore = await getMessagesFromDB(chat.id);
+                        if (data.messages.length < localMsgsBefore.length) {
+                            await deleteMissingMessages(chat.id, data.messages);
+                        }
                         messagesCache[chat.id] = data.messages;
                         await saveMessagesToDB(chat.id, data.messages);
                         await saveChatVersion(chat.id, remoteVersion);
+
+                        if (String(currentChatId) === String(chat.id)) {
+                            currentMessages = data.messages;
+                            renderMessages(currentMessages);
+                        }
                     }
                 } catch (e) {}
             });
