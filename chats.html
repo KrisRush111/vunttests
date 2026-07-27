@@ -464,9 +464,14 @@
                (переход "к базовому правилу"), а транзишен в .swiped/.dragging —
                к открытию. */
             opacity: 0;
-            transform: scale(0.6);
+            transform: scale(0.5);
             pointer-events: none;
-            transition: opacity 0.12s ease-in, transform 0.12s ease-in;
+            /* ease-in здесь держал бы кнопку видимой почти всю длительность
+               и "сбрасывал" её только в последний момент — на глаз это и
+               выглядело как зависшая кнопка, которая не успевает пропасть
+               до того, как ячейка её накрывает. ease-out (быстрый старт) прятает
+               кнопку сразу, рывком, а не в конце. */
+            transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
 
         .chat-item-swipe.swiped .chat-delete-action,
@@ -9482,21 +9487,38 @@ function getActiveElements() {
                 item.style.transition = '';
                 item.style.transform = '';
                 wrapper.classList.remove('dragging');
+                let opening = false;
                 if (dragging) {
                     const openThreshold = -SWIPE_OPEN_X * SWIPE_TRIGGER_RATIO;
-                    if ((lastX || 0) <= openThreshold) {
+                    opening = (lastX || 0) <= openThreshold;
+                    if (opening) {
                         wrapper.classList.add('swiped');
                     } else {
                         wrapper.classList.remove('swiped');
                     }
+                } else {
+                    opening = wrapper.classList.contains('swiped');
                 }
                 // Отдаём управление появлением/скрытием обратно CSS-переходу
-                // (transition в .chat-delete-action) — он плавно доведёт кнопку
-                // до конечного состояния (открыто/закрыто) с текущей позиции.
+                // (transition в .chat-delete-action). Важно: класс 'dragging' уже снят, но инлайн-
+                // стили (opacity/transform с transition: none) снимаем только после вынужденного reflow и
+                // в следующем кадре — иначе сброс transition и opacity/transform в одной синхронной
+                // задаче иногда склеивается браузером в одно обновление, и кнопка
+                // уедет не по быстрой «закрытие»-анимации, а по старой длинной и виснет
+                // поверх возвращающейся ячейки.
                 if (deleteBtn) {
-                    deleteBtn.style.transition = '';
-                    deleteBtn.style.opacity = '';
-                    deleteBtn.style.transform = '';
+                    if (opening) {
+                        deleteBtn.style.transition = '';
+                        deleteBtn.style.opacity = '';
+                        deleteBtn.style.transform = '';
+                    } else {
+                        void deleteBtn.offsetWidth; // форс-рефлоу перед сменой transition
+                        requestAnimationFrame(() => {
+                            deleteBtn.style.transition = '';
+                            deleteBtn.style.opacity = '';
+                            deleteBtn.style.transform = '';
+                        });
+                    }
                 }
                 chatSwipeState = null;
             };
