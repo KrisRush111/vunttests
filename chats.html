@@ -5438,14 +5438,21 @@
 
         // --- Постоянное хранение сообщений (без TTL) ---
         async function saveMessagesToDB(chatId, messages) {
-            if (!messages || messages.length === 0) return;
+            // ВАЖНО: раньше при пустом messages (например, когда с сервера пришло 0
+            // сообщений, потому что удалили единственное/последнее сообщение чата)
+            // функция выходила здесь же, НЕ обновляя chat_meta (last_id/count) — хотя
+            // renderMessages() в этот же момент уже честно рисовал пустой чат. Из-за
+            // этого локальная мета оставалась "залипшей" на старом count/last_id.
+            // Теперь chat_meta обновляется всегда, включая случай пустого чата.
+            if (!messages) return;
             try {
                 const db = await openDB();
                 const realMsgs = messages.filter(m => !String(m.id).startsWith('temp_'));
-                if (realMsgs.length === 0) return;
                 const tx = db.transaction(['messages', 'chat_meta'], 'readwrite');
-                const store = tx.objectStore('messages');
-                realMsgs.forEach(msg => store.put({ ...msg, chat_id: String(chatId) }));
+                if (realMsgs.length > 0) {
+                    const store = tx.objectStore('messages');
+                    realMsgs.forEach(msg => store.put({ ...msg, chat_id: String(chatId) }));
+                }
                 const lastMsg = realMsgs[realMsgs.length - 1];
                 tx.objectStore('chat_meta').put({
                     chat_id: String(chatId),
@@ -5494,8 +5501,19 @@
         // (полный /get_messages), как будто версии не существует.
         async function getRemoteChatVersion(chatId) {
             try {
+                // ВАЖНО: URL этого GET-запроса на конкретный chat_id всегда одинаковый,
+                // поэтому браузер (особенно Safari/iOS, но и Chrome тоже) может решить
+                // закэшировать ответ, даже когда сервер не прислал явных заголовков
+                // кэширования. Тогда после удаления сообщения на другом устройстве этот
+                // запрос будет долго возвращать СТАРУЮ версию из кэша, сравнение версий
+                // "совпадёт", и полный /get_messages никогда не вызовется — удалённое
+                // сообщение будет висеть в чате, пока что-то другое (например, отправка
+                // сообщения) не заставит браузер сходить в сеть по-настоящему.
+                // cache: 'no-store' + уникальный query-параметр ниже гарантируют, что
+                // каждый вызов реально идёт в сеть, а не отдаётся из локального кэша.
                 const res = await fetch(
-                    `${SERVER_URL}/chat_version/${chatId}?platform_user_id=${encodeURIComponent(userData.platform_user_id)}`
+                    `${SERVER_URL}/chat_version/${chatId}?platform_user_id=${encodeURIComponent(userData.platform_user_id)}&_ts=${Date.now()}`,
+                    { cache: 'no-store' }
                 );
                 if (!res.ok) return null;
                 const data = await res.json();
