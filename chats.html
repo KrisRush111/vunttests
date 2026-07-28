@@ -539,6 +539,115 @@
             }
         }
 
+        /* ===== Диалог "Удалить чат" (у себя / у себя и собеседника) =====
+           Нативный алерт-стиль, как в видео-референсе: затемнённый фон,
+           карточка с аватаром чата, заголовком, описанием и тремя
+           плитками-кнопками. Пока диалог открыт, сам чат в списке подсвечен
+           той же рамкой, что и при открытии контекстного меню
+           (chat-item-context-active), чтобы было понятно, какой именно чат
+           сейчас удаляется. */
+        .chat-delete-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 6000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(0, 0, 0, 0);
+            transition: background 0.18s ease;
+        }
+
+        .chat-delete-confirm-overlay.visible {
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .chat-delete-confirm-card {
+            width: 100%;
+            max-width: 300px;
+            border-radius: 20px;
+            background: rgba(245, 245, 247, 0.96);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            backdrop-filter: blur(24px) saturate(180%);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+            padding: 24px 20px 16px;
+            text-align: center;
+            transform: scale(0.85);
+            opacity: 0;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+        }
+
+        .chat-delete-confirm-overlay.visible .chat-delete-confirm-card {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-delete-confirm-card {
+                background: rgba(44, 44, 46, 0.96);
+            }
+        }
+
+        .chat-delete-confirm-avatar {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            margin: 0 auto 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 26px;
+            font-weight: 600;
+            background-size: cover;
+            background-position: center;
+        }
+
+        .chat-delete-confirm-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--telegram-text);
+            margin-bottom: 6px;
+        }
+
+        .chat-delete-confirm-text {
+            font-size: 14px;
+            line-height: 1.35;
+            color: var(--telegram-hint);
+            margin-bottom: 18px;
+        }
+
+        .chat-delete-confirm-btn {
+            display: block;
+            width: 100%;
+            border: none;
+            background: rgba(120, 120, 128, 0.16);
+            color: #ff3b30;
+            font-size: 16px;
+            font-weight: 500;
+            font-family: inherit;
+            padding: 13px 12px;
+            border-radius: 13px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.1s ease, transform 0.1s ease;
+        }
+
+        .chat-delete-confirm-btn + .chat-delete-confirm-btn {
+            margin-top: 8px;
+        }
+
+        .chat-delete-confirm-btn:active {
+            transform: scale(0.97);
+            background: rgba(120, 120, 128, 0.26);
+        }
+
+        .chat-delete-confirm-btn.chat-delete-confirm-cancel {
+            color: var(--telegram-primary, #2481cc);
+            font-weight: 600;
+            margin-top: 14px;
+        }
+
         /* Меню "Удалить" по ПКМ на десктопе — тот же самый визуальный язык,
            что и у меню сообщения при удержании: та же заматованная карточка
            (.message-action-menu) с рядом-строкой (.message-action-item.destructive) —
@@ -9332,7 +9441,7 @@ function getActiveElements() {
                 chatDeleteBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    deleteChatFromList(chat.id);
+                    openDeleteChatDialog(chat.id, chatItem);
                 });
 
                 // Десктоп: ПКМ по чату открывает компактное меню "Удалить"
@@ -9556,7 +9665,7 @@ function getActiveElements() {
             deleteRow.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 closeChatContextMenu();
-                deleteChatFromList(chatId);
+                openDeleteChatDialog(chatId, chatItem);
             });
 
             activeChatContextMenu = menu;
@@ -9582,10 +9691,96 @@ function getActiveElements() {
             closeAllChatSwipes();
         }, true);
 
-        // Удаляет чат у ОБОИХ участников и все его сообщения из БД (см.
-        // /delete_chat на сервере), а из UI убирает мгновенно/оптимистично —
-        // как только пользователь нажал на корзину, не дожидаясь ответа сети.
-        async function deleteChatFromList(chatId) {
+        // ===== Диалог выбора варианта удаления чата (у себя / у себя и собеседника) =====
+        // Визуально — нативный алерт (как в Telegram): аватар чата, заголовок,
+        // описание и три плитки-кнопки. Пока диалог открыт, сам чат в списке
+        // подсвечен рамкой (та же .chat-item-context-active, что и у ПКМ-меню).
+        let activeChatDeleteDialog = null;
+        let activeChatDeleteDialogItem = null;
+
+        function getChatNameForDialog(chat) {
+            return (chat && chat.name) || 'собеседником';
+        }
+
+        function closeDeleteChatDialog() {
+            if (activeChatDeleteDialog) {
+                const overlay = activeChatDeleteDialog;
+                overlay.classList.remove('visible');
+                setTimeout(() => overlay.remove(), 180);
+                activeChatDeleteDialog = null;
+            }
+            if (activeChatDeleteDialogItem) {
+                activeChatDeleteDialogItem.classList.remove('chat-item-context-active');
+                activeChatDeleteDialogItem = null;
+            }
+        }
+
+        function openDeleteChatDialog(chatId, chatItem) {
+            closeDeleteChatDialog();
+            closeChatContextMenu();
+            closeAllChatSwipes();
+
+            const chat = (currentChatsList || []).find(c => String(c.id) === String(chatId));
+            const chatName = getChatNameForDialog(chat);
+
+            if (chatItem) {
+                chatItem.classList.add('chat-item-context-active');
+                activeChatDeleteDialogItem = chatItem;
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'chat-delete-confirm-overlay';
+
+            const card = document.createElement('div');
+            card.className = 'chat-delete-confirm-card';
+
+            const avatarStyle = (chat && chat.avatar_background)
+                ? `background: linear-gradient(135deg, ${chat.avatar_background}, ${adjustColor(chat.avatar_background, 20)})`
+                : 'background: linear-gradient(135deg, #0088cc, #40a7e3)';
+
+            card.innerHTML = `
+                <div class="chat-delete-confirm-avatar" style="${avatarStyle}">${(chat && chat.initials) || '?'}</div>
+                <div class="chat-delete-confirm-title">Удалить чат</div>
+                <div class="chat-delete-confirm-text">Удалить чат с ${chatName} без возможности восстановления?</div>
+                <button type="button" class="chat-delete-confirm-btn" data-mode="me">Удалить только у себя</button>
+                <button type="button" class="chat-delete-confirm-btn" data-mode="everyone">Удалить у меня и ${chatName}</button>
+                <button type="button" class="chat-delete-confirm-btn chat-delete-confirm-cancel" data-mode="cancel">Отмена</button>
+            `;
+
+            // Подставляем реальную фотографию аватара, если она есть — как и в
+            // самом списке чатов (loadChatAvatar подменяет фон после загрузки).
+            if (chat && chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
+                loadChatAvatar(card.querySelector('.chat-delete-confirm-avatar'), chat.participants[0].platform_user_id, (chat.initials) || '?', chat.avatar_background);
+            }
+
+            card.querySelectorAll('.chat-delete-confirm-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const mode = btn.dataset.mode;
+                    closeDeleteChatDialog();
+                    if (mode === 'me' || mode === 'everyone') {
+                        deleteChatFromList(chatId, mode);
+                    }
+                });
+            });
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeDeleteChatDialog();
+            });
+
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+            activeChatDeleteDialog = overlay;
+
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+        }
+
+        // Удаляет чат — mode='everyone' стирает его и все сообщения у ОБОИХ
+        // участников из БД (как раньше), mode='me' лишь скрывает чат у текущего
+        // пользователя (чат появится снова, если придёт новое сообщение), не
+        // трогая его у собеседника. Из UI убирает мгновенно/оптимистично — как
+        // только пользователь выбрал вариант в диалоге, не дожидаясь ответа сети.
+        async function deleteChatFromList(chatId, mode = 'everyone') {
             closeAllChatSwipes();
             removeChatFromUI(chatId);
 
@@ -9593,7 +9788,7 @@ function getActiveElements() {
                 const response = await fetch(`${SERVER_URL}/delete_chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id, mode }),
                     credentials: 'include'
                 });
                 const data = await response.json();
