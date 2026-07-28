@@ -5443,6 +5443,11 @@
         // сообщение может "воскреснуть" из-за гонки: сервер ответит старыми данными до того,
         // как DELETE успеет примениться, и сообщение снова попадёт в IndexedDB и на экран.
         const locallyDeletedMessageIds = new Set();
+        // То же самое, что locallyDeletedMessageIds выше, но для целиком чатов: без этой защиты удалённый
+        // локально чат может мгновенно "воскреснуть", если 5-секундный REST-poll (startUnreadPolling)
+        // успеет отработать /get_chats ДО того, как запрос /delete_chat реально завершится на сервере —
+        // тогда /get_chats ещё мгновение вернёт удалённый чат, и без этой защиты он кажется "новым" и воскреснет.
+        const locallyDeletedChatIds = new Set();
         let userData = null;
 
         // ------------------------------------------------------------------
@@ -9262,6 +9267,9 @@ function getActiveElements() {
         }
 
         async function updateSingleChat(chatId) {
+            // Тот же гвард, что и в startUnreadPolling: если этот чат только что удалён локально,
+            // не даём устаревшему/запоздавшему WS-событию chat_activity воскресить его в списке.
+            if (locallyDeletedChatIds.has(String(chatId))) return;
             try {
                 const response = await fetch(`${SERVER_URL}/get_chat_info`, {
                     method: 'POST',
@@ -9834,6 +9842,17 @@ function getActiveElements() {
         // удалении, и при получении события 'chat_deleted' по сокету (когда
         // чат удалил собеседник или то же самое, но с другого устройства).
         function removeChatFromUI(chatId) {
+            // Помечаем чат как "недавно удалённый локально", чтобы 5-секундный
+            // REST-poll (startUnreadPolling) и WS-обработчик chat_activity не
+            // "воскресили" его, если сервер ещё не успел применить /delete_chat
+            // и на секунду-другую продолжает отдавать этот чат в /get_chats.
+            // Через 20с снимаем защиту — этого достаточно с запасом на один
+            // цикл 5с-поллинга + сетевые задержки, но не блокирует чат навсегда,
+            // если позже туда правда придёт новое сообщение.
+            const chatIdStr = String(chatId);
+            locallyDeletedChatIds.add(chatIdStr);
+            setTimeout(() => locallyDeletedChatIds.delete(chatIdStr), 20000);
+
             currentChatsList = (currentChatsList || []).filter(c => String(c.id) !== String(chatId));
             setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
 
@@ -12534,7 +12553,11 @@ function stopProfileDataPolling() {
                         // Чаты, которых ещё нет в currentChatsList (новый чат или пропущенное WS-событие chat_activity)
                         // раньше этот polling ТОЛЬКО обновлял уже известные чаты, новый чат не появлялся, пока страница не перезагружалась.
                         const newServerChats = data.chats.filter(serverChat =>
-                            !currentChatsList.some(c => String(c.id) === String(serverChat.id))
+                            !currentChatsList.some(c => String(c.id) === String(serverChat.id)) &&
+                            // Не воскрешаем чат, который пользователь только что удалил локально —
+                            // сервер может ещё мгновение отдавать его в /get_chats, пока /delete_chat
+                            // не применился (гонка), см. locallyDeletedChatIds.
+                            !locallyDeletedChatIds.has(String(serverChat.id))
                         );
                         if (newServerChats.length > 0) {
                             currentChatsList.unshift(...newServerChats);
