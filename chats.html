@@ -5496,7 +5496,13 @@
                 // своим собственным поллингом/локальным добавлением сообщения, повторный запрос был бы лишним.
                 appSocket.on('chat_activity', (payload) => {
                     if (!payload || payload.chat_id == null) return;
-                    if (currentChatId != null && String(currentChatId) === String(payload.chat_id)) return;
+                    // Пропускаем обновление списка ТОЛЬКО если этот чат уже открыт
+                    // И уже присутствует в списке — экран чата и так обновляется сам.
+                    // Если чата ещё нет в списке (первое сообщение в только что созданном
+                    // чате, который сам отправитель держит открытым), список всё равно
+                    // нужно обновить — иначе новый чат никогда не появится в нём.
+                    const alreadyInList = currentChatsList.some(c => String(c.id) === String(payload.chat_id));
+                    if (currentChatId != null && String(currentChatId) === String(payload.chat_id) && alreadyInList) return;
                     updateSingleChat(payload.chat_id);
                 });
 
@@ -10750,7 +10756,15 @@ function getActiveElements() {
                         };
                         
                         currentChatsList.unshift(newChat);
-                        updateChatItemInDOM(data.chat_id, newChat);
+                        // updateChatItemInDOM() ищет уже существующий .chat-item в DOM и
+                        // молча ничего не делает, если его нет — а для только что созданного
+                        // чата такого элемента ещё нет (в DOM был, максимум, временный чат с
+                        // другим id `temp_...`, либо вообще ничего). Поэтому у отправителя
+                        // список не обновлялся при первом сообщении. Полная перерисовка
+                        // списка (тот же приём, что и в updateSingleChat для новых чатов)
+                        // гарантированно вставляет новый чат в DOM.
+                        currentChatsList = sortChats(currentChatsList);
+                        renderChats(currentChatsList);
                         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                     }
                     
