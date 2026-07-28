@@ -5489,6 +5489,17 @@
                     removeChatFromUI(payload.chat_id);
                 });
 
+                // Новое сообщение/альбом в каком-то из чатов пользователя (см. broadcast_chat_activity на сервере).
+                // Если это первое сообщение от нового собеседника — чат мгновенно появляется в списке без
+                // перезагрузки страницы; если чат уже был в списке — он поднимается наверх и обновляется превью.
+                // Если это именно сейчас открытый чат — ничего не делаем: экран чата и так обновляется мгновенно
+                // своим собственным поллингом/локальным добавлением сообщения, повторный запрос был бы лишним.
+                appSocket.on('chat_activity', (payload) => {
+                    if (!payload || payload.chat_id == null) return;
+                    if (currentChatId != null && String(currentChatId) === String(payload.chat_id)) return;
+                    updateSingleChat(payload.chat_id);
+                });
+
                 appSocket.on('connect_error', () => {}); // молча достаточно — polling уже работает как fallback
             } catch (e) {
                 console.warn('WS connect failed, staying on polling-only mode', e);
@@ -9262,12 +9273,28 @@ function getActiveElements() {
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    const chatIndex = currentChatsList.findIndex(chat => chat.id === chatId);
-                    if (chatIndex !== -1) currentChatsList[chatIndex] = data.chat;
+                    const chatIndex = currentChatsList.findIndex(chat => String(chat.id) === String(chatId));
+                    const isNewChat = chatIndex === -1;
+                    if (!isNewChat) currentChatsList[chatIndex] = data.chat;
                     else currentChatsList.unshift(data.chat);
-                    
-                    updateChatItemInDOM(chatId, data.chat);
-                    moveChatToTop(chatId);
+
+                    const { chatsList } = getActiveElements();
+                    const existsInDOM = !!(chatsList && chatsList.querySelector(`.chat-item[data-chat-id="${chatId}"]`));
+
+                    if (isNewChat || !existsInDOM) {
+                        // Чата ещё нет в DOM (первое сообщение от нового собеседника,
+                        // либо список сейчас пуст/показывает заглушку "нет чатов") —
+                        // точечно обновлять нечего, поэтому перерисовываем весь список
+                        // заново с уже обновлёнными данными (currentChatsList).
+                        currentChatsList = sortChats(currentChatsList);
+                        renderChats(currentChatsList);
+                        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    } else {
+                        updateChatItemInDOM(chatId, data.chat);
+                        moveChatToTop(chatId);
+                        currentChatsList = sortChats(currentChatsList);
+                        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    }
                 }
             } catch (error) {}
         }
