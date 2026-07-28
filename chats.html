@@ -5465,8 +5465,16 @@
                 });
 
                 appSocket.on('connect', () => {
+                    console.log('[WS] connected', appSocket.id);
                     // При реконнекте (например после сна телефона) перезаходим в комнату текущего открытого чата, если он есть.
                     if (currentChatId) appSocket.emit('join_chat', { chat_id: currentChatId });
+                    // Как только сокет (пере)подключился — сразу подтягиваем список чатов на случай,
+                    // если что-то произошло, пока соединения не было (новый чат/сообщение).
+                    loadChats().catch(() => {});
+                });
+
+                appSocket.on('disconnect', (reason) => {
+                    console.warn('[WS] disconnected', reason);
                 });
 
                 // Удаление — либо чьим-то удалили в текущем чате для всех ('everyone').
@@ -5495,6 +5503,7 @@
                 // Если это именно сейчас открытый чат — ничего не делаем: экран чата и так обновляется мгновенно
                 // своим собственным поллингом/локальным добавлением сообщения, повторный запрос был бы лишним.
                 appSocket.on('chat_activity', (payload) => {
+                    console.log('[WS] chat_activity received for chat_id=', payload && payload.chat_id);
                     if (!payload || payload.chat_id == null) return;
                     // Пропускаем обновление списка ТОЛЬКО если этот чат уже открыт
                     // И уже присутствует в списке — экран чата и так обновляется сам.
@@ -5506,10 +5515,27 @@
                     updateSingleChat(payload.chat_id);
                 });
 
-                appSocket.on('connect_error', () => {}); // молча достаточно — polling уже работает как fallback
+                appSocket.on('connect_error', (err) => {
+                    console.warn('[WS] connect_error', err && err.message ? err.message : err);
+                });
             } catch (e) {
                 console.warn('WS connect failed, staying on polling-only mode', e);
             }
+        }
+
+        // Настоящий fallback-поллинг СПИСКА ЧАТОВ (не сообщений внутри чата — у того своя логика).
+        // Раньше комментарии утверждали, что "polling уже работает как fallback" для chat_activity,
+        // но такого поллинга не существовало — список чатов на 100% зависел от доставки WS-события
+        // chat_activity. Если WS не подключился/не доставил событие (например при первом сообщении
+        // в новом чате на стороне получателя), новый чат никогда не появлялся в списке без ручной
+        // перезагрузки страницы. Этот интервал подстраховывает именно этот сценарий.
+        let chatsListPollInterval = null;
+        function startChatsListPolling() {
+            if (chatsListPollInterval) return; // уже запущен
+            chatsListPollInterval = setInterval(() => {
+                if (document.hidden) return; // не дёргаем сервер, пока вкладка/приложение в фоне
+                loadChats().catch(() => {});
+            }, 6000);
         }
 
         // Вызывается и из поллинга (как fallback-сетка после полной реконцилиации), и напрямую из WS-хендлеров выше.
@@ -12157,6 +12183,7 @@ function stopProfileDataPolling() {
             
             userData = JSON.parse(userDataFromStorage);
             connectAppSocket();
+            startChatsListPolling();
 
             // Не блокируем инициализацию страницы — подписка/баннер
             // подключаются в фоне
