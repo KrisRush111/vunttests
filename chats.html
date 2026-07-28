@@ -12531,8 +12531,21 @@ function stopProfileDataPolling() {
                     const data = await response.json();
                     if (data.status === 'success' && data.chats) {
                         let hasChanges = false;
+                        // Чаты, которых ещё нет в currentChatsList (новый чат или пропущенное WS-событие chat_activity)
+                        // раньше этот polling ТОЛЬКО обновлял уже известные чаты, новый чат не появлялся, пока страница не перезагружалась.
+                        const newServerChats = data.chats.filter(serverChat =>
+                            !currentChatsList.some(c => String(c.id) === String(serverChat.id))
+                        );
+                        if (newServerChats.length > 0) {
+                            currentChatsList.unshift(...newServerChats);
+                            currentChatsList = sortChats(currentChatsList);
+                            renderChats(currentChatsList);
+                            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                            hasChanges = true;
+                        }
                         data.chats.forEach(serverChat => {
                             const localChat = currentChatsList.find(c => c.id === serverChat.id);
+                            if (!localChat) return;
                             const oldCount = localChat ? (localChat.unread_count || 0) : 0;
                             const newCount = serverChat.unread_count || 0;
                             if (oldCount !== newCount) {
