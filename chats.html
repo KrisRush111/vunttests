@@ -6728,6 +6728,7 @@ function getActiveElements() {
                 
                 let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
+                    const oldTempChatId = currentChat.id;
                     const response = await fetch(`${SERVER_URL}/create_chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -6754,8 +6755,13 @@ function getActiveElements() {
                         last_message_type: 'image'
                     };
                     
+                    // Убираем временный чат (temp_...) из списка — иначе рядом с новым
+                    // реальным чатом (другой id) в списке остаётся его "призрак", и при
+                    // следующей полной перерисовке (renderChats) чат отображается дважды.
+                    currentChatsList = currentChatsList.filter(c => c.id !== oldTempChatId);
                     currentChatsList.unshift(newChat);
-                    updateChatItemInDOM(data.chat_id, newChat);
+                    currentChatsList = sortChats(currentChatsList);
+                    renderChats(currentChatsList);
                     setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 }
 
@@ -6912,6 +6918,7 @@ function getActiveElements() {
 
                 let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
+                    const oldTempChatId = currentChat.id;
                     const response = await fetch(`${SERVER_URL}/create_chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -6938,8 +6945,13 @@ function getActiveElements() {
                         last_message_type: 'image'
                     };
 
+                    // Убираем временный чат (temp_...) из списка — иначе рядом с новым
+                    // реальным чатом (другой id) в списке остаётся его "призрак", и при
+                    // следующей полной перерисовке (renderChats) чат отображается дважды.
+                    currentChatsList = currentChatsList.filter(c => c.id !== oldTempChatId);
                     currentChatsList.unshift(newChat);
-                    updateChatItemInDOM(data.chat_id, newChat);
+                    currentChatsList = sortChats(currentChatsList);
+                    renderChats(currentChatsList);
                     setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 }
 
@@ -10380,7 +10392,12 @@ function getActiveElements() {
                     };
                     
                     currentChatsList.unshift(tempChat);
-                    updateChatItemInDOM(tempChat.id, tempChat);
+                    // updateChatItemInDOM() требует, чтобы .chat-item для этого чата уже
+                    // существовал в DOM — а у только что созданного временного чата его ещё
+                    // нет, поэтому раньше он молча не появлялся в списке (в т.ч. без фото
+                    // аватара) вплоть до следующей полной перерисовки. renderChats рисует
+                    // список сразу, включая загрузку фото аватара, если оно есть.
+                    renderChats(currentChatsList);
                     openTempChat(tempChat);
                     
                     const { messageInput } = getActiveElements();
@@ -10728,6 +10745,7 @@ function getActiveElements() {
                     let actualChatId = currentChat.id;
                     
                     if (currentChat.is_temp) {
+                        const oldTempChatId = currentChat.id;
                         const response = await fetch(`${SERVER_URL}/create_chat`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -10755,6 +10773,10 @@ function getActiveElements() {
                             avatar_background: currentChat.avatar_background
                         };
                         
+                        // Убираем временный чат (temp_...) из списка — иначе рядом с новым
+                        // реальным чатом (другой id) в списке остаётся его "призрак", и он
+                        // отображается вместе с новым как дубль при полной перерисовке ниже.
+                        currentChatsList = currentChatsList.filter(c => c.id !== oldTempChatId);
                         currentChatsList.unshift(newChat);
                         // updateChatItemInDOM() ищет уже существующий .chat-item в DOM и
                         // молча ничего не делает, если его нет — а для только что созданного
