@@ -4557,10 +4557,9 @@
 }
 
 .photo-viewer-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
     user-select: none;
     -webkit-user-drag: none;
     cursor: default;
@@ -11444,13 +11443,11 @@ async function updateProfileModalUI(user) {
         AvatarCache.render(SERVER_URL, activeElements.modalProfileAvatar, user.platform_user_id, initial, user.avatar_background, true);
         activeElements.modalProfileAvatar.style.backgroundColor = '';
 
-        // Обработчик клика на аватар — открываем полноэкранный просмотр.
-        // Берём фото напрямую с сервера (оригинальное качество), а не из
-        // локального кэша AvatarCache — тот кэш оптимизирован под маленький
-        // кружок 40-50px и может быть уменьшенной/сжатой копией, которая
-        // выглядела бы размытой на весь экран.
-        activeElements.modalProfileAvatar.onclick = () => {
-            openPhotoViewer(`${SERVER_URL}/avatar/${user.platform_user_id}`, user.nickname || '');
+        // Обработчик клика на аватар — открываем то, что сейчас отображается
+        activeElements.modalProfileAvatar.onclick = async () => {
+            const local = await AvatarCache.getLocal(user.platform_user_id);
+            const src = local?.dataUrl || `${SERVER_URL}/avatar/${user.platform_user_id}`;
+            openPhotoViewer(src, user.nickname || '');
         };
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
@@ -12544,10 +12541,10 @@ function stopProfileDataPolling() {
                     return;
                 }
                 const displayName = otherParticipant.nickname || (fallbackTitleEl && fallbackTitleEl.textContent) || '';
-                // Берём оригинал с сервера напрямую (не уменьшенную копию из
-                // AvatarCache, которая рассчитана на маленький кружок в хедере) —
-                // так фото на весь экран остаётся максимально чётким.
-                openPhotoViewer(`${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`, displayName);
+                AvatarCache.getLocal(otherParticipant.platform_user_id).then(local => {
+                    const src = (local && local.dataUrl) || `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
+                    openPhotoViewer(src, displayName);
+                });
             }
 
             if (chatAvatarDesktop && !chatAvatarDesktop.dataset.clickBound) {
@@ -13008,4 +13005,5 @@ function stopProfileDataPolling() {
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
-</html>  
+</html>   
+  
