@@ -6246,47 +6246,12 @@ function closeProfileModal() {
     }
 }
 
-function closeChat() {
-    const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
-
-    if (!chatModal) return;
-
-    currentChat = null;
-    currentChatId = null;
-    currentMessages = [];
-
-    if (chatAvatar) {
-        chatAvatar.style.backgroundImage = '';
-        chatAvatar.style.backgroundColor = '';
-        chatAvatar.textContent = '';
-    }
-    
-    if (chatTitle) chatTitle.textContent = '';
-    if (chatStatus) chatStatus.textContent = '';
-    
-    if (messagesContainer) messagesContainer.innerHTML = '';
-    
-    if (noMessages) {
-        noMessages.style.display = 'block';
-        noMessages.textContent = 'Сообщений пока нет...';
-    }
-
-    if (isDesktop) {
-        // Закрываем и чат, и профиль, показываем плейсхолдер
-        updateDesktopVisibility(false, false);
-    } else {
-        chatModal.classList.remove('active');
-        document.body.style.overflow = '';
-    }
-
-    if (openChatAbortController) {
-        openChatAbortController.abort();
-        openChatAbortController = null;
-    }
-    
-    isOpeningChat = false;
-}
-
+// ПРИМЕЧАНИЕ: единственное определение closeChat() теперь ниже по файлу —
+// раньше здесь была вторая, более старая копия этой функции. Обе были
+// объявлены через `function closeChat() {...}`, поэтому JS-хостинг реально
+// использовал только ПОСЛЕДНЮЮ по порядку в файле версию — эта была мёртвым
+// кодом, но создавала путаницу при отладке (правки здесь ни на что не влияли).
+// Убрали дубликат.
 // Добавьте обработчик для кнопки закрытия профиля
 if (profileCloseButtonDesktop) {
     profileCloseButtonDesktop.addEventListener('click', () => {
@@ -11517,12 +11482,33 @@ function stopProfileDataPolling() {
 
             stopMessagePolling();
 
+            // Запоминаем, какой чат закрываем, ДО того как обнулим currentChatId —
+            // нужен ниже для финальной подстраховки по mark_all_as_read и для
+            // немедленного пересчёта бейджа (см. комментарий у pollUnreadOnce).
+            const closingChatId = currentChatId;
+
             if (appSocket && currentChatId != null) {
                 appSocket.emit('leave_chat', { chat_id: currentChatId });
             }
             currentChatId = null;
             currentChat = null;
             currentMessages = [];
+
+            // ПОДСТРАХОВКА: markAllMessagesAsRead уже вызывается при открытии
+            // чата (см. loadMessages), но раньше это был единственный вызов —
+            // если тот запрос не успел дойти до сервера/потерялся из-за
+            // сетевого сбоя, синий бейдж непрочитанных в списке чатов оставался
+            // висеть и пропадал только при повторном заходе в этот же чат
+            // (который заново вызывал mark_all_as_read). Дублируем вызов здесь,
+            // при закрытии — это идемпотентно (сервер просто ничего не найдёт
+            // для обновления, если уже всё прочитано) и закрывает окно гонки.
+            if (closingChatId != null) {
+                markAllMessagesAsRead(closingChatId);
+                // Не ждём 5-секундный тик startUnreadPolling — пересчитываем
+                // бейдж сразу после того, как сервер должен был обработать
+                // отметку "прочитано" (небольшая задержка на round-trip).
+                setTimeout(() => { if (typeof pollUnreadOnce === 'function') pollUnreadOnce(); }, 700);
+            }
 
             if (chatAvatar) {
                 chatAvatar.style.backgroundImage = '';
@@ -12549,61 +12535,68 @@ function stopProfileDataPolling() {
         // === UNREAD BADGE REAL-TIME POLLING ===
         let unreadPollingInterval = null;
 
+        // Вынесено из setInterval в отдельную функцию, чтобы можно было
+        // вызвать один внеочередной тик сразу после закрытия чата (см.
+        // closeChat) — раньше бейдж непрочитанных в списке мог оставаться
+        // видимым до 5 секунд (или пока пользователь не откроет чат ещё раз,
+        // если в этот момент был in-flight запрос к серверу), а не пропадать
+        // сразу же после выхода из чата.
+        async function pollUnreadOnce() {
+            // Пока пользователь реально внутри чата — не трогаем список,
+            // там своя, более частая синхронизация (startMessagePolling).
+            if (currentChat) return;
+            if (!userData || !userData.platform_user_id) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/get_chats`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({platform_user_id: userData.platform_user_id}),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status === 'success' && data.chats) {
+                    data.chats.forEach(serverChat => {
+                        const localChat = currentChatsList.find(c => c.id === serverChat.id);
+                        const oldCount = localChat ? (localChat.unread_count || 0) : 0;
+                        const newCount = serverChat.unread_count || 0;
+                        if (oldCount !== newCount) {
+                            updateChatItemInDOM(serverChat.id, { unread_count: newCount });
+                            if (localChat) localChat.unread_count = newCount;
+                        }
+                        // Also update last_message preview if changed
+                        if (localChat && localChat.last_message !== serverChat.last_message) {
+                            updateChatItemInDOM(serverChat.id, { 
+                                last_message: serverChat.last_message, 
+                                last_message_time: serverChat.last_message_time,
+                                last_message_type: serverChat.last_message_type,
+                                last_message_is_me: serverChat.last_message_is_me,
+                                last_message_is_read: serverChat.last_message_is_read,
+                                unread_count: newCount
+                            });
+                            localChat.last_message = serverChat.last_message;
+                            localChat.last_message_time = serverChat.last_message_time;
+                            localChat.last_message_type = serverChat.last_message_type;
+                            localChat.last_message_is_me = serverChat.last_message_is_me;
+                            localChat.last_message_is_read = serverChat.last_message_is_read;
+                        } else if (localChat && localChat.last_message_is_read !== serverChat.last_message_is_read) {
+                            // Текст последнего сообщения не изменился, но собеседник мог только что
+                            // его прочитать — обновляем галочку в списке чатов на "прочитано".
+                            updateChatItemInDOM(serverChat.id, {
+                                last_message_is_me: serverChat.last_message_is_me,
+                                last_message_is_read: serverChat.last_message_is_read
+                            });
+                            localChat.last_message_is_me = serverChat.last_message_is_me;
+                            localChat.last_message_is_read = serverChat.last_message_is_read;
+                        }
+                    });
+                }
+            } catch(e) {}
+        }
+
         function startUnreadPolling() {
             stopUnreadPolling();
-            unreadPollingInterval = setInterval(async () => {
-                // Only poll when user is NOT inside a specific chat
-                if (currentChat) return;
-                if (!userData || !userData.platform_user_id) return;
-
-                try {
-                    const response = await fetch(`${SERVER_URL}/get_chats`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({platform_user_id: userData.platform_user_id}),
-                        credentials: 'include'
-                    });
-                    const data = await response.json();
-                    if (data.status === 'success' && data.chats) {
-                        let hasChanges = false;
-                        data.chats.forEach(serverChat => {
-                            const localChat = currentChatsList.find(c => c.id === serverChat.id);
-                            const oldCount = localChat ? (localChat.unread_count || 0) : 0;
-                            const newCount = serverChat.unread_count || 0;
-                            if (oldCount !== newCount) {
-                                hasChanges = true;
-                                updateChatItemInDOM(serverChat.id, { unread_count: newCount });
-                                if (localChat) localChat.unread_count = newCount;
-                            }
-                            // Also update last_message preview if changed
-                            if (localChat && localChat.last_message !== serverChat.last_message) {
-                                updateChatItemInDOM(serverChat.id, { 
-                                    last_message: serverChat.last_message, 
-                                    last_message_time: serverChat.last_message_time,
-                                    last_message_type: serverChat.last_message_type,
-                                    last_message_is_me: serverChat.last_message_is_me,
-                                    last_message_is_read: serverChat.last_message_is_read,
-                                    unread_count: newCount
-                                });
-                                localChat.last_message = serverChat.last_message;
-                                localChat.last_message_time = serverChat.last_message_time;
-                                localChat.last_message_type = serverChat.last_message_type;
-                                localChat.last_message_is_me = serverChat.last_message_is_me;
-                                localChat.last_message_is_read = serverChat.last_message_is_read;
-                            } else if (localChat && localChat.last_message_is_read !== serverChat.last_message_is_read) {
-                                // Текст последнего сообщения не изменился, но собеседник мог только что
-                                // его прочитать — обновляем галочку в списке чатов на "прочитано".
-                                updateChatItemInDOM(serverChat.id, {
-                                    last_message_is_me: serverChat.last_message_is_me,
-                                    last_message_is_read: serverChat.last_message_is_read
-                                });
-                                localChat.last_message_is_me = serverChat.last_message_is_me;
-                                localChat.last_message_is_read = serverChat.last_message_is_read;
-                            }
-                        });
-                    }
-                } catch(e) {}
-            }, 5000); // Poll every 5 seconds
+            unreadPollingInterval = setInterval(pollUnreadOnce, 5000); // Poll every 5 seconds
         }
 
         function stopUnreadPolling() {
