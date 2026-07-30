@@ -9965,10 +9965,23 @@ function getActiveElements() {
 
             pinnedItems.forEach(item => {
                 const itemRect = item.getBoundingClientRect();
-                const visibleTop = Math.max(itemRect.top, contentRect.top);
-                const visibleBottom = Math.min(itemRect.bottom, contentRect.bottom);
+                let visibleTop = Math.max(itemRect.top, contentRect.top);
+                let visibleBottom = Math.min(itemRect.bottom, contentRect.bottom);
                 if (visibleBottom <= visibleTop) return; // чат целиком уехал за пределы видимой области списка
+
+                // Если это первая/последняя строка списка, над/под ней в
+                // .chats-content остаётся только паддинг + скруглённый угол
+                // самой карточки — без этой добивки там был бы виден "срез"
+                // скруглённого белого угла на фоне уже прямоугольной подсветки
+                // (ровно то, что выглядит некорректно на скриншоте). Поэтому
+                // растягиваем коридор до самой границы списка, чтобы срез угла
+                // тоже был закрашен и подсветка выглядела одним сплошным блоком.
+                const wrapper = item.closest('.chat-item-swipe') || item;
+                if (!wrapper.previousElementSibling) visibleTop = contentRect.top;
+                if (!wrapper.nextElementSibling) visibleBottom = contentRect.bottom;
+
                 const visibleHeight = visibleBottom - visibleTop;
+                if (visibleHeight <= 0) return;
 
                 // Левый коридор: от реального края экрана/сайдбара до левого края строки.
                 makeStrip(left, itemRect.left - left, visibleTop, visibleHeight);
@@ -13419,4 +13432,4 @@ function stopProfileDataPolling() {
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
-</html>  
+</html>   
