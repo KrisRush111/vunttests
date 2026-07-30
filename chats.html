@@ -568,22 +568,39 @@
 
         /* ===== Контекстное меню чата по правому клику (десктоп) =====
            Пока меню открыто, элемент подсвечивается рамкой — так же, как
-           сообщение "поднимается" в своей рамке при удержании (message-action-menu).
-           border-radius:0 и outline-offset:0 — специально: ячейка чата занимает
-           всю ширину строки без отступов от краёв (edge-to-edge), поэтому
-           скруглённые внутрь-смещённые углы срезали подсветку по краям и она
-           выглядела "плиткой", вписанной внутрь ячейки, а не самой ячейкой —
-           теперь рамка и фон в точности совпадают с реальными границами всей строки. */
+           сообщение "поднимается" в своей рамке при удержании (message-action-menu). */
+        /* Сам чат больше не подсвечивается рамкой напрямую (она была бы
+           ограничена шириной .chat-item из-за паддингов/скругления родителей) —
+           вместо этого класс служит только маркером "этот чат сейчас активен
+           в меню/диалоге", а видимую рамку рисует отдельный оверлей
+           .chat-item-highlight-frame (см. ниже), который позиционируется через
+           position: fixed и getBoundingClientRect в JS, поэтому не зависит от
+           паддингов .chats-container/.chats-content и может растягиваться до
+           реальных краёв экрана (моб.) или до краёв плейсхолдера с чатами (деск.). */
         .chat-item-context-active {
-            outline: 2px solid rgba(36, 129, 204, 0.35);
-            outline-offset: 0;
-            border-radius: 0;
-            background-color: rgba(36, 129, 204, 0.06) !important;
+            background-color: rgba(36, 129, 204, 0.06);
         }
 
         @media (prefers-color-scheme: dark) {
             .chat-item-context-active {
-                background-color: rgba(255, 255, 255, 0.06) !important;
+                background-color: rgba(255, 255, 255, 0.06);
+            }
+        }
+
+        .chat-item-highlight-frame {
+            position: fixed;
+            z-index: 15;
+            pointer-events: none;
+            border-radius: 0;
+            outline: 2px solid rgba(36, 129, 204, 0.35);
+            outline-offset: -2px;
+            background-color: rgba(36, 129, 204, 0.06);
+            transition: opacity 0.12s ease;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-item-highlight-frame {
+                background-color: rgba(255, 255, 255, 0.06);
             }
         }
 
@@ -10001,6 +10018,60 @@ function getActiveElements() {
             listEl.addEventListener('pointercancel', endChatSwipe);
         }
 
+        // ===== Рамка-подсветка активного чата (растянута до реальных краёв) =====
+        // Раньше рамка рисовалась прямо на .chat-item через outline и была
+        // ограничена шириной элемента, зауженной паддингами .chats-container/
+        // .chats-content. Теперь рамка — отдельный div, добавленный в body с
+        // position: fixed, поэтому её ширина не зависит от паддингов предков:
+        // на мобильных она растягивается до самых краёв экрана устройства, на
+        // десктопе — до краёв плейсхолдера со списком чатов (.chats-content).
+        let activeChatHighlightFrame = null;
+        let activeChatHighlightItem = null;
+
+        function positionChatHighlightFrame(chatItem) {
+            if (!chatItem) return;
+            if (!activeChatHighlightFrame) {
+                activeChatHighlightFrame = document.createElement('div');
+                activeChatHighlightFrame.className = 'chat-item-highlight-frame';
+                document.body.appendChild(activeChatHighlightFrame);
+            }
+            activeChatHighlightItem = chatItem;
+
+            const itemRect = chatItem.getBoundingClientRect();
+            const isDesktop = window.innerWidth >= 768;
+
+            let left = 0;
+            let width = window.innerWidth;
+
+            if (isDesktop) {
+                const listContainer = chatItem.closest('.chats-content') || chatItem.closest('.desktop-sidebar');
+                if (listContainer) {
+                    const listRect = listContainer.getBoundingClientRect();
+                    left = listRect.left;
+                    width = listRect.width;
+                }
+            }
+
+            activeChatHighlightFrame.style.top = `${itemRect.top}px`;
+            activeChatHighlightFrame.style.height = `${itemRect.height}px`;
+            activeChatHighlightFrame.style.left = `${left}px`;
+            activeChatHighlightFrame.style.width = `${width}px`;
+        }
+
+        function removeChatHighlightFrame() {
+            if (activeChatHighlightFrame) {
+                activeChatHighlightFrame.remove();
+                activeChatHighlightFrame = null;
+            }
+            activeChatHighlightItem = null;
+        }
+
+        // Перепозиционируем рамку при ресайзе/повороте экрана, пока она активна
+        // (например, при переходе между мобильной и десктопной раскладкой).
+        window.addEventListener('resize', () => {
+            if (activeChatHighlightItem) positionChatHighlightFrame(activeChatHighlightItem);
+        });
+
         // ===== Контекстное меню чата по правому клику (десктоп) =====
         // Показывает компактное меню "Удалить" рядом с курсором — тот же визуальный
         // стиль (.message-action-menu/.message-action-item), что и у меню сообщения
@@ -10017,6 +10088,7 @@ function getActiveElements() {
                 activeChatContextItem.classList.remove('chat-item-context-active');
                 activeChatContextItem = null;
             }
+            removeChatHighlightFrame();
             document.removeEventListener('click', closeChatContextMenu, true);
             document.removeEventListener('scroll', closeChatContextMenu, true);
             document.removeEventListener('contextmenu', closeChatContextMenuOnOutsideContext, true);
@@ -10032,6 +10104,7 @@ function getActiveElements() {
 
             chatItem.classList.add('chat-item-context-active');
             activeChatContextItem = chatItem;
+            positionChatHighlightFrame(chatItem);
 
             // Самый меню, что и при удержании сообщения (message-action-menu +
             // message-action-item.destructive) — заматованная карточка с одной красной строкой «Удалить»
@@ -10135,6 +10208,7 @@ function getActiveElements() {
                 activeChatDeleteDialogItem.classList.remove('chat-item-context-active');
                 activeChatDeleteDialogItem = null;
             }
+            removeChatHighlightFrame();
         }
 
         function openDeleteChatDialog(chatId, chatItem) {
@@ -10148,6 +10222,7 @@ function getActiveElements() {
             if (chatItem) {
                 chatItem.classList.add('chat-item-context-active');
                 activeChatDeleteDialogItem = chatItem;
+                positionChatHighlightFrame(chatItem);
             }
 
             const overlay = document.createElement('div');
