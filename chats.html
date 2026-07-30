@@ -576,7 +576,8 @@
            карточки, то есть строго в "боковых полях" по краям. */
         .pinned-highlight-bleed {
             position: fixed;
-            z-index: -1;
+            /* На мобильных у .chats-content есть непрозрачный фон + скругление + боковые паддинги - ниже заменяем на два узких прямоугольника с позитивным z-index строго в боковых коридорах за самой строкой (см. syncPinnedHighlights). */
+            z-index: 1;
             pointer-events: none;
             background-color: #e0e0e0;
         }
@@ -9897,11 +9898,25 @@ function getActiveElements() {
         }
 
         // ===== "Вытекающая" за карточку подсветка закреплённых чатов =====
-        // См. .pinned-highlight-bleed в CSS: рисуем по одному fixed-прямоугольнику
-        // на каждый видимый .chat-item.is-pinned, растянутому по горизонтали до
-        // реальных краёв экрана (моб.) или до краёв плейсхолдера со списком чатов
-        // (деск.), и обрезанному по вертикали границами самого списка (.chats-content),
-        // чтобы прямоугольник не "вылезал" поверх поисковой строки/навигации,
+        // На мобильных у .chats-content есть непрозрачный фон + border-radius +
+        // overflow: hidden + боковые паддинги (12px/8px) — это "белая карточка",
+        // которая рисуется НАД прежним фоновым (z-index < 0) прямоугольником и
+        // поэтому обрезала подсветку ровно по краю паддинга/скругления, не давая
+        // ей дойти до реальных краёв экрана. На десктопе такой проблемы нет —
+        // там у .chats-content нет ни паддингов, ни скругления, ни overflow.
+        //
+        // Чтобы это исправить без переделки самой "карточки" (и не трогая
+        // остальной список), рисуем не один сплошной прямоугольник, а два узких
+        // "коридора" — слева и справа от самой строки чата (см. itemRect) — с
+        // положительным z-index (см. .pinned-highlight-bleed), т.е. поверх фона
+        // карточки. Так как границы коридоров всегда совпадают с левым/правым
+        // краем самой строки, они физически не перекрывают аватар/текст чата —
+        // только "коридор"-паддинг вокруг него и (если экран уже был бы обрезан
+        // скруглением) пространство за пределами скруглённых углов. На десктопе
+        // (паддинг 0) ширина обоих коридоров получается нулевой, поэтому там
+        // ничего не рисуется и раньше работавшая подсветка не меняется.
+        // Вертикально прямоугольники всё так же обрезаны границами самого списка
+        // (.chats-content), чтобы не "вылезать" поверх поисковой строки/навигации,
         // когда закреплённый чат частично уходит за верх/низ списка при скролле.
         let pinnedHighlightEls = [];
         let pinnedHighlightRaf = null;
@@ -9934,21 +9949,31 @@ function getActiveElements() {
                 left = sidebarRect.left;
                 width = sidebarRect.width;
             }
+            const right = left + width;
+
+            const makeStrip = (stripLeft, stripWidth, visibleTop, visibleHeight) => {
+                if (stripWidth <= 0 || visibleHeight <= 0) return;
+                const bleed = document.createElement('div');
+                bleed.className = 'pinned-highlight-bleed';
+                bleed.style.top = `${visibleTop}px`;
+                bleed.style.height = `${visibleHeight}px`;
+                bleed.style.left = `${stripLeft}px`;
+                bleed.style.width = `${stripWidth}px`;
+                document.body.appendChild(bleed);
+                pinnedHighlightEls.push(bleed);
+            };
 
             pinnedItems.forEach(item => {
                 const itemRect = item.getBoundingClientRect();
                 const visibleTop = Math.max(itemRect.top, contentRect.top);
                 const visibleBottom = Math.min(itemRect.bottom, contentRect.bottom);
                 if (visibleBottom <= visibleTop) return; // чат целиком уехал за пределы видимой области списка
+                const visibleHeight = visibleBottom - visibleTop;
 
-                const bleed = document.createElement('div');
-                bleed.className = 'pinned-highlight-bleed';
-                bleed.style.top = `${visibleTop}px`;
-                bleed.style.height = `${visibleBottom - visibleTop}px`;
-                bleed.style.left = `${left}px`;
-                bleed.style.width = `${width}px`;
-                document.body.appendChild(bleed);
-                pinnedHighlightEls.push(bleed);
+                // Левый коридор: от реального края экрана/сайдбара до левого края строки.
+                makeStrip(left, itemRect.left - left, visibleTop, visibleHeight);
+                // Правый коридор: от правого края строки до реального края экрана/сайдбара.
+                makeStrip(itemRect.right, right - itemRect.right, visibleTop, visibleHeight);
             });
         }
 
@@ -13394,4 +13419,4 @@ function stopProfileDataPolling() {
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
-</html>   
+</html>  
