@@ -433,15 +433,64 @@
         }
 
         .chat-item-swipe.swiped .chat-item {
-            transform: translateX(-92px);
+            transform: translateX(-176px);
         }
 
-        .chat-delete-action {
+        /* Контейнер свайп-кнопок (Закрепить/Открепить + Удалить), лежит под
+           ячейкой чата и открывается вместе с ней. Логика появления/скрытия
+           (opacity/visibility/transform + тайминги) — та же, что раньше была
+           только у одной кнопки удаления, просто теперь применяется ко всему
+           контейнеру разом, чтобы обе кнопки появлялись/исчезали синхронно. */
+        .chat-swipe-actions {
             position: absolute;
             top: 8px;
             right: 8px;
             bottom: 8px;
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+            z-index: 0;
+            /* Скрыт по умолчанию: фон .chat-item при hover/active становится
+               полупрозрачным, и без этого кнопки "просвечивали" бы через него
+               даже без реального смахивания. Появление плавно привязано к
+               прогрессу самого жеста (см. pointermove в attachChatSwipeHandlers).
+               Скрытие (когда ячейка возвращается на место) специально СЫСТРЕЕ
+               появления и с более резким уходом в масштаб — чтобы кнопки успевали
+               исчезнуть и не пересекались с возвращающейся ячейкой, которая едет
+               обратно те же 0.25s. Транзишен ниже применяется именно к закрытию
+               (переход "к базовому правилу"), а транзишен в .swiped/.dragging —
+               к открытию. */
+            opacity: 0;
+            transform: scale(0.35);
+            pointer-events: none;
+            /* visibility: hidden — жёсткий, не анимируемый выключатель рендера.
+               В отличие от opacity, он не может «частично» показать кнопки из-за
+               гонки таймингов/инлайн-стилей: при закрытии он мгновенно (0s, без
+               delay) убирает их из отрисовки целиком, независимо от того,
+               успела ли доиграть анимация opacity/transform. Это и есть строгий
+               запрет на просвечивание — держится на классе, а не на JS-таймингах. */
+            visibility: hidden;
+            /* ease-in здесь держал бы кнопки видимыми почти всю длительность
+               и "сбрасывал" их только в последний момент — на глаз это и
+               выглядело как зависшие кнопки, которые не успевают пропасть
+               до того, как ячейка их накрывает. ease-out (быстрый старт) прячет
+               кнопки сразу, рывком, а не в конце. */
+            transition: opacity 0.05s linear, transform 0.05s linear, visibility 0s linear;
+        }
+
+        .chat-item-swipe.swiped .chat-swipe-actions,
+        .chat-item-swipe.dragging .chat-swipe-actions {
+            opacity: 1;
+            visibility: visible;
+            transform: scale(1);
+            pointer-events: auto;
+            transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .chat-swipe-btn {
+            position: relative;
             width: 76px;
+            height: 100%;
             border: none;
             margin: 0;
             padding: 0;
@@ -451,76 +500,70 @@
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            z-index: 0;
             -webkit-tap-highlight-color: transparent;
-            /* Скрыта по умолчанию: фон .chat-item при hover/active становится
-               полупрозрачным, и без этого кнопка "просвечивала" бы через него
-               даже без реального смахивания. Появление плавно привязано к
-               прогрессу самого жеста (см. pointermove в attachChatSwipeHandlers).
-               Скрытие (когда ячейка возвращается на место) специально СЫСТРЕЕ
-               появления и с более резким уходом в масштаб — чтобы кнопка успевала
-               исчезнуть и не пересекалась с возвращающейся ячейкой, которая едет
-               обратно те же 0.25s. Транзишен ниже применяется именно к закрытию
-               (переход "к базовому правилу"), а транзишен в .swiped/.dragging —
-               к открытию. */
-            opacity: 0;
-            transform: scale(0.35);
-            pointer-events: none;
-            /* visibility: hidden — жёсткий, не анимируемый выключатель рендера.
-               В отличие от opacity, он не может «частично» показать кнопку из-за
-               гонки таймингов/инлайн-стилей: при закрытии он мгновенно (0s, без
-               delay) убирает кнопку из отрисовки целиком, независимо от того,
-               успела ли доиграть анимация opacity/transform. Это и есть строгий
-               запрет на просвечивание — держится на классе, а не на JS-таймингах. */
-            visibility: hidden;
-            /* ease-in здесь держал бы кнопку видимой почти всю длительность
-               и "сбрасывал" её только в последний момент — на глаз это и
-               выглядело как зависшая кнопка, которая не успевает пропасть
-               до того, как ячейка её накрывает. ease-out (быстрый старт) прятает
-               кнопку сразу, рывком, а не в конце. */
-            transition: opacity 0.05s linear, transform 0.05s linear, visibility 0s linear;
+            flex: 0 0 76px;
         }
 
-        .chat-item-swipe.swiped .chat-delete-action,
-        .chat-item-swipe.dragging .chat-delete-action {
-            opacity: 1;
-            visibility: visible;
-            transform: scale(1);
-            pointer-events: auto;
-            transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-        }
-
-        /* Красная кнопка "Удалить" — отдельная от рамки чата плитка (не во всю высоту
+        /* Цветная плитка кнопки — отдельная от рамки чата (не во всю высоту
            строки и не впритык к краю), с сильно скруглёнными "овальными" углами,
            как отдельные свайп-кнопки в родном приложении. */
-        .chat-delete-circle {
+        .chat-swipe-circle {
             width: 100%;
             height: 100%;
             border-radius: 26px;
-            background: #ff3b30;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 3px;
-            box-shadow: 0 2px 10px rgba(255, 59, 48, 0.35);
             transition: transform 0.12s ease, background-color 0.12s ease;
         }
 
-        .chat-delete-circle i {
+        .chat-swipe-circle i {
             font-size: 18px;
             line-height: 1;
         }
 
-        .chat-delete-circle span {
+        .chat-swipe-circle span {
             font-size: 10.5px;
             font-weight: 500;
             line-height: 1;
         }
 
-        .chat-delete-action:active .chat-delete-circle {
+        .chat-swipe-circle.delete {
+            background: #ff3b30;
+            box-shadow: 0 2px 10px rgba(255, 59, 48, 0.35);
+        }
+
+        .chat-swipe-circle.pin {
+            background: #813caf;
+            box-shadow: 0 2px 10px rgba(129, 60, 175, 0.35);
+        }
+
+        .chat-swipe-circle.unpin {
+            background: #ffa200;
+            box-shadow: 0 2px 10px rgba(255, 162, 0, 0.35);
+        }
+
+        .chat-swipe-btn:active .chat-swipe-circle.delete {
             transform: scale(0.92);
             background: #e0352c;
+        }
+
+        .chat-swipe-btn:active .chat-swipe-circle.pin {
+            transform: scale(0.92);
+            background: #6d2f92;
+        }
+
+        .chat-swipe-btn:active .chat-swipe-circle.unpin {
+            transform: scale(0.92);
+            background: #e09100;
+        }
+
+        /* Закреплённый чат — постоянная подсветка фона строки в списке, чтобы
+           отличаться от обычных чатов независимо от свежести сообщений. */
+        .chat-item.is-pinned {
+            background-color: #e0e0e0;
         }
 
         /* ===== Контекстное меню чата по правому клику (десктоп) =====
@@ -5564,6 +5607,20 @@
                     removeChatFromUI(payload.chat_id);
                 });
 
+                // Закрепление/открепление чата с другого устройства/вкладки этого же
+                // аккаунта (свайп или ПКМ) — событие летит только в личную комнату
+                // пользователя, приватно, собеседника оно не касается.
+                appSocket.on('chat_pin_changed', (payload) => {
+                    if (!payload || payload.chat_id == null) return;
+                    const chat = (currentChatsList || []).find(c => String(c.id) === String(payload.chat_id));
+                    if (!chat) return;
+                    chat.is_pinned = !!payload.is_pinned;
+                    chat.pinned_at = payload.pinned_at || null;
+                    currentChatsList = sortChats(currentChatsList);
+                    renderChats(currentChatsList);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                });
+
                 // Новое сообщение/альбом в каком-то из чатов пользователя (см. broadcast_chat_activity на сервере).
                 // Если это первое сообщение от нового собеседника — чат мгновенно появляется в списке без
                 // перезагрузки страницы; если чат уже был в списке — он поднимается наверх и обновляется превью.
@@ -9524,8 +9581,15 @@ function getActiveElements() {
         }
 
         function sortChats(chats) {
-            return [...chats].sort((a, b) => new Date(b.last_message_time || 0).getTime() - new Date(a.last_message_time || 0).getTime());
+            return [...chats].sort((a, b) => {
+                const aPinned = !!a.is_pinned;
+                const bPinned = !!b.is_pinned;
+                if (aPinned !== bPinned) return aPinned ? -1 : 1; // закреплённые чаты — бакетом наверх
+                return new Date(b.last_message_time || 0).getTime() - new Date(a.last_message_time || 0).getTime();
+            });
         }
+
+        const MAX_PINNED_CHATS = 3;
 
         async function updateSingleChat(chatId) {
             try {
@@ -9642,7 +9706,9 @@ function getActiveElements() {
             }
             
             noChats.style.display = 'none';
-            
+
+            const pinnedCount = chats.filter(c => c.is_pinned).length;
+
             const userIds = [];
             chats.forEach(chat => {
                 if (chat.participants && chat.participants.length > 0) {
@@ -9664,7 +9730,7 @@ function getActiveElements() {
                 chatSwipeWrapper.setAttribute('data-chat-id', chat.id);
 
                 const chatItem = document.createElement('div');
-                chatItem.className = 'chat-item';
+                chatItem.className = 'chat-item' + (chat.is_pinned ? ' is-pinned' : '');
                 chatItem.setAttribute('data-chat-id', chat.id);
                 chatItem.style.animationDelay = `${index * 0.05}s`;
                 
@@ -9726,26 +9792,56 @@ function getActiveElements() {
                     openChat(chat.id);
                 });
 
+                const chatSwipeActions = document.createElement('div');
+                chatSwipeActions.className = 'chat-swipe-actions';
+
+                // Закрепить/открепить — не показываем "Закрепить", если лимит
+                // уже исчерпан и этот чат ещё не закреплён (открепить всегда доступно).
+                if (chat.is_pinned || pinnedCount < MAX_PINNED_CHATS) {
+                    const chatPinBtn = document.createElement('button');
+                    chatPinBtn.type = 'button';
+                    chatPinBtn.className = 'chat-swipe-btn';
+                    if (chat.is_pinned) {
+                        chatPinBtn.setAttribute('aria-label', 'Открепить чат');
+                        chatPinBtn.innerHTML = '<span class="chat-swipe-circle unpin"><i class="fa-solid fa-thumbtack-slash"></i><span>Открепить</span></span>';
+                        chatPinBtn.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            unpinChatAction(chat.id);
+                        });
+                    } else {
+                        chatPinBtn.setAttribute('aria-label', 'Закрепить чат');
+                        chatPinBtn.innerHTML = '<span class="chat-swipe-circle pin"><i class="fa-solid fa-thumbtack"></i><span>Закрепить</span></span>';
+                        chatPinBtn.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            pinChatAction(chat.id);
+                        });
+                    }
+                    chatSwipeActions.appendChild(chatPinBtn);
+                }
+
                 const chatDeleteBtn = document.createElement('button');
                 chatDeleteBtn.type = 'button';
-                chatDeleteBtn.className = 'chat-delete-action';
+                chatDeleteBtn.className = 'chat-swipe-btn';
                 chatDeleteBtn.setAttribute('aria-label', 'Удалить чат');
-                chatDeleteBtn.innerHTML = '<span class="chat-delete-circle"><i class="fa-solid fa-trash-can"></i><span>Удалить</span></span>';
+                chatDeleteBtn.innerHTML = '<span class="chat-swipe-circle delete"><i class="fa-solid fa-trash-can"></i><span>Удалить</span></span>';
                 chatDeleteBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     openDeleteChatDialog(chat.id, chatItem);
                 });
+                chatSwipeActions.appendChild(chatDeleteBtn);
 
-                // Десктоп: ПКМ по чату открывает компактное меню "Удалить"
-                // (визуально как контекстное меню сообщения), свайп на десктопе не используется.
+                // Десктоп: ПКМ по чату открывает компактное меню "Закрепить/Открепить"
+                // и "Удалить" (визуально как контекстное меню сообщения), свайп на десктопе не используется.
                 chatItem.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
-                    openChatContextMenu(e, chatItem, chat.id);
+                    openChatContextMenu(e, chatItem, chat.id, chat.is_pinned, pinnedCount);
                 });
 
                 chatSwipeWrapper.appendChild(chatItem);
-                chatSwipeWrapper.appendChild(chatDeleteBtn);
+                chatSwipeWrapper.appendChild(chatSwipeActions);
 
                 fragment.appendChild(chatSwipeWrapper);
             });
@@ -9766,7 +9862,7 @@ function getActiveElements() {
         // каждый .chat-item-swipe отдельно: renderChats перерисовывает список
         // часто (polling, фоновая синхронизация), и повторная привязка на
         // каждый элемент была бы лишней работой и легко забыть при правках.
-        const SWIPE_OPEN_X = 92; // должно совпадать с шириной .chat-delete-action
+        const SWIPE_OPEN_X = 176; // должно совпадать с шириной .chat-swipe-actions (2 кнопки по 76px + gap 8px + отступы)
         const SWIPE_TRIGGER_RATIO = 0.35; // доля от SWIPE_OPEN_X, после которой свайп "защёлкивается" открытым
 
         let chatSwipeState = null;
@@ -9794,16 +9890,16 @@ function getActiveElements() {
                 // (мышь/трекпад) удаление вызывается через ПКМ (openChatContextMenu),
                 // поэтому мышиный drag по чату не должен открывать кнопку "Удалить".
                 if (e.pointerType !== 'touch') return;
-                if (e.target.closest('.chat-delete-action')) return; // клик по корзине — не свайп
+                if (e.target.closest('.chat-swipe-actions')) return; // клик по кнопкам — не свайп
                 const wrapper = e.target.closest('.chat-item-swipe');
                 if (!wrapper || !listEl.contains(wrapper)) return;
 
                 const item = wrapper.querySelector('.chat-item');
                 if (!item) return;
 
-                const deleteBtn = wrapper.querySelector('.chat-delete-action');
+                const actionsEl = wrapper.querySelector('.chat-swipe-actions');
                 chatSwipeState = {
-                    wrapper, item, deleteBtn,
+                    wrapper, item, actionsEl,
                     pointerId: e.pointerId,
                     startX: e.clientX,
                     startY: e.clientY,
@@ -9841,22 +9937,22 @@ function getActiveElements() {
                 chatSwipeState.item.style.transform = `translateX(${x}px)`;
                 chatSwipeState.lastX = x;
 
-                // Кнопка "Удалить" появляется плавно вместе с самим жестом —
+                // Кнопки появляются плавно вместе с самим жестом —
                 // прозрачность и масштаб растут пропорционально тому, насколько
                 // ячейка уже сдвинута влево, а не вспыхивают по таймеру сразу
                 // при начале драга.
-                const { deleteBtn } = chatSwipeState;
-                if (deleteBtn) {
+                const { actionsEl } = chatSwipeState;
+                if (actionsEl) {
                     const progress = Math.min(1, Math.abs(x) / SWIPE_OPEN_X);
-                    deleteBtn.style.transition = 'none';
-                    deleteBtn.style.opacity = String(progress);
-                    deleteBtn.style.transform = `scale(${0.6 + progress * 0.4})`;
+                    actionsEl.style.transition = 'none';
+                    actionsEl.style.opacity = String(progress);
+                    actionsEl.style.transform = `scale(${0.6 + progress * 0.4})`;
                 }
             }, { passive: false });
 
             const endChatSwipe = (e) => {
                 if (!chatSwipeState || chatSwipeState.pointerId !== e.pointerId) return;
-                const { wrapper, item, deleteBtn, dragging, lastX } = chatSwipeState;
+                const { wrapper, item, actionsEl, dragging, lastX } = chatSwipeState;
                 item.style.transition = '';
                 item.style.transform = '';
                 wrapper.classList.remove('dragging');
@@ -9925,7 +10021,7 @@ function getActiveElements() {
             if (activeChatContextMenu && !activeChatContextMenu.contains(e.target)) closeChatContextMenu();
         }
 
-        function openChatContextMenu(e, chatItem, chatId) {
+        function openChatContextMenu(e, chatItem, chatId, isPinned, pinnedCount) {
             closeChatContextMenu();
             closeAllChatSwipes();
 
@@ -9937,6 +10033,34 @@ function getActiveElements() {
             // вместо старой красной рамки-пильги.
             const menu = document.createElement('div');
             menu.className = 'message-action-menu animate__animated animate__fadeIn';
+
+            // Закрепить/открепить — обычная (не destructive) строка меню: серый
+            // хавер, чёрный текст, как и все остальные не-опасные пункты. Строку
+            // "Закрепить" не показываем, если лимит уже исчерпан и этот чат ещё
+            // не закреплён ("Открепить" всегда доступно).
+            if (isPinned) {
+                const unpinRow = document.createElement('button');
+                unpinRow.type = 'button';
+                unpinRow.className = 'message-action-item';
+                unpinRow.innerHTML = '<span>Открепить</span><span class="message-action-item-icon"><i class="fa-solid fa-thumbtack-slash"></i></span>';
+                unpinRow.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    closeChatContextMenu();
+                    unpinChatAction(chatId);
+                });
+                menu.appendChild(unpinRow);
+            } else if ((pinnedCount || 0) < MAX_PINNED_CHATS) {
+                const pinRow = document.createElement('button');
+                pinRow.type = 'button';
+                pinRow.className = 'message-action-item';
+                pinRow.innerHTML = '<span>Закрепить</span><span class="message-action-item-icon"><i class="fa-solid fa-thumbtack"></i></span>';
+                pinRow.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    closeChatContextMenu();
+                    pinChatAction(chatId);
+                });
+                menu.appendChild(pinRow);
+            }
 
             const deleteRow = document.createElement('button');
             deleteRow.type = 'button';
@@ -10092,6 +10216,101 @@ function getActiveElements() {
             } catch (error) {
                 showMessage('Не удалось удалить чат. Проверьте соединение', 'error');
                 loadChats();
+            }
+        }
+
+        // Закрепление/открепление чата — приватно для текущего пользователя
+        // (собеседника это не касается). Оптимистично обновляем локальный
+        // список и перерисовываем его целиком (не точечно), т.к. лимит в
+        // MAX_PINNED_CHATS штук влияет на доступность кнопки "Закрепить" сразу
+        // у ВСЕХ чатов в списке, а не только у того, который меняем.
+        async function pinChatAction(chatId) {
+            closeAllChatSwipes();
+            closeChatContextMenu();
+
+            const chat = (currentChatsList || []).find(c => String(c.id) === String(chatId));
+            if (!chat) return;
+            if (chat.is_pinned) return;
+
+            const pinnedCount = currentChatsList.filter(c => c.is_pinned).length;
+            if (pinnedCount >= MAX_PINNED_CHATS) {
+                showMessage(`Можно закрепить не более ${MAX_PINNED_CHATS} чатов`, 'error');
+                return;
+            }
+
+            const prevPinnedAt = chat.pinned_at;
+            chat.is_pinned = true;
+            chat.pinned_at = new Date().toISOString();
+            currentChatsList = sortChats(currentChatsList);
+            renderChats(currentChatsList);
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+
+            try {
+                const response = await fetch(`${SERVER_URL}/pin_chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    chat.is_pinned = false;
+                    chat.pinned_at = prevPinnedAt;
+                    currentChatsList = sortChats(currentChatsList);
+                    renderChats(currentChatsList);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    showMessage(data.error || 'Не удалось закрепить чат', 'error');
+                } else if (data.pinned_at) {
+                    chat.pinned_at = data.pinned_at;
+                }
+            } catch (error) {
+                chat.is_pinned = false;
+                chat.pinned_at = prevPinnedAt;
+                currentChatsList = sortChats(currentChatsList);
+                renderChats(currentChatsList);
+                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                showMessage('Не удалось закрепить чат. Проверьте соединение', 'error');
+            }
+        }
+
+        async function unpinChatAction(chatId) {
+            closeAllChatSwipes();
+            closeChatContextMenu();
+
+            const chat = (currentChatsList || []).find(c => String(c.id) === String(chatId));
+            if (!chat) return;
+            if (!chat.is_pinned) return;
+
+            const prevPinnedAt = chat.pinned_at;
+            chat.is_pinned = false;
+            chat.pinned_at = null;
+            currentChatsList = sortChats(currentChatsList);
+            renderChats(currentChatsList);
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+
+            try {
+                const response = await fetch(`${SERVER_URL}/unpin_chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    chat.is_pinned = true;
+                    chat.pinned_at = prevPinnedAt;
+                    currentChatsList = sortChats(currentChatsList);
+                    renderChats(currentChatsList);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    showMessage(data.error || 'Не удалось открепить чат', 'error');
+                }
+            } catch (error) {
+                chat.is_pinned = true;
+                chat.pinned_at = prevPinnedAt;
+                currentChatsList = sortChats(currentChatsList);
+                renderChats(currentChatsList);
+                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                showMessage('Не удалось открепить чат. Проверьте соединение', 'error');
             }
         }
 
