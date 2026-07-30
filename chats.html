@@ -561,24 +561,13 @@
         }
 
         /* Закреплённый чат — постоянная подсветка фона строки в списке, чтобы
-           отличаться от обычных чатов независимо от свежести сообщений. */
+           отличаться от обычных чатов независимо от свежести сообщений.
+           На мобильных .chats-content больше не имеет боковых паддингов
+           (они перенесены на сам .chat-item, как на десктопе — см. правила
+           .chats-container.mobile-only .chats-content/.chat-item ниже), поэтому
+           этот фон уже сам по себе тянется до реальных краёв экрана без
+           дополнительных JS-прямоугольников. */
         .chat-item.is-pinned {
-            background-color: #e0e0e0;
-        }
-
-        /* Серая подсветка закреплённого чата "вытекает" за пределы скруглённой
-           белой карточки списка (.chats-content) до самых краёв экрана на
-           мобильных и до краёв плейсхолдера со списком чатов на десктопе.
-           Сама .chat-item.is-pinned остаётся как есть и рисует серый фон только
-           внутри карточки — эти прямоугольники добавляются в JS (см.
-           syncPinnedHighlights) с position: fixed позади всего контента
-           (z-index: -1), поэтому видны только там, где сверху нет непрозрачной
-           карточки, то есть строго в "боковых полях" по краям. */
-        .pinned-highlight-bleed {
-            position: fixed;
-            /* На мобильных у .chats-content есть непрозрачный фон + скругление + боковые паддинги - ниже заменяем на два узких прямоугольника с позитивным z-index строго в боковых коридорах за самой строкой (см. syncPinnedHighlights). */
-            z-index: 1;
-            pointer-events: none;
             background-color: #e0e0e0;
         }
 
@@ -4482,8 +4471,17 @@
                 -webkit-overflow-scrolling: touch;
                 scroll-behavior: smooth;
                 overscroll-behavior: contain;
-                padding: 12px;
+                /* Раньше здесь был padding: 12px со всех сторон — из-за него
+                   фон закреплённого чата (.chat-item.is-pinned) не доходил до
+                   реальных краёв экрана, как на десктопе (см. правило ниже,
+                   где .chats-content там без боковых паддингов/скругления).
+                   Боковые отступы теперь переехали на сам .chat-item (ниже),
+                   а здесь остаётся только вертикальный, чтобы список не
+                   "прилипал" к хедеру/навигации сверху и снизу. */
+                padding: 12px 0;
                 padding-bottom: 80px;
+                border-radius: 0;
+                box-shadow: none;
                 height: auto;
                 min-height: 0;
                 display: flex;
@@ -4502,7 +4500,7 @@
             .chat-item {
                 display: flex;
                 align-items: center;
-                padding: 12px 0;
+                padding: 12px 16px;
                 border-bottom: 1px solid var(--telegram-divider);
                 margin: 0;
                 background-color: var(--telegram-bg);
@@ -4536,7 +4534,11 @@
                 }
                 
                 .chats-container.mobile-only .chats-content {
-                    padding: 8px;
+                    padding: 8px 0;
+                }
+
+                .chat-item {
+                    padding: 12px 12px;
                 }
             }
             
@@ -9893,119 +9895,8 @@ function getActiveElements() {
 
             attachChatSwipeHandlers(chatsListDesktop);
             attachChatSwipeHandlers(chatsListMobile);
-
-            syncPinnedHighlights();
         }
 
-        // ===== "Вытекающая" за карточку подсветка закреплённых чатов =====
-        // На мобильных у .chats-content есть непрозрачный фон + border-radius +
-        // overflow: hidden + боковые паддинги (12px/8px) — это "белая карточка",
-        // которая рисуется НАД прежним фоновым (z-index < 0) прямоугольником и
-        // поэтому обрезала подсветку ровно по краю паддинга/скругления, не давая
-        // ей дойти до реальных краёв экрана. На десктопе такой проблемы нет —
-        // там у .chats-content нет ни паддингов, ни скругления, ни overflow.
-        //
-        // Чтобы это исправить без переделки самой "карточки" (и не трогая
-        // остальной список), рисуем не один сплошной прямоугольник, а два узких
-        // "коридора" — слева и справа от самой строки чата (см. itemRect) — с
-        // положительным z-index (см. .pinned-highlight-bleed), т.е. поверх фона
-        // карточки. Так как границы коридоров всегда совпадают с левым/правым
-        // краем самой строки, они физически не перекрывают аватар/текст чата —
-        // только "коридор"-паддинг вокруг него и (если экран уже был бы обрезан
-        // скруглением) пространство за пределами скруглённых углов. На десктопе
-        // (паддинг 0) ширина обоих коридоров получается нулевой, поэтому там
-        // ничего не рисуется и раньше работавшая подсветка не меняется.
-        // Вертикально прямоугольники всё так же обрезаны границами самого списка
-        // (.chats-content), чтобы не "вылезать" поверх поисковой строки/навигации,
-        // когда закреплённый чат частично уходит за верх/низ списка при скролле.
-        let pinnedHighlightEls = [];
-        let pinnedHighlightRaf = null;
-
-        function clearPinnedHighlights() {
-            pinnedHighlightEls.forEach(el => el.remove());
-            pinnedHighlightEls = [];
-        }
-
-        function syncPinnedHighlights() {
-            clearPinnedHighlights();
-
-            const isDesktopNow = window.matchMedia('(min-width: 768px)').matches;
-            const chatsList = isDesktopNow ? chatsListDesktop : chatsListMobile;
-            if (!chatsList) return;
-
-            const chatsContent = chatsList.closest('.chats-content');
-            if (!chatsContent) return;
-
-            const pinnedItems = chatsList.querySelectorAll('.chat-item.is-pinned');
-            if (!pinnedItems.length) return;
-
-            const contentRect = chatsContent.getBoundingClientRect();
-
-            let left = 0;
-            let width = window.innerWidth;
-            if (isDesktopNow) {
-                const sidebar = chatsList.closest('.desktop-sidebar') || chatsContent;
-                const sidebarRect = sidebar.getBoundingClientRect();
-                left = sidebarRect.left;
-                width = sidebarRect.width;
-            }
-            const right = left + width;
-
-            const makeStrip = (stripLeft, stripWidth, visibleTop, visibleHeight) => {
-                if (stripWidth <= 0 || visibleHeight <= 0) return;
-                const bleed = document.createElement('div');
-                bleed.className = 'pinned-highlight-bleed';
-                bleed.style.top = `${visibleTop}px`;
-                bleed.style.height = `${visibleHeight}px`;
-                bleed.style.left = `${stripLeft}px`;
-                bleed.style.width = `${stripWidth}px`;
-                document.body.appendChild(bleed);
-                pinnedHighlightEls.push(bleed);
-            };
-
-            pinnedItems.forEach(item => {
-                const itemRect = item.getBoundingClientRect();
-                let visibleTop = Math.max(itemRect.top, contentRect.top);
-                let visibleBottom = Math.min(itemRect.bottom, contentRect.bottom);
-                if (visibleBottom <= visibleTop) return; // чат целиком уехал за пределы видимой области списка
-
-                // Если это первая/последняя строка списка, над/под ней в
-                // .chats-content остаётся только паддинг + скруглённый угол
-                // самой карточки — без этой добивки там был бы виден "срез"
-                // скруглённого белого угла на фоне уже прямоугольной подсветки
-                // (ровно то, что выглядит некорректно на скриншоте). Поэтому
-                // растягиваем коридор до самой границы списка, чтобы срез угла
-                // тоже был закрашен и подсветка выглядела одним сплошным блоком.
-                const wrapper = item.closest('.chat-item-swipe') || item;
-                if (!wrapper.previousElementSibling) visibleTop = contentRect.top;
-                if (!wrapper.nextElementSibling) visibleBottom = contentRect.bottom;
-
-                const visibleHeight = visibleBottom - visibleTop;
-                if (visibleHeight <= 0) return;
-
-                // Левый коридор: от реального края экрана/сайдбара до левого края строки.
-                makeStrip(left, itemRect.left - left, visibleTop, visibleHeight);
-                // Правый коридор: от правого края строки до реального края экрана/сайдбара.
-                makeStrip(itemRect.right, right - itemRect.right, visibleTop, visibleHeight);
-            });
-        }
-
-        function requestSyncPinnedHighlights() {
-            if (pinnedHighlightRaf) return;
-            pinnedHighlightRaf = requestAnimationFrame(() => {
-                pinnedHighlightRaf = null;
-                syncPinnedHighlights();
-            });
-        }
-
-        // Список скроллится внутри .chats-content (overflow-y: auto), а не всей
-        // страницей — обе версии (моб./деск.) слушаем сразу, лишний вызов на
-        // невидимой версии не мешает, т.к. syncPinnedHighlights сам выбирает
-        // активную по ширине экрана.
-        document.querySelectorAll('.chats-content').forEach(el => {
-            el.addEventListener('scroll', requestSyncPinnedHighlights, { passive: true });
-        });
-        window.addEventListener('resize', requestSyncPinnedHighlights);
 
         // ===== Свайп влево по чату для удаления (chats.html) =====
         // Делегирование на весь список вместо навешивания обработчиков на
@@ -13433,4 +13324,3 @@ function stopProfileDataPolling() {
     <script src="push-notifications.js"></script>
 </body>
 </html>   
-   
