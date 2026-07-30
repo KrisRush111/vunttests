@@ -566,6 +566,21 @@
             background-color: #e0e0e0;
         }
 
+        /* Серая подсветка закреплённого чата "вытекает" за пределы скруглённой
+           белой карточки списка (.chats-content) до самых краёв экрана на
+           мобильных и до краёв плейсхолдера со списком чатов на десктопе.
+           Сама .chat-item.is-pinned остаётся как есть и рисует серый фон только
+           внутри карточки — эти прямоугольники добавляются в JS (см.
+           syncPinnedHighlights) с position: fixed позади всего контента
+           (z-index: -1), поэтому видны только там, где сверху нет непрозрачной
+           карточки, то есть строго в "боковых полях" по краям. */
+        .pinned-highlight-bleed {
+            position: fixed;
+            z-index: -1;
+            pointer-events: none;
+            background-color: #e0e0e0;
+        }
+
         /* ===== Контекстное меню чата по правому клику (десктоп) =====
            Пока меню открыто, элемент подсвечивается рамкой — так же, как
            сообщение "поднимается" в своей рамке при удержании (message-action-menu). */
@@ -9877,7 +9892,82 @@ function getActiveElements() {
 
             attachChatSwipeHandlers(chatsListDesktop);
             attachChatSwipeHandlers(chatsListMobile);
+
+            syncPinnedHighlights();
         }
+
+        // ===== "Вытекающая" за карточку подсветка закреплённых чатов =====
+        // См. .pinned-highlight-bleed в CSS: рисуем по одному fixed-прямоугольнику
+        // на каждый видимый .chat-item.is-pinned, растянутому по горизонтали до
+        // реальных краёв экрана (моб.) или до краёв плейсхолдера со списком чатов
+        // (деск.), и обрезанному по вертикали границами самого списка (.chats-content),
+        // чтобы прямоугольник не "вылезал" поверх поисковой строки/навигации,
+        // когда закреплённый чат частично уходит за верх/низ списка при скролле.
+        let pinnedHighlightEls = [];
+        let pinnedHighlightRaf = null;
+
+        function clearPinnedHighlights() {
+            pinnedHighlightEls.forEach(el => el.remove());
+            pinnedHighlightEls = [];
+        }
+
+        function syncPinnedHighlights() {
+            clearPinnedHighlights();
+
+            const isDesktopNow = window.matchMedia('(min-width: 768px)').matches;
+            const chatsList = isDesktopNow ? chatsListDesktop : chatsListMobile;
+            if (!chatsList) return;
+
+            const chatsContent = chatsList.closest('.chats-content');
+            if (!chatsContent) return;
+
+            const pinnedItems = chatsList.querySelectorAll('.chat-item.is-pinned');
+            if (!pinnedItems.length) return;
+
+            const contentRect = chatsContent.getBoundingClientRect();
+
+            let left = 0;
+            let width = window.innerWidth;
+            if (isDesktopNow) {
+                const sidebar = chatsList.closest('.desktop-sidebar') || chatsContent;
+                const sidebarRect = sidebar.getBoundingClientRect();
+                left = sidebarRect.left;
+                width = sidebarRect.width;
+            }
+
+            pinnedItems.forEach(item => {
+                const itemRect = item.getBoundingClientRect();
+                const visibleTop = Math.max(itemRect.top, contentRect.top);
+                const visibleBottom = Math.min(itemRect.bottom, contentRect.bottom);
+                if (visibleBottom <= visibleTop) return; // чат целиком уехал за пределы видимой области списка
+
+                const bleed = document.createElement('div');
+                bleed.className = 'pinned-highlight-bleed';
+                bleed.style.top = `${visibleTop}px`;
+                bleed.style.height = `${visibleBottom - visibleTop}px`;
+                bleed.style.left = `${left}px`;
+                bleed.style.width = `${width}px`;
+                document.body.appendChild(bleed);
+                pinnedHighlightEls.push(bleed);
+            });
+        }
+
+        function requestSyncPinnedHighlights() {
+            if (pinnedHighlightRaf) return;
+            pinnedHighlightRaf = requestAnimationFrame(() => {
+                pinnedHighlightRaf = null;
+                syncPinnedHighlights();
+            });
+        }
+
+        // Список скроллится внутри .chats-content (overflow-y: auto), а не всей
+        // страницей — обе версии (моб./деск.) слушаем сразу, лишний вызов на
+        // невидимой версии не мешает, т.к. syncPinnedHighlights сам выбирает
+        // активную по ширине экрана.
+        document.querySelectorAll('.chats-content').forEach(el => {
+            el.addEventListener('scroll', requestSyncPinnedHighlights, { passive: true });
+        });
+        window.addEventListener('resize', requestSyncPinnedHighlights);
 
         // ===== Свайп влево по чату для удаления (chats.html) =====
         // Делегирование на весь список вместо навешивания обработчиков на
@@ -13305,4 +13395,3 @@ function stopProfileDataPolling() {
     <script src="push-notifications.js"></script>
 </body>
 </html>   
-  
