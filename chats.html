@@ -465,35 +465,23 @@
             gap: 8px;
             z-index: 0;
             /* Кнопки лежат ПОД ячейкой (z-index: 0 против z-index: 1 у
-               .chat-item), а фон ячейки во всех состояниях непрозрачный —
-               поэтому пересечься с ячейкой они не могут в принципе.
-               Закрытое состояние. Появление и исчезновение — ПОЛНЫЕ и плавные:
-               анимация целиком отдана CSS (JS больше не подмешивает
-               промежуточную прозрачность по прогрессу жеста), поэтому кнопки
-               всегда доезжают либо до 100%, либо до 0% — без "недопоявившихся"
-               полупрозрачных состояний при медленном свайпе.
-               visibility снимается с задержкой, равной длительности анимации,
-               чтобы уход в масштаб успел доиграть полностью. */
-            opacity: 0;
+               .chat-item), а фон ячейки во всех состояниях непрозрачный.
+               Кнопки не масштабируются и не гаснут: они целиком, в полный
+               размер, выезжают из-за правого края экрана вслед за ячейкой —
+               как в нативном iOS-свайпе. В закрытом состоянии ряд полностью
+               сдвинут вправо за пределы обёртки, а .chat-item-swipe имеет
+               overflow: hidden, поэтому кнопки просто обрезаны и не могут
+               ни просвечивать, ни пересекаться с ячейкой.
+               Правая кнопка появляется первой, следующие выходят
+               из-под неё по мере продолжения жеста. */
+            transform: translateX(calc(100% + 8px));
             pointer-events: none;
-            visibility: hidden;
-            /* Полное схлопывание в точку (scale 0) и полный рост до scale(1) —
-               кнопки всегда отыгрывают анимацию целиком, без промежуточных
-               "застрявших" размеров. */
-            transform: scale(0);
-            /* Растут и схлопываются от правого края — в сторону, ПРОТИВОПОЛОЖНУЮ
-               возвращающейся ячейке, поэтому она их не догоняет и не накрывает. */
-            transform-origin: right center;
-            transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1), transform 0.15s cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 0.15s;
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .chat-item-swipe.swiped .chat-swipe-actions,
-        .chat-item-swipe.dragging .chat-swipe-actions {
-            opacity: 1;
-            visibility: visible;
-            transform: scale(1);
+        .chat-item-swipe.swiped .chat-swipe-actions {
+            transform: translateX(0);
             pointer-events: auto;
-            transition: opacity 0.18s ease-out, transform 0.26s cubic-bezier(0.34, 1.4, 0.64, 1), visibility 0s linear 0s;
         }
 
         .chat-swipe-btn {
@@ -586,11 +574,17 @@
             }
         }
 
-        /* Закреплённый чат не должен реагировать на наведение/нажатие: без изменения фона и без scale */
+        /* Закреплённый чат не меняет фон при наведении/нажатии.
+           ВАЖНО: здесь НЕЛЬЗЯ писать transform: none !important — :active
+           срабатывает, как только палец коснулся ячейки, и !important перебивал
+           даже inline-transform, которым JS двигает ячейку во время свайпа.
+           Из-за этого закреплённые чаты не реагировали на свайп влево.
+           Отмена scale при нажатии сделана ниже правилом
+           .chat-item-swipe .chat-item:active (без !important, поэтому
+           inline-сдвиг свайпа работает нормально). */
         .chat-item.is-pinned:hover,
         .chat-item.is-pinned:active {
             background-color: #F7F7F7 !important;
-            transform: none !important;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -9971,7 +9965,20 @@ function getActiveElements() {
             wrapper.classList.remove('swiped');
             wrapper.classList.remove('dragging');
             const item = wrapper.querySelector('.chat-item');
-            if (item) item.style.transform = '';
+            if (item) {
+                item.style.transition = '';
+                item.style.transform = '';
+            }
+            // Обязательно снимаем и inline-стили ряда кнопок: если свайп
+            // закрывают извне (тап по другому чату, повторный рендер списка),
+            // оставшийся от жеста inline-transform держал бы кнопки открытыми
+            // в обход CSS-класса.
+            const actionsEl = wrapper.querySelector('.chat-swipe-actions');
+            if (actionsEl) {
+                actionsEl.style.transition = '';
+                actionsEl.style.opacity = '';
+                actionsEl.style.transform = '';
+            }
         }
 
         function closeAllChatSwipes(exceptWrapper = null) {
@@ -10036,11 +10043,16 @@ function getActiveElements() {
                 chatSwipeState.item.style.transform = `translateX(${x}px)`;
                 chatSwipeState.lastX = x;
 
-                // Появлением/скрытием кнопок целиком управляет CSS через класс
-                // 'dragging'/'swiped' (плавная анимация opacity + scale).
-                // JS намеренно НЕ трогает их inline-стили: раньше он подмешивал
-                // прозрачность по прогрессу жеста, из-за чего при медленном
-                // свайпе кнопки застревали в полупоявившемся состоянии.
+                // Ряд кнопок движется вместе с пальцем 1:1: насколько ячейка
+                // ушла влево, ровно настолько кнопки выехали из-за правого края.
+                // Ни прозрачности, ни масштаба — только сдвиг, поэтому кнопки
+                // всегда полноразмерные и никогда не пересекаются с ячейкой.
+                const { actionsEl } = chatSwipeState;
+                if (actionsEl) {
+                    const hidden = SWIPE_OPEN_X - Math.abs(x);
+                    actionsEl.style.transition = 'none';
+                    actionsEl.style.transform = `translateX(${hidden}px)`;
+                }
             }, { passive: false });
 
             const endChatSwipe = (e) => {
@@ -10061,12 +10073,17 @@ function getActiveElements() {
                 } else {
                     opening = wrapper.classList.contains('swiped');
                 }
-                // Подчищаем возможные остаточные inline-стили от старых версий
-                // логики: дальше состоянием кнопок управляет только CSS-класс.
+                // Возвращаем управление CSS: снимаем inline-стили в следующем
+                // кадре, уже после форс-рефлоу, иначе браузер может склеить
+                // сброс transition: none и смену transform в одно обновление,
+                // и кнопки прыгнут на место без анимации.
                 if (actionsEl) {
-                    actionsEl.style.transition = '';
                     actionsEl.style.opacity = '';
-                    actionsEl.style.transform = '';
+                    void actionsEl.offsetWidth;
+                    requestAnimationFrame(() => {
+                        actionsEl.style.transition = '';
+                        actionsEl.style.transform = '';
+                    });
                 }
                 chatSwipeState = null;
             };
