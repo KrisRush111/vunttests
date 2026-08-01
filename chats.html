@@ -454,8 +454,13 @@
             transform: none;
         }
 
+        /* Сдвиг ячейки = реальная ширина ряда кнопок (одна кнопка или две),
+           её проставляет JS в --swipe-open-x при отрисовке списка. Раньше здесь
+           было жёсткое -176px под две кнопки, из-за чего при одной кнопке
+           ("Закрепить" скрыта, лимит закреплённых исчерпан) между ячейкой и
+           кнопкой оставалась пустая дыра шириной второй кнопки. */
         .chat-item-swipe.swiped .chat-item {
-            transform: translateX(-176px);
+            transform: translateX(calc(-1 * var(--swipe-open-x, 176px)));
         }
 
         /* Контейнер свайп-кнопок (Закрепить/Открепить + Удалить), лежит под
@@ -497,7 +502,9 @@
             --p: var(--swipe-p);
         }
 
-        .chat-swipe-btn:nth-last-child(2) {
+        /* Задержка только когда кнопок реально две: у одиночной кнопки
+           ("Закрепить" скрыта) она должна расти сразу вместе с жестом. */
+        .chat-swipe-btn:not(:only-child):nth-last-child(2) {
             --p: clamp(0, (var(--swipe-p) - 0.3) / 0.7, 1);
         }
 
@@ -9969,6 +9976,14 @@ function getActiveElements() {
                 chatSwipeWrapper.appendChild(chatItem);
                 chatSwipeWrapper.appendChild(chatSwipeActions);
 
+                // Ширина открытия свайпа — по числу кнопок у этого чата
+                // (одна "Удалить" или "Закрепить/Открепить" + "Удалить").
+                const swipeBtnCount = chatSwipeActions.querySelectorAll('.chat-swipe-btn').length || 1;
+                chatSwipeWrapper.style.setProperty(
+                    '--swipe-open-x',
+                    (swipeBtnCount * 76 + (swipeBtnCount - 1) * 8 + 16) + 'px'
+                );
+
                 fragment.appendChild(chatSwipeWrapper);
             });
             
@@ -9989,7 +10004,22 @@ function getActiveElements() {
         // каждый .chat-item-swipe отдельно: renderChats перерисовывает список
         // часто (polling, фоновая синхронизация), и повторная привязка на
         // каждый элемент была бы лишней работой и легко забыть при правках.
-        const SWIPE_OPEN_X = 176; // должно совпадать с шириной .chat-swipe-actions (2 кнопки по 76px + gap 8px + отступы)
+        const SWIPE_BTN_W = 76;   // ширина одной свайп-кнопки (.chat-swipe-btn)
+        const SWIPE_GAP = 8;      // отступ ряда кнопок справа и зазор между ячейкой и кнопкой
+        const SWIPE_OPEN_X = 176; // запасное значение для двух кнопок
+
+        // Насколько далеко открывается конкретный чат: у чата с одной кнопкой
+        // (только "Удалить") открытие короче ровно на ширину второй кнопки,
+        // поэтому дыры между ячейкой и кнопкой не остаётся.
+        function getSwipeOpenX(wrapper) {
+            const actionsEl = wrapper && wrapper.querySelector('.chat-swipe-actions');
+            if (!actionsEl) return SWIPE_OPEN_X;
+            const btnCount = actionsEl.querySelectorAll('.chat-swipe-btn').length || 1;
+            const width = actionsEl.offsetWidth || (btnCount * SWIPE_BTN_W + (btnCount - 1) * SWIPE_GAP);
+            const openX = Math.round(width + SWIPE_GAP * 2); // отступ справа + зазор до ячейки
+            wrapper.style.setProperty('--swipe-open-x', openX + 'px');
+            return openX;
+        }
         const SWIPE_TRIGGER_RATIO = 0.35; // доля от SWIPE_OPEN_X, после которой свайп "защёлкивается" открытым
 
         let chatSwipeState = null;
@@ -9998,7 +10028,7 @@ function getActiveElements() {
             if (!wrapper) return;
             wrapper.classList.remove('swiped');
             wrapper.classList.remove('dragging');
-            wrapper.style.removeProperty('--swipe-p');
+            wrapper.style.removeProperty('--swipe-p'); // --swipe-open-x не трогаем: это статичный размер ряда кнопок
             const item = wrapper.querySelector('.chat-item');
             if (item) {
                 item.style.transition = '';
@@ -10039,12 +10069,13 @@ function getActiveElements() {
                 if (!item) return;
 
                 const actionsEl = wrapper.querySelector('.chat-swipe-actions');
+                const openX = getSwipeOpenX(wrapper);
                 chatSwipeState = {
-                    wrapper, item, actionsEl,
+                    wrapper, item, actionsEl, openX,
                     pointerId: e.pointerId,
                     startX: e.clientX,
                     startY: e.clientY,
-                    baseX: wrapper.classList.contains('swiped') ? -SWIPE_OPEN_X : 0,
+                    baseX: wrapper.classList.contains('swiped') ? -openX : 0,
                     dragging: false,
                     decided: false,
                     lastX: 0,
@@ -10073,7 +10104,7 @@ function getActiveElements() {
 
                 e.preventDefault();
                 let x = chatSwipeState.baseX + dx;
-                x = Math.max(-SWIPE_OPEN_X, Math.min(0, x));
+                x = Math.max(-chatSwipeState.openX, Math.min(0, x));
                 chatSwipeState.item.style.transition = 'none';
                 chatSwipeState.item.style.transform = `translateX(${x}px)`;
                 chatSwipeState.lastX = x;
@@ -10082,19 +10113,19 @@ function getActiveElements() {
                 // hidden), а растут из точки до полного размера ровно по ходу
                 // пальца: прогресс 0..1 отдаём в CSS-переменную, дальше всё
                 // делает scale() на .chat-swipe-circle.
-                const progress = Math.min(1, Math.abs(x) / SWIPE_OPEN_X);
+                const progress = Math.min(1, Math.abs(x) / chatSwipeState.openX);
                 chatSwipeState.wrapper.style.setProperty('--swipe-p', progress.toFixed(4));
             }, { passive: false });
 
             const endChatSwipe = (e) => {
                 if (!chatSwipeState || chatSwipeState.pointerId !== e.pointerId) return;
-                const { wrapper, item, actionsEl, dragging, lastX } = chatSwipeState;
+                const { wrapper, item, actionsEl, dragging, lastX, openX } = chatSwipeState;
                 item.style.transition = '';
                 item.style.transform = '';
                 wrapper.classList.remove('dragging');
                 let opening = false;
                 if (dragging) {
-                    const openThreshold = -SWIPE_OPEN_X * SWIPE_TRIGGER_RATIO;
+                    const openThreshold = -openX * SWIPE_TRIGGER_RATIO;
                     opening = (lastX || 0) <= openThreshold;
                     if (opening) {
                         wrapper.classList.add('swiped');
@@ -13407,4 +13438,4 @@ function stopProfileDataPolling() {
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
-</html>
+</html>  
