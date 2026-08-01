@@ -422,6 +422,14 @@
             position: relative;
             overflow: hidden;
             border-bottom: 1px solid var(--telegram-divider);
+            /* Прогресс свайпа 0..1. Во время жеста его задаёт JS inline-стилем,
+               в покое — классы ниже. По нему кнопки растут из точки в полный
+               размер и обратно. */
+            --swipe-p: 0;
+        }
+
+        .chat-item-swipe.swiped {
+            --swipe-p: 1;
         }
 
         .chat-item-swipe:last-child {
@@ -474,14 +482,23 @@
                ни просвечивать, ни пересекаться с ячейкой.
                Правая кнопка появляется первой, следующие выходят
                из-под неё по мере продолжения жеста. */
-            transform: translateX(calc(100% + 8px));
             pointer-events: none;
-            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .chat-item-swipe.swiped .chat-swipe-actions {
-            transform: translateX(0);
             pointer-events: auto;
+        }
+
+        /* Индивидуальный прогресс кнопки: правая (последняя, "Удалить")
+           растёт сразу вместе с жестом, левая ("Закрепить"/"Открепить") —
+           с небольшой задержкой, поэтому кнопки появляются каскадом, как в
+           видео. clamp() держит значение в диапазоне 0..1. */
+        .chat-swipe-btn {
+            --p: var(--swipe-p);
+        }
+
+        .chat-swipe-btn:nth-last-child(2) {
+            --p: clamp(0, (var(--swipe-p) - 0.3) / 0.7, 1);
         }
 
         .chat-swipe-btn {
@@ -513,7 +530,24 @@
             align-items: center;
             justify-content: center;
             gap: 3px;
-            transition: transform 0.12s ease, background-color 0.12s ease;
+            /* Рост из точки в полный размер. Плитка масштабируется внутри
+               своего же бокса, за границы обёртки не выходит — поэтому
+               overflow: hidden её больше не режет. */
+            transform: scale(var(--p, 0));
+            transform-origin: center center;
+            will-change: transform;
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.12s ease;
+        }
+
+        /* Во время самого жеста анимации нет — размер идёт 1:1 за пальцем. */
+        .chat-item-swipe.dragging .chat-swipe-circle {
+            transition: background-color 0.12s ease;
+        }
+
+        /* Содержимое плитки проявляется чуть позже её самой, чтобы иконка и
+           подпись не "плыли" в момент, когда кнопка ещё размером с точку. */
+        .chat-swipe-circle > * {
+            opacity: clamp(0, (var(--p, 0) - 0.45) / 0.35, 1);
         }
 
         .chat-swipe-circle i {
@@ -543,17 +577,17 @@
         }
 
         .chat-swipe-btn:active .chat-swipe-circle.delete {
-            transform: scale(0.92);
+            transform: scale(calc(var(--p, 0) * 0.92));
             background: #e0352c;
         }
 
         .chat-swipe-btn:active .chat-swipe-circle.pin {
-            transform: scale(0.92);
+            transform: scale(calc(var(--p, 0) * 0.92));
             background: #6d2f92;
         }
 
         .chat-swipe-btn:active .chat-swipe-circle.unpin {
-            transform: scale(0.92);
+            transform: scale(calc(var(--p, 0) * 0.92));
             background: #e09100;
         }
 
@@ -9964,6 +9998,7 @@ function getActiveElements() {
             if (!wrapper) return;
             wrapper.classList.remove('swiped');
             wrapper.classList.remove('dragging');
+            wrapper.style.removeProperty('--swipe-p');
             const item = wrapper.querySelector('.chat-item');
             if (item) {
                 item.style.transition = '';
@@ -10043,16 +10078,12 @@ function getActiveElements() {
                 chatSwipeState.item.style.transform = `translateX(${x}px)`;
                 chatSwipeState.lastX = x;
 
-                // Ряд кнопок движется вместе с пальцем 1:1: насколько ячейка
-                // ушла влево, ровно настолько кнопки выехали из-за правого края.
-                // Ни прозрачности, ни масштаба — только сдвиг, поэтому кнопки
-                // всегда полноразмерные и никогда не пересекаются с ячейкой.
-                const { actionsEl } = chatSwipeState;
-                if (actionsEl) {
-                    const hidden = SWIPE_OPEN_X - Math.abs(x);
-                    actionsEl.style.transition = 'none';
-                    actionsEl.style.transform = `translateX(${hidden}px)`;
-                }
+                // Кнопки не выезжают из-за края (там их резал overflow:
+                // hidden), а растут из точки до полного размера ровно по ходу
+                // пальца: прогресс 0..1 отдаём в CSS-переменную, дальше всё
+                // делает scale() на .chat-swipe-circle.
+                const progress = Math.min(1, Math.abs(x) / SWIPE_OPEN_X);
+                chatSwipeState.wrapper.style.setProperty('--swipe-p', progress.toFixed(4));
             }, { passive: false });
 
             const endChatSwipe = (e) => {
@@ -10073,18 +10104,16 @@ function getActiveElements() {
                 } else {
                     opening = wrapper.classList.contains('swiped');
                 }
-                // Возвращаем управление CSS: снимаем inline-стили в следующем
-                // кадре, уже после форс-рефлоу, иначе браузер может склеить
-                // сброс transition: none и смену transform в одно обновление,
-                // и кнопки прыгнут на место без анимации.
+                // Возвращаем управление CSS: снимаем inline-прогресс уже после
+                // того, как проставлен/снят класс .swiped, чтобы кнопки плавно
+                // дорастали до полного размера или сжимались обратно в точку.
                 if (actionsEl) {
+                    actionsEl.style.transition = '';
                     actionsEl.style.opacity = '';
-                    void actionsEl.offsetWidth;
-                    requestAnimationFrame(() => {
-                        actionsEl.style.transition = '';
-                        actionsEl.style.transform = '';
-                    });
+                    actionsEl.style.transform = '';
                 }
+                void wrapper.offsetWidth;
+                wrapper.style.removeProperty('--swipe-p');
                 chatSwipeState = null;
             };
 
@@ -13378,4 +13407,4 @@ function stopProfileDataPolling() {
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
-</html>  
+</html>
