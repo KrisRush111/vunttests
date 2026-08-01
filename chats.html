@@ -5718,6 +5718,9 @@
                 appSocket.on('connect', () => {
                     // При реконнекте (например после сна телефона) перезаходим в комнату текущего открытого чата, если он есть.
                     if (currentChatId) appSocket.emit('join_chat', { chat_id: currentChatId });
+                    // Пока сокет был отключён, событий chat_pin_changed никто не буферизует
+                    // (Redis Pub/Sub без истории) — досинхронизируем закрепления с сервером.
+                    syncPinnedFromServer();
                 });
 
                 // Удаление — либо чьим-то удалили в текущем чате для всех ('everyone').
@@ -5745,13 +5748,7 @@
                 // пользователя, приватно, собеседника оно не касается.
                 appSocket.on('chat_pin_changed', (payload) => {
                     if (!payload || payload.chat_id == null) return;
-                    const chat = (currentChatsList || []).find(c => String(c.id) === String(payload.chat_id));
-                    if (!chat) return;
-                    chat.is_pinned = !!payload.is_pinned;
-                    chat.pinned_at = payload.pinned_at || null;
-                    currentChatsList = sortChats(currentChatsList);
-                    renderChats(currentChatsList);
-                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    applyRemotePinChange(payload.chat_id, payload.is_pinned, payload.pinned_at);
                 });
 
                 // Новое сообщение/альбом в каком-то из чатов пользователя (см. broadcast_chat_activity на сервере).
@@ -5776,6 +5773,70 @@
                 console.warn('WS connect failed, staying on polling-only mode', e);
             }
         }
+
+        // Применяет закрепление/открепление, пришедшее С ДРУГОГО устройства (WS)
+        // или обнаруженное фоновой сверкой. Возвращает true, если что-то поменялось.
+        function applyRemotePinChange(chatId, isPinned, pinnedAt) {
+            const chat = (currentChatsList || []).find(c => String(c.id) === String(chatId));
+            if (!chat) {
+                // Чата ещё нет в локальном списке (например, он появился на другом
+                // устройстве) — подтягиваем его целиком, там уже придёт is_pinned.
+                updateSingleChat(chatId);
+                return false;
+            }
+            const next = !!isPinned;
+            const nextAt = pinnedAt || null;
+            if (!!chat.is_pinned === next && (chat.pinned_at || null) === nextAt) return false;
+            chat.is_pinned = next;
+            chat.pinned_at = nextAt;
+            currentChatsList = sortChats(currentChatsList);
+            renderChats(currentChatsList);
+            setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+            return true;
+        }
+
+        // Резервная сверка закреплений с сервером — на случай, если WS-событие
+        // не дошло (устройство спало, сокет висел в reconnect, воркер перезапустился).
+        let _pinSyncInFlight = false;
+        async function syncPinnedFromServer() {
+            if (_pinSyncInFlight) return;
+            if (!userData || !userData.platform_user_id) return;
+            _pinSyncInFlight = true;
+            try {
+                const response = await fetch(`${SERVER_URL}/get_chats`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({platform_user_id: userData.platform_user_id}),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success' || !Array.isArray(data.chats)) return;
+                let changed = false;
+                data.chats.forEach(serverChat => {
+                    const localChat = (currentChatsList || []).find(c => String(c.id) === String(serverChat.id));
+                    if (!localChat) return;
+                    const sPinned = !!serverChat.is_pinned;
+                    const sAt = serverChat.pinned_at || null;
+                    if (!!localChat.is_pinned !== sPinned || (localChat.pinned_at || null) !== sAt) {
+                        localChat.is_pinned = sPinned;
+                        localChat.pinned_at = sAt;
+                        changed = true;
+                    }
+                });
+                if (changed) {
+                    currentChatsList = sortChats(currentChatsList);
+                    renderChats(currentChatsList);
+                    setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                }
+            } catch (e) {} finally {
+                _pinSyncInFlight = false;
+            }
+        }
+
+        // Вкладка/приложение вернулись из фона — WS мог пропустить события, пока спал.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') syncPinnedFromServer();
+        });
 
         // Вызывается и из поллинга (как fallback-сетка после полной реконцилиации), и напрямую из WS-хендлеров выше.
         // Мгновенно убирает сообщение из открытого чата (если он тот же) и из IndexedDB любого чата, чтобы оно не воскресло при следующем открытии этого чата на на этом же или другом устройстве.
@@ -13310,6 +13371,26 @@ function stopProfileDataPolling() {
                 });
                 const data = await response.json();
                 if (data.status === 'success' && data.chats) {
+                    // Закрепления — отдельным проходом: их изменение требует
+                    // не точечного обновления ячейки, а пересортировки списка.
+                    let pinsChanged = false;
+                    data.chats.forEach(serverChat => {
+                        const localChat = currentChatsList.find(c => String(c.id) === String(serverChat.id));
+                        if (!localChat) return;
+                        const sPinned = !!serverChat.is_pinned;
+                        const sAt = serverChat.pinned_at || null;
+                        if (!!localChat.is_pinned !== sPinned || (localChat.pinned_at || null) !== sAt) {
+                            localChat.is_pinned = sPinned;
+                            localChat.pinned_at = sAt;
+                            pinsChanged = true;
+                        }
+                    });
+                    if (pinsChanged) {
+                        currentChatsList = sortChats(currentChatsList);
+                        renderChats(currentChatsList);
+                        setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+                    }
+
                     data.chats.forEach(serverChat => {
                         const localChat = currentChatsList.find(c => c.id === serverChat.id);
                         const oldCount = localChat ? (localChat.unread_count || 0) : 0;
@@ -13438,4 +13519,4 @@ function stopProfileDataPolling() {
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
 </body>
-</html>  
+</html>
