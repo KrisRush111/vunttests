@@ -13445,7 +13445,7 @@ function stopProfileDataPolling() {
         .profile-more-menu {
             position: fixed;
             z-index: 6100;
-            min-width: 210px;
+            min-width: 172px;
             padding: 6px 0;
             border-radius: 14px;
             background: rgba(255, 255, 255, 0.85);
@@ -13473,7 +13473,7 @@ function stopProfileDataPolling() {
         .profile-more-item {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start;
             width: 100%;
             border: none;
             background: none;
@@ -13507,7 +13507,7 @@ function stopProfileDataPolling() {
             width: 18px;
             text-align: center;
             opacity: 0.8;
-            margin-left: 12px;
+            margin-left: 8px;
         }
 
         /* ===== Диалог подтверждения «Пожаловаться?» (Да / Нет) —
@@ -13715,10 +13715,45 @@ function stopProfileDataPolling() {
         }
 
         .report-sheet-body {
+            position: relative;
             flex: 1 1 auto;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             padding: 0 14px 18px;
+            transition: height 0.3s cubic-bezier(0.22, 0.9, 0.3, 1);
+        }
+
+        /* Плавный переход между шагами: старый шаг уезжает, новый въезжает,
+           высота листа при этом мягко подстраивается. */
+        .report-step {
+            transition: transform 0.3s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.22s ease;
+            will-change: transform, opacity;
+        }
+
+        .report-step.step-enter-right {
+            transform: translateX(26px);
+            opacity: 0;
+        }
+
+        .report-step.step-enter-left {
+            transform: translateX(-26px);
+            opacity: 0;
+        }
+
+        .report-step.step-exit-left {
+            transform: translateX(-26px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .report-step.step-exit-right {
+            transform: translateX(26px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .report-option.is-chosen {
+            background: rgba(11, 132, 254, 0.14);
         }
 
         .report-sheet-subtitle {
@@ -13843,15 +13878,15 @@ function stopProfileDataPolling() {
             font-weight: 600;
             font-family: inherit;
             color: #fff;
-            background: var(--telegram-primary, #2481cc);
+            background: #0B84FE;
             cursor: pointer;
             -webkit-tap-highlight-color: transparent;
-            transition: transform 0.1s ease, opacity 0.12s ease;
+            transition: transform 0.1s ease, opacity 0.12s ease, background 0.12s ease;
         }
 
         .report-submit-btn:active {
             transform: scale(0.98);
-            opacity: 0.9;
+            background: #0a76e2;
         }
     </style>
     <script>
@@ -14008,13 +14043,68 @@ function stopProfileDataPolling() {
             });
             header.querySelector('.report-sheet-close').addEventListener('click', closeSheet);
 
+            const STEP_DURATION = 300;
+            let swapping = false;
+
+            /* Плавная замена шага: старый уезжает в сторону, новый въезжает
+               с противоположной, высота листа анимируется между ними. */
+            function swapStep(html, dir, onMount) {
+                const old = body.querySelector('.report-step');
+                const step = document.createElement('div');
+                step.className = 'report-step';
+                step.innerHTML = html;
+
+                if (!old) {
+                    body.appendChild(step);
+                    if (onMount) onMount(step);
+                    return;
+                }
+
+                if (swapping) return;
+                swapping = true;
+
+                const padBottom = 18;
+                const oldH = old.offsetHeight;
+
+                body.scrollTop = 0;
+                body.style.overflow = 'hidden';
+                body.style.height = (oldH + padBottom) + 'px';
+
+                // Старый шаг вынимаем из потока, чтобы новый не прыгал вниз
+                old.style.position = 'absolute';
+                old.style.top = '0';
+                old.style.left = '14px';
+                old.style.right = '14px';
+
+                step.classList.add(dir === 'back' ? 'step-enter-left' : 'step-enter-right');
+                body.appendChild(step);
+                if (onMount) onMount(step);
+
+                const newH = step.offsetHeight;
+
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        old.classList.add(dir === 'back' ? 'step-exit-right' : 'step-exit-left');
+                        step.classList.remove('step-enter-left', 'step-enter-right');
+                        body.style.height = (newH + padBottom) + 'px';
+                    });
+                });
+
+                setTimeout(() => {
+                    old.remove();
+                    body.style.height = '';
+                    body.style.overflow = '';
+                    swapping = false;
+                }, STEP_DURATION + 20);
+            }
+
             /* Шаг 1 — список причин */
-            function renderReasons() {
+            function renderReasons(dir) {
                 const back = header.querySelector('.report-sheet-back');
                 if (back) back.remove();
                 header.querySelector('.report-sheet-close').style.display = '';
 
-                body.innerHTML =
+                const html =
                     '<div class="report-sheet-subtitle">Что не так с пользователем?</div>' +
                     '<div class="report-option-list">' +
                         REPORT_REASONS.map((r, i) =>
@@ -14025,12 +14115,17 @@ function stopProfileDataPolling() {
                         ).join('') +
                     '</div>';
 
-                body.querySelectorAll('.report-option').forEach((btn) => {
-                    btn.addEventListener('click', () => {
-                        renderComment(REPORT_REASONS[Number(btn.dataset.index)]);
+                swapStep(html, dir || 'back', (step) => {
+                    step.querySelectorAll('.report-option').forEach((btn) => {
+                        btn.addEventListener('click', () => {
+                            if (swapping) return;
+                            btn.classList.add('is-chosen');
+                            setTimeout(() => {
+                                renderComment(REPORT_REASONS[Number(btn.dataset.index)]);
+                            }, 90);
+                        });
                     });
                 });
-                body.scrollTop = 0;
             }
 
             /* Шаг 2 — комментарий */
@@ -14044,11 +14139,11 @@ function stopProfileDataPolling() {
                     back.className = 'report-sheet-back';
                     back.setAttribute('aria-label', 'Назад');
                     back.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-                    back.addEventListener('click', renderReasons);
+                    back.addEventListener('click', () => renderReasons('back'));
                     header.appendChild(back);
                 }
 
-                body.innerHTML =
+                const html =
                     '<div class="report-comment-label">' +
                         (isOther ? 'Опишите проблему' : 'Хотите что-то добавить? (необязательно)') +
                     '</div>' +
@@ -14060,13 +14155,17 @@ function stopProfileDataPolling() {
                     '</div>' +
                     '<button type="button" class="report-submit-btn">Отправить</button>';
 
-                body.scrollTop = 0;
-                const input = body.querySelector('.report-comment-input');
-                if (input && window.matchMedia('(min-width: 768px)').matches) input.focus();
-
-                body.querySelector('.report-submit-btn').addEventListener('click', () => {
-                    // Дизайн без рабочей функции — отправка пока не реализована.
-                    closeSheet();
+                swapStep(html, 'forward', (step) => {
+                    step.querySelector('.report-submit-btn').addEventListener('click', () => {
+                        // Дизайн без рабочей функции — отправка пока не реализована.
+                        closeSheet();
+                    });
+                    if (window.matchMedia('(min-width: 768px)').matches) {
+                        setTimeout(() => {
+                            const input = step.querySelector('.report-comment-input');
+                            if (input) input.focus();
+                        }, STEP_DURATION);
+                    }
                 });
             }
 
