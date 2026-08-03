@@ -6382,6 +6382,10 @@ function openProfileModal(userId) {
     const token = Symbol();
     _profileLoadToken = token;
 
+    // Запоминаем, на кого сейчас открыт профиль — это же id уходит в жалобу
+    // (скрипт жалоб внизу страницы читает window.__reportTargetUserId).
+    window.__reportTargetUserId = userId;
+
     // Сбрасываем UI профиля до пустого состояния (без placeholder'ов)
     const activeElements = getActiveElements();
     if (activeElements.modalProfileNickname) activeElements.modalProfileNickname.textContent = '';
@@ -13905,7 +13909,111 @@ function stopProfileDataPolling() {
             'Другое'
         ];
 
+        const REPORT_ENDPOINT = (typeof SERVER_URL !== 'undefined' && SERVER_URL)
+            ? SERVER_URL + '/report'
+            : 'https://vuntserverrr.site/report';
+
         let moreMenuEl = null;
+        let reportSending = false;
+
+        /* Кто жалуется: берём из userData (сессия), с запасным вариантом из
+           sessionStorage/localStorage — на случай, если скрипт сработал раньше,
+           чем initializePage успела заполнить userData. */
+        function getReporterId() {
+            try {
+                if (typeof userData !== 'undefined' && userData && userData.platform_user_id) {
+                    return String(userData.platform_user_id);
+                }
+            } catch (e) {}
+            try {
+                const raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && parsed.platform_user_id) return String(parsed.platform_user_id);
+                }
+            } catch (e) {}
+            return '';
+        }
+
+        /* На кого жалуемся: id собеседника + id чата.
+           Приоритет — профиль, который сейчас открыт (window.__reportTargetUserId),
+           иначе второй участник текущего чата. */
+        function getReportTarget() {
+            const target = { reported_user_id: '', reported_nickname: getContactName(), chat_id: '' };
+
+            if (window.__reportTargetUserId) {
+                target.reported_user_id = String(window.__reportTargetUserId);
+            }
+
+            try {
+                if (typeof currentChat !== 'undefined' && currentChat) {
+                    if (currentChat.id) target.chat_id = String(currentChat.id);
+                    const me = getReporterId();
+                    const participants = currentChat.participants || [];
+                    const other = participants.find(p => String(p.platform_user_id) !== me);
+                    if (!target.reported_user_id && other) {
+                        target.reported_user_id = String(other.platform_user_id);
+                    }
+                    if (other && (other.nickname || other.name) && target.reported_nickname === 'пользователя') {
+                        target.reported_nickname = other.nickname || other.name;
+                    }
+                }
+            } catch (e) {}
+
+            if (target.reported_nickname === 'пользователя') target.reported_nickname = '';
+            return target;
+        }
+
+        function reportToast(text) {
+            if (typeof showSimpleToast === 'function') {
+                showSimpleToast(text);
+            } else {
+                alert(text);
+            }
+        }
+
+        /* Отправка жалобы на сервер -> сервер пересылает её боту жалоб в Telegram */
+        async function sendReport(reason, comment) {
+            const reporterId = getReporterId();
+            if (!reporterId) {
+                reportToast('Не удалось определить ваш аккаунт');
+                return false;
+            }
+
+            const target = getReportTarget();
+            const payload = {
+                platform_user_id: reporterId,
+                reported_user_id: target.reported_user_id,
+                reported_nickname: target.reported_nickname,
+                reason: reason,
+                comment: comment || '',
+                chat_id: target.chat_id
+            };
+
+            try {
+                const response = await fetch(REPORT_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json().catch(() => ({}));
+
+                if (response.ok && result.success) return true;
+
+                if (result.error === 'comment_required') {
+                    reportToast('Опишите проблему подробнее');
+                } else if (result.error === 'bad_reason') {
+                    reportToast('Неизвестная причина жалобы');
+                } else {
+                    reportToast('Не удалось отправить жалобу. Попробуйте позже');
+                }
+                return false;
+            } catch (e) {
+                reportToast('Нет связи с сервером. Попробуйте позже');
+                return false;
+            }
+        }
 
         function getContactName() {
             const isDesktop = window.matchMedia('(min-width: 768px)').matches;
@@ -14156,9 +14264,36 @@ function stopProfileDataPolling() {
                     '<button type="button" class="report-submit-btn">Отправить</button>';
 
                 swapStep(html, 'forward', (step) => {
-                    step.querySelector('.report-submit-btn').addEventListener('click', () => {
-                        // Дизайн без рабочей функции — отправка пока не реализована.
-                        closeSheet();
+                    const submitBtn = step.querySelector('.report-submit-btn');
+                    const input = step.querySelector('.report-comment-input');
+
+                    submitBtn.addEventListener('click', async () => {
+                        if (reportSending) return;
+
+                        const comment = input ? input.value.trim() : '';
+                        if (isOther && comment.length < 3) {
+                            reportToast('Опишите, что случилось');
+                            if (input) input.focus();
+                            return;
+                        }
+
+                        reportSending = true;
+                        submitBtn.disabled = true;
+                        submitBtn.style.opacity = '0.6';
+                        const originalText = submitBtn.textContent;
+                        submitBtn.textContent = 'Отправка...';
+
+                        const ok = await sendReport(reason, comment);
+
+                        reportSending = false;
+                        if (ok) {
+                            closeSheet();
+                            reportToast('Жалоба отправлена');
+                        } else {
+                            submitBtn.disabled = false;
+                            submitBtn.style.opacity = '';
+                            submitBtn.textContent = originalText;
+                        }
                     });
                     if (window.matchMedia('(min-width: 768px)').matches) {
                         setTimeout(() => {
