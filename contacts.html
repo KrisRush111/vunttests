@@ -2064,6 +2064,536 @@ body {
 </head>
 <body>
 
+<!-- ==========================================================================
+     ЭКРАН БЛОКИРОВКИ ЗАБАНЕННОГО АККАУНТА (вставлять СРАЗУ после <body>)
+     --------------------------------------------------------------------------
+     Один и тот же блок вставляется без изменений в chats.html, contacts.html
+     и profile.html — он полностью самодостаточен: свой CSS, своя разметка,
+     своя логика, ничего из окружающей страницы не использует и ничего из неё
+     не требует. Единственная необязательная связка со страницей — вызов
+     window.BanGuard.attachSocket(appSocket) там, где создаётся Socket.IO
+     соединение: он даёт мгновенную доставку бана/разбана. Без него всё тоже
+     работает, просто через фолбэк-опрос раз в 20-60 секунд.
+
+     Как это работает:
+       • Источник правды — сервер (POST /ban_status). Он же отдаёт server_time,
+         по которому считается поправка на разъезд часов: перевод времени на
+         телефоне бан не снимает и не удлиняет.
+       • Срок хранится АБСОЛЮТНОЙ меткой expires_at, поэтому таймер тикает и
+         офлайн: остаток всегда = expires_at − текущее время, а не счётчик.
+       • Последнее состояние лежит в localStorage, поэтому экран блокировки
+         появляется сразу при открытии страницы (в том числе без сети), ещё до
+         ответа сервера — без «моргания» интерфейсом чатов.
+       • Пользователь остаётся ЗАЛОГИНЕН: сессия не трогается, серверные API
+         не блокируются — блокируется только интерфейс.
+     ========================================================================== -->
+<style>
+    /* Пока аккаунт заблокирован — страница под оверлеем не скроллится и не
+       ловит нажатия (сам оверлей перехватывает всё). */
+    html.ban-locked, html.ban-locked body {
+        overflow: hidden !important;
+        touch-action: none !important;
+    }
+
+    #banOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;           /* выше любых модалок/меню страницы */
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 28px 22px calc(28px + env(safe-area-inset-bottom, 0px));
+        background: #ffffff;
+        color: #000000;
+        -webkit-user-select: none;
+        user-select: none;
+        overscroll-behavior: none;
+    }
+
+    #banOverlay.active { display: flex; }
+
+    .ban-card {
+        /* Свой font-family, чтобы блок оставался самодостаточным и одинаково
+           выглядел во всех трёх файлах, независимо от их стилей. */
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                     Roboto, sans-serif;
+        width: 100%;
+        max-width: 420px;
+        text-align: center;
+        animation: banCardIn .28s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    @keyframes banCardIn {
+        from { opacity: 0; transform: translateY(10px) scale(.97); }
+        to   { opacity: 1; transform: none; }
+    }
+
+    .ban-icon {
+        width: 76px;
+        height: 76px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 59, 48, 0.10);
+        color: #FF3B30;
+        font-size: 34px;
+    }
+
+    .ban-title {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -0.4px;
+        margin-bottom: 8px;
+    }
+
+    /* Дата бана — сразу под «Вы забанены» */
+    .ban-date {
+        font-size: 14px;
+        font-weight: 500;
+        color: #8e8e93;
+        margin-bottom: 26px;
+    }
+
+    .ban-label {
+        font-size: 15px;
+        font-weight: 500;
+        color: #3c3c43;
+        margin-bottom: 10px;
+    }
+
+    .ban-timer {
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
+        color: #0B84FE;
+        margin-bottom: 4px;
+        min-height: 38px;
+    }
+
+    .ban-until {
+        font-size: 13px;
+        color: #8e8e93;
+        margin-bottom: 26px;
+    }
+
+    /* Ссылка на поддержку — под таймером */
+    .ban-support {
+        font-size: 14px;
+        color: #8e8e93;
+        line-height: 1.5;
+    }
+
+    .ban-support a {
+        color: #0B84FE;
+        font-weight: 600;
+        text-decoration: none;
+        -webkit-user-select: text;
+        user-select: text;
+    }
+
+    .ban-support a:active { opacity: .6; }
+
+    #banOverlay.is-permanent .ban-timer,
+    #banOverlay.is-permanent .ban-until { display: none; }
+
+    @media (prefers-color-scheme: dark) {
+        #banOverlay {
+            background: #212121;
+            color: #ffffff;
+        }
+        .ban-label { color: rgba(255, 255, 255, 0.78); }
+        .ban-date,
+        .ban-until,
+        .ban-support { color: #8e8e93; }
+        .ban-icon { background: rgba(255, 69, 58, 0.14); color: #FF453A; }
+    }
+</style>
+
+<div id="banOverlay" role="dialog" aria-modal="true" aria-live="polite">
+    <div class="ban-card">
+        <!-- Иконка нарисована инлайн-SVG, а не шрифтовой <i class="fas">:
+             экран блокировки должен выглядеть правильно даже если Font Awesome
+             с CDN не загрузился (нет сети/CDN заблокирован) — иначе на месте
+             иконки был бы пустой круг. -->
+        <div class="ban-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="9"></circle>
+                <line x1="5.6" y1="5.6" x2="18.4" y2="18.4"></line>
+            </svg>
+        </div>
+        <div class="ban-title">Вы забанены</div>
+        <div class="ban-date" id="banDate"></div>
+        <div class="ban-label" id="banLabel">Ваш аккаунт был забанен на:</div>
+        <div class="ban-timer" id="banTimer"></div>
+        <div class="ban-until" id="banUntil"></div>
+        <div class="ban-support">
+            Поддержка:
+            <a id="banSupportLink" href="https://t.me/VuntgramSupport_bot"
+               target="_blank" rel="noopener">@VuntgramSupport_bot</a>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    var BAN_SERVER_URL = 'https://vuntserverrr.site';
+    var BAN_CACHE_KEY  = 'vunt_ban_state';
+    var BAN_SUPPORT    = '@VuntgramSupport_bot';
+
+    var overlay = document.getElementById('banOverlay');
+    var elDate    = document.getElementById('banDate');
+    var elLabel   = document.getElementById('banLabel');
+    var elTimer   = document.getElementById('banTimer');
+    var elUntil   = document.getElementById('banUntil');
+    var elSupport = document.getElementById('banSupportLink');
+
+    var state = null;      // текущий бан (или null)
+    var skewMs = 0;        // локальные часы минус серверные
+    var tickTimer = null;
+    var pollTimer = null;
+    var inFlight = false;
+    var expiredChecked = false;
+    var socketAttached = false;
+
+    // ---------------------------------------------------------------- утилиты
+
+    function userId() {
+        var raw = null;
+        try { raw = sessionStorage.getItem('userData'); } catch (e) {}
+        if (!raw) { try { raw = localStorage.getItem('rememberedUser'); } catch (e) {} }
+        if (!raw) return null;
+        try {
+            var u = JSON.parse(raw);
+            return (u && u.platform_user_id) ? String(u.platform_user_id) : null;
+        } catch (e) { return null; }
+    }
+
+    function serverNow() { return Date.now() - skewMs; }
+
+    function readCache() {
+        try {
+            var raw = localStorage.getItem(BAN_CACHE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+    }
+
+    function writeCache(ban) {
+        try {
+            if (ban) {
+                localStorage.setItem(BAN_CACHE_KEY, JSON.stringify(ban));
+            } else {
+                localStorage.removeItem(BAN_CACHE_KEY);
+            }
+        } catch (e) {}
+    }
+
+    var MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля',
+                  'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+    function fmtDateTime(iso) {
+        var t = Date.parse(iso || '');
+        if (!t) return '';
+        var d = new Date(t);
+        var hh = String(d.getHours()).padStart(2, '0');
+        var mm = String(d.getMinutes()).padStart(2, '0');
+        return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() +
+               ', ' + hh + ':' + mm;
+    }
+
+    function fmtRemaining(ms) {
+        if (ms < 0) ms = 0;
+        var total = Math.floor(ms / 1000);
+        var d = Math.floor(total / 86400);
+        var h = Math.floor((total % 86400) / 3600);
+        var m = Math.floor((total % 3600) / 60);
+        var s = total % 60;
+        var p2 = function (n) { return String(n).padStart(2, '0'); };
+        if (d > 0) return d + ' д ' + p2(h) + ' ч ' + p2(m) + ' мин ' + p2(s) + ' с';
+        if (h > 0) return p2(h) + ' ч ' + p2(m) + ' мин ' + p2(s) + ' с';
+        if (m > 0) return p2(m) + ' мин ' + p2(s) + ' с';
+        return s + ' с';
+    }
+
+    // ------------------------------------------------------- показ / скрытие
+
+    function isStillBanned(ban) {
+        if (!ban || !ban.is_banned) return false;
+        if (ban.is_permanent || !ban.expires_at) return true;
+        var end = Date.parse(ban.expires_at);
+        if (!end) return true;
+        return end > serverNow();
+    }
+
+    function render() {
+        if (!state) return;
+        var permanent = !!(state.is_permanent || !state.expires_at);
+
+        overlay.classList.toggle('is-permanent', permanent);
+        elDate.textContent = state.banned_at
+            ? 'Дата бана: ' + fmtDateTime(state.banned_at)
+            : '';
+
+        var support = state.support || BAN_SUPPORT;
+        elSupport.textContent = support;
+        elSupport.href = 'https://t.me/' + support.replace(/^@/, '');
+
+        if (permanent) {
+            elLabel.textContent = 'Ваш аккаунт забанен навсегда';
+            elTimer.textContent = '';
+            elUntil.textContent = '';
+            return;
+        }
+
+        elLabel.textContent = 'Ваш аккаунт был забанен на:';
+        elUntil.textContent = 'Разблокировка: ' + fmtDateTime(state.expires_at);
+        tick();
+    }
+
+    function tick() {
+        if (!state || state.is_permanent || !state.expires_at) return;
+        var left = Date.parse(state.expires_at) - serverNow();
+        elTimer.textContent = fmtRemaining(left);
+
+        if (left <= 0) {
+            // Истёк — решает всё равно сервер (наши часы могут врать).
+            // Если сети нет, разблокируем сами: срок объективно прошёл.
+            if (!expiredChecked) {
+                expiredChecked = true;
+                refresh(true).then(function (stillBanned) {
+                    if (!stillBanned) return;
+                    // сервер настаивает, что бан ещё активен — продолжаем показ
+                    expiredChecked = false;
+                }).catch(function () {
+                    hide();
+                });
+            }
+        }
+    }
+
+    var shownAt = 0;
+
+    function show(ban) {
+        state = ban;
+        ban.skew = skewMs;            // поправка часов переживает перезагрузку
+        if (!shownAt) shownAt = Date.now();
+        writeCache(ban);
+        expiredChecked = false;
+
+        document.documentElement.classList.add('ban-locked');
+        overlay.classList.add('active');
+        render();
+
+        if (tickTimer) clearInterval(tickTimer);
+        tickTimer = setInterval(tick, 1000);
+        schedulePoll(20000);
+    }
+
+    function hide() {
+        var wasBanned = !!state;
+        state = null;
+        writeCache(null);
+        if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+        overlay.classList.remove('active');
+        document.documentElement.classList.remove('ban-locked');
+        schedulePoll(60000);
+        // Страница провела под блокировкой неизвестно сколько — её данные
+        // (чаты, статусы, сокет-комнаты) могли устареть, поэтому один раз
+        // перезагружаем. Но НЕ перезагружаем, если оверлей только что мигнул
+        // из устаревшего локального кэша при открытии страницы (< 1.5 с) —
+        // иначе получился бы лишний ре-лоад на каждом входе после разбана.
+        var visibleFor = shownAt ? Date.now() - shownAt : 0;
+        shownAt = 0;
+        if (wasBanned && visibleFor > 1500) {
+            setTimeout(function () { window.location.reload(); }, 150);
+        }
+    }
+
+    // -------------------------------------------------------------- сервер
+
+    function refresh(force) {
+        var uid = userId();
+        if (!uid) return Promise.resolve(false);
+        if (inFlight && !force) return Promise.resolve(!!state);
+        inFlight = true;
+
+        return fetch(BAN_SERVER_URL + '/ban_status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platform_user_id: uid }),
+            credentials: 'include',
+            cache: 'no-store'
+        }).then(function (r) { return r.json(); }).then(function (data) {
+            inFlight = false;
+            if (!data || data.status !== 'success') return !!state;
+
+            if (data.server_time) {
+                var srv = Date.parse(data.server_time);
+                if (srv) skewMs = Date.now() - srv;
+            }
+
+            // Бан с уже прошедшим expires_at (гонка на секунду) считаем снятым —
+            // иначе таймер завис бы на нуле и дёргал сервер каждую секунду.
+            if (data.is_banned && isStillBanned(data)) {
+                data.user_id = uid;
+                show(data);
+                return true;
+            }
+            if (state) hide(); else writeCache(null);
+            return false;
+        }).catch(function (e) {
+            inFlight = false;
+            // Нет сети — оставляем как есть: таймер продолжает идти от
+            // абсолютного expires_at, блокировка не пропадает.
+            throw e;
+        });
+    }
+
+    function schedulePoll(ms) {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(function () {
+            refresh(false).catch(function () {});
+        }, ms);
+    }
+
+    // ------------------------------------------------------- инициализация
+
+    function applyCache() {
+        var uid = userId();
+        var cached = readCache();
+        if (!uid || !cached) return;
+        if (String(cached.user_id || '') !== uid) { writeCache(null); return; }
+        if (typeof cached.skew === 'number') skewMs = cached.skew;
+        if (isStillBanned(cached)) {
+            show(cached);
+        } else {
+            writeCache(null);
+        }
+    }
+
+    var started = false;
+
+    function init() {
+        if (started) return;
+        started = true;
+        applyCache();
+        refresh(true).catch(function () {});
+        schedulePoll(state ? 20000 : 60000);
+
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible') {
+                refresh(true).catch(function () {});
+            }
+        });
+        window.addEventListener('online', function () {
+            refresh(true).catch(function () {});
+        });
+        window.addEventListener('pageshow', function () {
+            applyCache();
+            refresh(true).catch(function () {});
+        });
+        // Тот же аккаунт в другой вкладке получил бан/разбан — синхронизируемся
+        // без запроса к серверу.
+        window.addEventListener('storage', function (e) {
+            if (e.key !== BAN_CACHE_KEY) return;
+            var cached = readCache();
+            if (isStillBanned(cached)) show(cached);
+            else if (state) hide();
+        });
+
+        // Даём странице шанс отдать свой сокет через attachSocket(); если через
+        // 3 секунды его нет — поднимаем собственный.
+        setTimeout(ensureOwnSocket, 3000);
+    }
+
+    // Мгновенная доставка через уже существующий WebSocket (комната user:<id>).
+    function attachSocket(socket) {
+        if (!socket || socket.__banBound) return;
+        socket.__banBound = true;
+        socketAttached = true;
+
+        socket.on('ban_applied', function (payload) {
+            if (!payload) return;
+            var uid = userId();
+            if (uid && payload.user_id && String(payload.user_id) !== uid) return;
+            payload.user_id = uid || payload.user_id;
+            payload.is_banned = true;
+            show(payload);
+            // Сразу сверяем часы с сервером, чтобы таймер был точным.
+            refresh(true).catch(function () {});
+        });
+
+        socket.on('ban_lifted', function (payload) {
+            var uid = userId();
+            if (payload && payload.user_id && uid &&
+                String(payload.user_id) !== uid) return;
+            hide();
+        });
+    }
+
+    // Если страница сама Socket.IO не поднимает (например profile.html), поднимем
+    // отдельное лёгкое соединение только под баны — иначе бан доходил бы туда
+    // лишь фолбэк-опросом раз в 20-60 секунд, а не мгновенно.
+    var SOCKET_CDN = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+    var ownSocketTried = false;
+
+    function ensureOwnSocket() {
+        if (socketAttached || ownSocketTried) return;
+        ownSocketTried = true;
+        var uid = userId();
+        if (!uid) return;
+
+        var start = function () {
+            if (socketAttached || typeof io === 'undefined') return;
+            try {
+                attachSocket(io(BAN_SERVER_URL, {
+                    path: '/socket.io/',
+                    transports: ['websocket', 'polling'],
+                    withCredentials: true,
+                    query: { platform_user_id: uid },
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000
+                }));
+            } catch (e) {}
+        };
+
+        if (typeof io !== 'undefined') { start(); return; }
+
+        var tag = document.createElement('script');
+        tag.src = SOCKET_CDN;
+        tag.async = true;
+        tag.onload = start;
+        (document.head || document.documentElement).appendChild(tag);
+    }
+
+    window.BanGuard = {
+        init: init,
+        attachSocket: attachSocket,
+        ensureOwnSocket: ensureOwnSocket,
+        refresh: function () { return refresh(true).catch(function () {}); },
+        isBanned: function () { return !!state; }
+    };
+
+    // Кэш применяем максимально рано — до первой отрисовки интерфейса.
+    applyCache();
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>
+
+
+
     <div id="loadingOverlay" class="loading-overlay">
         <div class="spinner"></div>
         <div class="loading-text">Загрузка данных...</div>
@@ -2350,6 +2880,10 @@ body {
                 reconnectionDelay: 1000,
                 reconnectionDelayMax: 5000
             });
+
+            // Баны/разбаны прилетают в личную комнату user:<id> по этому же
+            // сокету — отдельное соединение под них не нужно.
+            if (window.BanGuard) window.BanGuard.attachSocket(realtimeSocket);
 
             realtimeSocket.on('connect', () => {
                 console.log('[WS] connected', realtimeSocket.id);
@@ -4350,6 +4884,9 @@ function setupSearchHandlers() {
 
                 userData = JSON.parse(userDataFromStorage);
                 console.log('User data loaded:', userData);
+
+                // Проверяем бан сразу, как стал известен platform_user_id.
+                if (window.BanGuard) window.BanGuard.refresh();
 
                 // Открываем WebSocket сразу после того, как известен
                 // platform_user_id -- дальше presence/заявки в друзья будут
