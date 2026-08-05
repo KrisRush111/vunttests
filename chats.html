@@ -5356,13 +5356,6 @@
         margin-bottom: 26px;
     }
 
-    .ban-reason {
-        font-size: 14px;
-        color: #8e8e93;
-        margin-bottom: 22px;
-        word-break: break-word;
-    }
-
     /* Ссылка на поддержку — под таймером */
     .ban-support {
         font-size: 14px;
@@ -5391,7 +5384,6 @@
         .ban-label { color: rgba(255, 255, 255, 0.78); }
         .ban-date,
         .ban-until,
-        .ban-reason,
         .ban-support { color: #8e8e93; }
         .ban-icon { background: rgba(255, 69, 58, 0.14); color: #FF453A; }
     }
@@ -5415,7 +5407,6 @@
         <div class="ban-label" id="banLabel">Ваш аккаунт был забанен на:</div>
         <div class="ban-timer" id="banTimer"></div>
         <div class="ban-until" id="banUntil"></div>
-        <div class="ban-reason" id="banReason" style="display:none;"></div>
         <div class="ban-support">
             Поддержка:
             <a id="banSupportLink" href="https://t.me/VuntgramSupport_bot"
@@ -5437,7 +5428,6 @@
     var elLabel   = document.getElementById('banLabel');
     var elTimer   = document.getElementById('banTimer');
     var elUntil   = document.getElementById('banUntil');
-    var elReason  = document.getElementById('banReason');
     var elSupport = document.getElementById('banSupportLink');
 
     var state = null;      // текущий бан (или null)
@@ -5446,6 +5436,7 @@
     var pollTimer = null;
     var inFlight = false;
     var expiredChecked = false;
+    var socketAttached = false;
 
     // ---------------------------------------------------------------- утилиты
 
@@ -5528,13 +5519,6 @@
         var support = state.support || BAN_SUPPORT;
         elSupport.textContent = support;
         elSupport.href = 'https://t.me/' + support.replace(/^@/, '');
-
-        if (state.reason) {
-            elReason.textContent = 'Причина: ' + state.reason;
-            elReason.style.display = '';
-        } else {
-            elReason.style.display = 'none';
-        }
 
         if (permanent) {
             elLabel.textContent = 'Ваш аккаунт забанен навсегда';
@@ -5698,12 +5682,17 @@
             if (isStillBanned(cached)) show(cached);
             else if (state) hide();
         });
+
+        // Даём странице шанс отдать свой сокет через attachSocket(); если через
+        // 3 секунды его нет — поднимаем собственный.
+        setTimeout(ensureOwnSocket, 3000);
     }
 
     // Мгновенная доставка через уже существующий WebSocket (комната user:<id>).
     function attachSocket(socket) {
         if (!socket || socket.__banBound) return;
         socket.__banBound = true;
+        socketAttached = true;
 
         socket.on('ban_applied', function (payload) {
             if (!payload) return;
@@ -5724,9 +5713,46 @@
         });
     }
 
+    // Если страница сама Socket.IO не поднимает (например profile.html), поднимем
+    // отдельное лёгкое соединение только под баны — иначе бан доходил бы туда
+    // лишь фолбэк-опросом раз в 20-60 секунд, а не мгновенно.
+    var SOCKET_CDN = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+    var ownSocketTried = false;
+
+    function ensureOwnSocket() {
+        if (socketAttached || ownSocketTried) return;
+        ownSocketTried = true;
+        var uid = userId();
+        if (!uid) return;
+
+        var start = function () {
+            if (socketAttached || typeof io === 'undefined') return;
+            try {
+                attachSocket(io(BAN_SERVER_URL, {
+                    path: '/socket.io/',
+                    transports: ['websocket', 'polling'],
+                    withCredentials: true,
+                    query: { platform_user_id: uid },
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000
+                }));
+            } catch (e) {}
+        };
+
+        if (typeof io !== 'undefined') { start(); return; }
+
+        var tag = document.createElement('script');
+        tag.src = SOCKET_CDN;
+        tag.async = true;
+        tag.onload = start;
+        (document.head || document.documentElement).appendChild(tag);
+    }
+
     window.BanGuard = {
         init: init,
         attachSocket: attachSocket,
+        ensureOwnSocket: ensureOwnSocket,
         refresh: function () { return refresh(true).catch(function () {}); },
         isBanned: function () { return !!state; }
     };
