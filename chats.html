@@ -5237,6 +5237,219 @@
     display: none !important;
 }
 
+    
+/* ==========================================================================
+   ПРОФИЛЬ КОНТАКТА — НОВЫЙ ДИЗАЙН ШАПКИ (как в Telegram iOS)
+   1) Кнопки "чат / звук / ещё" — круглые белые с синей иконкой (без плитки
+      и квадратной тени). Когда шапка раскрыта в фото — круги становятся
+      полупрозрачными с белыми иконками поверх снимка.
+   2) Аватарка с фотографией по нажатию раскрывается на всю ширину
+      (квадратный "герой"), повторное нажатие открывает фото в просмотрщике.
+   ========================================================================== */
+
+/* --- переменные шапки: отступ модалки (bleed) и позиция аватарки --- */
+.profile-modal-content {
+    --hero-bleed: 20px;         /* padding у .profile-modal на десктопе */
+    --hero-avatar-top: 32px;    /* верхний padding шапки */
+    --hero-avatar-size: 100px;
+}
+@media (max-width: 767px) {
+    .profile-modal-content {
+        --hero-bleed: 0px;
+        --hero-avatar-top: 64px;
+    }
+}
+
+/* ---------- 1. КРУГЛЫЕ КНОПКИ ДЕЙСТВИЙ ---------- */
+
+.profile-actions,
+.desktop-profile .profile-actions {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-bottom: none !important;
+    padding: 6px 0 2px !important;
+    transition: margin-top .34s cubic-bezier(.25,.8,.25,1);
+}
+
+.action-buttons {
+    gap: 12px;
+    padding: 0 8px;
+}
+
+.action-button,
+.desktop-profile .action-button {
+    background: transparent !important;
+    padding: 2px 0;
+    border-radius: 16px;
+}
+.action-button:hover,
+.action-button:active,
+.desktop-profile .action-button:hover,
+.desktop-profile .action-button:active {
+    background: transparent !important;
+    transform: none;
+}
+
+.action-button-icon,
+.desktop-profile .action-button-icon {
+    width: 54px;
+    height: 54px;
+    border-radius: 50% !important;   /* круг, а не квадрат */
+    background: var(--telegram-bg, #ffffff) !important;
+    color: #0a84ff !important;
+    font-size: 21px;
+    margin-bottom: 7px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .07);  /* мягкая круглая тень */
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transition: transform .18s ease, background-color .3s ease,
+                color .3s ease, box-shadow .3s ease;
+}
+.action-button:active .action-button-icon,
+.desktop-profile .action-button:active .action-button-icon {
+    transform: scale(.9);
+}
+
+.action-button-label {
+    color: #0a84ff;
+    font-size: 12px;
+    font-weight: 500;
+    transition: color .3s ease, text-shadow .3s ease;
+}
+
+/* ---------- 2. ШАПКА: обычное (свёрнутое) состояние ---------- */
+
+.profile-header,
+.desktop-profile .profile-header {
+    padding-top: calc(var(--hero-avatar-top) + var(--hero-avatar-size) + 16px);
+    box-shadow: none;
+    background: transparent;
+    transition: height .34s cubic-bezier(.25,.8,.25,1),
+                padding .34s cubic-bezier(.25,.8,.25,1),
+                border-radius .34s cubic-bezier(.25,.8,.25,1),
+                margin .34s cubic-bezier(.25,.8,.25,1);
+}
+.profile-header::before { display: none; }   /* убрали голубой "купол" */
+.profile-header:active { transform: none; }
+
+/* аватарка всегда абсолютная — только так её размер плавно анимируется */
+.profile-avatar {
+    position: absolute;
+    top: var(--hero-avatar-top);
+    left: 50%;
+    width: var(--hero-avatar-size);
+    height: var(--hero-avatar-size);
+    margin: 0 0 0 calc(var(--hero-avatar-size) / -2);
+    border-radius: 50%;
+    z-index: 1;
+    transition: top .34s cubic-bezier(.25,.8,.25,1),
+                left .34s cubic-bezier(.25,.8,.25,1),
+                width .34s cubic-bezier(.25,.8,.25,1),
+                height .34s cubic-bezier(.25,.8,.25,1),
+                margin .34s cubic-bezier(.25,.8,.25,1),
+                border-radius .34s cubic-bezier(.25,.8,.25,1);
+}
+.profile-avatar:active { transform: none; }
+
+.profile-info {
+    position: relative;
+    z-index: 3;
+    transition: opacity .16s ease;
+}
+
+/* ---------- 3. ШАПКА: раскрытая в фото ---------- */
+
+.hero-expanded .profile-header {
+    padding: 0 !important;
+    border-radius: 0 !important;
+    background: #000;
+    margin: calc(var(--hero-bleed) * -1) calc(var(--hero-bleed) * -1) 0 calc(var(--hero-bleed) * -1) !important;
+    width: calc(100% + var(--hero-bleed) * 2) !important;
+    max-width: none !important;
+}
+
+.hero-expanded .profile-avatar {
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border-radius: 0;
+    cursor: zoom-in;
+}
+
+/* затемнение снизу, чтобы имя и кнопки читались на любом фото */
+.hero-expanded .profile-header::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 62%;
+    background: linear-gradient(to top, rgba(0,0,0,.75) 0%, rgba(0,0,0,.35) 45%, rgba(0,0,0,0) 100%);
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* имя/ID/статус — в левый нижний угол фото, белым */
+.hero-expanded .profile-info {
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 104px;
+    align-items: flex-start;
+    text-align: left;
+    width: auto;
+}
+.hero-expanded .profile-nickname {
+    color: #fff;
+    text-align: left;
+    font-size: 25px;
+    text-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+.hero-expanded .profile-id,
+.hero-expanded .profile-status .status-text,
+.hero-expanded .profile-status.offline .status-text {
+    color: rgba(255,255,255,.82);
+    text-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+
+/* кнопки заезжают внутрь фото и становятся полупрозрачными кругами */
+.hero-expanded .profile-actions {
+    margin-top: -92px !important;
+    position: relative;
+    z-index: 5;
+}
+.hero-expanded .action-button-icon,
+.desktop-profile.hero-expanded .action-button-icon,
+.hero-expanded .desktop-profile .action-button-icon {
+    background: rgba(255, 255, 255, .20) !important;
+    color: #fff !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, .22);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+}
+.hero-expanded .action-button-label {
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+
+/* кнопки "назад" / "закрыть" поверх фото */
+.hero-expanded .profile-back-button,
+.hero-expanded .profile-close-button {
+    background: rgba(0, 0, 0, .32) !important;
+    color: #fff !important;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    z-index: 6;
+}
+
+/* во время анимации прячем текст — он "переезжает" из центра вниз-влево */
+.hero-animating .profile-info { opacity: 0; }
+.hero-noanim .profile-header,
+.hero-noanim .profile-avatar,
+.hero-noanim .profile-actions,
+.hero-noanim .profile-info { transition: none !important; }
+
     </style>
 </head>
 <body>
@@ -6935,6 +7148,7 @@ function openProfileModal(userId) {
 
     // Сбрасываем UI профиля до пустого состояния (без placeholder'ов)
     const activeElements = getActiveElements();
+    if (window.ProfileHero) window.ProfileHero.resetAll();
     if (activeElements.modalProfileNickname) activeElements.modalProfileNickname.textContent = '';
     if (activeElements.modalProfileId) activeElements.modalProfileId.textContent = '';
     if (activeElements.modalProfileAvatar) {
@@ -7035,6 +7249,7 @@ function switchProfileMediaTab(variant, tab) {
 
 
 function closeProfileModal() {
+    if (window.ProfileHero) window.ProfileHero.resetAll();
     stopProfileStatusPolling();
     stopProfileDataPolling();
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
@@ -12427,8 +12642,16 @@ async function updateProfileModalUI(user) {
         AvatarCache.render(SERVER_URL, activeElements.modalProfileAvatar, user.platform_user_id, initial, user.avatar_background, true);
         activeElements.modalProfileAvatar.style.backgroundColor = '';
 
-        // Обработчик клика на аватар — открываем то, что сейчас отображается
-        activeElements.modalProfileAvatar.onclick = async () => {
+        // Клик по аватарке: 1-е нажатие — разворачиваем её в фото на всю ширину
+        // (как в Telegram iOS), 2-е — открываем полноэкранный просмотрщик.
+        const heroHeader = activeElements.modalProfileAvatar.closest('.profile-header');
+        activeElements.modalProfileAvatar.style.cursor = 'pointer';
+        activeElements.modalProfileAvatar.onclick = async (e) => {
+            if (e) e.stopPropagation();
+            if (window.ProfileHero && heroHeader && !window.ProfileHero.isExpanded(heroHeader)) {
+                window.ProfileHero.expand(heroHeader);
+                return;
+            }
             const local = await AvatarCache.getLocal(user.platform_user_id);
             const src = local?.dataUrl || `${SERVER_URL}/avatar/${user.platform_user_id}`;
             openPhotoViewer(src, user.nickname || '');
@@ -12438,6 +12661,12 @@ async function updateProfileModalUI(user) {
         activeElements.modalProfileAvatar.textContent = initial;
         activeElements.modalProfileAvatar.style.backgroundImage = 'none';
         activeElements.modalProfileAvatar.onclick = null;
+        activeElements.modalProfileAvatar.style.cursor = 'default';
+        // Без фотографии раскрывать нечего — сворачиваем шапку обратно
+        if (window.ProfileHero) {
+            const h = activeElements.modalProfileAvatar.closest('.profile-header');
+            if (h) window.ProfileHero.reset(h);
+        }
         
         if (user.avatar_background) {
             const lighterColor = adjustColor(user.avatar_background, 20);
@@ -15126,5 +15355,108 @@ function stopProfileDataPolling() {
         window.addEventListener('pageshow', bindMoreButtons);
     })();
     </script>
+
+<!-- ==========================================================================
+     ПРОФИЛЬ КОНТАКТА: раскрытие аватарки в фото на всю ширину (Telegram iOS).
+     Первое нажатие по аватарке — плавно разворачивает её в квадратный "герой",
+     повторное — открывает фото в полноэкранном просмотрщике.
+     ========================================================================== -->
+<script>
+(function () {
+    const DUR = 340; // должно совпадать с transition в CSS
+
+    function box(header) {
+        return header ? header.closest('.profile-modal-content') : null;
+    }
+
+    function bleed(content) {
+        const v = getComputedStyle(content).getPropertyValue('--hero-bleed');
+        return parseFloat(v) || 0;
+    }
+
+    function targetHeight(header, content) {
+        // квадрат по ширине шапки с учётом выхода за padding модалки
+        const w = header.offsetWidth + bleed(content) * 2;
+        return Math.round(Math.min(w, window.innerHeight * 0.78));
+    }
+
+    const ProfileHero = {
+        isExpanded(header) {
+            const c = box(header);
+            return !!c && c.classList.contains('hero-expanded');
+        },
+
+        expand(header) {
+            const c = box(header);
+            if (!c || c.classList.contains('hero-expanded')) return;
+
+            const startH = header.offsetHeight;
+            header.style.height = startH + 'px';
+            void header.offsetHeight;                 // reflow
+
+            c.classList.add('hero-animating', 'hero-expanded');
+            header.style.height = targetHeight(header, c) + 'px';
+
+            clearTimeout(c._heroTimer);
+            c._heroTimer = setTimeout(() => {
+                c.classList.remove('hero-animating');
+            }, DUR);
+        },
+
+        collapse(header) {
+            const c = box(header);
+            if (!c || !c.classList.contains('hero-expanded')) return;
+
+            const curH = header.offsetHeight;
+            c.classList.add('hero-animating');
+            c.classList.remove('hero-expanded');
+
+            header.style.height = 'auto';
+            const endH = header.offsetHeight;         // натуральная высота
+            header.style.height = curH + 'px';
+            void header.offsetHeight;                 // reflow
+            header.style.height = endH + 'px';
+
+            clearTimeout(c._heroTimer);
+            c._heroTimer = setTimeout(() => {
+                c.classList.remove('hero-animating');
+                header.style.height = '';
+            }, DUR);
+        },
+
+        toggle(header) {
+            this.isExpanded(header) ? this.collapse(header) : this.expand(header);
+        },
+
+        /* мгновенный сброс — при открытии/закрытии карточки профиля */
+        reset(header) {
+            const c = box(header);
+            if (!c) return;
+            clearTimeout(c._heroTimer);
+            c.classList.add('hero-noanim');
+            c.classList.remove('hero-expanded', 'hero-animating');
+            header.style.height = '';
+            void header.offsetHeight;
+            c.classList.remove('hero-noanim');
+        },
+
+        resetAll() {
+            document.querySelectorAll('.profile-modal-content .profile-header')
+                .forEach(h => ProfileHero.reset(h));
+        }
+    };
+
+    // при повороте/ресайзе пересчитываем высоту раскрытого фото
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('.profile-modal-content.hero-expanded').forEach(c => {
+            const header = c.querySelector('.profile-header');
+            if (header) header.style.height = targetHeight(header, c) + 'px';
+        });
+    });
+
+    window.ProfileHero = ProfileHero;
+})();
+</script>
+
 </body>
 </html>
