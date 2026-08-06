@@ -5464,7 +5464,7 @@
     .profile-modal-content {
         --hero-actions-collapsed: -26px;
         --hero-actions-expanded:  -10px;
-        --hero-photo-overhang: 90px;
+        --hero-photo-overhang: 94px;
     }
 }
 
@@ -12711,7 +12711,9 @@ async function updateProfileModalUI(user) {
         activeElements.modalProfileAvatar.style.cursor = 'pointer';
         activeElements.modalProfileAvatar.onclick = async (e) => {
             if (e) e.stopPropagation();
-            if (window.ProfileHero && heroHeader && !window.ProfileHero.isExpanded(heroHeader)) {
+            const canExpand = window.ProfileHero && window.ProfileHero.allowed
+                ? window.ProfileHero.allowed() : false;
+            if (canExpand && heroHeader && !window.ProfileHero.isExpanded(heroHeader)) {
                 window.ProfileHero.expand(heroHeader);
                 return;
             }
@@ -15449,9 +15451,16 @@ function stopProfileDataPolling() {
             return !!c && c.classList.contains('hero-expanded');
         },
 
+        /* раскрытие фото работает только на мобильных;
+           на десктопе аватарка остаётся как есть */
+        allowed() {
+            return window.matchMedia('(max-width: 767px)').matches;
+        },
+
         expand(header) {
             const c = box(header);
             if (!c || c.classList.contains('hero-expanded')) return;
+            if (!ProfileHero.allowed()) return;
 
             const startH = header.offsetHeight;
             header.style.height = startH + 'px';
@@ -15513,7 +15522,12 @@ function stopProfileDataPolling() {
     window.addEventListener('resize', () => {
         document.querySelectorAll('.profile-modal-content.hero-expanded').forEach(c => {
             const header = c.querySelector('.profile-header');
-            if (header) header.style.height = targetHeight(header, c) + 'px';
+            if (!header) return;
+            if (!ProfileHero.allowed()) {      // перешли на десктоп — сворачиваем
+                ProfileHero.reset(header);
+                return;
+            }
+            header.style.height = targetHeight(header, c) + 'px';
         });
     });
 
