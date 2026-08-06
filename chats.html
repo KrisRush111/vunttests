@@ -14895,11 +14895,35 @@ function stopProfileDataPolling() {
                 }, STEP_DURATION + 20);
             }
 
+            /* Стрелка «назад» в шапке. Каждый шаг задаёт СВОЁ действие, поэтому
+               кнопку всегда пересоздаём: если переиспользовать старую, на ней
+               остаётся обработчик предыдущего шага (из-за этого назад с шага
+               комментария после возврата из предупреждения вёл не к причинам). */
+            function setBackAction(handler) {
+                const old = header.querySelector('.report-sheet-back');
+                if (old) old.remove();
+
+                if (!handler) {
+                    header.querySelector('.report-sheet-close').style.display = '';
+                    return;
+                }
+
+                header.querySelector('.report-sheet-close').style.display = 'none';
+                const back = document.createElement('button');
+                back.type = 'button';
+                back.className = 'report-sheet-back';
+                back.setAttribute('aria-label', 'Назад');
+                back.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+                back.addEventListener('click', () => {
+                    if (reportSending || swapping) return;
+                    handler();
+                });
+                header.appendChild(back);
+            }
+
             /* Шаг 1 — список причин */
             function renderReasons(dir) {
-                const back = header.querySelector('.report-sheet-back');
-                if (back) back.remove();
-                header.querySelector('.report-sheet-close').style.display = '';
+                setBackAction(null);
 
                 const html =
                     '<div class="report-sheet-subtitle">Что не так с пользователем?</div>' +
@@ -14926,19 +14950,10 @@ function stopProfileDataPolling() {
             }
 
             /* Шаг 2 — комментарий */
-            function renderComment(reason) {
+            function renderComment(reason, prefill) {
                 const isOther = reason === 'Другое';
 
-                header.querySelector('.report-sheet-close').style.display = 'none';
-                if (!header.querySelector('.report-sheet-back')) {
-                    const back = document.createElement('button');
-                    back.type = 'button';
-                    back.className = 'report-sheet-back';
-                    back.setAttribute('aria-label', 'Назад');
-                    back.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-                    back.addEventListener('click', () => renderReasons('back'));
-                    header.appendChild(back);
-                }
+                setBackAction(() => renderReasons('back'));
 
                 const html =
                     '<div class="report-comment-label">' +
@@ -14952,9 +14967,11 @@ function stopProfileDataPolling() {
                     '</div>' +
                     '<button type="button" class="report-submit-btn">Отправить</button>';
 
-                swapStep(html, 'forward', (step) => {
+                swapStep(html, prefill != null ? 'back' : 'forward', (step) => {
                     const submitBtn = step.querySelector('.report-submit-btn');
                     const input = step.querySelector('.report-comment-input');
+                    // Возврат из предупреждения — не теряем уже написанный текст.
+                    if (input && prefill) input.value = prefill;
 
                     submitBtn.addEventListener('click', () => {
                         if (reportSending || swapping) return;
@@ -14983,20 +15000,7 @@ function stopProfileDataPolling() {
                Кнопка «Отправить» здесь заблокирована 3 секунды: по ней идёт
                заливка-отсчёт, чтобы текст успели хотя бы пробежать глазами. */
             function renderWarning(reason, comment) {
-                header.querySelector('.report-sheet-close').style.display = 'none';
-                const existingBack = header.querySelector('.report-sheet-back');
-                if (existingBack) existingBack.remove();
-
-                const back = document.createElement('button');
-                back.type = 'button';
-                back.className = 'report-sheet-back';
-                back.setAttribute('aria-label', 'Назад');
-                back.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-                back.addEventListener('click', () => {
-                    if (reportSending) return;
-                    renderComment(reason);
-                });
-                header.appendChild(back);
+                setBackAction(() => renderComment(reason, comment || ''));
 
                 const html =
                     '<div class="report-warn-box">' +
@@ -15049,6 +15053,11 @@ function stopProfileDataPolling() {
                             }, 1000);
                         });
                     });
+
+                    // Уходим с шага (назад/закрытие) — гасим таймер отсчёта.
+                    const stopOnLeave = () => stopCountdown();
+                    const backBtn = header.querySelector('.report-sheet-back');
+                    if (backBtn) backBtn.addEventListener('click', stopOnLeave);
 
                     cancelBtn.addEventListener('click', () => {
                         if (reportSending) return;
@@ -15118,4 +15127,4 @@ function stopProfileDataPolling() {
     })();
     </script>
 </body>
-</html>  
+</html>
