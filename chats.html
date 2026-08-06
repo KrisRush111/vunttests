@@ -4375,6 +4375,41 @@
             }
         }
 
+        /* ── ФИКС: хедер чата не должен уезжать за верх экрана при открытии клавиатуры ──
+           На iOS Safari при фокусе в поле ввода layout viewport остаётся высотой 100vh,
+           а visual viewport сжимается и страница «подскроливается» вверх. position: fixed
+           привязан к layout viewport → верх модалки (хедер) уходит за пределы видимой зоны.
+           Решение: привязываем модалку к visual viewport через CSS-переменные,
+           которые обновляет JS (см. setupVisualViewportFix). */
+        @media (max-width: 767px) {
+            .chat-modal {
+                top: var(--vv-top, 0px);
+                bottom: auto;
+                height: var(--vv-height, 100dvh);
+                max-height: var(--vv-height, 100dvh);
+                overflow: hidden;
+            }
+
+            .chat-modal .chat-header {
+                position: sticky;
+                top: 0;
+                flex: 0 0 60px;            /* хедер не сжимается и не скроллится */
+            }
+
+            .chat-modal .messages-container {
+                flex: 1 1 auto;
+                min-height: 0;             /* иначе flex-элемент не даёт контейнеру ужаться */
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .chat-modal .message-input-container {
+                flex: 0 0 auto;
+                position: relative;
+                bottom: auto !important;   /* перебиваем inline-стили из JS */
+            }
+        }
+
         @media (min-width: 768px) {
             body.wallpaper-enabled {
                 background-image: var(--wallpaper-url);
@@ -12127,14 +12162,17 @@ function getActiveElements() {
                 const { messageInputContainer, messagesContainer } = getActiveElements();
                 if (!messageInputContainer) return;
 
+                // Позицию по вертикали теперь держит flex-раскладка модалки,
+                // привязанной к visual viewport (см. setupVisualViewportFix),
+                // поэтому bottom вручную НЕ трогаем — иначе хедер/инпут разъезжаются.
+                messageInputContainer.style.bottom = '';
+
                 if (keyboardOpen && !isSendingMessage) {
-                    messageInputContainer.style.bottom = '8px';
-                    messageInputContainer.style.paddingBottom = 'env(safe-area-inset-bottom, 8px)';
+                    messageInputContainer.style.paddingBottom = '8px';
                     setTimeout(() => {
                         if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     }, 100);
                 } else {
-                    messageInputContainer.style.bottom = '12px';
                     messageInputContainer.style.paddingBottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
                 }
             }
@@ -12150,6 +12188,66 @@ function getActiveElements() {
                 keyboardShown = false;
                 adjustInputPosition(false);
             });
+        }
+
+        /* ──────────────────────────────────────────────────────────────
+           Привязка окна чата к visual viewport.
+           Держит хедер (аватар + ник) видимым, когда открыта клавиатура.
+           ────────────────────────────────────────────────────────────── */
+        function setupVisualViewportFix() {
+            const vv = window.visualViewport;
+            if (!vv) return;                       // старые браузеры — оставляем как было
+            if (setupVisualViewportFix._done) return;
+            setupVisualViewportFix._done = true;
+
+            const root = document.documentElement;
+            let rafId = null;
+
+            function apply() {
+                rafId = null;
+
+                const height = Math.round(vv.height);
+                const offsetTop = Math.round(vv.offsetTop);
+                // высота клавиатуры = сколько layout viewport'а осталось «под» видимой областью
+                const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+
+                root.style.setProperty('--vv-height', height + 'px');
+                root.style.setProperty('--vv-top', offsetTop + 'px');
+                root.style.setProperty('--kb-height', kb + 'px');
+
+                const open = kb > 80;
+                document.body.classList.toggle('keyboard-open', open);
+                document.body.classList.toggle('keyboard-closed', !open);
+
+                if (open) {
+                    const modal = document.querySelector('.chat-modal.active');
+                    const mc = modal && modal.querySelector('.messages-container');
+                    if (mc) mc.scrollTop = mc.scrollHeight;
+                }
+            }
+
+            function schedule() {
+                if (rafId === null) rafId = requestAnimationFrame(apply);
+            }
+
+            vv.addEventListener('resize', schedule);
+            vv.addEventListener('scroll', schedule);
+            window.addEventListener('orientationchange', () => setTimeout(apply, 350));
+
+            // iOS сам скроллит страницу к полю ввода — возвращаем её наверх,
+            // иначе fixed-модалка (и хедер) уезжает за границу экрана.
+            document.addEventListener('focusin', (e) => {
+                if (!e.target.closest || !e.target.closest('.chat-modal')) return;
+                setTimeout(() => { window.scrollTo(0, 0); apply(); }, 50);
+                setTimeout(() => { window.scrollTo(0, 0); apply(); }, 300);
+            });
+
+            document.addEventListener('focusout', () => {
+                setTimeout(() => { window.scrollTo(0, 0); apply(); }, 50);
+                setTimeout(apply, 350);
+            });
+
+            apply();
         }
 
 async function openChat(chatId) {
@@ -13742,6 +13840,7 @@ function stopProfileDataPolling() {
 
             setupKeyboardHandlers();
             setupKeyboardDetection();
+            setupVisualViewportFix();
             
             document.addEventListener('gesturestart', (e) => e.preventDefault());
             document.addEventListener('gesturechange', (e) => e.preventDefault());
