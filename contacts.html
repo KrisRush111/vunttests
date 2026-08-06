@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
-    <title>Контакты - TheVuntgram</title>   
+    <title>Контакты - TheVuntgram</title>
     <link rel="stylesheet" href="assets/animate/animate.min.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 
@@ -2123,12 +2123,14 @@ body {
 
 /* --- переменные шапки: отступ модалки (bleed) и позиция аватарки --- */
 .profile-modal-content {
+    --hero-dur: .34s;           /* скорость раскрытия/сворачивания фото */
     --hero-bleed: 20px;         /* padding у .profile-modal на десктопе */
     --hero-avatar-top: 32px;    /* верхний padding шапки */
     --hero-avatar-size: 100px;
 }
 @media (max-width: 767px) {
     .profile-modal-content {
+        --hero-dur: .30s;
         --hero-bleed: 0px;
         --hero-avatar-top: 64px;
     }
@@ -2143,8 +2145,8 @@ body {
     border: none !important;
     border-bottom: none !important;
     padding: 6px 0 2px !important;
-    transition: margin-top .52s cubic-bezier(.22,.61,.24,1),
-                margin-bottom .52s cubic-bezier(.22,.61,.24,1);
+    transition: margin-top var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                margin-bottom var(--hero-dur) cubic-bezier(.22,.61,.24,1);
 }
 
 .action-buttons {
@@ -2200,10 +2202,10 @@ body {
     padding-top: calc(var(--hero-avatar-top) + var(--hero-avatar-size) + 16px);
     box-shadow: none;
     background: transparent;
-    transition: height .52s cubic-bezier(.22,.61,.24,1),
-                padding .52s cubic-bezier(.22,.61,.24,1),
-                border-radius .52s cubic-bezier(.22,.61,.24,1),
-                margin .52s cubic-bezier(.22,.61,.24,1);
+    transition: height var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                padding var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                border-radius var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                margin var(--hero-dur) cubic-bezier(.22,.61,.24,1);
 }
 .profile-header::before { display: none; }   /* убрали голубой "купол" */
 .profile-header:active { transform: none; }
@@ -2218,12 +2220,12 @@ body {
     margin: 0 0 0 calc(var(--hero-avatar-size) / -2);
     border-radius: 50%;
     z-index: 1;
-    transition: top .52s cubic-bezier(.22,.61,.24,1),
-                left .52s cubic-bezier(.22,.61,.24,1),
-                width .52s cubic-bezier(.22,.61,.24,1),
-                height .52s cubic-bezier(.22,.61,.24,1),
-                margin .52s cubic-bezier(.22,.61,.24,1),
-                border-radius .52s cubic-bezier(.22,.61,.24,1);
+    transition: top var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                left var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                width var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                height var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                margin var(--hero-dur) cubic-bezier(.22,.61,.24,1),
+                border-radius var(--hero-dur) cubic-bezier(.22,.61,.24,1);
 }
 .profile-avatar:active { transform: none; }
 
@@ -2381,7 +2383,7 @@ body {
 }
 
 .hero-animating .profile-info { opacity: 0; }
-.profile-info { transition: opacity .26s ease .1s; }
+.profile-info { transition: opacity .16s ease .04s; }
 .hero-noanim .profile-header,
 .hero-noanim .profile-avatar,
 .hero-noanim .profile-actions,
@@ -5439,7 +5441,15 @@ function setupSearchHandlers() {
      ========================================================================== -->
 <script>
 (function () {
-    const DUR = 520; // должно совпадать с transition в CSS
+    // Длительность берём прямо из CSS-переменной --hero-dur, чтобы скорость
+    // менялась в одном месте (в CSS) и JS-таймер не расходился с анимацией.
+    const DUR_FALLBACK = 340;
+    function dur(content) {
+        const v = content ? getComputedStyle(content).getPropertyValue('--hero-dur').trim() : '';
+        if (!v) return DUR_FALLBACK;
+        const ms = v.endsWith('ms') ? parseFloat(v) : parseFloat(v) * 1000;
+        return Number.isFinite(ms) && ms > 0 ? ms : DUR_FALLBACK;
+    }
 
     function box(header) {
         return header ? header.closest('.profile-modal-content') : null;
@@ -5483,7 +5493,7 @@ function setupSearchHandlers() {
             clearTimeout(c._heroTimer);
             c._heroTimer = setTimeout(() => {
                 c.classList.remove('hero-animating');
-            }, DUR);
+            }, dur(c));
         },
 
         collapse(header) {
@@ -5504,7 +5514,7 @@ function setupSearchHandlers() {
             c._heroTimer = setTimeout(() => {
                 c.classList.remove('hero-animating');
                 header.style.height = '';
-            }, DUR);
+            }, dur(c));
         },
 
         toggle(header) {
