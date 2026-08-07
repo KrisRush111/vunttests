@@ -3309,7 +3309,11 @@ body {
         <button id="photoViewerClose" class="photo-viewer-back" aria-label="Закрыть">
             <i class="fas fa-chevron-left"></i>
         </button>
-        <div id="photoViewerNamePill" class="photo-viewer-name-pill"></div>
+        <div class="photo-viewer-header-center">
+            <div id="photoViewerNamePill" class="photo-viewer-name-pill"></div>
+            <!-- "3 из 12" — как в chats.html -->
+            <div id="photoViewerCounter" class="photo-viewer-counter" style="display:none;"></div>
+        </div>
     </div>
     <div id="photoViewerContent" class="photo-viewer-content">
         <img id="photoViewerImg" class="photo-viewer-img" src="" alt="User Photo" draggable="false">
@@ -3318,6 +3322,9 @@ body {
         <button id="photoViewerShare" class="photo-viewer-share" aria-label="Поделиться">
             <i class="fa-solid fa-share-nodes"></i>
         </button>
+        <!-- время отправки фото — как в chats.html -->
+        <span id="photoViewerTime" class="photo-viewer-time" style="display:none;"></span>
+        <span class="photo-viewer-footer-spacer" aria-hidden="true"></span>
     </div>
 </div>
 
@@ -4056,6 +4063,8 @@ async function openChatWithContact(user) {
     const closeBtn = document.getElementById('photoViewerClose');
     const namePill = document.getElementById('photoViewerNamePill');
     const shareBtn = document.getElementById('photoViewerShare');
+    const counterEl = document.getElementById('photoViewerCounter');
+    const timeEl = document.getElementById('photoViewerTime');
     if (!modal || !content || !img) return;
 
     let scale = 1;
@@ -4088,7 +4097,9 @@ async function openChatWithContact(user) {
         updateTransform(animate);
     }
 
-    window.openPhotoViewer = function(photoUrl, displayName) {
+    // meta (необязательно): { index, total, time } — показывает "N из M" и время отправки.
+    // Для аватарки meta не передаётся, и оба блока скрыты.
+    window.openPhotoViewer = function(photoUrl, displayName, meta) {
         scale = 1; translateX = 0; translateY = 0;
         img.style.transition = 'none';
         img.style.opacity = '0';
@@ -4103,6 +4114,16 @@ async function openChatWithContact(user) {
         if (namePill) {
             namePill.textContent = displayName || '';
             namePill.style.display = displayName ? '' : 'none';
+        }
+        const hasCounter = meta && Number.isFinite(meta.total) && meta.total > 0 && Number.isFinite(meta.index);
+        if (counterEl) {
+            counterEl.textContent = hasCounter ? `${meta.index + 1} из ${meta.total}` : '';
+            counterEl.style.display = hasCounter ? '' : 'none';
+        }
+        if (timeEl) {
+            const t = meta && meta.time ? meta.time : '';
+            timeEl.textContent = t;
+            timeEl.style.display = t ? '' : 'none';
         }
         modal.classList.add('active');
         document.addEventListener('keydown', handleKeydown);
@@ -6112,7 +6133,7 @@ function setupSearchHandlers() {
 (function () {
     const MEDIA_SERVER_URL = 'https://vuntserverrr.site';
     let mediaToken = 0;              // защита от race condition при быстром переключении профилей
-    let mediaPhotos = [];            // url'ы фото текущего профиля (для просмотрщика)
+    let mediaItems = [];             // фото текущего профиля: { url, sent_at } (для просмотрщика)
 
     function els() {
         const suffix = window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
@@ -6136,12 +6157,46 @@ function setupSearchHandlers() {
             const grid = document.getElementById(`modal-photos-grid-${suffix}`);
             const ps = document.getElementById(`modal-photos-section-${suffix}`);
             const fs = document.getElementById(`modal-files-section-${suffix}`);
-            if (tabs) tabs.style.display = 'none';
+            if (tabs) { tabs.style.display = 'none'; tabs.classList.add('media-hidden'); }
             if (grid) grid.innerHTML = '';
             if (ps) ps.style.display = 'none';
             if (fs) fs.style.display = 'none';
         });
-        mediaPhotos = [];
+        mediaItems = [];
+    }
+
+    // Показывает только те вкладки, в которых реально что-то есть.
+    // Нет ни фото, ни файлов — блок скрыт целиком; есть только одна категория —
+    // переключатель не нужен, показываем сразу её содержимое.
+    function applyTabsVisibility(suffix, hasMedia, hasFiles) {
+        const tabs = document.getElementById(`modal-media-tabs-${suffix}`);
+        const ps = document.getElementById(`modal-photos-section-${suffix}`);
+        const fs = document.getElementById(`modal-files-section-${suffix}`);
+        if (!ps || !fs) return;
+
+        const mediaBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="media"]') : null;
+        const filesBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="files"]') : null;
+        if (mediaBtn) mediaBtn.style.display = hasMedia ? '' : 'none';
+        if (filesBtn) filesBtn.style.display = hasFiles ? '' : 'none';
+
+        if (!hasMedia && !hasFiles) {
+            if (tabs) { tabs.style.display = 'none'; tabs.classList.add('media-hidden'); }
+            ps.style.display = 'none';
+            fs.style.display = 'none';
+            ps.classList.remove('active');
+            fs.classList.remove('active');
+            return;
+        }
+
+        // переключатель нужен только когда есть что переключать
+        const showTabs = hasMedia && hasFiles;
+        if (tabs) {
+            tabs.style.display = showTabs ? 'flex' : 'none';
+            tabs.classList.toggle('media-hidden', !showTabs);
+        }
+        ps.style.display = hasMedia ? 'block' : 'none';
+        fs.style.display = hasFiles ? 'block' : 'none';
+        window.switchProfileMediaTab(suffix, hasMedia ? 'media' : 'files');
     }
 
     window.hideProfileMediaSections = hide;
@@ -6161,39 +6216,53 @@ function setupSearchHandlers() {
         filesSection.classList.toggle('active', tab === 'files');
     };
 
+    // Время отправки — тот же формат, что в chats.html (ЧЧ:ММ)
+    function formatPhotoTime(timestamp) {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return '';
+        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    }
+
     // Открытие фото из сетки: используем уже существующий просмотрщик
+    // (логика приближения/уменьшения не меняется) + счётчик и время как в chats.html
     window.openProfilePhoto = function (index) {
-        const url = mediaPhotos[index];
-        if (!url) return;
+        const item = mediaItems[index];
+        if (!item || !item.url) return;
         const suffix = window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
         const nickEl = document.getElementById(`modal-profile-nickname-${suffix}`);
         const name = nickEl ? (nickEl.textContent || '').trim() : '';
         if (typeof window.openPhotoViewer === 'function') {
-            window.openPhotoViewer(url, name);
+            window.openPhotoViewer(item.url, name, {
+                index: index,
+                total: mediaItems.length,
+                time: formatPhotoTime(item.sent_at)
+            });
         } else {
-            window.open(url, '_blank');
+            window.open(item.url, '_blank');
         }
     };
 
-    function render(photoUrls) {
+    function render(items) {
         const { suffix, tabs, grid, photosSection, filesSection } = els();
         if (!grid || !photosSection || !filesSection) return;
 
-        mediaPhotos = photoUrls;
+        mediaItems = items || [];
 
-        if (photoUrls.length > 0) {
-            grid.innerHTML = photoUrls.map((url, idx) => (
-                `<div class="profile-photo-item" onclick="openProfilePhoto(${idx})">` +
-                `<img src="${url.replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;">` +
-                `</div>`
-            )).join('');
-            if (tabs) tabs.style.display = 'flex';
-            photosSection.style.display = 'block';
-            filesSection.style.display = 'block';
-            window.switchProfileMediaTab(suffix, 'media');
-        } else {
+        if (mediaItems.length === 0) {
+            // Нет медиа (и файлов пока не бывает) — не показываем блок вообще
             hide();
+            return;
         }
+
+        grid.innerHTML = mediaItems.map((item, idx) => (
+            `<div class="profile-photo-item" onclick="openProfilePhoto(${idx})">` +
+            `<img src="${String(item.url).replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;">` +
+            `</div>`
+        )).join('');
+
+        // Файлов в переписке пока не бывает — вкладка "Файлы" не показывается
+        applyTabsVisibility(suffix, true, false);
     }
 
     // Загружает фото переписки с контактом и строит разделы
@@ -6231,18 +6300,68 @@ function setupSearchHandlers() {
             if (token !== mediaToken) return;
             if (msgData.status !== 'success' || !Array.isArray(msgData.messages)) return;
 
-            const photoUrls = msgData.messages
-                .filter(m => m.is_image || isImageUrl(m.content))
-                .map(m => m.content)
-                .filter(Boolean);
+            const items = msgData.messages
+                .filter(m => (m.is_image || isImageUrl(m.content)) && m.content)
+                .map(m => ({ url: m.content, sent_at: m.sent_at }));
 
-            render(photoUrls);
+            render(items);
         } catch (e) {
             console.error('[PROFILE MEDIA] ', e);
         }
     };
 })();
 </script>
+
+<style id="photo-viewer-meta-styles">
+/* Счётчик "N из M" под именем и время отправки в футере просмотрщика фото */
+.photo-viewer-header-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+.photo-viewer-counter {
+    padding: 4px 14px;
+    background: rgba(50, 50, 50, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 20px;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.photo-viewer-time {
+    flex: 1;
+    text-align: center;
+    padding: 0 10px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.72);
+    white-space: nowrap;
+}
+.photo-viewer-footer-spacer {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+}
+/* Пустые вкладки медиа/файлов не занимают место */
+.profile-media-tab[style*="display: none"],
+.profile-media-tab[style*="display:none"] { display: none !important; }
+</style>
+
+<style id="profile-media-empty-hide">
+/* Переключатель "Медиа | Файлы" скрывается классом, а не только inline-стилем:
+   в блоке profile-media-unified для .profile-media-tabs стоит display:flex !important,
+   который перебивал inline style="display:none" — из-за этого пустой переключатель
+   всё равно оставался виден. Здесь селектор специфичнее и идёт позже. */
+.profile-modal .profile-media-tabs.media-hidden,
+.profile-modal-content .profile-media-tabs.media-hidden,
+.profile-media-tabs.media-hidden {
+    display: none !important;
+}
+</style>
 
 </body>
 </html>
