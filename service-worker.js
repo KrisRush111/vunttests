@@ -1,6 +1,6 @@
 // service-worker.js
-const CACHE_NAME = 'vuntgram-v2.2.2';
-const API_CACHE_NAME = 'vuntgram-api-v2.2.2';
+const CACHE_NAME = 'vuntgram-v2.2.3';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.3';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
 const STATIC_RESOURCES = [
@@ -19,6 +19,13 @@ const STATIC_RESOURCES = [
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
 ];
+
+// Страховка: любой промис, который мы всё же не поймали, логируем как
+// warning вместо красного "Uncaught (in promise)" и не даём ему всплыть.
+self.addEventListener('unhandledrejection', (event) => {
+  console.warn('⚠️ TheVuntgram SW: необработанный промис:', event.reason);
+  event.preventDefault();
+});
 
 // Установка Service Worker
 self.addEventListener('install', (event) => {
@@ -74,10 +81,21 @@ self.addEventListener('activate', (event) => {
 
 // Обработка запросов - УПРОЩЕННАЯ ВЕРСИЯ
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  
-  // Пропускаем неподдерживаемые схемы
+  let url;
+  try {
+    url = new URL(event.request.url);
+  } catch (e) {
+    return; // невалидный URL — отдаём браузеру
+  }
+
+  // Пропускаем неподдерживаемые схемы (chrome-extension:, blob:, data: и т.п.)
   if (!url.protocol.startsWith('http')) {
+    return;
+  }
+
+  // Range-запросы (видео/аудио, докачка) НЕЛЬЗЯ проксировать и кэшировать —
+  // ответ 206 ломает cache.put и рвёт воспроизведение. Отдаём браузеру.
+  if (event.request.headers.has('range')) {
     return;
   }
 
@@ -87,20 +105,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Для статических ресурсов - Cache First
-  if (isStaticResource(event.request)) {
+  // Для статических ресурсов - Cache First (только GET)
+  if (event.request.method === 'GET' && isStaticResource(event.request)) {
     event.respondWith(handleStaticRequest(event.request));
     return;
   }
 
   // Для HTML страниц - Network First
-  if (event.request.destination === 'document') {
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
     event.respondWith(handleHtmlRequest(event.request));
     return;
   }
 
-  // По умолчанию - Network Only (не кэшируем)
-  event.respondWith(fetch(event.request));
+  // ВАЖНО: раньше здесь было event.respondWith(fetch(event.request)) —
+  // перехват запроса ради точно такого же fetch. Пользы ноль, а любой
+  // сетевой сбой ИЛИ отмена запроса (уход со страницы, xhr.abort() у
+  // поллинга, отменённая загрузка медиа, CORS) давали реджект промиса
+  // без catch → "Uncaught (in promise) TypeError: Failed to fetch"
+  // в консоли на каждый такой запрос.
+  // Теперь просто НЕ вызываем respondWith: браузер выполняет запрос сам,
+  // ровно как без service worker'а, и сам корректно обрабатывает ошибку.
+  return;
 });
 
 function isApiRequest(request) {
@@ -165,7 +190,19 @@ async function handleApiRequest(request) {
       return tryFallbackFromLocalStorage(request);
     }
 
-    throw error;
+    // ВАЖНО: раньше здесь был throw error — реджект промиса внутри
+    // respondWith, который вылетал в консоль как "Uncaught (in promise)
+    // TypeError: Failed to fetch" и приходил на страницу как невнятный
+    // сетевой сбой. Теперь отдаём нормальный JSON-ответ 503, который
+    // страница разберёт как { status: 'error', error: ... }.
+    return new Response(
+      JSON.stringify({
+        status: 'error',
+        error: 'Нет соединения с сервером',
+        offline: true
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 }
 
@@ -183,62 +220,74 @@ async function tryFallbackFromLocalStorage(request) {
   );
 }
 
+// Безопасное кэширование: cache.put бросает исключение на 206, на opaque
+// ответах и на не-GET запросах. Раньше такой throw уходил в никуда и
+// всплывал как unhandled rejection.
+async function safeCachePut(cache, request, response) {
+  try {
+    if (request.method !== 'GET') return;
+    if (!response || !response.ok || response.status === 206) return;
+    await cache.put(request, response);
+  } catch (err) {
+    console.warn('⚠️ TheVuntgram: cache.put failed', request.url, err);
+  }
+}
+
 async function handleStaticRequest(request) {
   const cache = await caches.open(CACHE_NAME);
   const cachedResponse = await cache.match(request);
-  
+
   if (cachedResponse) {
-    // Фоновая проверка обновления (только для статики)
-    updateStaticCacheInBackground(request, cache);
+    // Фоновая проверка обновления (только для статики).
+    // event.waitUntil здесь недоступен, поэтому обязательно свой catch —
+    // иначе висячий промис снова даст "Uncaught (in promise)".
+    updateStaticCacheInBackground(request, cache).catch(() => {});
     return cachedResponse;
   }
-  
+
   // Загружаем и кэшируем статический ресурс
   try {
     const networkResponse = await fetch(request);
-    
-    if (networkResponse.ok) {
-      cache.put(request, networkResponse.clone());
-    }
-    
+    await safeCachePut(cache, request, networkResponse.clone());
     return networkResponse;
   } catch (error) {
-    throw error;
+    // НЕ бросаем ошибку наружу (это давало Failed to fetch в консоли).
+    // Возвращаем пустой 504 — браузер обработает его как неудачную
+    // загрузку конкретного ресурса, не засоряя консоль реджектами.
+    console.warn('⚠️ TheVuntgram: static request failed', request.url);
+    return new Response('', { status: 504, statusText: 'Offline' });
   }
 }
 
 async function handleHtmlRequest(request) {
   const cache = await caches.open(CACHE_NAME);
-  
+
   try {
     const networkResponse = await fetch(request);
-    
+
     if (networkResponse.ok) {
       // Обновляем кэш HTML страниц
-      cache.put(request, networkResponse.clone());
+      await safeCachePut(cache, request, networkResponse.clone());
       return networkResponse;
     }
-    
-    throw new Error('HTML response not ok');
+
+    // Не-2xx (404/500) — пробуем кэш, иначе отдаём ответ сервера как есть
+    const cachedFallback = await cache.match(request);
+    return cachedFallback || networkResponse;
   } catch (error) {
-    // Fallback на кэшированную версию
+    // Реальный сетевой сбой — fallback на кэш, затем на offline.html
     const cachedResponse = await cache.match(request);
-    
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-    
-    throw error;
+    if (cachedResponse) return cachedResponse;
+
+    // Раньше здесь был throw error → белый экран + Failed to fetch в консоли
+    return showOfflinePage();
   }
 }
 
 async function updateStaticCacheInBackground(request, cache) {
   try {
     const networkResponse = await fetch(request);
-    
-    if (networkResponse.ok) {
-      cache.put(request, networkResponse);
-    }
+    await safeCachePut(cache, request, networkResponse);
   } catch (error) {
     // Игнорируем ошибки фонового обновления
   }
