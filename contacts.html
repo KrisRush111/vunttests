@@ -3170,6 +3170,20 @@ body {
                         <div id="modal-user-course-desktop" class="detail-value">Загрузка...</div>
                     </div>
                 </div>
+
+                <!-- Медиа и файлы из переписки с этим контактом -->
+                <div id="modal-media-tabs-desktop" class="profile-media-tabs" style="display:none;">
+                    <button type="button" class="profile-media-tab active" data-tab="media" onclick="switchProfileMediaTab('desktop','media')">Медиа</button>
+                    <button type="button" class="profile-media-tab" data-tab="files" onclick="switchProfileMediaTab('desktop','files')">Файлы</button>
+                </div>
+
+                <div id="modal-photos-section-desktop" class="profile-media-section active" style="display:none;">
+                    <div id="modal-photos-grid-desktop" class="profile-photos-grid"></div>
+                </div>
+
+                <div id="modal-files-section-desktop" class="profile-media-section" style="display:none;">
+                    <div id="modal-files-list-desktop" class="profile-files-empty">Файлов пока нет</div>
+                </div>
             </div>
         </div>
     </div>
@@ -3272,6 +3286,20 @@ body {
                     <div class="detail-label">Курс</div>
                     <div id="modal-user-course-mobile" class="detail-value">Загрузка...</div>
                 </div>
+            </div>
+
+            <!-- Медиа и файлы из переписки с этим контактом -->
+            <div id="modal-media-tabs-mobile" class="profile-media-tabs" style="display:none;">
+                <button type="button" class="profile-media-tab active" data-tab="media" onclick="switchProfileMediaTab('mobile','media')">Медиа</button>
+                <button type="button" class="profile-media-tab" data-tab="files" onclick="switchProfileMediaTab('mobile','files')">Файлы</button>
+            </div>
+
+            <div id="modal-photos-section-mobile" class="profile-media-section active" style="display:none;">
+                <div id="modal-photos-grid-mobile" class="profile-photos-grid"></div>
+            </div>
+
+            <div id="modal-files-section-mobile" class="profile-media-section" style="display:none;">
+                <div id="modal-files-list-mobile" class="profile-files-empty">Файлов пока нет</div>
             </div>
         </div>
     </div>
@@ -4393,6 +4421,8 @@ function openProfileModal(userId) {
     }
 
     loadUserProfile(userId);
+    // Медиа и файлы из переписки с этим контактом (как в chats.html)
+    if (window.renderProfileMediaSections) window.renderProfileMediaSections(userId);
     // Подписываемся на realtime presence именно этого пользователя (он может
     // быть не в текущем списке контактов) и запускаем прямой live-поллинг
     // статуса, пока профиль открыт — иначе текст "был(а) в сети" тут мог
@@ -4404,6 +4434,7 @@ function openProfileModal(userId) {
 // В функции closeProfileModal для мобильных устройств:
 function closeProfileModal() {
     if (window.ProfileHero) window.ProfileHero.resetAll();
+    if (window.hideProfileMediaSections) window.hideProfileMediaSections();
     stopProfileStatusPolling();
     if (isDesktop) {
         desktopPlaceholder.style.display = 'flex';
@@ -5925,5 +5956,293 @@ function setupSearchHandlers() {
     }
 }
 </style>
+
+<!-- ===================================================================
+     ЕДИНЫЙ ВИД РАЗДЕЛА "МЕДИА / ФАЙЛЫ" В ПРОФИЛЕ КОНТАКТА
+     (одинаково в chats.html и contacts.html)
+
+     1) Переключатель "Медиа | Файлы" — компактная центрированная пилюля
+        на серой подложке: активная вкладка — белая капсула с мягкой тенью.
+     2) Сетка фото — во всю ширину экрана, без карточки и скруглений
+        (на мобильных фото упираются в края, как в Telegram).
+     3) Снизу остаётся небольшое пустое место, чтобы последний ряд фото
+        не прилипал к краю экрана / нижней навигации.
+     Блок подключён последним, чтобы перекрыть более ранние правила.
+     =================================================================== -->
+<style id="profile-media-unified">
+/* ---------- базовые стили (нужны там, где их ещё нет) ---------- */
+.profile-media-tabs { display: flex; }
+.profile-media-tab {
+    font-family: inherit;
+    border: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.profile-media-section:not(.active) { display: none !important; }
+.profile-photos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+}
+.profile-photo-item {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--telegram-secondary-bg);
+}
+.profile-photo-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform .18s ease, opacity .25s ease;
+}
+.profile-photo-item:active img { transform: scale(.97); }
+@media (hover: hover) {
+    .profile-photo-item:hover img { transform: scale(1.04); }
+}
+
+/* ---------- 1. ПЕРЕКЛЮЧАТЕЛЬ "МЕДИА | ФАЙЛЫ" ---------- */
+.profile-modal .profile-media-tabs,
+.profile-modal-content .profile-media-tabs {
+    display: flex !important;
+    width: fit-content !important;
+    max-width: calc(100% - 24px);
+    margin: 6px auto 0 !important;
+    align-self: center;
+    padding: 3px !important;
+    gap: 2px !important;
+    background: rgba(120, 120, 128, .12) !important;
+    border-radius: 999px !important;
+    box-shadow: none !important;
+    border: none !important;
+}
+
+.profile-modal .profile-media-tab,
+.profile-modal-content .profile-media-tab {
+    flex: 0 0 auto !important;
+    min-width: 108px;
+    padding: 9px 22px !important;
+    border-radius: 999px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    letter-spacing: .01em;
+    color: var(--telegram-text) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    opacity: .7;
+    transition: background-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+
+.profile-modal .profile-media-tab.active,
+.profile-modal-content .profile-media-tab.active {
+    background: var(--telegram-bg, #fff) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .14), 0 1px 1px rgba(0, 0, 0, .04) !important;
+    opacity: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+    .profile-modal .profile-media-tabs,
+    .profile-modal-content .profile-media-tabs {
+        background: rgba(120, 120, 128, .26) !important;
+    }
+    .profile-modal .profile-media-tab.active,
+    .profile-modal-content .profile-media-tab.active {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .5) !important;
+    }
+}
+
+/* ---------- 2. СЕТКА ФОТО ВО ВСЮ ШИРИНУ ---------- */
+.profile-modal .profile-media-section,
+.profile-modal-content .profile-media-section {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    width: 100% !important;
+    margin: 14px 0 0 !important;
+    /* 3) небольшое пустое место снизу */
+    padding: 0 0 calc(26px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+.profile-modal .profile-photos-grid,
+.profile-modal-content .profile-photos-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 2px !important;
+    padding: 0 !important;
+}
+
+.profile-modal .profile-media-section-title { display: none !important; }
+
+.profile-modal .profile-files-empty,
+.profile-modal-content .profile-files-empty {
+    padding: 30px 16px 34px !important;
+    font-size: 14px;
+    color: var(--telegram-hint);
+    text-align: center;
+}
+
+/* На десктопе профиль — колонка 480px, сетку слегка скругляем */
+@media (min-width: 768px) {
+    .profile-modal .profile-photos-grid,
+    .profile-modal-content .profile-photos-grid {
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    .profile-modal .profile-media-section,
+    .profile-modal-content .profile-media-section {
+        padding-bottom: 20px !important;
+    }
+}
+</style>
+
+
+<!-- ===================================================================
+     МЕДИА И ФАЙЛЫ В ПРОФИЛЕ КОНТАКТА (contacts.html)
+     Логика такая же, как в chats.html, но сообщения тут не загружены
+     заранее: сначала находим чат с контактом (/get_or_create_chat),
+     затем тянем сообщения (/get_messages с mark_as_read: false, чтобы
+     открытие профиля НЕ помечало чужие сообщения прочитанными) и
+     строим сетку фото. Если фото нет — переключатель и сетка скрыты.
+     =================================================================== -->
+<script>
+(function () {
+    const MEDIA_SERVER_URL = 'https://vuntserverrr.site';
+    let mediaToken = 0;              // защита от race condition при быстром переключении профилей
+    let mediaPhotos = [];            // url'ы фото текущего профиля (для просмотрщика)
+
+    function els() {
+        const suffix = window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
+        return {
+            suffix,
+            tabs: document.getElementById(`modal-media-tabs-${suffix}`),
+            grid: document.getElementById(`modal-photos-grid-${suffix}`),
+            photosSection: document.getElementById(`modal-photos-section-${suffix}`),
+            filesSection: document.getElementById(`modal-files-section-${suffix}`)
+        };
+    }
+
+    function isImageUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return /^https?:\/\/\S+\.(jpe?g|png|gif|webp|bmp|heic|heif)(\?\S*)?$/i.test(url.trim());
+    }
+
+    function hide() {
+        ['desktop', 'mobile'].forEach(suffix => {
+            const tabs = document.getElementById(`modal-media-tabs-${suffix}`);
+            const grid = document.getElementById(`modal-photos-grid-${suffix}`);
+            const ps = document.getElementById(`modal-photos-section-${suffix}`);
+            const fs = document.getElementById(`modal-files-section-${suffix}`);
+            if (tabs) tabs.style.display = 'none';
+            if (grid) grid.innerHTML = '';
+            if (ps) ps.style.display = 'none';
+            if (fs) fs.style.display = 'none';
+        });
+        mediaPhotos = [];
+    }
+
+    window.hideProfileMediaSections = hide;
+
+    // Переключение вкладок "Медиа" / "Файлы"
+    window.switchProfileMediaTab = function (variant, tab) {
+        const suffix = variant === 'desktop' ? 'desktop' : 'mobile';
+        const tabsEl = document.getElementById(`modal-media-tabs-${suffix}`);
+        const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
+        const filesSection = document.getElementById(`modal-files-section-${suffix}`);
+        if (!tabsEl || !photosSection || !filesSection) return;
+
+        tabsEl.querySelectorAll('.profile-media-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        photosSection.classList.toggle('active', tab === 'media');
+        filesSection.classList.toggle('active', tab === 'files');
+    };
+
+    // Открытие фото из сетки: используем уже существующий просмотрщик
+    window.openProfilePhoto = function (index) {
+        const url = mediaPhotos[index];
+        if (!url) return;
+        const suffix = window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
+        const nickEl = document.getElementById(`modal-profile-nickname-${suffix}`);
+        const name = nickEl ? (nickEl.textContent || '').trim() : '';
+        if (typeof window.openPhotoViewer === 'function') {
+            window.openPhotoViewer(url, name);
+        } else {
+            window.open(url, '_blank');
+        }
+    };
+
+    function render(photoUrls) {
+        const { suffix, tabs, grid, photosSection, filesSection } = els();
+        if (!grid || !photosSection || !filesSection) return;
+
+        mediaPhotos = photoUrls;
+
+        if (photoUrls.length > 0) {
+            grid.innerHTML = photoUrls.map((url, idx) => (
+                `<div class="profile-photo-item" onclick="openProfilePhoto(${idx})">` +
+                `<img src="${url.replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;">` +
+                `</div>`
+            )).join('');
+            if (tabs) tabs.style.display = 'flex';
+            photosSection.style.display = 'block';
+            filesSection.style.display = 'block';
+            window.switchProfileMediaTab(suffix, 'media');
+        } else {
+            hide();
+        }
+    }
+
+    // Загружает фото переписки с контактом и строит разделы
+    window.renderProfileMediaSections = async function (contactId) {
+        const token = ++mediaToken;
+        hide();
+
+        const myId = (window.userData && window.userData.platform_user_id) ||
+                     (typeof userData !== 'undefined' && userData && userData.platform_user_id);
+        if (!myId || !contactId) return;
+
+        try {
+            const chatRes = await fetch(`${MEDIA_SERVER_URL}/get_or_create_chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ platform_user_id: myId, contact_id: contactId })
+            });
+            const chatData = await chatRes.json();
+            if (token !== mediaToken) return;
+            // is_new === true — переписки ещё нет, значит и медиа нет
+            if (chatData.status !== 'success' || !chatData.chat_id || chatData.is_new) return;
+
+            const msgRes = await fetch(`${MEDIA_SERVER_URL}/get_messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    chat_id: chatData.chat_id,
+                    platform_user_id: myId,
+                    mark_as_read: false          // открытие профиля не читает сообщения
+                })
+            });
+            const msgData = await msgRes.json();
+            if (token !== mediaToken) return;
+            if (msgData.status !== 'success' || !Array.isArray(msgData.messages)) return;
+
+            const photoUrls = msgData.messages
+                .filter(m => m.is_image || isImageUrl(m.content))
+                .map(m => m.content)
+                .filter(Boolean);
+
+            render(photoUrls);
+        } catch (e) {
+            console.error('[PROFILE MEDIA] ', e);
+        }
+    };
+})();
+</script>
+
 </body>
 </html>
