@@ -1,6 +1,8 @@
 // service-worker.js
-const CACHE_NAME = 'vuntgram-v2.2.3';
-const API_CACHE_NAME = 'vuntgram-api-v2.2.3';
+// ВАЖНО: версию обязательно поднимать при каждом изменении статики —
+// иначе старые файлы продолжают отдаваться из кэша Cache First.
+const CACHE_NAME = 'vuntgram-v2.2.4';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
 const STATIC_RESOURCES = [
@@ -160,11 +162,21 @@ function isApiRequest(request) {
 function isStaticResource(request) {
   const url = new URL(request.url);
   
-  // Только действительно статические ресурсы
+  // Только действительно статические ресурсы.
+  // Аватарки исключены сознательно: у них своё версионирование через
+  // /avatar_version + локальный кэш в IndexedDB (avatar-cache.js), а сами
+  // роуты отдают Cache-Control, так что HTTP-кэша браузера достаточно.
+  // /avatar_full/ обязательно исключаем тоже — иначе фото в полном
+  // разрешении залипало бы в Cache First навсегда и не обновлялось после
+  // смены аватара.
+  const isAvatar = url.pathname.includes('/avatar/')
+                || url.pathname.includes('/avatar_full/')
+                || url.pathname.includes('/avatar_version/');
+
   return request.destination === 'style' || 
          request.destination === 'script' || 
          request.destination === 'font' ||
-         (request.destination === 'image' && !url.pathname.includes('/avatar/'));
+         (request.destination === 'image' && !isAvatar);
 }
 
 async function handleApiRequest(request) {
