@@ -7260,7 +7260,7 @@ function openProfileModal(userId) {
     }
 
     // Разделы "Фото" и "Файлы" — строим из уже загруженных сообщений текущего чата
-    renderProfileMediaSections();
+    renderProfileMediaSections(userId);
 
     // Проверяем, какая версия интерфейса активна
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
@@ -7301,29 +7301,73 @@ function openProfileModal(userId) {
 
 // Заполняет разделы "Фото" и "Файлы" в профиле контакта на основе сообщений
 // текущего открытого чата. Если фото нет — оба раздела скрываются.
-function renderProfileMediaSections() {
+function renderProfileMediaSections(profileUserId) {
     const activeElements = getActiveElements();
     if (!activeElements.modalPhotosGrid || !activeElements.modalPhotosSection || !activeElements.modalFilesSection) return;
 
-    const photoMessages = (currentMessages || []).filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+    // Медиа показываем только для переписки с ЭТИМ же человеком. Если чат не открыт
+    // или профиль принадлежит другому пользователю — никаких медиа/файлов быть не
+    // должно (иначе в профиль утекали бы фото из предыдущего открытого чата).
+    const partnerId = currentChat && currentChat.participants && currentChat.participants[0]
+        ? String(currentChat.participants[0].platform_user_id)
+        : null;
+    const sameUser = profileUserId == null ? !!currentChat : (partnerId && String(profileUserId) === partnerId);
+    if (!currentChat || !sameUser) {
+        ['desktop', 'mobile'].forEach(sfx => {
+            const grid = document.getElementById(`modal-photos-grid-${sfx}`);
+            if (grid) grid.innerHTML = '';
+            applyProfileMediaTabsVisibility(sfx, false, false);
+        });
+        return;
+    }
 
-    if (photoMessages.length > 0) {
+    const photoMessages = (currentMessages || []).filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+    const hasMedia = photoMessages.length > 0;
+    const hasFiles = false; // файлов в переписке пока не бывает — вкладку не показываем
+    const suffix = window.matchMedia("(min-width: 768px)").matches ? 'desktop' : 'mobile';
+
+    if (hasMedia) {
         activeElements.modalPhotosGrid.innerHTML = photoMessages.map((msg, idx) => {
             const url = msg.content;
             return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
         }).join('');
-        if (activeElements.modalMediaTabs) activeElements.modalMediaTabs.style.display = 'flex';
-        activeElements.modalPhotosSection.style.display = 'block';
-        activeElements.modalFilesSection.style.display = 'block';
-        // Каждый раз при открытии профиля возвращаемся на вкладку "Медиа"
-        const isDesktop = window.matchMedia("(min-width: 768px)").matches;
-        switchProfileMediaTab(isDesktop ? 'desktop' : 'mobile', 'media');
     } else {
         activeElements.modalPhotosGrid.innerHTML = '';
-        if (activeElements.modalMediaTabs) activeElements.modalMediaTabs.style.display = 'none';
-        activeElements.modalPhotosSection.style.display = 'none';
-        activeElements.modalFilesSection.style.display = 'none';
     }
+
+    applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles);
+}
+
+// Показывает только непустые вкладки: нет ни медиа, ни файлов — блок скрыт целиком;
+// есть только одна категория — переключатель не нужен, сразу её содержимое.
+function applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles) {
+    const tabs = document.getElementById(`modal-media-tabs-${suffix}`);
+    const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
+    const filesSection = document.getElementById(`modal-files-section-${suffix}`);
+    if (!photosSection || !filesSection) return;
+
+    const mediaBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="media"]') : null;
+    const filesBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="files"]') : null;
+    if (mediaBtn) mediaBtn.style.display = hasMedia ? '' : 'none';
+    if (filesBtn) filesBtn.style.display = hasFiles ? '' : 'none';
+
+    if (!hasMedia && !hasFiles) {
+        if (tabs) { tabs.style.display = 'none'; tabs.classList.add('media-hidden'); }
+        photosSection.style.display = 'none';
+        filesSection.style.display = 'none';
+        photosSection.classList.remove('active');
+        filesSection.classList.remove('active');
+        return;
+    }
+
+    const showTabs = hasMedia && hasFiles;
+    if (tabs) {
+        tabs.style.display = showTabs ? 'flex' : 'none';
+        tabs.classList.toggle('media-hidden', !showTabs);
+    }
+    photosSection.style.display = hasMedia ? 'block' : 'none';
+    filesSection.style.display = hasFiles ? 'block' : 'none';
+    switchProfileMediaTab(suffix, hasMedia ? 'media' : 'files');
 }
 
 // Переключает вкладки "Медиа" / "Файлы" в профиле контакта
@@ -10182,9 +10226,14 @@ function getActiveElements() {
 
             resetZoomButton.addEventListener('click', resetZoom);
 
+            // Зум колесом — тем же шагом, что в contacts.html (плавнее, 1.15)
             imageContainer.addEventListener('wheel', (e) => {
                 e.preventDefault();
-                if (e.deltaY < 0) zoomIn(); else zoomOut();
+                if (e.deltaY < 0) scale = Math.min(scale * 1.15, 5);
+                else scale = Math.max(scale / 1.15, 1);
+                if (scale === 1) { translateX = 0; translateY = 0; }
+                clampTranslate();
+                updateTransform(false);
             });
 
             // === Десктоп: перетаскивание увеличенного фото мышью ===
@@ -10299,15 +10348,15 @@ function getActiveElements() {
                     const currentDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
                     const ratio = currentDistance / pinchStartDistance;
 
-                    scale = Math.max(1, Math.min(pinchStartScale * ratio, 5));
+                    // Как в contacts.html: разрешаем "резиновое" уменьшение ниже 1x,
+                    // отскок обратно к 1x происходит на touchend
+                    scale = Math.max(0.5, Math.min(pinchStartScale * ratio, 5));
 
                     // Удерживаем точку под пальцами на месте при масштабировании
                     const scaleDelta = scale / pinchStartScale;
                     translateX = pinchStartTranslate.x * scaleDelta + pinchMidpoint.x * (1 - scaleDelta);
                     translateY = pinchStartTranslate.y * scaleDelta + pinchMidpoint.y * (1 - scaleDelta);
 
-                    if (scale === 1) { translateX = 0; translateY = 0; }
-                    clampTranslate();
                     updateTransform(false);
                 } else if (e.touches.length === 1) {
                     const touch = e.touches[0];
@@ -10331,10 +10380,13 @@ function getActiveElements() {
             imageContainer.addEventListener('touchend', (e) => {
                 if (e.touches.length < 2) pinchStartDistance = null;
 
-                if (scale <= 1) {
+                if (scale < 1) {
+                    // "Растянули" фото ниже 1x — плавно возвращаем в исходный размер
+                    resetZoom();
+                } else if (scale === 1) {
                     translateX = 0;
                     translateY = 0;
-                    updateTransform(false);
+                    updateTransform(true);
                 } else {
                     clampTranslate();
                     updateTransform(true);
@@ -15778,6 +15830,18 @@ function stopProfileDataPolling() {
     .profile-modal-content .profile-media-section {
         padding-bottom: 20px !important;
     }
+}
+</style>
+
+<style id="profile-media-empty-hide">
+/* Переключатель "Медиа | Файлы" скрывается классом, а не только inline-стилем:
+   в блоке profile-media-unified для .profile-media-tabs стоит display:flex !important,
+   который перебивал inline style="display:none" — из-за этого пустой переключатель
+   всё равно оставался виден. Здесь селектор специфичнее и идёт позже. */
+.profile-modal .profile-media-tabs.media-hidden,
+.profile-modal-content .profile-media-tabs.media-hidden,
+.profile-media-tabs.media-hidden {
+    display: none !important;
 }
 </style>
 
