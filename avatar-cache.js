@@ -40,6 +40,55 @@ const AvatarCache = (function () {
 
     const LS_PREFIX = 'vg_avatar_';
 
+    // ------------------------------------------------------------------
+    // Размер запрашиваемой картинки (борьба с размытыми аватарками)
+    // ------------------------------------------------------------------
+    // Раньше клиент всегда качал /avatar/<id> без параметров, а сервер
+    // жёстко отдавал 300x300. Один и тот же файл использовался и для
+    // кружка 50x50 в списке чатов, и для аватара 100x100 в профиле, и
+    // для раскрытого фото на всю ширину экрана. На телефоне с
+    // devicePixelRatio 3 даже 100 CSS-px требуют 300 РЕАЛЬНЫХ пикселей,
+    // то есть 300px-файл уже работал на пределе, а в раскрытом виде
+    // растягивался в 4+ раза — отсюда мыло.
+    //
+    // Теперь размер считается по реальному размеру элемента и плотности
+    // экрана, округляется до "ступеньки" (чтобы не плодить сотни
+    // вариантов в кэше Cloudinary) и передаётся серверу как ?size&dpr.
+    const SIZE_BUCKETS = [64, 128, 192, 256, 384, 512, 768, 1000];
+
+    function screenDpr() {
+        const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        return Math.min(Math.max(dpr, 1), 3);
+    }
+
+    function bucketFor(cssSize) {
+        const needed = Math.ceil((cssSize || 100) * screenDpr());
+        for (const b of SIZE_BUCKETS) {
+            if (b >= needed) return b;
+        }
+        return SIZE_BUCKETS[SIZE_BUCKETS.length - 1];
+    }
+
+    // Размер элемента может быть ещё неизвестен (элемент скрыт в модалке и
+    // offsetWidth === 0) — тогда берём разумный дефолт, а не 0.
+    function cssSizeOf(el) {
+        if (!el) return 100;
+        const w = el.offsetWidth || el.getBoundingClientRect().width || 0;
+        return w > 0 ? w : 100;
+    }
+
+    function avatarUrl(serverUrl, userId, bucket) {
+        return `${serverUrl}/avatar/${userId}?size=${bucket}&dpr=${screenDpr().toFixed(1)}`;
+    }
+
+    // URL аватара в ПОЛНОМ разрешении — для полноэкранного просмотрщика и
+    // для раскрытия шапки профиля в фото. Кэшированную миниатюру там
+    // использовать нельзя: её растянет на весь экран (а с зумом до 5x — в
+    // 20 раз), и выглядит это отвратительно.
+    function fullUrl(serverUrl, userId) {
+        return `${serverUrl}/avatar_full/${userId}`;
+    }
+
     // Синхронный "быстрый" кэш поверх IndexedDB — localStorage читается
     // мгновенно (без Promise), поэтому фото можно применить ДО первого
     // await и до первой отрисовки элемента браузером — так фон вообще
@@ -54,11 +103,11 @@ const AvatarCache = (function () {
         }
     }
 
-    function saveLocalSync(userId, version, dataUrl) {
+    function saveLocalSync(userId, version, dataUrl, bucket) {
         try {
             localStorage.setItem(
                 LS_PREFIX + String(userId),
-                JSON.stringify({ version, dataUrl })
+                JSON.stringify({ version, dataUrl, bucket: bucket || null })
             );
         } catch (e) {
             // Квота localStorage превышена или недоступен — не критично,
@@ -86,9 +135,9 @@ const AvatarCache = (function () {
         }
     }
 
-    async function saveLocal(userId, version, dataUrl) {
+    async function saveLocal(userId, version, dataUrl, bucket) {
         // Синхронный L1-кэш — обновляем сразу, не дожидаясь IndexedDB
-        saveLocalSync(userId, version, dataUrl);
+        saveLocalSync(userId, version, dataUrl, bucket);
         try {
             const db = await openDB();
             const tx = db.transaction(STORE, 'readwrite');
@@ -96,6 +145,11 @@ const AvatarCache = (function () {
                 userId: String(userId),
                 version,
                 dataUrl,
+                // bucket — в каком разрешении лежит эта копия. Без него нельзя
+                // понять, годится ли кэш для более крупного места отрисовки:
+                // старый кэш (300px), снятый для списка чатов, молча
+                // растягивался в профиле.
+                bucket: bucket || null,
                 savedAt: Date.now()
             });
         } catch (e) {
@@ -164,8 +218,11 @@ const AvatarCache = (function () {
      * @param {boolean} hasAvatar - есть ли у пользователя аватар вообще
      * @returns {Promise<void>}
      */
-    async function render(serverUrl, el, userId, initials, bgColor, hasAvatar) {
+    async function render(serverUrl, el, userId, initials, bgColor, hasAvatar, sizeHint) {
         if (!el || !userId) return;
+
+        // Сколько РЕАЛЬНЫХ пикселей нужно этому месту отрисовки
+        const bucket = bucketFor(sizeHint || cssSizeOf(el));
 
         if (!hasAvatar) {
             applyPlaceholder(el, initials, bgColor);
@@ -195,10 +252,13 @@ const AvatarCache = (function () {
         // Просто ждём саму фотографию (см. checkAndUpdate ниже — она
         // качается максимально быстро, параллельно с проверкой версии).
 
-        // 2) В фоне — дешёвая проверка версии на сервере
-        const key = String(userId);
+        // 2) В фоне — дешёвая проверка версии на сервере.
+        //    Ключ включает bucket: если этот же аватар уже качался в мелком
+        //    размере для списка чатов, для профиля его надо перекачать
+        //    крупнее, а не переиспользовать in-flight мелкий запрос.
+        const key = String(userId) + '@' + bucket;
         if (!pending.has(key)) {
-            pending.set(key, checkAndUpdate(serverUrl, userId, local));
+            pending.set(key, checkAndUpdate(serverUrl, userId, local, bucket));
             pending.get(key).finally(() => pending.delete(key));
         }
 
@@ -212,7 +272,7 @@ const AvatarCache = (function () {
         }
     }
 
-    async function checkAndUpdate(serverUrl, userId, local) {
+    async function checkAndUpdate(serverUrl, userId, local, bucket) {
         try {
             // Ни /avatar_version, ни /avatar не проверяют сессию на сервере,
             // поэтому credentials здесь не нужны. Это важно для /avatar:
@@ -223,7 +283,15 @@ const AvatarCache = (function () {
             // реальной картинки молча падало в catch, и локально
             // сохранялся только фон-плейсхолдер, а не само фото.
 
-            if (!local) {
+            // Кэш годится только если он снят в разрешении НЕ МЕНЬШЕ нужного.
+            // Иначе (например, в кэше 128px из списка чатов, а рисуем аватар
+            // в профиле, которому нужно 384px) относимся к нему как к
+            // отсутствующему и перекачиваем в правильном размере — именно
+            // из-за отсутствия этой проверки аватар в профиле и в раскрытом
+            // виде оставался размытым даже после исправлений на сервере.
+            const needsBiggerCopy = !!local && (!local.bucket || local.bucket < bucket);
+
+            if (!local || needsBiggerCopy) {
                 // Локальной копии нет вообще (первый заход, новое устройство/
                 // браузер) — значит фото придётся скачать в любом случае,
                 // независимо от того, что скажет /avatar_version. Поэтому
@@ -232,7 +300,7 @@ const AvatarCache = (function () {
                 // быстрее, чем последовательно.
                 const [versionRes, imgRes] = await Promise.all([
                     fetch(`${serverUrl}/avatar_version/${userId}`).catch(() => null),
-                    fetch(`${serverUrl}/avatar/${userId}`)
+                    fetch(avatarUrl(serverUrl, userId, bucket))
                 ]);
 
                 if (!imgRes.ok) return null;
@@ -247,7 +315,7 @@ const AvatarCache = (function () {
                 // version может быть null, если проверка версии не удалась —
                 // тогда просто не кэшируем хэш, следующий заход перепроверит
                 if (version && version !== 'none') {
-                    await saveLocal(userId, version, dataUrl);
+                    await saveLocal(userId, version, dataUrl, bucket);
                 }
                 return { changed: true, dataUrl };
             }
@@ -270,12 +338,12 @@ const AvatarCache = (function () {
             }
 
             // Версия изменилась — скачиваем фото
-            const imgRes = await fetch(`${serverUrl}/avatar/${userId}`);
+            const imgRes = await fetch(avatarUrl(serverUrl, userId, bucket));
             if (!imgRes.ok) return null;
             const blob = await imgRes.blob();
             const dataUrl = await blobToDataURL(blob);
 
-            await saveLocal(userId, remoteVersion, dataUrl);
+            await saveLocal(userId, remoteVersion, dataUrl, bucket);
             return { changed: true, dataUrl };
         } catch (e) {
             // Нет сети/ошибка — оставляем то, что уже показано
@@ -283,5 +351,11 @@ const AvatarCache = (function () {
         }
     }
 
-    return { render, removeLocal, getLocal, saveLocal, getLocalSync, saveLocalSync, removeLocalSync };
+    return {
+        render, removeLocal, getLocal, saveLocal,
+        getLocalSync, saveLocalSync, removeLocalSync,
+        // Служебные хелперы для страниц: fullUrl нужен везде, где аватар
+        // показывается крупно (полноэкранный просмотрщик, раскрытая шапка).
+        fullUrl, avatarUrl, bucketFor, screenDpr
+    };
 })();
