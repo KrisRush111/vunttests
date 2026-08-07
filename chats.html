@@ -6333,7 +6333,19 @@
         </div>
     </div>
 
-    <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
+    <!--
+      ВАЖНО (качество фото): раньше здесь было accept="image/*". На iOS/Safari
+      это заставляет систему при выборе из "Фотоплёнки" САМОЙ конвертировать
+      HEIC в JPEG — с даунскейлом и агрессивным пережатием. Именно поэтому
+      фото с iPhone приходили мыльными, а с Android и десктопа — нормальными
+      (ни клиент, ни сервер картинку не сжимают, в Cloudinary уходит File
+      как есть). Перечисляем конкретные типы, включая heic/heif: тогда Safari
+      отдаёт файл без конвертации, а HEIC уже на своей стороне корректно
+      преобразует Cloudinary.
+    -->
+    <input type="file" id="imageInput"
+           accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
+           multiple style="display: none;">
 
     <div id="contactsModal" class="contacts-modal">
         <div class="contacts-header">
@@ -7477,18 +7489,48 @@ if (profileCloseButtonDesktop) {
         updateTransform(animate);
     }
 
-    window.openPhotoViewer = function(photoUrl, displayName) {
+    // placeholderSrc — необязательная мгновенная заглушка (миниатюра аватара
+    // из локального кэша). Показывается размыто-увеличенной ТОЛЬКО пока
+    // грузится настоящее фото в полном разрешении, и заменяется на него по
+    // onload. Раньше в просмотрщик передавали саму миниатюру и она так и
+    // оставалась на экране — отсюда и жалобы на плохое качество.
+    window.openPhotoViewer = function(photoUrl, displayName, placeholderSrc) {
         scale = 1; translateX = 0; translateY = 0;
         img.style.transition = 'none';
-        img.style.opacity = '0';
         img.style.transform = 'scale(0.92)';
-        img.src = photoUrl;
-        img.onload = () => {
-            img.style.transition = 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+
+        if (placeholderSrc) {
+            // Заглушку показываем сразу, но приглушённой и слегка размытой,
+            // чтобы её низкое разрешение не читалось как окончательное фото.
+            img.src = placeholderSrc;
+            img.style.opacity = '0.55';
+            img.style.filter = 'blur(6px)';
+        } else {
+            img.style.opacity = '0';
+            img.style.filter = '';
+        }
+
+        // Полное разрешение грузим отдельным Image: пока оно не готово, на
+        // экране остаётся заглушка, и подмена происходит одним кадром без
+        // мигания пустотой.
+        const fullLoader = new Image();
+        fullLoader.decoding = 'async';
+        fullLoader.onload = () => {
+            img.src = photoUrl;
+            img.style.filter = '';
+            img.style.transition = 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.22s ease';
             img.style.opacity = '1';
             img.style.transform = 'scale(1)';
             setTimeout(() => { img.style.transition = 'none'; }, 230);
         };
+        fullLoader.onerror = () => {
+            // Полное фото не загрузилось (нет сети) — оставляем заглушку
+            // читаемой, без блюра, чтобы хоть что-то было видно.
+            img.style.filter = '';
+            img.style.opacity = '1';
+            img.style.transform = 'scale(1)';
+        };
+        fullLoader.src = photoUrl;
         if (namePill) {
             namePill.textContent = displayName || '';
             namePill.style.display = displayName ? '' : 'none';
@@ -8036,7 +8078,11 @@ function getActiveElements() {
         // перекачиваем/перерисовываем только если он реально сменился.
         function loadChatAvatar(avatarElement, userId, initials, bgColor) {
             if (!avatarElement) return;
-            AvatarCache.render(SERVER_URL, avatarElement, userId, initials, bgColor, true);
+            // 50 — размер .chat-avatar в CSS-пикселях. Передаём его явно:
+            // элемент в этот момент может быть ещё не в потоке (offsetWidth = 0),
+            // и без подсказки AvatarCache взял бы дефолт и запросил картинку
+            // не того размера.
+            AvatarCache.render(SERVER_URL, avatarElement, userId, initials, bgColor, true, 50);
         }
 
         function loadContactAvatar(avatarElement, userId, initials, bgColor) {
@@ -12775,6 +12821,32 @@ async function openChat(chatId) {
             }
         }
 
+// Подменяет фон аватара на фото в ПОЛНОМ разрешении. Нужно там, где аватар
+// перестаёт быть маленьким кружком: раскрытая шапка профиля во весь экран.
+// Пока полное фото грузится, на экране остаётся уже показанная миниатюра,
+// поэтому подмена незаметна и ничего не мигает.
+const _fullAvatarUpgraded = new Set();
+function upgradeAvatarToFull(el, userId) {
+    if (!el || !userId) return;
+    const key = String(userId);
+    const url = (window.AvatarCache && AvatarCache.fullUrl)
+        ? AvatarCache.fullUrl(SERVER_URL, userId)
+        : `${SERVER_URL}/avatar_full/${userId}`;
+    // Один раз на пользователя за сессию: браузер дальше отдаёт файл из
+    // своего HTTP-кэша (роут /avatar_full шлёт Cache-Control: max-age).
+    if (_fullAvatarUpgraded.has(key)) {
+        el.style.backgroundImage = `url(${url})`;
+        return;
+    }
+    const loader = new Image();
+    loader.decoding = 'async';
+    loader.onload = () => {
+        _fullAvatarUpgraded.add(key);
+        el.style.backgroundImage = `url(${url})`;
+    };
+    loader.src = url;
+}
+
 async function updateProfileModalUI(user) {
     const activeElements = getActiveElements();
     
@@ -12786,7 +12858,11 @@ async function updateProfileModalUI(user) {
     const hasAvatar = !!(user.has_avatar_photo || user.has_avatar);
     if (hasAvatar) {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
-        AvatarCache.render(SERVER_URL, activeElements.modalProfileAvatar, user.platform_user_id, initial, user.avatar_background, true);
+        // Последний аргумент — размер отрисовки в CSS-пикселях. Аватар в
+        // профиле рисуется 100x100 (в 2 раза больше кружка в списке чатов),
+        // поэтому и картинку надо запрашивать крупнее: раньше и там, и там
+        // использовался один файл 300x300, и на retina профиль был мыльным.
+        AvatarCache.render(SERVER_URL, activeElements.modalProfileAvatar, user.platform_user_id, initial, user.avatar_background, true, 100);
         activeElements.modalProfileAvatar.style.backgroundColor = '';
 
         // Клик по аватарке: 1-е нажатие — разворачиваем её в фото на всю ширину
@@ -12798,12 +12874,25 @@ async function updateProfileModalUI(user) {
             const canExpand = window.ProfileHero && window.ProfileHero.allowed
                 ? window.ProfileHero.allowed() : false;
             if (canExpand && heroHeader && !window.ProfileHero.isExpanded(heroHeader)) {
+                // Раскрытая шапка — это фото НА ВСЮ ШИРИНУ экрана
+                // (.hero-expanded .profile-avatar { width: 100% }), а в
+                // background-image до этого лежит миниатюра из кэша под
+                // кружок 100x100. Её растягивало в 4+ раза — фото выглядело
+                // размытым. Подгружаем полное разрешение и подменяем фон,
+                // когда оно готово (анимацию раскрытия не задерживаем).
+                upgradeAvatarToFull(activeElements.modalProfileAvatar, user.platform_user_id);
                 window.ProfileHero.expand(heroHeader);
                 return;
             }
+            // ВАЖНО: в полноэкранный просмотрщик НЕЛЬЗЯ отдавать миниатюру из
+            // кэша (раньше здесь был local.dataUrl) — это картинка размером под
+            // кружок аватара, а тут она растягивается на весь экран и зумится
+            // до 5x, то есть апскейл до 20 раз. Берём полное разрешение с
+            // /avatar_full, а кэшированную миниатюру отдаём как мгновенную
+            // заглушку, чтобы на медленной сети не было пустого экрана.
             const local = await AvatarCache.getLocal(user.platform_user_id);
-            const src = local?.dataUrl || `${SERVER_URL}/avatar/${user.platform_user_id}`;
-            openPhotoViewer(src, user.nickname || '');
+            const fullSrc = AvatarCache.fullUrl(SERVER_URL, user.platform_user_id);
+            openPhotoViewer(fullSrc, user.nickname || '', local && local.dataUrl);
         };
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
@@ -13906,9 +13995,11 @@ function stopProfileDataPolling() {
                     return;
                 }
                 const displayName = otherParticipant.nickname || (fallbackTitleEl && fallbackTitleEl.textContent) || '';
+                // То же самое, что и в карточке профиля: на весь экран отдаём
+                // полное разрешение, миниатюру из кэша — только как заглушку.
                 AvatarCache.getLocal(otherParticipant.platform_user_id).then(local => {
-                    const src = (local && local.dataUrl) || `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
-                    openPhotoViewer(src, displayName);
+                    const fullSrc = AvatarCache.fullUrl(SERVER_URL, otherParticipant.platform_user_id);
+                    openPhotoViewer(fullSrc, displayName, local && local.dataUrl);
                 });
             }
 
