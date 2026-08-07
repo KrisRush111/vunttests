@@ -5549,6 +5549,17 @@
 </head>
 <body>
 <!-- ==========================================================================
+     БЫЛО: страница поднимала свой Socket.IO (connectAppSocket) и одновременно
+     блок BanGuard ниже через 3 секунды поднимал ВТОРОЕ соединение к тому же
+     серверу с тем же platform_user_id. Из-за этого в консоли сыпалось
+     "WebSocket is closed before the connection is established" (manager.js):
+     два Manager'а socket.io гонялись за одно и то же соединение, и один из
+     WebSocket'ов закрывался, ещё находясь в состоянии CONNECTING.
+     СТАЛО: страница заранее объявляет, что сокет даст сама — BanGuard ждёт его
+     через attachSocket() и своё соединение не создаёт (см. ensureOwnSocket).
+     ========================================================================== -->
+<script>window.PAGE_PROVIDES_SOCKET = true;</script>
+<!-- ==========================================================================
      ЭКРАН БЛОКИРОВКИ ЗАБАНЕННОГО АККАУНТА (вставлять СРАЗУ после <body>)
      --------------------------------------------------------------------------
      Один и тот же блок вставляется без изменений в chats.html, contacts.html
@@ -5758,6 +5769,11 @@
     var inFlight = false;
     var expiredChecked = false;
     var socketAttached = false;
+    // Своё (резервное) соединение BanGuard. Держим ссылку, чтобы корректно
+    // закрыть его, если страница позже отдаст собственный сокет через
+    // attachSocket() — раньше ссылки не было и лишний WebSocket висел до
+    // закрытия вкладки, удваивая соединения и события.
+    var ownSocket = null;
 
     // ---------------------------------------------------------------- утилиты
 
@@ -6017,6 +6033,18 @@
         socket.__banBound = true;
         socketAttached = true;
 
+        // Если мы уже успели поднять своё резервное соединение, а страница
+        // только теперь отдала настоящее — своё гасим. БЫЛО: оба сокета
+        // оставались открытыми (двойной коннект одного и того же
+        // platform_user_id, дубли событий, гонка реконнектов и как следствие
+        // предупреждения "WebSocket is closed before the connection is
+        // established"). СТАЛО: живым остаётся ровно один сокет.
+        if (ownSocket && ownSocket !== socket) {
+            try { ownSocket.removeAllListeners(); } catch (e) {}
+            try { ownSocket.disconnect(); } catch (e) {}
+            ownSocket = null;
+        }
+
         socket.on('ban_applied', function (payload) {
             if (!payload) return;
             var uid = userId();
@@ -6041,9 +6069,27 @@
     // лишь фолбэк-опросом раз в 20-60 секунд, а не мгновенно.
     var SOCKET_CDN = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
     var ownSocketTried = false;
+    // Сколько раз мы уже отложили создание своего сокета в ожидании сокета
+    // страницы (см. ensureOwnSocket).
+    var waitedForPageSocket = 0;
 
     function ensureOwnSocket() {
         if (socketAttached || ownSocketTried) return;
+
+        // БЫЛО: ровно через 3 секунды BanGuard безусловно поднимал своё
+        // соединение. На chats.html/contacts.html страница поднимает сокет сама,
+        // но иногда позже (ждёт userData и загрузку socket.io с CDN) — и мы
+        // получали два параллельных WebSocket'а к одному серверу.
+        // СТАЛО: если страница объявила PAGE_PROVIDES_SOCKET, ждём её сокет и
+        // проверяем каждую секунду до 20 секунд; своё соединение поднимаем
+        // только если страница так и не отдала своё (полная деградация к
+        // прежнему поведению, но без дублей).
+        if (window.PAGE_PROVIDES_SOCKET && waitedForPageSocket < 20) {
+            waitedForPageSocket += 1;
+            setTimeout(ensureOwnSocket, 1000);
+            return;
+        }
+
         ownSocketTried = true;
         var uid = userId();
         if (!uid) return;
@@ -6051,15 +6097,26 @@
         var start = function () {
             if (socketAttached || typeof io === 'undefined') return;
             try {
-                attachSocket(io(BAN_SERVER_URL, {
+                ownSocket = io(BAN_SERVER_URL, {
                     path: '/socket.io/',
-                    transports: ['websocket', 'polling'],
+                    // БЫЛО: ['websocket', 'polling'] — socket.io сразу пытался
+                    // открыть WebSocket, и если апгрейд не успевал (мобильная
+                    // сеть, уход вкладки в фон, спящий экран), транспорт
+                    // закрывался в состоянии CONNECTING — то самое
+                    // "WebSocket is closed before the connection is established".
+                    // СТАЛО: сначала мгновенный polling-хендшейк, затем штатный
+                    // upgrade на WebSocket. Соединение живёт с первой секунды,
+                    // а неудачный апгрейд больше ничего не роняет.
+                    transports: ['polling', 'websocket'],
+                    upgrade: true,
+                    timeout: 20000,
                     withCredentials: true,
                     query: { platform_user_id: uid },
                     reconnection: true,
                     reconnectionDelay: 1000,
                     reconnectionDelayMax: 5000
-                }));
+                });
+                attachSocket(ownSocket);
             } catch (e) {}
         };
 
@@ -6562,15 +6619,42 @@
         // он даёт только мгновенную доставку именно события удаления, не ждущись следующего тика поллинга (2.5с) и/или повторного открытия чата.
         let appSocket = null;
 
+        // Сколько раз уже ждали загрузку библиотеки socket.io (см. ниже).
+        let appSocketLibWaits = 0;
+
         function connectAppSocket() {
-            if (!userData || !userData.platform_user_id || typeof io !== 'function') return;
+            if (!userData || !userData.platform_user_id) return;
             if (appSocket) return; // уже подключено/подключаемся
+
+            // БЫЛО: если к моменту вызова библиотека socket.io с CDN ещё не
+            // загрузилась (медленная сеть, холодный старт PWA), функция молча
+            // выходила и НИКОГДА не вызывалась повторно: appSocket оставался null,
+            // join_chat/leave_chat не отправлялись, real-time не работал, а BanGuard
+            // через несколько секунд поднимал взамен своё соединение.
+            // СТАЛО: ждём появления io() короткими повторами (до ~10 секунд).
+            if (typeof io !== 'function') {
+                if (appSocketLibWaits++ < 40) setTimeout(connectAppSocket, 250);
+                return;
+            }
+
             try {
                 appSocket = io(SOCKET_URL, {
                     path: '/socket.io/',
                     query: { platform_user_id: userData.platform_user_id },
                     withCredentials: true,
-                    transports: ['websocket', 'polling'],
+                    // БЫЛО: ['websocket', 'polling'] — первый же транспорт
+                    // WebSocket. Пока он в CONNECTING, любое переключение
+                    // (сворачивание PWA, засыпание экрана, смена сети, таймаут
+                    // апгрейда) закрывает его и браузер пишет в консоль
+                    // "WebSocket is closed before the connection is established"
+                    // (manager.js), а доставка событий откладывается до
+                    // фолбэка на polling.
+                    // СТАЛО: polling-хендшейк первым (он проходит всегда и
+                    // моментально), затем штатный upgrade на WebSocket. Событий
+                    // не теряем, консоль чистая, реконнекты не гоняют транспорт.
+                    transports: ['polling', 'websocket'],
+                    upgrade: true,
+                    timeout: 20000,
                     reconnection: true,
                     reconnectionDelay: 1000,
                     reconnectionDelayMax: 10000,
