@@ -6232,7 +6232,12 @@ function setupSearchHandlers() {
         const suffix = window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
         const nickEl = document.getElementById(`modal-profile-nickname-${suffix}`);
         const name = nickEl ? (nickEl.textContent || '').trim() : '';
-        if (typeof window.openPhotoViewer === 'function') {
+        // Просмотрщик медиа — точная копия логики из chats.html: счётчик "N из M",
+        // листание (стрелки на десктопе, свайп на мобильных), pinch-zoom,
+        // колесо мыши, двойной тап/клик, кнопки "поделиться" и "сохранить".
+        if (typeof window.openProfileImageModal === 'function') {
+            window.openProfileImageModal(mediaItems, index);
+        } else if (typeof window.openPhotoViewer === 'function') {
             window.openPhotoViewer(item.url, name, {
                 index: index,
                 total: mediaItems.length,
@@ -6257,7 +6262,10 @@ function setupSearchHandlers() {
 
         grid.innerHTML = mediaItems.map((item, idx) => (
             `<div class="profile-photo-item" onclick="openProfilePhoto(${idx})">` +
-            `<img src="${String(item.url).replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;">` +
+            `<img src="${String(item.url).replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;" ` +
+            `style="opacity:0.15; transition: opacity .3s ease, transform .18s ease;" ` +
+            `onload="this.style.opacity='1'; this.closest('.profile-photo-item') && this.closest('.profile-photo-item').classList.add('image-loaded');" ` +
+            `onerror="this.onerror=null; this.style.opacity='1';">` +
             `</div>`
         )).join('');
 
@@ -6362,6 +6370,594 @@ function setupSearchHandlers() {
     display: none !important;
 }
 </style>
+
+<!-- ===================================================================
+     ПРОСМОТРЩИК МЕДИА ИЗ ПРОФИЛЯ КОНТАКТА (как в chats.html)
+     Полная копия дизайна и логики модального окна фото из chats.html:
+     шапка "← N из M ↺", футер "поделиться / время / сохранить",
+     стрелки листания на десктопе, свайп между фото на мобильных,
+     pinch-zoom с "резиновым" уменьшением, зум колесом, перетаскивание,
+     двойной клик/тап для увеличения, стрелки и Esc на клавиатуре.
+     =================================================================== -->
+<style id="profile-media-viewer-styles">
+.image-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    display: flex;
+    flex-direction: column;
+    z-index: 10000;
+    cursor: default;
+    overflow: hidden;
+    touch-action: none;
+    animation: profileImageModalFadeIn 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+@keyframes profileImageModalFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.image-modal-content {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+    touch-action: none;
+}
+
+.zoomable-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    cursor: grab;
+    transition: none;
+    transform-origin: center center;
+    will-change: transform;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.zoomable-image:active { cursor: grabbing; }
+
+/* Стрелки навигации по фото — только для десктопа (мышь/тачпад) */
+.image-modal-nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    border: none;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10002;
+    transition: background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+    opacity: 0.85;
+}
+
+.image-modal-nav-arrow:hover {
+    background: rgba(0, 0, 0, 0.7);
+    transform: translateY(-50%) scale(1.08);
+    opacity: 1;
+}
+
+.image-modal-nav-arrow:disabled {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.image-modal-nav-arrow.prev { left: 16px; }
+.image-modal-nav-arrow.next { right: 16px; }
+
+@media (max-width: 767px) {
+    .image-modal-nav-arrow { display: none !important; }
+}
+</style>
+
+<script>
+(function () {
+    function formatPhotoTime(timestamp) {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return '';
+        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // items: [{ url, sent_at }], startIndex — индекс открываемого фото
+    window.openProfileImageModal = function (items, startIndex) {
+        const photos = (items || []).filter(it => it && it.url);
+        if (!photos.length) return;
+
+        const totalImages = photos.length;
+        const currentIndex = Math.max(0, Math.min(startIndex || 0, totalImages - 1));
+
+        const modal = document.createElement('div');
+        modal.className = 'image-modal-overlay';
+
+        let scale = 1;
+        let isDragging = false;
+        let startX, startY, translateX = 0, translateY = 0;
+
+        const header = document.createElement('div');
+        header.style.cssText = `display: flex; align-items: center; padding: 16px; background: rgba(0, 0, 0, 0.8); color: white; border-bottom: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); z-index: 10001; position: relative;`;
+
+        const backButton = document.createElement('button');
+        backButton.innerHTML = '&larr;';
+        backButton.style.cssText = `background: none; border: none; color: white; font-size: 20px; margin-right: 16px; cursor: pointer; padding: 8px; transition: transform 0.2s ease;`;
+        backButton.addEventListener('mouseenter', () => backButton.style.transform = 'scale(1.1)');
+        backButton.addEventListener('mouseleave', () => backButton.style.transform = 'scale(1)');
+
+        const title = document.createElement('div');
+        title.style.cssText = `flex: 1; font-size: 17px; font-weight: 500;`;
+        title.textContent = totalImages > 1 ? `${currentIndex + 1} из ${totalImages}` : 'Фото';
+
+        const resetZoomButton = document.createElement('button');
+        resetZoomButton.innerHTML = '&#8634;';
+        resetZoomButton.style.cssText = `background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 8px; margin-left: 8px; opacity: 0.7; transition: opacity 0.2s ease, transform 0.2s ease;`;
+        resetZoomButton.title = 'Сбросить масштаб';
+        resetZoomButton.addEventListener('mouseenter', () => resetZoomButton.style.opacity = '1');
+        resetZoomButton.addEventListener('mouseleave', () => resetZoomButton.style.opacity = '0.7');
+
+        header.appendChild(backButton);
+        header.appendChild(title);
+        header.appendChild(resetZoomButton);
+
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-modal-content';
+
+        const prevArrow = document.createElement('button');
+        prevArrow.className = 'image-modal-nav-arrow prev';
+        prevArrow.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+        prevArrow.title = 'Предыдущее фото';
+        prevArrow.setAttribute('aria-label', 'Предыдущее фото');
+
+        const nextArrow = document.createElement('button');
+        nextArrow.className = 'image-modal-nav-arrow next';
+        nextArrow.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+        nextArrow.title = 'Следующее фото';
+        nextArrow.setAttribute('aria-label', 'Следующее фото');
+
+        const img = document.createElement('img');
+        img.src = photos[currentIndex].url;
+        img.className = 'zoomable-image';
+        img.draggable = false;
+        img.style.opacity = '0';
+        img.style.transform = 'scale(0.92)';
+        img.style.transition = 'opacity 0.18s ease, transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        img.addEventListener('load', () => {
+            img.style.opacity = '1';
+            img.style.transform = 'scale(1)';
+            setTimeout(() => { img.style.transition = 'none'; }, 200);
+        }, { once: true });
+
+        const footer = document.createElement('div');
+        footer.style.cssText = `padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: rgba(0, 0, 0, 0.8); color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); font-size: 14px; display: flex; align-items: center; justify-content: space-between;`;
+
+        const shareBtn = document.createElement('button');
+        shareBtn.innerHTML = '<i class="fa-solid fa-share-nodes"></i>';
+        shareBtn.title = 'Поделиться';
+        shareBtn.style.cssText = `background: rgba(255,255,255,0.15); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; transition: background 0.18s ease, transform 0.18s ease; flex-shrink: 0;`;
+        shareBtn.addEventListener('mouseenter', () => { shareBtn.style.background = 'rgba(255,255,255,0.28)'; shareBtn.style.transform = 'scale(1.1)'; });
+        shareBtn.addEventListener('mouseleave', () => { shareBtn.style.background = 'rgba(255,255,255,0.15)'; shareBtn.style.transform = 'scale(1)'; });
+        shareBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const currentSrc = img.src;
+            try {
+                const response = await fetch(currentSrc);
+                const blob = await response.blob();
+                const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+                const file = new File([blob], `photo.${ext}`, { type: blob.type });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file] });
+                } else if (navigator.share) {
+                    await navigator.share({ url: currentSrc });
+                } else {
+                    await navigator.clipboard.writeText(currentSrc);
+                    shareBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    setTimeout(() => { shareBtn.innerHTML = '<i class="fa-solid fa-share-nodes"></i>'; }, 1500);
+                }
+            } catch {}
+        });
+
+        const footerTime = document.createElement('span');
+        footerTime.style.cssText = `text-align: center; flex: 1; font-size: 13px; color: rgba(255,255,255,0.6);`;
+        footerTime.textContent = formatPhotoTime(photos[currentIndex].sent_at);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>';
+        saveBtn.title = 'Сохранить';
+        saveBtn.style.cssText = `background: rgba(255,255,255,0.15); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; transition: background 0.18s ease, transform 0.18s ease; flex-shrink: 0;`;
+        saveBtn.addEventListener('mouseenter', () => { saveBtn.style.background = 'rgba(255,255,255,0.28)'; saveBtn.style.transform = 'scale(1.1)'; });
+        saveBtn.addEventListener('mouseleave', () => { saveBtn.style.background = 'rgba(255,255,255,0.15)'; saveBtn.style.transform = 'scale(1)'; });
+        saveBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const currentSrc = img.src;
+            const urlExt = (currentSrc.match(/\.(\w+)(?:\?|$)/) || [])[1] || 'jpg';
+            const ext = urlExt.replace('jpeg', 'jpg');
+            const fileName = `photo.${ext}`;
+            try {
+                const response = await fetch(currentSrc);
+                if (!response.ok) throw new Error('fetch failed');
+                const blob = await response.blob();
+                if (!blob || blob.size === 0) throw new Error('empty blob');
+                const blobType = blob.type || `image/${ext}`;
+                const file = new File([blob], fileName, { type: blobType });
+                const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window && window.innerWidth < 768);
+                if (isMobileDevice && navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file] });
+                    saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                } else {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                }
+            } catch {
+                try {
+                    let downloadUrl = currentSrc;
+                    if (currentSrc.includes('cloudinary.com')) {
+                        downloadUrl = currentSrc.replace('/upload/', `/upload/fl_attachment:${fileName.replace('.', '_')}/`);
+                    }
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
+                } catch {
+                    const a = document.createElement('a');
+                    a.href = currentSrc;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+            }
+        });
+
+        footer.appendChild(shareBtn);
+        footer.appendChild(footerTime);
+        footer.appendChild(saveBtn);
+
+        function clampTranslate() {
+            const rect = imageContainer.getBoundingClientRect();
+            const imgRect = img.getBoundingClientRect();
+            const naturalWidth = imgRect.width / scale;
+            const naturalHeight = imgRect.height / scale;
+            const scaledWidth = naturalWidth * scale;
+            const scaledHeight = naturalHeight * scale;
+            const maxX = Math.max(0, (scaledWidth - rect.width) / 2);
+            const maxY = Math.max(0, (scaledHeight - rect.height) / 2);
+            translateX = Math.min(maxX, Math.max(-maxX, translateX));
+            translateY = Math.min(maxY, Math.max(-maxY, translateY));
+        }
+
+        function updateTransform(animate = false) {
+            img.style.transition = animate ? 'transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none';
+            img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+            resetZoomButton.style.display = scale > 1.01 ? 'block' : 'none';
+        }
+
+        function zoomIn() {
+            scale = Math.min(scale * 1.5, 5);
+            clampTranslate();
+            updateTransform(true);
+        }
+
+        function zoomOut() {
+            scale = Math.max(scale / 1.5, 1);
+            if (scale === 1) { translateX = 0; translateY = 0; }
+            clampTranslate();
+            updateTransform(true);
+        }
+
+        function resetZoom() {
+            scale = 1;
+            translateX = 0;
+            translateY = 0;
+            updateTransform(true);
+        }
+
+        resetZoomButton.addEventListener('click', resetZoom);
+
+        // Зум колесом мыши
+        imageContainer.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (e.deltaY < 0) scale = Math.min(scale * 1.15, 5);
+            else scale = Math.max(scale / 1.15, 1);
+            if (scale === 1) { translateX = 0; translateY = 0; }
+            clampTranslate();
+            updateTransform(false);
+        });
+
+        // === Десктоп: перетаскивание увеличенного фото мышью ===
+        imageContainer.addEventListener('mousedown', (e) => {
+            if (scale <= 1) return;
+            isDragging = true;
+            startX = e.clientX - translateX;
+            startY = e.clientY - translateY;
+            img.style.cursor = 'grabbing';
+        });
+
+        function onMouseMove(e) {
+            if (!isDragging || scale <= 1) return;
+            e.preventDefault();
+            translateX = e.clientX - startX;
+            translateY = e.clientY - startY;
+            clampTranslate();
+            updateTransform(false);
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+            img.style.cursor = scale > 1 ? 'grab' : 'default';
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+
+        img.addEventListener('dblclick', () => {
+            if (scale > 1) resetZoom();
+            else { scale = 2.5; updateTransform(true); }
+        });
+
+        // === Мобильные жесты: пинч-зум, перемещение пальцем, свайп между фото ===
+        let pinchStartDistance = null;
+        let pinchStartScale = 1;
+        let pinchStartTranslate = { x: 0, y: 0 };
+        let pinchMidpoint = { x: 0, y: 0 };
+
+        let panStartX = 0, panStartY = 0;
+        let panActive = false;
+
+        let swipeStartX = 0, swipeStartY = 0;
+        let swipeActive = false;
+
+        let lastTapTime = 0;
+
+        function getMidpoint(t1, t2) {
+            const rect = imageContainer.getBoundingClientRect();
+            return {
+                x: (t1.clientX + t2.clientX) / 2 - rect.left - rect.width / 2,
+                y: (t1.clientY + t2.clientY) / 2 - rect.top - rect.height / 2
+            };
+        }
+
+        imageContainer.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                pinchStartDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                pinchStartScale = scale;
+                pinchStartTranslate = { x: translateX, y: translateY };
+                pinchMidpoint = getMidpoint(t1, t2);
+                panActive = false;
+                swipeActive = false;
+                img.style.transition = 'none';
+            } else if (e.touches.length === 1) {
+                const touch = e.touches[0];
+
+                if (scale > 1.01) {
+                    panActive = true;
+                    swipeActive = false;
+                    panStartX = touch.clientX - translateX;
+                    panStartY = touch.clientY - translateY;
+                    img.style.transition = 'none';
+                } else {
+                    panActive = false;
+                    swipeActive = true;
+                    swipeStartX = touch.clientX;
+                    swipeStartY = touch.clientY;
+                }
+
+                const now = Date.now();
+                if (now - lastTapTime < 300) {
+                    if (scale > 1.01) {
+                        resetZoom();
+                    } else {
+                        const rect = imageContainer.getBoundingClientRect();
+                        translateX = -((touch.clientX - rect.left - rect.width / 2)) * 1.5;
+                        translateY = -((touch.clientY - rect.top - rect.height / 2)) * 1.5;
+                        scale = 2.5;
+                        clampTranslate();
+                        updateTransform(true);
+                    }
+                    panActive = false;
+                    swipeActive = false;
+                }
+                lastTapTime = now;
+            }
+        }, { passive: false });
+
+        imageContainer.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && pinchStartDistance !== null) {
+                e.preventDefault();
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                const currentDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                const ratio = currentDistance / pinchStartDistance;
+
+                // "Резиновое" уменьшение ниже 1x, отскок обратно на touchend
+                scale = Math.max(0.5, Math.min(pinchStartScale * ratio, 5));
+
+                const scaleDelta = scale / pinchStartScale;
+                translateX = pinchStartTranslate.x * scaleDelta + pinchMidpoint.x * (1 - scaleDelta);
+                translateY = pinchStartTranslate.y * scaleDelta + pinchMidpoint.y * (1 - scaleDelta);
+
+                updateTransform(false);
+            } else if (e.touches.length === 1) {
+                const touch = e.touches[0];
+
+                if (panActive && scale > 1.01) {
+                    e.preventDefault();
+                    translateX = touch.clientX - panStartX;
+                    translateY = touch.clientY - panStartY;
+                    clampTranslate();
+                    updateTransform(false);
+                } else if (swipeActive) {
+                    const diffX = touch.clientX - swipeStartX;
+                    const diffY = touch.clientY - swipeStartY;
+                    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 10) {
+                        e.preventDefault();
+                    }
+                }
+            }
+        }, { passive: false });
+
+        imageContainer.addEventListener('touchend', (e) => {
+            if (e.touches.length < 2) pinchStartDistance = null;
+
+            if (scale < 1) {
+                resetZoom();
+            } else if (scale === 1) {
+                translateX = 0;
+                translateY = 0;
+                updateTransform(true);
+            } else {
+                clampTranslate();
+                updateTransform(true);
+            }
+
+            if (swipeActive && scale <= 1 && e.changedTouches.length === 1) {
+                const endX = e.changedTouches[0].clientX;
+                const endY = e.changedTouches[0].clientY;
+                const diffX = swipeStartX - endX;
+                const diffY = swipeStartY - endY;
+
+                if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
+                    if (diffX > 0 && currentImageIndex < totalImages - 1) {
+                        currentImageIndex = updateNavigation(currentImageIndex + 1);
+                    } else if (diffX < 0 && currentImageIndex > 0) {
+                        currentImageIndex = updateNavigation(currentImageIndex - 1);
+                    }
+                }
+            }
+
+            panActive = false;
+            swipeActive = false;
+        });
+
+        imageContainer.appendChild(img);
+        imageContainer.appendChild(prevArrow);
+        imageContainer.appendChild(nextArrow);
+
+        modal.appendChild(header);
+        modal.appendChild(imageContainer);
+        modal.appendChild(footer);
+        document.body.appendChild(modal);
+
+        let currentImageIndex = currentIndex;
+
+        function updateArrowsState() {
+            prevArrow.disabled = currentImageIndex <= 0;
+            nextArrow.disabled = currentImageIndex >= totalImages - 1;
+        }
+
+        function updateNavigation(newIndex) {
+            const next = photos[newIndex];
+            if (next) {
+                title.textContent = totalImages > 1 ? `${newIndex + 1} из ${totalImages}` : 'Фото';
+                // Плавное появление нового фото — как в chats.html
+                img.style.transition = 'opacity 0.18s ease, transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                img.style.opacity = '0';
+                img.style.transform = 'scale(0.92)';
+                const applySrc = () => {
+                    img.src = next.url;
+                    img.addEventListener('load', () => {
+                        img.style.transition = 'opacity 0.18s ease, transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                        img.style.opacity = '1';
+                        img.style.transform = 'scale(1)';
+                        setTimeout(() => { img.style.transition = 'none'; }, 200);
+                    }, { once: true });
+                };
+                setTimeout(applySrc, 100);
+                scale = 1;
+                translateX = 0;
+                translateY = 0;
+                resetZoomButton.style.display = 'none';
+                footerTime.textContent = formatPhotoTime(next.sent_at);
+                currentImageIndex = newIndex;
+                updateArrowsState();
+                return newIndex;
+            }
+            return currentImageIndex;
+        }
+
+        prevArrow.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentImageIndex > 0) updateNavigation(currentImageIndex - 1);
+        });
+
+        nextArrow.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentImageIndex < totalImages - 1) updateNavigation(currentImageIndex + 1);
+        });
+
+        updateArrowsState();
+
+        function closeModal() {
+            modal.classList.add('animate__animated', 'animate__fadeOut');
+            document.removeEventListener('keydown', handleKeydown);
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            setTimeout(() => {
+                if (modal.parentNode) modal.parentNode.removeChild(modal);
+            }, 300);
+        }
+
+        backButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeModal();
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal && scale === 1) closeModal();
+        });
+
+        function handleKeydown(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            } else if (e.key === 'ArrowLeft' && currentImageIndex > 0) {
+                currentImageIndex = updateNavigation(currentImageIndex - 1);
+            } else if (e.key === 'ArrowRight' && currentImageIndex < totalImages - 1) {
+                currentImageIndex = updateNavigation(currentImageIndex + 1);
+            } else if (e.key === '0' || e.key === 'Numpad0') {
+                resetZoom();
+            } else if (e.key === '+' || e.key === '=') {
+                zoomIn();
+            } else if (e.key === '-') {
+                zoomOut();
+            }
+        }
+
+        document.addEventListener('keydown', handleKeydown);
+
+        resetZoomButton.style.display = 'none';
+        updateTransform();
+    };
+})();
+</script>
 
 </body>
 </html>
