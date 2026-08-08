@@ -2385,6 +2385,37 @@
             transition: all var(--animation-duration) var(--animation-timing);
             animation: slideInRight 0.3s var(--animation-timing);
             animation-fill-mode: both;
+            position: relative;
+        }
+
+        /* Линия-разделитель между контактами в рамке "Написать сообщение".
+           Отступ слева = ширина аватара (48) + отступ (12) + padding (16) — как в iOS/Telegram. */
+        .contact-item::after {
+            content: '';
+            position: absolute;
+            left: 76px;
+            right: 0;
+            bottom: 0;
+            height: 1px;
+            background: var(--telegram-divider);
+            pointer-events: none;
+        }
+
+        /* Не рисуем линию у последнего контакта и перед буквенным заголовком раздела */
+        .contact-item:last-child::after {
+            display: none;
+        }
+
+        .contact-item:has(+ .contacts-section-header)::after,
+        .contact-item.no-divider::after {
+            display: none;
+        }
+
+        /* Fallback для браузеров без :has() — линия у заголовка сверху */
+        @supports not selector(:has(*)) {
+            .contacts-section-header {
+                border-top: 1px solid var(--telegram-divider);
+            }
         }
 
         .contact-item:nth-child(odd) {
@@ -14526,6 +14557,24 @@ function stopProfileDataPolling() {
             });
 
             finalizeHeader();
+
+            // При фильтрации соседи по DOM могут быть скрыты, поэтому линию-разделитель
+            // убираем у последнего ВИДИМОГО контакта каждого буквенного раздела.
+            const visible = children.filter(el => el.classList.contains('contact-item') && el.style.display !== 'none');
+            children.forEach(el => el.classList && el.classList.remove('no-divider'));
+            visible.forEach((el, i) => {
+                const next = visible[i + 1];
+                if (!next) { el.classList.add('no-divider'); return; }
+                // если между этим и следующим видимым контактом есть заголовок раздела — линию убираем
+                let node = el.nextElementSibling;
+                while (node && node !== next) {
+                    if (node.classList.contains('contacts-section-header') && node.style.display !== 'none') {
+                        el.classList.add('no-divider');
+                        break;
+                    }
+                    node = node.nextElementSibling;
+                }
+            });
         }
 
         document.addEventListener('DOMContentLoaded', initializePage);
