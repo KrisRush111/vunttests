@@ -12905,31 +12905,12 @@ async function openChat(chatId) {
             }
         }
 
-// Подменяет фон аватара на фото в ПОЛНОМ разрешении. Нужно там, где аватар
-// перестаёт быть маленьким кружком: раскрытая шапка профиля во весь экран.
-// Пока полное фото грузится, на экране остаётся уже показанная миниатюра,
-// поэтому подмена незаметна и ничего не мигает.
-const _fullAvatarUpgraded = new Set();
-function upgradeAvatarToFull(el, userId) {
-    if (!el || !userId) return;
-    const key = String(userId);
-    const url = (window.AvatarCache && AvatarCache.fullUrl)
-        ? AvatarCache.fullUrl(SERVER_URL, userId)
-        : `${SERVER_URL}/avatar_full/${userId}`;
-    // Один раз на пользователя за сессию: браузер дальше отдаёт файл из
-    // своего HTTP-кэша (роут /avatar_full шлёт Cache-Control: max-age).
-    if (_fullAvatarUpgraded.has(key)) {
-        el.style.backgroundImage = `url(${url})`;
-        return;
-    }
-    const loader = new Image();
-    loader.decoding = 'async';
-    loader.onload = () => {
-        _fullAvatarUpgraded.add(key);
-        el.style.backgroundImage = `url(${url})`;
-    };
-    loader.src = url;
-}
+// ПРИМЕЧАНИЕ: подмена фона аватарки на фото в ПОЛНОМ разрешении убрана
+// специально (было upgradeAvatarToFull + /avatar_full). Из-за неё прямо во
+// время анимации раскрытия менялся background-image на картинку другого
+// размера/кропа, и фото визуально дёргалось и смещалось. Теперь, ровно как
+// в contacts.html, раскрывается та же самая картинка, что уже показана в
+// кружке аватара — анимация чистая, без смещения.
 
 async function updateProfileModalUI(user) {
     const activeElements = getActiveElements();
@@ -12958,13 +12939,9 @@ async function updateProfileModalUI(user) {
             const canExpand = window.ProfileHero && window.ProfileHero.allowed
                 ? window.ProfileHero.allowed() : false;
             if (canExpand && heroHeader && !window.ProfileHero.isExpanded(heroHeader)) {
-                // Раскрытая шапка — это фото НА ВСЮ ШИРИНУ экрана
-                // (.hero-expanded .profile-avatar { width: 100% }), а в
-                // background-image до этого лежит миниатюра из кэша под
-                // кружок 100x100. Её растягивало в 4+ раза — фото выглядело
-                // размытым. Подгружаем полное разрешение и подменяем фон,
-                // когда оно готово (анимацию раскрытия не задерживаем).
-                upgradeAvatarToFull(activeElements.modalProfileAvatar, user.platform_user_id);
+                // Раскрываем ровно ту картинку, что уже показана в кружке —
+                // никаких догрузок и подмен фона во время анимации (это и
+                // давало смещение). Поведение идентично contacts.html.
                 window.ProfileHero.expand(heroHeader);
                 return;
             }
