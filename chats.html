@@ -7412,7 +7412,7 @@ function renderProfileMediaSections(profileUserId) {
         ['desktop', 'mobile'].forEach(sfx => {
             const grid = document.getElementById(`modal-photos-grid-${sfx}`);
             if (grid) grid.innerHTML = '';
-            applyProfileMediaTabsVisibility(sfx, false, false);
+            hideProfileMediaBlock(sfx);
         });
         return;
     }
@@ -7422,20 +7422,29 @@ function renderProfileMediaSections(profileUserId) {
     const hasFiles = false; // файлов в переписке пока не бывает — вкладку не показываем
     const suffix = window.matchMedia("(min-width: 768px)").matches ? 'desktop' : 'mobile';
 
+    const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
+    const emptyEl = photosSection ? ensureProfileMediaEmptyEl(photosSection) : null;
+
     if (hasMedia) {
+        activeElements.modalPhotosGrid.style.display = '';
+        if (emptyEl) emptyEl.style.display = 'none';
         activeElements.modalPhotosGrid.innerHTML = photoMessages.map((msg, idx) => {
             const url = msg.content;
             return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
         }).join('');
     } else {
         activeElements.modalPhotosGrid.innerHTML = '';
+        activeElements.modalPhotosGrid.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'block';
     }
 
     applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles);
 }
 
-// Показывает только непустые вкладки: нет ни медиа, ни файлов — блок скрыт целиком;
-// есть только одна категория — переключатель не нужен, сразу её содержимое.
+// Переключатель "Медиа | Файлы" показывается всегда, когда открыт чат с этим
+// человеком: раньше пилюля появлялась только при hasMedia && hasFiles, а файлов
+// в переписке пока не бывает — поэтому она не появлялась никогда. Пустая
+// вкладка теперь показывает заглушку ("Медиа пока нет" / "Файлов пока нет").
 function applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles) {
     const tabs = document.getElementById(`modal-media-tabs-${suffix}`);
     const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
@@ -7444,26 +7453,41 @@ function applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles) {
 
     const mediaBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="media"]') : null;
     const filesBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="files"]') : null;
-    if (mediaBtn) mediaBtn.style.display = hasMedia ? '' : 'none';
-    if (filesBtn) filesBtn.style.display = hasFiles ? '' : 'none';
+    if (mediaBtn) mediaBtn.style.display = '';
+    if (filesBtn) filesBtn.style.display = '';
 
-    if (!hasMedia && !hasFiles) {
-        if (tabs) { tabs.style.display = 'none'; tabs.classList.add('media-hidden'); }
-        photosSection.style.display = 'none';
-        filesSection.style.display = 'none';
-        photosSection.classList.remove('active');
-        filesSection.classList.remove('active');
-        return;
-    }
-
-    const showTabs = hasMedia && hasFiles;
     if (tabs) {
-        tabs.style.display = showTabs ? 'flex' : 'none';
-        tabs.classList.toggle('media-hidden', !showTabs);
+        tabs.style.display = 'flex';
+        tabs.classList.remove('media-hidden');
     }
-    photosSection.style.display = hasMedia ? 'block' : 'none';
-    filesSection.style.display = hasFiles ? 'block' : 'none';
-    switchProfileMediaTab(suffix, hasMedia ? 'media' : 'files');
+
+    // Обе секции "включены", какая видна — решает класс .active
+    photosSection.style.display = 'block';
+    filesSection.style.display = 'block';
+
+    switchProfileMediaTab(suffix, (!hasMedia && hasFiles) ? 'files' : 'media');
+}
+
+// Полностью скрывает блок медиа/файлов (чат не открыт или профиль другого человека)
+function hideProfileMediaBlock(suffix) {
+    const tabs = document.getElementById(`modal-media-tabs-${suffix}`);
+    const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
+    const filesSection = document.getElementById(`modal-files-section-${suffix}`);
+    if (tabs) { tabs.style.display = 'none'; tabs.classList.add('media-hidden'); }
+    if (photosSection) { photosSection.style.display = 'none'; photosSection.classList.remove('active'); }
+    if (filesSection) { filesSection.style.display = 'none'; filesSection.classList.remove('active'); }
+}
+
+// Заглушка "Медиа пока нет" внутри секции фото (создаётся один раз)
+function ensureProfileMediaEmptyEl(photosSection) {
+    let el = photosSection.querySelector('.profile-media-empty');
+    if (!el) {
+        el = document.createElement('div');
+        el.className = 'profile-files-empty profile-media-empty';
+        el.textContent = 'Медиа пока нет';
+        photosSection.appendChild(el);
+    }
+    return el;
 }
 
 // Переключает вкладки "Медиа" / "Файлы" в профиле контакта
