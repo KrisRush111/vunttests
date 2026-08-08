@@ -6161,9 +6161,13 @@ function setupSearchHandlers() {
         mediaItems = [];
     }
 
-    // Показывает только те вкладки, в которых реально что-то есть.
-    // Нет ни фото, ни файлов — блок скрыт целиком; есть только одна категория —
-    // переключатель не нужен, показываем сразу её содержимое.
+    // ПОЧЕМУ ПРОПАДАЛИ "МЕДИА | ФАЙЛЫ":
+    // старая версия показывала пилюлю только когда есть И фото, И файлы
+    // (showTabs = hasMedia && hasFiles). Файлов в переписке пока не бывает,
+    // hasFiles всегда false — значит переключатель прятался ВСЕГДА, на экране
+    // оставалась одна сетка фото. Теперь пилюля показывается всегда, когда
+    // переписка с контактом существует, а пустая вкладка показывает заглушку
+    // ("Медиа пока нет" / "Файлов пока нет") — как на скриншоте Telegram.
     function applyTabsVisibility(suffix, hasMedia, hasFiles) {
         const tabs = document.getElementById(`modal-media-tabs-${suffix}`);
         const ps = document.getElementById(`modal-photos-section-${suffix}`);
@@ -6172,27 +6176,32 @@ function setupSearchHandlers() {
 
         const mediaBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="media"]') : null;
         const filesBtn = tabs ? tabs.querySelector('.profile-media-tab[data-tab="files"]') : null;
-        if (mediaBtn) mediaBtn.style.display = hasMedia ? '' : 'none';
-        if (filesBtn) filesBtn.style.display = hasFiles ? '' : 'none';
+        if (mediaBtn) mediaBtn.style.display = '';
+        if (filesBtn) filesBtn.style.display = '';
 
-        if (!hasMedia && !hasFiles) {
-            if (tabs) { tabs.style.display = 'none'; tabs.classList.add('media-hidden'); }
-            ps.style.display = 'none';
-            fs.style.display = 'none';
-            ps.classList.remove('active');
-            fs.classList.remove('active');
-            return;
-        }
-
-        // переключатель нужен только когда есть что переключать
-        const showTabs = hasMedia && hasFiles;
         if (tabs) {
-            tabs.style.display = showTabs ? 'flex' : 'none';
-            tabs.classList.toggle('media-hidden', !showTabs);
+            tabs.style.display = 'flex';
+            tabs.classList.remove('media-hidden');
         }
-        ps.style.display = hasMedia ? 'block' : 'none';
-        fs.style.display = hasFiles ? 'block' : 'none';
-        window.switchProfileMediaTab(suffix, hasMedia ? 'media' : 'files');
+
+        // Обе секции "включены", какая видна — решает класс .active
+        ps.style.display = 'block';
+        fs.style.display = 'block';
+
+        // Открываем ту вкладку, где есть содержимое (по умолчанию — "Медиа")
+        window.switchProfileMediaTab(suffix, (!hasMedia && hasFiles) ? 'files' : 'media');
+    }
+
+    // Заглушка "Медиа пока нет" внутри секции фото (создаётся один раз)
+    function ensureMediaEmptyEl(photosSection) {
+        let el = photosSection.querySelector('.profile-media-empty');
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'profile-files-empty profile-media-empty';
+            el.textContent = 'Медиа пока нет';
+            photosSection.appendChild(el);
+        }
+        return el;
     }
 
     window.hideProfileMediaSections = hide;
@@ -6250,23 +6259,31 @@ function setupSearchHandlers() {
 
         mediaItems = items || [];
 
-        if (mediaItems.length === 0) {
-            // Нет медиа (и файлов пока не бывает) — не показываем блок вообще
-            hide();
-            return;
+        const hasMedia = mediaItems.length > 0;
+        const emptyEl = ensureMediaEmptyEl(photosSection);
+
+        if (!hasMedia) {
+            // Переписка есть, но фото в ней нет — блок НЕ скрываем (как в Telegram),
+            // показываем переключатель и заглушку "Медиа пока нет".
+            grid.innerHTML = '';
+            grid.style.display = 'none';
+            emptyEl.style.display = 'block';
+        } else {
+            grid.style.display = '';
+            emptyEl.style.display = 'none';
+            grid.innerHTML = mediaItems.map((item, idx) => (
+                `<div class="profile-photo-item" onclick="openProfilePhoto(${idx})">` +
+                `<img src="${String(item.url).replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;" ` +
+                `style="opacity:0.15; transition: opacity .3s ease, transform .18s ease;" ` +
+                `onload="this.style.opacity='1'; this.closest('.profile-photo-item') && this.closest('.profile-photo-item').classList.add('image-loaded');" ` +
+                `onerror="this.onerror=null; this.style.opacity='1';">` +
+                `</div>`
+            )).join('');
         }
 
-        grid.innerHTML = mediaItems.map((item, idx) => (
-            `<div class="profile-photo-item" onclick="openProfilePhoto(${idx})">` +
-            `<img src="${String(item.url).replace(/"/g, '&quot;')}" alt="Фото" loading="lazy" draggable="false" oncontextmenu="return false;" ` +
-            `style="opacity:0.15; transition: opacity .3s ease, transform .18s ease;" ` +
-            `onload="this.style.opacity='1'; this.closest('.profile-photo-item') && this.closest('.profile-photo-item').classList.add('image-loaded');" ` +
-            `onerror="this.onerror=null; this.style.opacity='1';">` +
-            `</div>`
-        )).join('');
-
-        // Файлов в переписке пока не бывает — вкладка "Файлы" не показывается
-        applyTabsVisibility(suffix, true, false);
+        // Файлов в переписке пока не бывает, но вкладку "Файлы" всё равно
+        // показываем — внутри неё заглушка "Файлов пока нет".
+        applyTabsVisibility(suffix, hasMedia, false);
     }
 
     // Загружает фото переписки с контактом и строит разделы
@@ -6274,8 +6291,18 @@ function setupSearchHandlers() {
         const token = ++mediaToken;
         hide();
 
-        const myId = (window.userData && window.userData.platform_user_id) ||
-                     (typeof userData !== 'undefined' && userData && userData.platform_user_id);
+        // ID берём из трёх мест: window.userData, глобальной userData и
+        // sessionStorage — раньше, если userData ещё не успела загрузиться,
+        // функция молча выходила и блок медиа просто не появлялся.
+        let myId = (window.userData && window.userData.platform_user_id) ||
+                   (typeof userData !== 'undefined' && userData && userData.platform_user_id) || null;
+        if (!myId) {
+            try {
+                const raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                const u = raw ? JSON.parse(raw) : null;
+                if (u && u.platform_user_id) myId = u.platform_user_id;
+            } catch (e) {}
+        }
         if (!myId || !contactId) return;
 
         try {
@@ -6496,7 +6523,7 @@ function setupSearchHandlers() {
 
         const title = document.createElement('div');
         title.style.cssText = `flex: 1; font-size: 17px; font-weight: 500;`;
-        title.textContent = totalImages > 1 ? `${currentIndex + 1} из ${totalImages}` : 'Фото';
+        title.textContent = `${currentIndex + 1} из ${totalImages}`;
 
         const resetZoomButton = document.createElement('button');
         resetZoomButton.innerHTML = '&#8634;';
@@ -6870,28 +6897,17 @@ function setupSearchHandlers() {
             nextArrow.disabled = currentImageIndex >= totalImages - 1;
         }
 
+        // Листание фото — ТОЧЬ В ТОЧЬ как в chats.html: кадр меняется сразу,
+        // без промежуточного затухания и setTimeout, зум/сдвиг сбрасываются
+        // через resetZoom(), счётчик в шапке всегда "N из M".
         function updateNavigation(newIndex) {
             const next = photos[newIndex];
             if (next) {
-                title.textContent = totalImages > 1 ? `${newIndex + 1} из ${totalImages}` : 'Фото';
-                // Плавное появление нового фото — как в chats.html
-                img.style.transition = 'opacity 0.18s ease, transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                img.style.opacity = '0';
-                img.style.transform = 'scale(0.92)';
-                const applySrc = () => {
-                    img.src = next.url;
-                    img.addEventListener('load', () => {
-                        img.style.transition = 'opacity 0.18s ease, transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                        img.style.opacity = '1';
-                        img.style.transform = 'scale(1)';
-                        setTimeout(() => { img.style.transition = 'none'; }, 200);
-                    }, { once: true });
-                };
-                setTimeout(applySrc, 100);
-                scale = 1;
-                translateX = 0;
-                translateY = 0;
-                resetZoomButton.style.display = 'none';
+                title.textContent = `${newIndex + 1} из ${totalImages}`;
+                img.style.transition = 'none';
+                img.style.opacity = '1';
+                img.src = next.url;
+                resetZoom();
                 footerTime.textContent = formatPhotoTime(next.sent_at);
                 currentImageIndex = newIndex;
                 updateArrowsState();
