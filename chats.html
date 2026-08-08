@@ -7573,48 +7573,22 @@ if (profileCloseButtonDesktop) {
         updateTransform(animate);
     }
 
-    // placeholderSrc — необязательная мгновенная заглушка (миниатюра аватара
-    // из локального кэша). Показывается размыто-увеличенной ТОЛЬКО пока
-    // грузится настоящее фото в полном разрешении, и заменяется на него по
-    // onload. Раньше в просмотрщик передавали саму миниатюру и она так и
-    // оставалась на экране — отсюда и жалобы на плохое качество.
-    window.openPhotoViewer = function(photoUrl, displayName, placeholderSrc) {
+    // Логика ровно как в contacts.html: показываем ту же картинку, что уже
+    // есть у аватарки (миниатюра из кэша AvatarCache), без догрузки
+    // /avatar_full и без подмены кадра. Никаких заглушек и блюра.
+    window.openPhotoViewer = function(photoUrl, displayName) {
         scale = 1; translateX = 0; translateY = 0;
         img.style.transition = 'none';
+        img.style.opacity = '0';
         img.style.transform = 'scale(0.92)';
-
-        if (placeholderSrc) {
-            // Заглушку показываем сразу, но приглушённой и слегка размытой,
-            // чтобы её низкое разрешение не читалось как окончательное фото.
-            img.src = placeholderSrc;
-            img.style.opacity = '0.55';
-            img.style.filter = 'blur(6px)';
-        } else {
-            img.style.opacity = '0';
-            img.style.filter = '';
-        }
-
-        // Полное разрешение грузим отдельным Image: пока оно не готово, на
-        // экране остаётся заглушка, и подмена происходит одним кадром без
-        // мигания пустотой.
-        const fullLoader = new Image();
-        fullLoader.decoding = 'async';
-        fullLoader.onload = () => {
-            img.src = photoUrl;
-            img.style.filter = '';
-            img.style.transition = 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.22s ease';
+        img.style.filter = '';
+        img.src = photoUrl;
+        img.onload = () => {
+            img.style.transition = 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             img.style.opacity = '1';
             img.style.transform = 'scale(1)';
             setTimeout(() => { img.style.transition = 'none'; }, 230);
         };
-        fullLoader.onerror = () => {
-            // Полное фото не загрузилось (нет сети) — оставляем заглушку
-            // читаемой, без блюра, чтобы хоть что-то было видно.
-            img.style.filter = '';
-            img.style.opacity = '1';
-            img.style.transform = 'scale(1)';
-        };
-        fullLoader.src = photoUrl;
         if (namePill) {
             namePill.textContent = displayName || '';
             namePill.style.display = displayName ? '' : 'none';
@@ -12945,15 +12919,12 @@ async function updateProfileModalUI(user) {
                 window.ProfileHero.expand(heroHeader);
                 return;
             }
-            // ВАЖНО: в полноэкранный просмотрщик НЕЛЬЗЯ отдавать миниатюру из
-            // кэша (раньше здесь был local.dataUrl) — это картинка размером под
-            // кружок аватара, а тут она растягивается на весь экран и зумится
-            // до 5x, то есть апскейл до 20 раз. Берём полное разрешение с
-            // /avatar_full, а кэшированную миниатюру отдаём как мгновенную
-            // заглушку, чтобы на медленной сети не было пустого экрана.
+            // Как в contacts.html: отдаём миниатюру из локального кэша, а
+            // если её нет — обычный /avatar/{id}. Полное разрешение
+            // (/avatar_full) не используется.
             const local = await AvatarCache.getLocal(user.platform_user_id);
-            const fullSrc = AvatarCache.fullUrl(SERVER_URL, user.platform_user_id);
-            openPhotoViewer(fullSrc, user.nickname || '', local && local.dataUrl);
+            const src = local?.dataUrl || `${SERVER_URL}/avatar/${user.platform_user_id}`;
+            openPhotoViewer(src, user.nickname || '');
         };
     } else {
         const initial = user.nickname?.charAt(0).toUpperCase() || '?';
@@ -14056,11 +14027,11 @@ function stopProfileDataPolling() {
                     return;
                 }
                 const displayName = otherParticipant.nickname || (fallbackTitleEl && fallbackTitleEl.textContent) || '';
-                // То же самое, что и в карточке профиля: на весь экран отдаём
-                // полное разрешение, миниатюру из кэша — только как заглушку.
+                // То же самое, что и в карточке профиля (и как в contacts.html):
+                // миниатюра из кэша, иначе /avatar/{id}. Без /avatar_full.
                 AvatarCache.getLocal(otherParticipant.platform_user_id).then(local => {
-                    const fullSrc = AvatarCache.fullUrl(SERVER_URL, otherParticipant.platform_user_id);
-                    openPhotoViewer(fullSrc, displayName, local && local.dataUrl);
+                    const src = local?.dataUrl || `${SERVER_URL}/avatar/${otherParticipant.platform_user_id}`;
+                    openPhotoViewer(src, displayName);
                 });
             }
 
