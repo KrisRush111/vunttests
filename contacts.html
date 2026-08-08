@@ -4418,6 +4418,12 @@ function openProfileModal(userId) {
     showLoading('Загрузка профиля...');
     const { profileModal } = getActiveElements();
 
+    // На кого будет жалоба — этот же id читает блок жалоб внизу страницы.
+    window.__reportTargetUserId = userId;
+    // Кнопку «ещё» держим закрытой, пока не подтвердится дружба
+    // (updateProfileModalUI откроет её только при friendship = accepted).
+    setProfileMoreAvailability(false);
+
     // Шапка всегда открывается в свёрнутом виде
     if (window.ProfileHero) window.ProfileHero.resetAll();
 
@@ -4450,6 +4456,8 @@ function openProfileModal(userId) {
 
 // В функции closeProfileModal для мобильных устройств:
 function closeProfileModal() {
+    window.__reportTargetUserId = null;
+    setProfileMoreAvailability(false);
     if (window.ProfileHero) window.ProfileHero.resetAll();
     if (window.hideProfileMediaSections) window.hideProfileMediaSections();
     stopProfileStatusPolling();
@@ -4934,7 +4942,7 @@ async function updateProfileModalUI(user) {
         }
     }
 
-    // Проверяем статус дружбы асинхронно и управляем кнопкой чата
+    // Проверяем статус дружбы асинхронно и управляем кнопками чата и «ещё»
     const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
     
     if (friendshipStatus === 'accepted') {
@@ -4950,7 +4958,29 @@ async function updateProfileModalUI(user) {
         activeElements.chatButton.style.pointerEvents = 'none';
         activeElements.chatButton.style.cursor = 'not-allowed';  // Для десктопа
     }
+
+    // Три точки («ещё» → Пожаловаться) — только для друзей.
+    setProfileMoreAvailability(friendshipStatus === 'accepted');
 }
+
+/* Кнопка «ещё» (три точки) в профиле контакта. У не-друзей она серая и
+   не нажимается: жаловаться и вообще открывать это меню можно только на
+   человека, который у меня в друзьях. Флаг data-report-allowed читает
+   обработчик клика в блоке жалоб — так меню не откроется даже если клик
+   каким-то образом прошёл. */
+function setProfileMoreAvailability(allowed) {
+    ['moreButtonDesktop', 'moreButtonMobile'].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.dataset.reportAllowed = allowed ? '1' : '0';
+        btn.classList.toggle('is-disabled', !allowed);
+        btn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+        btn.style.opacity = allowed ? '' : '0.5';
+        btn.style.pointerEvents = allowed ? '' : 'none';
+        btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+    });
+}
+window.setProfileMoreAvailability = setProfileMoreAvailability;
 
 
   
@@ -7147,6 +7177,1192 @@ function setupSearchHandlers() {
     filter: none !important;
 }
 </style>
+
+    <!-- ===== Жалоба на пользователя (меню «ещё» → Пожаловаться) — contacts.html ===== -->
+    <style>
+        /* Меню, всплывающее по кнопке «ещё» в профиле контакта.
+           Визуально это тот же язык, что и контекстное меню сообщения
+           (.message-action-menu / .message-action-item.destructive). */
+        .profile-more-menu {
+            position: fixed;
+            z-index: 6100;
+            min-width: 172px;
+            padding: 6px 0;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.85);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+            transform-origin: top center;
+            transform: scale(0.9);
+            opacity: 0;
+            transition: transform 0.16s cubic-bezier(0.34, 1.4, 0.64, 1), opacity 0.14s ease;
+        }
+
+        .profile-more-menu.visible {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .profile-more-menu {
+                background: rgba(48, 48, 50, 0.85);
+            }
+        }
+
+        .profile-more-item {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            width: 100%;
+            border: none;
+            background: none;
+            padding: 11px 16px;
+            font-size: 16px;
+            font-family: inherit;
+            color: var(--text-color, #1c1c1e);
+            cursor: pointer;
+            text-align: left;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.1s ease;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .profile-more-item {
+                color: var(--text-color, #f2f2f7);
+            }
+        }
+
+        .profile-more-item:hover,
+        .profile-more-item:active {
+            background: rgba(120, 120, 128, 0.16);
+        }
+
+        .profile-more-item.destructive {
+            color: #ff3b30;
+        }
+
+        .profile-more-item-icon {
+            font-size: 15px;
+            width: 18px;
+            text-align: center;
+            opacity: 0.8;
+            margin-left: 8px;
+        }
+
+        /* ===== Диалог подтверждения «Пожаловаться?» (Да / Нет) —
+           тот же нативный алерт-стиль, что и у удаления чата ===== */
+        .report-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 6200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(0, 0, 0, 0);
+            transition: background 0.18s ease;
+        }
+
+        .report-confirm-overlay.visible {
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .report-confirm-card {
+            width: 100%;
+            max-width: 300px;
+            border-radius: 20px;
+            background: rgba(245, 245, 247, 0.96);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            backdrop-filter: blur(24px) saturate(180%);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+            padding: 24px 20px 16px;
+            text-align: center;
+            transform: scale(0.85);
+            opacity: 0;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+        }
+
+        .report-confirm-overlay.visible .report-confirm-card {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-confirm-card {
+                background: rgba(44, 44, 46, 0.96);
+            }
+        }
+
+        .report-confirm-icon {
+            width: 62px;
+            height: 62px;
+            border-radius: 50%;
+            margin: 0 auto 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #ff3b30;
+            background: rgba(255, 59, 48, 0.14);
+        }
+
+        .report-confirm-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--telegram-text);
+            margin-bottom: 6px;
+        }
+
+        .report-confirm-text {
+            font-size: 14px;
+            line-height: 1.35;
+            color: var(--telegram-hint);
+            margin-bottom: 18px;
+            word-break: break-word;
+        }
+
+        .report-confirm-btn {
+            display: block;
+            width: 100%;
+            border: none;
+            background: rgba(120, 120, 128, 0.16);
+            color: #ff3b30;
+            font-size: 16px;
+            font-weight: 500;
+            font-family: inherit;
+            padding: 13px 12px;
+            border-radius: 13px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.1s ease, transform 0.1s ease;
+        }
+
+        .report-confirm-btn + .report-confirm-btn {
+            margin-top: 8px;
+        }
+
+        .report-confirm-btn:active {
+            transform: scale(0.97);
+            background: rgba(120, 120, 128, 0.26);
+        }
+
+        .report-confirm-btn.report-confirm-cancel {
+            color: var(--telegram-primary, #2481cc);
+            font-weight: 600;
+        }
+
+        /* ===== Лист «Сообщить о нарушении» ===== */
+        .report-sheet-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 6300;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0);
+            transition: background 0.2s ease;
+            overflow: hidden;
+        }
+
+        .report-sheet-overlay.visible {
+            background: rgba(0, 0, 0, 0.45);
+        }
+
+        .report-sheet {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            max-height: min(86vh, 780px);
+            display: flex;
+            flex-direction: column;
+            border-radius: 24px;
+            background: #efeff4;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+            overflow: hidden;
+            transform: translateY(18px) scale(0.96);
+            opacity: 0;
+            transition: transform 0.24s cubic-bezier(0.34, 1.35, 0.64, 1), opacity 0.2s ease;
+        }
+
+        .report-sheet-overlay.visible .report-sheet {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-sheet {
+                background: #1c1c1e;
+            }
+        }
+
+        .report-sheet-header {
+            position: relative;
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 18px 16px 14px;
+        }
+
+        .report-sheet-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--telegram-text, #1c1c1e);
+            text-align: center;
+            padding: 0 52px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-sheet-title {
+                color: #f2f2f7;
+            }
+        }
+
+        .report-sheet-close,
+        .report-sheet-back {
+            position: absolute;
+            top: 12px;
+            left: 14px;
+            width: 34px;
+            height: 34px;
+            border: none;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            color: var(--telegram-text, #1c1c1e);
+            background: rgba(120, 120, 128, 0.16);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.12s ease, transform 0.12s ease;
+        }
+
+        .report-sheet-close:active,
+        .report-sheet-back:active {
+            transform: scale(0.92);
+            background: rgba(120, 120, 128, 0.28);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-sheet-close,
+            .report-sheet-back {
+                color: #f2f2f7;
+                background: rgba(120, 120, 128, 0.32);
+            }
+        }
+
+        .report-sheet-body {
+            position: relative;
+            flex: 1 1 auto;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 0 14px 18px;
+            transition: height 0.3s cubic-bezier(0.22, 0.9, 0.3, 1);
+        }
+
+        /* Плавный переход между шагами: старый шаг уезжает, новый въезжает,
+           высота листа при этом мягко подстраивается. */
+        .report-step {
+            transition: transform 0.3s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.22s ease;
+            will-change: transform, opacity;
+        }
+
+        .report-step.step-enter-right {
+            transform: translateX(26px);
+            opacity: 0;
+        }
+
+        .report-step.step-enter-left {
+            transform: translateX(-26px);
+            opacity: 0;
+        }
+
+        .report-step.step-exit-left {
+            transform: translateX(-26px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .report-step.step-exit-right {
+            transform: translateX(26px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .report-option.is-chosen {
+            background: rgba(11, 132, 254, 0.14);
+        }
+
+        .report-sheet-subtitle {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: var(--telegram-hint, #8e8e93);
+            padding: 4px 14px 10px;
+        }
+
+        .report-option-list {
+            border-radius: 16px;
+            background: #ffffff;
+            overflow: hidden;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-option-list {
+                background: #2c2c2e;
+            }
+        }
+
+        .report-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            width: 100%;
+            border: none;
+            background: none;
+            padding: 15px 16px;
+            font-size: 16px;
+            font-family: inherit;
+            color: var(--telegram-text, #1c1c1e);
+            text-align: left;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.1s ease;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-option {
+                color: #f2f2f7;
+            }
+        }
+
+        .report-option:hover,
+        .report-option:active {
+            background: rgba(120, 120, 128, 0.14);
+        }
+
+        .report-option + .report-option {
+            box-shadow: inset 0 1px 0 rgba(120, 120, 128, 0.22);
+        }
+
+        .report-option-chevron {
+            font-size: 14px;
+            opacity: 0.35;
+            flex: 0 0 auto;
+        }
+
+        /* Шаг 2 — комментарий */
+        .report-comment-label {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: var(--telegram-hint, #8e8e93);
+            padding: 4px 14px 10px;
+        }
+
+        .report-comment-box {
+            border-radius: 16px;
+            background: #ffffff;
+            padding: 12px 14px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-comment-box {
+                background: #2c2c2e;
+            }
+        }
+
+        .report-comment-input {
+            width: 100%;
+            min-height: 108px;
+            border: none;
+            outline: none;
+            resize: none;
+            background: transparent;
+            font-family: inherit;
+            font-size: 16px;
+            line-height: 1.4;
+            color: var(--telegram-text, #1c1c1e);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-comment-input {
+                color: #f2f2f7;
+            }
+        }
+
+        .report-comment-input::placeholder {
+            color: var(--telegram-hint, #8e8e93);
+        }
+
+        .report-selected-reason {
+            font-size: 14px;
+            color: var(--telegram-hint, #8e8e93);
+            padding: 0 14px 12px;
+        }
+
+        .report-submit-btn {
+            display: block;
+            width: 100%;
+            margin-top: 16px;
+            border: none;
+            border-radius: 14px;
+            padding: 14px 12px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: inherit;
+            color: #fff;
+            background: #0B84FE;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 0.1s ease, opacity 0.12s ease, background 0.12s ease;
+        }
+
+        .report-submit-btn:active {
+            transform: scale(0.98);
+            background: #0a76e2;
+        }
+
+        /* ---------- Шаг 3: предупреждение о ложной жалобе ---------- */
+        .report-warn-box {
+            border-radius: 16px;
+            background: #ffffff;
+            padding: 18px 16px;
+            text-align: center;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-warn-box { background: #2c2c2e; }
+        }
+
+        .report-warn-icon {
+            width: 56px;
+            height: 56px;
+            margin: 0 auto 14px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 59, 48, 0.10);
+            color: #FF3B30;
+            font-size: 24px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-warn-icon { background: rgba(255, 69, 58, 0.14); color: #FF453A; }
+        }
+
+        /* Первые три слова — крупно, жирно, красным: их видно сразу. */
+        .report-warn-lead {
+            display: block;
+            font-size: 22px;
+            line-height: 1.15;
+            font-weight: 800;
+            letter-spacing: 0.4px;
+            color: #FF3B30;
+            margin-bottom: 8px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-warn-lead { color: #FF453A; }
+        }
+
+        .report-warn-text {
+            font-size: 15px;
+            line-height: 1.45;
+            color: var(--telegram-text, #1c1c1e);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-warn-text { color: #f2f2f7; }
+        }
+
+        .report-warn-text b { font-weight: 700; }
+
+        /* Две кнопки в одну строку */
+        .report-warn-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .report-warn-actions .report-submit-btn,
+        .report-warn-actions .report-warn-cancel {
+            margin-top: 0;
+            flex: 1 1 0;
+            min-width: 0;
+        }
+
+        .report-warn-cancel {
+            display: block;
+            border: none;
+            border-radius: 14px;
+            padding: 14px 12px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: inherit;
+            color: var(--telegram-text, #1c1c1e);
+            background: rgba(120, 120, 128, 0.16);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 0.1s ease, opacity 0.12s ease;
+        }
+
+        .report-warn-cancel:active { transform: scale(0.98); opacity: .75; }
+
+        @media (prefers-color-scheme: dark) {
+            .report-warn-cancel { color: #f2f2f7; background: rgba(120, 120, 128, 0.32); }
+        }
+
+        /* Кнопка «Отправить» с обратным отсчётом 3 с: пока идёт заливка —
+           нажатие не срабатывает, зато видно, сколько осталось ждать. */
+        .report-warn-send {
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+        }
+
+        .report-warn-send.is-locked {
+            background: rgba(120, 120, 128, 0.16);
+            color: var(--telegram-hint, #8e8e93);
+            cursor: default;
+        }
+
+        .report-warn-send.is-locked:active {
+            transform: none;
+            background: rgba(120, 120, 128, 0.16);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .report-warn-send.is-locked {
+                background: rgba(120, 120, 128, 0.32);
+                color: #8e8e93;
+            }
+            .report-warn-send.is-locked:active { background: rgba(120, 120, 128, 0.32); }
+        }
+
+        .report-warn-fill {
+            position: absolute;
+            inset: 0;
+            transform-origin: left center;
+            transform: scaleX(0);
+            background: #0B84FE;
+            opacity: .28;
+            z-index: 0;
+        }
+
+        .report-warn-send.is-counting .report-warn-fill {
+            animation: reportWarnFill 3s linear forwards;
+        }
+
+        @keyframes reportWarnFill {
+            from { transform: scaleX(0); }
+            to   { transform: scaleX(1); }
+        }
+
+        .report-warn-send-label { position: relative; z-index: 1; }
+
+        /* Тост жалобы. В chats.html для этого есть showSimpleToast/.copy-toast,
+           на странице контактов его нет — поэтому свой, самодостаточный. */
+        .report-toast {
+            position: fixed;
+            left: 50%;
+            bottom: 92px;
+            transform: translate(-50%, 12px);
+            z-index: 6400;
+            max-width: min(86vw, 420px);
+            padding: 11px 18px;
+            border-radius: 22px;
+            background: rgba(28, 28, 30, 0.92);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            backdrop-filter: blur(14px) saturate(160%);
+            color: #fff;
+            font-size: 14px;
+            font-family: inherit;
+            text-align: center;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .report-toast.show {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
+        /* Кнопка «ещё» неактивна, если пользователь не в друзьях */
+        .action-button.is-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            cursor: not-allowed;
+        }
+    </style>
+    <script>
+    (function () {
+        'use strict';
+
+        // Варианты жалобы — ровно в том порядке, который задан.
+        const REPORT_REASONS = [
+            'Оскорбления',
+            'Незаконные услуги и товары',
+            'Спам',
+            'Мошенничество',
+            'Домогательство',
+            'Порнографические материалы',
+            'Жестокое обращение',
+            'Другое'
+        ];
+
+        const REPORT_ENDPOINT = (typeof SERVER_URL !== 'undefined' && SERVER_URL)
+            ? SERVER_URL + '/report'
+            : 'https://vuntserverrr.site/report';
+
+        let moreMenuEl = null;
+        let reportSending = false;
+
+        /* Кто жалуется: берём из userData (сессия), с запасным вариантом из
+           sessionStorage/localStorage — на случай, если скрипт сработал раньше,
+           чем initializePage успела заполнить userData. */
+        function getReporterId() {
+            try {
+                if (typeof userData !== 'undefined' && userData && userData.platform_user_id) {
+                    return String(userData.platform_user_id);
+                }
+            } catch (e) {}
+            try {
+                const raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && parsed.platform_user_id) return String(parsed.platform_user_id);
+                }
+            } catch (e) {}
+            return '';
+        }
+
+        /* На кого жалуемся. В contacts.html нет открытого чата, поэтому
+           берём профиль, который сейчас открыт: window.__reportTargetUserId
+           (его выставляет открытие модалки) или currentViewedUser.
+           chat_id не отправляем — сервер сам найдёт личный чат этих двоих,
+           если он существует. Если чата нет, бот покажет жалобу без «отчёта». */
+        function getReportTarget() {
+            const target = { reported_user_id: '', reported_nickname: getContactName(), chat_id: '' };
+
+            if (window.__reportTargetUserId) {
+                target.reported_user_id = String(window.__reportTargetUserId);
+            }
+
+            try {
+                if (typeof currentViewedUser !== 'undefined' && currentViewedUser) {
+                    if (!target.reported_user_id && currentViewedUser.platform_user_id) {
+                        target.reported_user_id = String(currentViewedUser.platform_user_id);
+                    }
+                    if (currentViewedUser.nickname && target.reported_nickname === 'пользователя') {
+                        target.reported_nickname = currentViewedUser.nickname;
+                    }
+                }
+            } catch (e) {}
+
+            if (target.reported_nickname === 'пользователя') target.reported_nickname = '';
+            return target;
+        }
+
+        function reportToast(text) {
+            const old = document.querySelector('.report-toast');
+            if (old) old.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'report-toast';
+            toast.textContent = text;
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => toast.classList.add('show'));
+            });
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 260);
+            }, 1600);
+        }
+
+        /* Отправка жалобы на сервер -> сервер пересылает её боту жалоб в Telegram */
+        async function sendReport(reason, comment) {
+            const reporterId = getReporterId();
+            if (!reporterId) {
+                reportToast('Не удалось определить ваш аккаунт');
+                return false;
+            }
+
+            const target = getReportTarget();
+            const payload = {
+                platform_user_id: reporterId,
+                reported_user_id: target.reported_user_id,
+                reported_nickname: target.reported_nickname,
+                reason: reason,
+                comment: comment || '',
+                chat_id: target.chat_id
+            };
+
+            try {
+                const response = await fetch(REPORT_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json().catch(() => ({}));
+
+                if (response.ok && result.success) return true;
+
+                if (result.error === 'comment_required') {
+                    reportToast('Опишите проблему подробнее');
+                } else if (result.error === 'bad_reason') {
+                    reportToast('Неизвестная причина жалобы');
+                } else {
+                    reportToast('Не удалось отправить жалобу. Попробуйте позже');
+                }
+                return false;
+            } catch (e) {
+                reportToast('Нет связи с сервером. Попробуйте позже');
+                return false;
+            }
+        }
+
+        function getContactName() {
+            const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+            const el = document.getElementById(isDesktop
+                ? 'modal-profile-nickname-desktop'
+                : 'modal-profile-nickname-mobile');
+            const name = el && el.textContent ? el.textContent.trim() : '';
+            return name && name !== 'Не указано' ? name : 'пользователя';
+        }
+
+        /* ---------- Меню «ещё» ---------- */
+        function closeMoreMenu() {
+            if (!moreMenuEl) return;
+            const el = moreMenuEl;
+            moreMenuEl = null;
+            el.classList.remove('visible');
+            setTimeout(() => el.remove(), 160);
+            document.removeEventListener('pointerdown', onOutsidePointer, true);
+            document.removeEventListener('keydown', onMenuKeydown, true);
+            window.removeEventListener('scroll', closeMoreMenu, true);
+            window.removeEventListener('resize', closeMoreMenu);
+        }
+
+        function onOutsidePointer(e) {
+            if (moreMenuEl && !moreMenuEl.contains(e.target)) closeMoreMenu();
+        }
+
+        function onMenuKeydown(e) {
+            if (e.key === 'Escape') closeMoreMenu();
+        }
+
+        function openMoreMenu(anchor) {
+            closeMoreMenu();
+
+            const menu = document.createElement('div');
+            menu.className = 'profile-more-menu';
+            menu.innerHTML =
+                '<button type="button" class="profile-more-item destructive" data-action="report">' +
+                    '<span>Пожаловаться</span>' +
+                    '<span class="profile-more-item-icon"><i class="fa-solid fa-flag"></i></span>' +
+                '</button>';
+            document.body.appendChild(menu);
+            moreMenuEl = menu;
+
+            // Позиционируем под кнопкой «ещё», не вылезая за экран.
+            const rect = anchor.getBoundingClientRect();
+            const mw = menu.offsetWidth;
+            const mh = menu.offsetHeight;
+            let left = rect.left + rect.width / 2 - mw / 2;
+            left = Math.max(10, Math.min(left, window.innerWidth - mw - 10));
+            let top = rect.bottom + 8;
+            if (top + mh > window.innerHeight - 10) top = Math.max(10, rect.top - mh - 8);
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+
+            requestAnimationFrame(() => menu.classList.add('visible'));
+
+            menu.querySelector('[data-action="report"]').addEventListener('click', () => {
+                closeMoreMenu();
+                openReportConfirm(getContactName());
+            });
+
+            setTimeout(() => {
+                document.addEventListener('pointerdown', onOutsidePointer, true);
+                document.addEventListener('keydown', onMenuKeydown, true);
+                window.addEventListener('scroll', closeMoreMenu, true);
+                window.addEventListener('resize', closeMoreMenu);
+            }, 0);
+        }
+
+        /* ---------- Подтверждение «Пожаловаться?» ---------- */
+        function openReportConfirm(name) {
+            const overlay = document.createElement('div');
+            overlay.className = 'report-confirm-overlay';
+            overlay.innerHTML =
+                '<div class="report-confirm-card" role="dialog" aria-modal="true">' +
+                    '<div class="report-confirm-icon"><i class="fa-solid fa-flag"></i></div>' +
+                    '<div class="report-confirm-title">Пожаловаться</div>' +
+                    '<div class="report-confirm-text">Вы точно хотите пожаловаться на «' + escapeHtml(name) + '»?</div>' +
+                    '<button type="button" class="report-confirm-btn" data-answer="yes">Да</button>' +
+                    '<button type="button" class="report-confirm-btn report-confirm-cancel" data-answer="no">Нет</button>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+
+            function close(cb) {
+                overlay.classList.remove('visible');
+                setTimeout(() => {
+                    overlay.remove();
+                    if (cb) cb();
+                }, 200);
+            }
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) close();
+            });
+            overlay.querySelector('[data-answer="yes"]').addEventListener('click', () => {
+                close(() => openReportSheet(name));
+            });
+            overlay.querySelector('[data-answer="no"]').addEventListener('click', () => close());
+        }
+
+        /* ---------- Лист «Сообщить о нарушении» ---------- */
+        function openReportSheet(name) {
+            const overlay = document.createElement('div');
+            overlay.className = 'report-sheet-overlay';
+            overlay.innerHTML =
+                '<div class="report-sheet" role="dialog" aria-modal="true">' +
+                    '<div class="report-sheet-header">' +
+                        '<button type="button" class="report-sheet-close" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button>' +
+                        '<div class="report-sheet-title">Сообщить о нарушении</div>' +
+                    '</div>' +
+                    '<div class="report-sheet-body"></div>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+
+            const sheet = overlay.querySelector('.report-sheet');
+            const body = overlay.querySelector('.report-sheet-body');
+            const header = overlay.querySelector('.report-sheet-header');
+
+            function closeSheet() {
+                overlay.classList.remove('visible');
+                setTimeout(() => overlay.remove(), 240);
+                document.removeEventListener('keydown', onKey, true);
+            }
+
+            function onKey(e) {
+                if (e.key === 'Escape') closeSheet();
+            }
+            document.addEventListener('keydown', onKey, true);
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeSheet();
+            });
+            header.querySelector('.report-sheet-close').addEventListener('click', closeSheet);
+
+            const STEP_DURATION = 300;
+            let swapping = false;
+
+            /* Плавная замена шага: старый уезжает в сторону, новый въезжает
+               с противоположной, высота листа анимируется между ними. */
+            function swapStep(html, dir, onMount) {
+                const old = body.querySelector('.report-step');
+                const step = document.createElement('div');
+                step.className = 'report-step';
+                step.innerHTML = html;
+
+                if (!old) {
+                    body.appendChild(step);
+                    if (onMount) onMount(step);
+                    return;
+                }
+
+                if (swapping) return;
+                swapping = true;
+
+                const padBottom = 18;
+                const oldH = old.offsetHeight;
+
+                body.scrollTop = 0;
+                body.style.overflow = 'hidden';
+                body.style.height = (oldH + padBottom) + 'px';
+
+                // Старый шаг вынимаем из потока, чтобы новый не прыгал вниз
+                old.style.position = 'absolute';
+                old.style.top = '0';
+                old.style.left = '14px';
+                old.style.right = '14px';
+
+                step.classList.add(dir === 'back' ? 'step-enter-left' : 'step-enter-right');
+                body.appendChild(step);
+                if (onMount) onMount(step);
+
+                const newH = step.offsetHeight;
+
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        old.classList.add(dir === 'back' ? 'step-exit-right' : 'step-exit-left');
+                        step.classList.remove('step-enter-left', 'step-enter-right');
+                        body.style.height = (newH + padBottom) + 'px';
+                    });
+                });
+
+                setTimeout(() => {
+                    old.remove();
+                    body.style.height = '';
+                    body.style.overflow = '';
+                    swapping = false;
+                }, STEP_DURATION + 20);
+            }
+
+            /* Стрелка «назад» в шапке. Каждый шаг задаёт СВОЁ действие, поэтому
+               кнопку всегда пересоздаём: если переиспользовать старую, на ней
+               остаётся обработчик предыдущего шага (из-за этого назад с шага
+               комментария после возврата из предупреждения вёл не к причинам). */
+            function setBackAction(handler) {
+                const old = header.querySelector('.report-sheet-back');
+                if (old) old.remove();
+
+                if (!handler) {
+                    header.querySelector('.report-sheet-close').style.display = '';
+                    return;
+                }
+
+                header.querySelector('.report-sheet-close').style.display = 'none';
+                const back = document.createElement('button');
+                back.type = 'button';
+                back.className = 'report-sheet-back';
+                back.setAttribute('aria-label', 'Назад');
+                back.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+                back.addEventListener('click', () => {
+                    if (reportSending || swapping) return;
+                    handler();
+                });
+                header.appendChild(back);
+            }
+
+            /* Шаг 1 — список причин */
+            function renderReasons(dir) {
+                setBackAction(null);
+
+                const html =
+                    '<div class="report-sheet-subtitle">Что не так с пользователем?</div>' +
+                    '<div class="report-option-list">' +
+                        REPORT_REASONS.map((r, i) =>
+                            '<button type="button" class="report-option" data-index="' + i + '">' +
+                                '<span>' + escapeHtml(r) + '</span>' +
+                                '<span class="report-option-chevron"><i class="fa-solid fa-chevron-right"></i></span>' +
+                            '</button>'
+                        ).join('') +
+                    '</div>';
+
+                swapStep(html, dir || 'back', (step) => {
+                    step.querySelectorAll('.report-option').forEach((btn) => {
+                        btn.addEventListener('click', () => {
+                            if (swapping) return;
+                            btn.classList.add('is-chosen');
+                            setTimeout(() => {
+                                renderComment(REPORT_REASONS[Number(btn.dataset.index)]);
+                            }, 90);
+                        });
+                    });
+                });
+            }
+
+            /* Шаг 2 — комментарий */
+            function renderComment(reason, prefill) {
+                const isOther = reason === 'Другое';
+
+                setBackAction(() => renderReasons('back'));
+
+                const html =
+                    '<div class="report-comment-label">' +
+                        (isOther ? 'Опишите проблему' : 'Хотите что-то добавить? (необязательно)') +
+                    '</div>' +
+                    (isOther ? '' : '<div class="report-selected-reason">Причина: ' + escapeHtml(reason) + '</div>') +
+                    '<div class="report-comment-box">' +
+                        '<textarea class="report-comment-input" rows="5" placeholder="' +
+                        (isOther ? 'Расскажите, что случилось' : 'Дополнительная информация') +
+                        '"></textarea>' +
+                    '</div>' +
+                    '<button type="button" class="report-submit-btn">Отправить</button>';
+
+                swapStep(html, prefill != null ? 'back' : 'forward', (step) => {
+                    const submitBtn = step.querySelector('.report-submit-btn');
+                    const input = step.querySelector('.report-comment-input');
+                    // Возврат из предупреждения — не теряем уже написанный текст.
+                    if (input && prefill) input.value = prefill;
+
+                    submitBtn.addEventListener('click', () => {
+                        if (reportSending || swapping) return;
+
+                        const comment = input ? input.value.trim() : '';
+                        if (isOther && comment.length < 3) {
+                            reportToast('Опишите, что случилось');
+                            if (input) input.focus();
+                            return;
+                        }
+
+                        // Жалоба НЕ уходит сразу — сначала экран предупреждения.
+                        if (input) input.blur();
+                        renderWarning(reason, comment);
+                    });
+                    if (window.matchMedia('(min-width: 768px)').matches) {
+                        setTimeout(() => {
+                            const input = step.querySelector('.report-comment-input');
+                            if (input) input.focus();
+                        }, STEP_DURATION);
+                    }
+                });
+            }
+
+            /* Шаг 3 — предупреждение об ответственности за ложную жалобу.
+               Кнопка «Отправить» здесь заблокирована 3 секунды: по ней идёт
+               заливка-отсчёт, чтобы текст успели хотя бы пробежать глазами. */
+            function renderWarning(reason, comment) {
+                setBackAction(() => renderComment(reason, comment || ''));
+
+                const html =
+                    '<div class="report-warn-box">' +
+                        '<div class="report-warn-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>' +
+                        '<div class="report-warn-text">' +
+                            '<span class="report-warn-lead">ПРИ ЛОЖНОЙ ЖАЛОБЕ</span>' +
+                            'ваш аккаунт получит бан на какое-то время, без доступа к страницам. ' +
+                            'Если ложных жалоб от вас будет больше, ваш аккаунт будет ' +
+                            '<b>заблокирован навсегда</b> — без возможности восстановления. ' +
+                            'Жалоба и переписка уходят на проверку модератору, поэтому ' +
+                            'отправляйте её, только если нарушение действительно было.' +
+                        '</div>' +
+                        '<div class="report-warn-actions">' +
+                            '<button type="button" class="report-warn-cancel">Отменить</button>' +
+                            '<button type="button" class="report-submit-btn report-warn-send is-locked">' +
+                                '<span class="report-warn-fill"></span>' +
+                                '<span class="report-warn-send-label">Отправить (3)</span>' +
+                            '</button>' +
+                        '</div>' +
+                    '</div>';
+
+                swapStep(html, 'forward', (step) => {
+                    const cancelBtn = step.querySelector('.report-warn-cancel');
+                    const sendBtn   = step.querySelector('.report-warn-send');
+                    const label     = step.querySelector('.report-warn-send-label');
+
+                    let unlocked = false;
+                    let left = 3;
+                    let countdown = null;
+
+                    function stopCountdown() {
+                        if (countdown) { clearInterval(countdown); countdown = null; }
+                    }
+
+                    // Отсчёт стартуем следующим кадром — иначе заливка съела бы
+                    // часть времени, пока идёт анимация смены шага.
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            sendBtn.classList.add('is-counting');
+                            countdown = setInterval(() => {
+                                left -= 1;
+                                if (left > 0) {
+                                    label.textContent = 'Отправить (' + left + ')';
+                                    return;
+                                }
+                                stopCountdown();
+                                unlocked = true;
+                                sendBtn.classList.remove('is-locked', 'is-counting');
+                                label.textContent = 'Отправить';
+                            }, 1000);
+                        });
+                    });
+
+                    // Уходим с шага (назад/закрытие) — гасим таймер отсчёта.
+                    const stopOnLeave = () => stopCountdown();
+                    const backBtn = header.querySelector('.report-sheet-back');
+                    if (backBtn) backBtn.addEventListener('click', stopOnLeave);
+
+                    cancelBtn.addEventListener('click', () => {
+                        if (reportSending) return;
+                        stopCountdown();
+                        closeSheet();
+                    });
+
+                    sendBtn.addEventListener('click', async () => {
+                        if (!unlocked || reportSending) return;
+
+                        reportSending = true;
+                        sendBtn.disabled = true;
+                        cancelBtn.disabled = true;
+                        sendBtn.style.opacity = '0.6';
+                        label.textContent = 'Отправка...';
+
+                        const ok = await sendReport(reason, comment);
+
+                        reportSending = false;
+                        if (ok) {
+                            closeSheet();
+                            reportToast('Жалоба отправлена');
+                        } else {
+                            sendBtn.disabled = false;
+                            cancelBtn.disabled = false;
+                            sendBtn.style.opacity = '';
+                            label.textContent = 'Отправить';
+                        }
+                    });
+                });
+            }
+
+            renderReasons();
+            void sheet.offsetHeight;
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, (c) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[c]);
+        }
+
+        /* ---------- Привязка к кнопке «ещё» ---------- */
+        function bindMoreButtons() {
+            ['moreButtonDesktop', 'moreButtonMobile'].forEach((id) => {
+                const btn = document.getElementById(id);
+                if (!btn || btn.dataset.reportBound === '1') return;
+                btn.dataset.reportBound = '1';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Меню «ещё» доступно только для друзей: updateProfileModalUI
+                    // ставит data-report-allowed="1", когда дружба подтверждена.
+                    if (btn.dataset.reportAllowed !== '1') {
+                        reportToast('Доступно только для друзей');
+                        return;
+                    }
+                    if (moreMenuEl) {
+                        closeMoreMenu();
+                    } else {
+                        openMoreMenu(btn);
+                    }
+                });
+            });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bindMoreButtons);
+        } else {
+            bindMoreButtons();
+        }
+        window.addEventListener('pageshow', bindMoreButtons);
+    })();
+    </script>
 
 </body>
 </html>
