@@ -5258,12 +5258,25 @@
     --hero-bleed: 20px;         /* padding у .profile-modal на десктопе */
     --hero-avatar-top: 32px;    /* верхний padding шапки */
     --hero-avatar-size: 100px;
+
+    /* ---- РАЗМЕР РАСКРЫТОГО ФОТО ----
+       --hero-photo-ratio : высота = ширина * ratio (1 = квадрат,
+                            1.08 — чуть выше квадрата, как на скриншоте)
+       --hero-photo-maxvh : предел по высоте экрана (доля 0..1)
+       --hero-blur-height : высота размытой полосы внизу фото
+       --hero-blur-amount : сила размытия                                */
+    --hero-photo-ratio: 1.08;
+    --hero-photo-maxvh: 0.62;
+    --hero-blur-height: 46%;
+    --hero-blur-amount: 22px;
 }
 @media (max-width: 767px) {
     .profile-modal-content {
         --hero-dur: .30s;
         --hero-bleed: 0px;
         --hero-avatar-top: 64px;
+        --hero-photo-ratio: 1.08;
+        --hero-photo-maxvh: 0.62;
     }
 }
 
@@ -5388,6 +5401,33 @@
     margin: 0;
     border-radius: 0;
     cursor: zoom-in;
+}
+
+/* РАЗМЫТИЕ нижней части фото — полоса начинается чуть выше имени/кнопок
+   и плавно сходит на нет кверху (mask). Как в Telegram iOS. */
+.hero-expanded .profile-header::before {
+    display: block !important;
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    bottom: calc(var(--hero-photo-overhang) * -1);
+    height: calc(var(--hero-blur-height) + var(--hero-photo-overhang));
+    -webkit-backdrop-filter: blur(var(--hero-blur-amount)) saturate(115%);
+    backdrop-filter: blur(var(--hero-blur-amount)) saturate(115%);
+    -webkit-mask-image: linear-gradient(to top,
+        rgba(0,0,0,1) 0%,
+        rgba(0,0,0,1) 42%,
+        rgba(0,0,0,.72) 62%,
+        rgba(0,0,0,.34) 80%,
+        rgba(0,0,0,0) 100%);
+    mask-image: linear-gradient(to top,
+        rgba(0,0,0,1) 0%,
+        rgba(0,0,0,1) 42%,
+        rgba(0,0,0,.72) 62%,
+        rgba(0,0,0,.34) 80%,
+        rgba(0,0,0,0) 100%);
+    z-index: 2;
+    pointer-events: none;
 }
 
 /* затемнение снизу, чтобы имя и кнопки читались на любом фото */
@@ -15678,10 +15718,18 @@ function stopProfileDataPolling() {
         return parseFloat(v) || 0;
     }
 
+    function cssNum(content, name, fallback) {
+        const v = content ? getComputedStyle(content).getPropertyValue(name).trim() : '';
+        const n = parseFloat(v);
+        return Number.isFinite(n) && n > 0 ? n : fallback;
+    }
+
     function targetHeight(header, content) {
-        // квадрат по ширине шапки с учётом выхода за padding модалки
+        // высота = ширина * --hero-photo-ratio, но не выше --hero-photo-maxvh
         const w = header.offsetWidth + bleed(content) * 2;
-        return Math.round(Math.min(w, window.innerHeight * 0.78));
+        const ratio = cssNum(content, '--hero-photo-ratio', 1);
+        const maxVh = cssNum(content, '--hero-photo-maxvh', 0.78);
+        return Math.round(Math.min(w * ratio, window.innerHeight * maxVh));
     }
 
     const ProfileHero = {
