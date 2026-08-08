@@ -4420,9 +4420,6 @@ function openProfileModal(userId) {
 
     // На кого будет жалоба — этот же id читает блок жалоб внизу страницы.
     window.__reportTargetUserId = userId;
-    // Кнопку «ещё» держим закрытой, пока не подтвердится дружба
-    // (updateProfileModalUI откроет её только при friendship = accepted).
-    setProfileMoreAvailability(false);
 
     // Шапка всегда открывается в свёрнутом виде
     if (window.ProfileHero) window.ProfileHero.resetAll();
@@ -4457,7 +4454,6 @@ function openProfileModal(userId) {
 // В функции closeProfileModal для мобильных устройств:
 function closeProfileModal() {
     window.__reportTargetUserId = null;
-    setProfileMoreAvailability(false);
     if (window.ProfileHero) window.ProfileHero.resetAll();
     if (window.hideProfileMediaSections) window.hideProfileMediaSections();
     stopProfileStatusPolling();
@@ -4959,28 +4955,24 @@ async function updateProfileModalUI(user) {
         activeElements.chatButton.style.cursor = 'not-allowed';  // Для десктопа
     }
 
-    // Три точки («ещё» → Пожаловаться) — только для друзей.
-    setProfileMoreAvailability(friendshipStatus === 'accepted');
+    // Кнопка «ещё» (три точки) — ровно та же логика, что у кнопки «Чат»:
+    // доступна всем, кроме тех, кто не у меня в контактах.
+    if (activeElements.moreButton) {
+        if (friendshipStatus === 'accepted') {
+            activeElements.moreButton.dataset.reportAllowed = '1';
+            activeElements.moreButton.disabled = false;
+            activeElements.moreButton.style.opacity = '1';
+            activeElements.moreButton.style.pointerEvents = 'auto';
+            activeElements.moreButton.style.cursor = 'pointer';
+        } else {
+            activeElements.moreButton.dataset.reportAllowed = '0';
+            activeElements.moreButton.disabled = true;
+            activeElements.moreButton.style.opacity = '0.5';
+            activeElements.moreButton.style.pointerEvents = 'none';
+            activeElements.moreButton.style.cursor = 'not-allowed';
+        }
+    }
 }
-
-/* Кнопка «ещё» (три точки) в профиле контакта. У не-друзей она серая и
-   не нажимается: жаловаться и вообще открывать это меню можно только на
-   человека, который у меня в друзьях. Флаг data-report-allowed читает
-   обработчик клика в блоке жалоб — так меню не откроется даже если клик
-   каким-то образом прошёл. */
-function setProfileMoreAvailability(allowed) {
-    ['moreButtonDesktop', 'moreButtonMobile'].forEach((id) => {
-        const btn = document.getElementById(id);
-        if (!btn) return;
-        btn.dataset.reportAllowed = allowed ? '1' : '0';
-        btn.classList.toggle('is-disabled', !allowed);
-        btn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
-        btn.style.opacity = allowed ? '' : '0.5';
-        btn.style.pointerEvents = allowed ? '' : 'none';
-        btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
-    });
-}
-window.setProfileMoreAvailability = setProfileMoreAvailability;
 
 
   
@@ -7798,12 +7790,6 @@ function setupSearchHandlers() {
             transform: translate(-50%, 0);
         }
 
-        /* Кнопка «ещё» неактивна, если пользователь не в друзьях */
-        .action-button.is-disabled {
-            opacity: 0.5;
-            pointer-events: none;
-            cursor: not-allowed;
-        }
     </style>
     <script>
     (function () {
@@ -8340,12 +8326,9 @@ function setupSearchHandlers() {
                 btn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    // Меню «ещё» доступно только для друзей: updateProfileModalUI
-                    // ставит data-report-allowed="1", когда дружба подтверждена.
-                    if (btn.dataset.reportAllowed !== '1') {
-                        reportToast('Доступно только для друзей');
-                        return;
-                    }
+                    // Страховка: у не-контактов updateProfileModalUI ставит
+                    // data-report-allowed="0" — меню не открываем.
+                    if (btn.dataset.reportAllowed === '0') return;
                     if (moreMenuEl) {
                         closeMoreMenu();
                     } else {
