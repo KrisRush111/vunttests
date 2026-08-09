@@ -4959,9 +4959,8 @@ function updateProfileUI() {
 
    
         async function openAvatarModal(targetAvatarElement) {
-            if (!userData.has_avatar) {
-               
-                avatarInput.click();
+            // Без фотографии увеличивать нечего — модалку не открываем вообще
+            if (!userData.has_avatar && !userData.has_avatar_photo) {
                 return;
             }
 
@@ -6003,6 +6002,24 @@ window.addEventListener('DOMContentLoaded', () => {
        Первое нажатие раскрываем сами и НЕ пускаем событие дальше, поэтому
        старый обработчик (полноэкранный просмотрщик) не срабатывает.
        Второе нажатие пропускаем как есть — откроется фото. */
+    /* ---- реально ли на КОНКРЕТНОЙ аватарке есть картинка ----
+       Проверяем и данные пользователя, и саму отрисовку элемента: если фона-
+       картинки нет и нет вложенного <img>, значит там только буква на цветном
+       фоне — такую аватарку раскрывать нельзя. */
+    function hasRealPhoto(av) {
+        if (!av) return false;
+        const img = av.querySelector('img');
+        if (img && img.getAttribute('src')) return true;
+        let bg = '';
+        try { bg = getComputedStyle(av).backgroundImage || ''; } catch (e) {}
+        const hasBgPhoto = !!bg && bg !== 'none' &&
+            (bg.indexOf('url(') !== -1) &&
+            bg.indexOf('data:image/svg') === -1;
+        if (!hasBgPhoto) return false;
+        // если данные пользователя уже загружены — доверяем и им
+        return hasPhoto();
+    }
+
     function openViewer(av) {
         if (typeof window.openAvatarModal === 'function') window.openAvatarModal(av);
     }
@@ -6020,8 +6037,12 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const header = av.closest('.vg-hero-header');
 
-        // Нет фото / десктоп — прежнее поведение (выбор файла либо просмотрщик)
-        if (!ProfileHero.allowed() || !hasPhoto() || !header) {
+        // На аватарке нет фотографии (только буква на цветном фоне) —
+        // раскрывать и увеличивать нечего: клик просто игнорируем.
+        if (!hasRealPhoto(av)) return;
+
+        // Десктоп — прежнее поведение (полноэкранный просмотрщик)
+        if (!ProfileHero.allowed() || !header) {
             openViewer(av);
             return;
         }
@@ -6072,6 +6093,101 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     window.ProfileHero = ProfileHero;
+})();
+</script>
+
+<!-- ==========================================================================
+     ПРИВЕДЕНИЕ ШАПКИ ПРОФИЛЯ К chats.html
+     1) Ник — тот же шрифт и жирность, что в chats.html (.profile-nickname:
+        22px / 600, без letter-spacing; в раскрытом фото — 25px / 600).
+     2) Раскрытая аватарка — того же размера, что в chats.html: фото свисает
+        ниже шапки на --hero-photo-overhang (как там), а контент под шапкой
+        плавно приспускается на столько же.
+     3) Аватарка без фотографии не раскрывается (логика в скрипте ниже).
+     ========================================================================== -->
+<style id="vg-hero-match-chats">
+
+/* ---------- 1. НИК: как .profile-nickname в chats.html ---------- */
+.vg-hero-nickname,
+.profile-nickname.vg-hero-nickname,
+#profile-nickname,
+#desktop-profile-nickname,
+#sidebar-profile-nickname,
+#mobile-sidebar-profile-nickname {
+    font-size: 22px !important;
+    font-weight: 600 !important;
+    letter-spacing: normal !important;
+    margin: 0 0 4px !important;
+}
+.vg-hero.hero-expanded .vg-hero-nickname {
+    font-size: 25px !important;
+    font-weight: 600 !important;
+    letter-spacing: normal !important;
+}
+
+/* ---------- 2. РАЗМЕР РАСКРЫТОГО ФОТО: как в chats.html ---------- */
+.vg-hero {
+    /* насколько фото свисает ниже шапки — значения из chats.html */
+    --hero-photo-overhang: 90px;
+}
+@media (max-width: 767px) {
+    .vg-hero { --hero-photo-overhang: 94px; }
+}
+
+/* даём фото выйти за нижний край шапки и лежать поверх контента ниже */
+.vg-hero.hero-expanded .vg-hero-header {
+    overflow: visible !important;
+    z-index: 4;
+}
+.vg-hero.hero-expanded .vg-hero-avatar {
+    height: calc(100% + var(--hero-photo-overhang)) !important;
+}
+/* затемнение тянем до реального низа фото */
+.vg-hero.hero-expanded .vg-hero-header::after {
+    bottom: calc(var(--hero-photo-overhang) * -1) !important;
+    height: calc(74% + var(--hero-photo-overhang)) !important;
+}
+/* ник и ID — в левый нижний угол именно фото, а не шапки */
+.vg-hero.hero-expanded .vg-hero-info {
+    bottom: calc(var(--hero-photo-overhang) * -1 + 14px) !important;
+}
+
+/* контент под шапкой приспускается ровно на величину свеса */
+.vg-hero.hero-expanded ~ .vg-settings-groups {
+    padding-top: calc(var(--hero-photo-overhang) + 20px) !important;
+}
+.vg-hero.hero-expanded > .vg-hero-header + * {
+    margin-top: calc(var(--hero-photo-overhang) + 4px) !important;
+}
+.vg-hero > .vg-hero-header + * {
+    transition: margin-top var(--hero-dur, .30s) cubic-bezier(.22,.61,.24,1);
+}
+.vg-hero.hero-noanim > .vg-hero-header + * { transition: none !important; }
+
+/* ---------- 3. Аватарка без фото — не кликабельна ---------- */
+.vg-hero-avatar.vg-no-photo { cursor: default !important; }
+</style>
+
+<script id="vg-hero-nophoto-guard">
+/* Помечаем аватарки без фотографии, чтобы у них не было курсора-указателя
+   и они точно не раскрывались (сам клик гасится в обработчике выше). */
+(function () {
+    function mark() {
+        document.querySelectorAll('.vg-hero-avatar').forEach(av => {
+            let bg = '';
+            try { bg = getComputedStyle(av).backgroundImage || ''; } catch (e) {}
+            const img = av.querySelector('img');
+            const has = (img && img.getAttribute('src')) ||
+                (bg && bg !== 'none' && bg.indexOf('url(') !== -1 &&
+                 bg.indexOf('data:image/svg') === -1);
+            av.classList.toggle('vg-no-photo', !has);
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mark);
+    } else { mark(); }
+    window.addEventListener('load', mark);
+    setInterval(mark, 1500);
 })();
 </script>
 
