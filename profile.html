@@ -812,19 +812,14 @@
             transition: background-color 0.25s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* Красный бейдж непрочитанных на иконке "Чаты" в футере */
+        /* Красный бейдж непрочитанных на иконке "Чаты" в футере.
+           position: fixed + максимальный z-index: бейдж больше не является
+           частью слоя .bottom-nav (backdrop-filter + border-radius), который
+           обрезал его правый верхний угол. Координаты ставит JS от иконки. */
         .nav-badge {
-            position: absolute;
+            position: fixed;
             top: 0;
-            left: 50%;
-            /* translate3d вместо translateX: бейдж получает собственный
-               композитный слой и больше не растрируется внутри слоя
-               .bottom-nav с backdrop-filter — в Safari именно из-за этого
-               у круга «срезался» правый верхний край */
-            transform: translate3d(6px, 0, 0);
-            will-change: transform;
-            -webkit-backface-visibility: hidden;
-            backface-visibility: hidden;
+            left: 0;
             display: none;
             align-items: center;
             justify-content: center;
@@ -842,7 +837,7 @@
             letter-spacing: -0.2px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             pointer-events: none;
-            z-index: 2;
+            z-index: 2147483000;
         }
 
         .nav-badge.visible {
@@ -850,9 +845,10 @@
             animation: navBadgePop 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
+
         @keyframes navBadgePop {
-            from { transform: translate3d(6px, 0, 0) scale(0.5); opacity: 0; }
-            to   { transform: translate3d(6px, 0, 0) scale(1);   opacity: 1; }
+            from { transform: scale(0.5); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
         }
 
 
@@ -6600,6 +6596,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     el.textContent = '';
                 }
             }
+            positionBadges();
             try { localStorage.setItem(BADGE_CACHE_KEY, String(count)); } catch (e) {}
             try {
                 if (navigator.setAppBadge) {
@@ -6607,6 +6604,31 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (e) {}
         }
+
+        // Бейдж выведен из футера (position: fixed), поэтому его координаты
+        // считаем от иконки "Чаты" — так его не может обрезать ни один предок.
+        function positionBadges() {
+            var nodes = document.querySelectorAll('[data-nav-badge="chats"]');
+            for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                if (!el.classList.contains('visible')) continue;
+                var wrap = el.parentElement;      // .nav-icon-wrap
+                if (!wrap) continue;
+                var r = wrap.getBoundingClientRect();
+                // футер скрыт (открыта модалка) — прячем бейдж, но не сбрасываем счётчик
+                if (!r.width && !r.height) { el.style.visibility = 'hidden'; continue; }
+                el.style.visibility = 'visible';
+                el.style.left = (r.left + r.width / 2 + 6) + 'px';
+                el.style.top  = r.top + 'px';
+            }
+        }
+        window.addEventListener('resize', positionBadges);
+        window.addEventListener('orientationchange', positionBadges);
+        window.addEventListener('scroll', positionBadges, true);
+        if (window.ResizeObserver) {
+            try { new ResizeObserver(positionBadges).observe(document.documentElement); } catch (e) {}
+        }
+        setInterval(positionBadges, 500);
 
         function refresh() {
             var uid = badgeUserId();
