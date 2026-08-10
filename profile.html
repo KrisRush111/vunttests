@@ -4603,6 +4603,29 @@ window.addEventListener("beforeunload", () => {
 
  
    
+     // Файл -> data:URL. Нужен, чтобы (а) показать выбранное фото без
+     // повторной загрузки с сервера и (б) сразу положить его в AvatarCache.
+     function fileToDataURL(file) {
+         return new Promise((resolve, reject) => {
+             const reader = new FileReader();
+             reader.onload = () => resolve(reader.result);
+             reader.onerror = reject;
+             reader.readAsDataURL(file);
+         });
+     }
+
+     // Хэш-версия аватара с сервера. AvatarCache хранит копию вместе с этой
+     // версией и сверяет её на следующем заходе — без неё свежесохранённая
+     // копия считалась бы "без версии" и перекачивалась заново.
+     async function fetchAvatarVersion(uid) {
+         try {
+             const r = await fetch(`${SERVER_URL}/avatar_version/${uid}`);
+             if (!r.ok) return null;
+             const d = await r.json();
+             return d && d.version ? d.version : null;
+         } catch (e) { return null; }
+     }
+
      async function handleAvatarUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -4662,24 +4685,71 @@ window.addEventListener("beforeunload", () => {
 
         // Обновляем данные пользователя
         userData.has_avatar = true;
+        // has_avatar_photo раньше не выставлялся здесь никогда, а profileFingerprint()
+        // и hasPhoto() читают именно его — из-за этого сигнатура профиля оставалась
+        // "без фото" и вызывала лишнюю перерисовку сразу после загрузки.
+        userData.has_avatar_photo = true;
+        userData.avatar_url = data.avatar_url || userData.avatar_url;
         userData.avatar_background = data.avatar_background || userData.avatar_background;
         // Увеличиваем версию аватара — это обновит ?v= во всех будущих загрузках
         // и не даст браузеру показать старую картинку из кэша
         userData.avatar_version = (userData.avatar_version || 0) + 1;
         sessionStorage.setItem('userData', JSON.stringify(userData));
 
-        // Освобождаем локальный URL и используем серверный (с forceReload=true — обновляем принудительно)
-        const freshAvatarUrl = `${data.avatar_url}?t=${Date.now()}`;
-        avatarElements.forEach(element => {
-            element.style.backgroundImage = `url(${freshAvatarUrl})`;
-        });
-        
-        URL.revokeObjectURL(localImageUrl);
+        // ГЛАВНАЯ ПРИЧИНА "СБРОСА": персистентный снимок own_profile:<id>
+        // записывался ТОЛЬКО внутри fetchUserData(), поэтому в IndexedDB
+        // оставался старый объект с has_avatar:false. loadProfileData() при
+        // следующем рендере делает { ...userData, ...persisted } — и устаревший
+        // снимок перетирал свежий, аватар откатывался в букву до ответа сервера.
+        // Пишем актуальный снимок сразу же, во все хранилища.
+        try {
+            setCacheItem(ownProfileCacheKey(userData.platform_user_id), userData, OWN_PROFILE_TTL);
+        } catch (e) {}
+        try {
+            if (localStorage.getItem('rememberedUser')) {
+                localStorage.setItem('rememberedUser', JSON.stringify(userData));
+            }
+        } catch (e) {}
 
-        // Локальная копия в IndexedDB устарела (аватар только что сменился) —
-        // удаляем её, чтобы на следующем заходе (или в другой вкладке/устройстве)
-        // AvatarCache скачал и сохранил уже новую картинку, а не старую
-        AvatarCache.removeLocal(userData.platform_user_id);
+        // Показываем выбранный файл как data:URL и кладём его же в AvatarCache.
+        // Раньше здесь ставился `${data.avatar_url}?t=${Date.now()}` и тут же
+        // вызывался revokeObjectURL(): ?t= намеренно ломает CDN-кэш, картинка
+        // качалась с Cloudinary заново, а blob был уже отозван — отсюда провал
+        // изображения на время загрузки. Плюс вместо сохранения новой копии
+        // вызывался removeLocal(), и early-boot <style> в <head> при следующем
+        // заходе не находил фото в localStorage и снова рисовал букву.
+        try {
+            const dataUrl = await fileToDataURL(file);
+            const version = data.avatar_version_hash || await fetchAvatarVersion(userData.platform_user_id);
+            // Профиль — самое крупное место отрисовки, берём соответствующий bucket,
+            // чтобы копия не оказалась мелкой и не перекачивалась ради резкости.
+            const bucket = AvatarCache.bucketFor(360);
+
+            avatarElements.forEach(element => {
+                element.style.backgroundImage = `url(${dataUrl})`;
+            });
+
+            if (version && version !== 'none') {
+                await AvatarCache.saveLocal(userData.platform_user_id, version, dataUrl, bucket);
+            } else {
+                AvatarCache.saveLocalSync(userData.platform_user_id, null, dataUrl, bucket);
+            }
+            URL.revokeObjectURL(localImageUrl);
+        } catch (e) {
+            // Не смогли прочитать файл/закэшировать — подменяем на серверный URL,
+            // но blob отзываем только ПОСЛЕ того, как картинка реально загрузилась.
+            const freshAvatarUrl = `${data.avatar_url}?t=${Date.now()}`;
+            const preload = new Image();
+            preload.onload = () => {
+                avatarElements.forEach(element => {
+                    element.style.backgroundImage = `url(${freshAvatarUrl})`;
+                });
+                URL.revokeObjectURL(localImageUrl);
+            };
+            preload.onerror = () => URL.revokeObjectURL(localImageUrl);
+            preload.src = freshAvatarUrl;
+            AvatarCache.removeLocal(userData.platform_user_id);
+        }
 
         showMessage('Аватар успешно загружен!', 'success');
 
@@ -4731,11 +4801,23 @@ window.addEventListener("beforeunload", () => {
                 }
                 
                 userData.has_avatar = false;
+                userData.has_avatar_photo = false;
+                userData.avatar_url = null;
                 userData.avatar_background = data.avatar_background || userData.avatar_background;
                 // Увеличиваем версию и здесь — если пользователь загрузит новый аватар,
                 // URL снова будет отличаться от закэшированного старого
                 userData.avatar_version = (userData.avatar_version || 0) + 1;
                 sessionStorage.setItem('userData', JSON.stringify(userData));
+                // Симметрично загрузке: обновляем персистентный снимок, иначе
+                // старый (уже с фото) вернул бы аватар назад при следующем рендере.
+                try {
+                    setCacheItem(ownProfileCacheKey(userData.platform_user_id), userData, OWN_PROFILE_TTL);
+                } catch (e) {}
+                try {
+                    if (localStorage.getItem('rememberedUser')) {
+                        localStorage.setItem('rememberedUser', JSON.stringify(userData));
+                    }
+                } catch (e) {}
                 
                 const firstLetter = userData.nickname?.charAt(0).toUpperCase() || '?';
                 
