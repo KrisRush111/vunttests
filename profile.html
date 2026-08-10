@@ -4729,6 +4729,10 @@ window.addEventListener("beforeunload", () => {
                 element.style.backgroundImage = `url(${dataUrl})`;
             });
 
+            // Модалка увеличенного фото тоже должна сразу знать новую картинку,
+            // иначе до первой переоткрытия там оставался предыдущий src.
+            if (avatarModalImage) avatarModalImage.src = dataUrl;
+
             if (version && version !== 'none') {
                 await AvatarCache.saveLocal(userData.platform_user_id, version, dataUrl, bucket);
             } else {
@@ -5144,8 +5148,40 @@ function updateProfileUI() {
                 }
             }
 
-            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}`;
-            avatarModalImage.src = avatarUrl;
+            // ПРИЧИНА "СТАРОГО ФОТО ПРИ УВЕЛИЧЕНИИ": раньше здесь безусловно
+            // ставился `${SERVER_URL}/avatar/<id>` без версии. Этот URL уже лежал
+            // в HTTP-кэше браузера/CDN со времён предыдущего аватара, поэтому он
+            // мгновенно перетирал свежую копию из AvatarCache — в модалке
+            // показывалась прошлая фотография, хотя в шапке была новая.
+            // Теперь: (1) URL версионируем, (2) подменяем src только ПОСЛЕ того,
+            // как новая картинка реально загрузилась.
+            const openToken = (avatarModalImage.dataset.openToken = String(Date.now()) + Math.random());
+            const hadCached = !!avatarModalImage.getAttribute('src');
+
+            const version = userData.avatar_version_hash
+                || (await fetchAvatarVersion(userData.platform_user_id))
+                || userData.avatar_version
+                || null;
+
+            // Модалку могли закрыть/переоткрыть, пока шёл запрос версии
+            if (avatarModalImage.dataset.openToken !== openToken) return;
+
+            const bust = (version && version !== 'none') ? `v=${encodeURIComponent(version)}` : `t=${Date.now()}`;
+            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}?${bust}`;
+
+            const preload = new Image();
+            preload.onload = () => {
+                if (avatarModalImage.dataset.openToken !== openToken) return;
+                avatarModalImage.src = avatarUrl;
+            };
+            preload.onerror = () => {
+                // Сеть/сервер не отдали фото — оставляем кэшированное;
+                // если показывать было нечего, пробуем URL напрямую.
+                if (!hadCached && avatarModalImage.dataset.openToken === openToken) {
+                    avatarModalImage.src = avatarUrl;
+                }
+            };
+            preload.src = avatarUrl;
         }
 
         function closeAvatarModal() {
