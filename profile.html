@@ -15,7 +15,7 @@
 
         userId берём из localStorage.vg_last_user_id — этот ключ пишется в
         checkAuthorization()/fetchUserData() и, в отличие от sessionStorage,
-        НЕ очищается браузером при закрытии вкладки/окна. Именно поэтому   
+        НЕ очищается браузером при закрытии вкладки/окна. Именно поэтому
         раньше при полном закрытии и повторном открытии сайта фон успевал
         мелькнуть: sessionStorage к этому моменту уже пуст, а старую
         подстраховку через localStorage.rememberedUser браузер иногда не
@@ -4436,6 +4436,7 @@ window.addEventListener("beforeunload", () => {
             localStorage.removeItem('vg_last_user_id');
             if (idBeingLoggedOut) {
                 AvatarCache.removeLocal(idBeingLoggedOut);
+                try { localStorage.removeItem('vg_avatar_full_' + String(idBeingLoggedOut)); } catch (e) {}
             }
             
             // Перенаправляем на страницу входа
@@ -4730,8 +4731,10 @@ window.addEventListener("beforeunload", () => {
             });
 
             // Модалка увеличенного фото тоже должна сразу знать новую картинку,
-            // иначе до первой переоткрытия там оставался предыдущий src.
+            // иначе до переоткрытия там оставался предыдущий src.
             if (avatarModalImage) avatarModalImage.src = dataUrl;
+            // И запоминаем ПОЛНОЕ (необрезанное) фото отдельно от AvatarCache
+            setFullAvatarLocal(userData.platform_user_id, dataUrl);
 
             if (version && version !== 'none') {
                 await AvatarCache.saveLocal(userData.platform_user_id, version, dataUrl, bucket);
@@ -4838,6 +4841,8 @@ window.addEventListener("beforeunload", () => {
                 
                 // Локальная копия больше не актуальна — убираем из IndexedDB
                 AvatarCache.removeLocal(userData.platform_user_id);
+                removeFullAvatarLocal(userData.platform_user_id);
+                if (avatarModalImage) avatarModalImage.removeAttribute('src');
 
                 showMessage('Аватар успешно удален!', 'success');
             } catch (error) {
@@ -5127,6 +5132,31 @@ function updateProfileUI() {
 }
 
    
+        // Полноразмерная копия последнего загруженного фото (НЕ обрезанный
+        // квадратный thumbnail из AvatarCache). Именно подстановка кэша AvatarCache
+        // в модалку и давала обрезку/смещение: там лежит cover-cropped квадрат
+        // под круглую аватарку, а модалка показывает фото целиком.
+        function fullAvatarKey(uid) { return 'vg_avatar_full_' + String(uid); }
+
+        function getFullAvatarLocal(uid) {
+            try {
+                const raw = localStorage.getItem(fullAvatarKey(uid));
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                return parsed && parsed.dataUrl ? parsed.dataUrl : null;
+            } catch (e) { return null; }
+        }
+
+        function setFullAvatarLocal(uid, dataUrl) {
+            try {
+                localStorage.setItem(fullAvatarKey(uid), JSON.stringify({ dataUrl, ts: Date.now() }));
+            } catch (e) {}
+        }
+
+        function removeFullAvatarLocal(uid) {
+            try { localStorage.removeItem(fullAvatarKey(uid)); } catch (e) {}
+        }
+
         async function openAvatarModal(targetAvatarElement) {
             // Без фотографии увеличивать нечего — модалку не открываем вообще
             if (!userData.has_avatar && !userData.has_avatar_photo) {
@@ -5136,30 +5166,25 @@ function updateProfileUI() {
             avatarModal.classList.add('active');
             document.body.style.overflow = 'hidden';
 
-            // Мгновенно, без ожидания промиса — если уже есть в быстром
-            // (localStorage) кэше, показываем сразу же
-            const syncLocal = AvatarCache.getLocalSync(userData.platform_user_id);
-            if (syncLocal && syncLocal.dataUrl) {
-                avatarModalImage.src = syncLocal.dataUrl;
+            const uid = userData.platform_user_id;
+            const openToken = String(Date.now()) + Math.random();
+            avatarModalImage.dataset.openToken = openToken;
+
+            // Мгновенный плейсхолдер — только полноразмерная копия.
+            // Обрезанный thumbnail из AvatarCache здесь НЕ используем.
+            const fullLocal = getFullAvatarLocal(uid);
+            if (fullLocal) {
+                avatarModalImage.src = fullLocal;
             } else {
-                const local = await AvatarCache.getLocal(userData.platform_user_id);
-                if (local && local.dataUrl) {
-                    avatarModalImage.src = local.dataUrl;
-                }
+                // Нечего показать без обрезки — не показываем ничего,
+                // чтобы не мигать квадратным кропом.
+                avatarModalImage.removeAttribute('src');
             }
+            const hadPlaceholder = !!fullLocal;
 
-            // ПРИЧИНА "СТАРОГО ФОТО ПРИ УВЕЛИЧЕНИИ": раньше здесь безусловно
-            // ставился `${SERVER_URL}/avatar/<id>` без версии. Этот URL уже лежал
-            // в HTTP-кэше браузера/CDN со времён предыдущего аватара, поэтому он
-            // мгновенно перетирал свежую копию из AvatarCache — в модалке
-            // показывалась прошлая фотография, хотя в шапке была новая.
-            // Теперь: (1) URL версионируем, (2) подменяем src только ПОСЛЕ того,
-            // как новая картинка реально загрузилась.
-            const openToken = (avatarModalImage.dataset.openToken = String(Date.now()) + Math.random());
-            const hadCached = !!avatarModalImage.getAttribute('src');
-
+            // Версионируем URL, иначе браузер/CDN отдаёт прошлое фото из HTTP-кэша
             const version = userData.avatar_version_hash
-                || (await fetchAvatarVersion(userData.platform_user_id))
+                || (await fetchAvatarVersion(uid))
                 || userData.avatar_version
                 || null;
 
@@ -5167,17 +5192,16 @@ function updateProfileUI() {
             if (avatarModalImage.dataset.openToken !== openToken) return;
 
             const bust = (version && version !== 'none') ? `v=${encodeURIComponent(version)}` : `t=${Date.now()}`;
-            const avatarUrl = `${SERVER_URL}/avatar/${userData.platform_user_id}?${bust}`;
+            const avatarUrl = `${SERVER_URL}/avatar/${uid}?${bust}`;
 
+            // Подменяем src только после реальной загрузки — без провалов и кропа
             const preload = new Image();
             preload.onload = () => {
                 if (avatarModalImage.dataset.openToken !== openToken) return;
                 avatarModalImage.src = avatarUrl;
             };
             preload.onerror = () => {
-                // Сеть/сервер не отдали фото — оставляем кэшированное;
-                // если показывать было нечего, пробуем URL напрямую.
-                if (!hadCached && avatarModalImage.dataset.openToken === openToken) {
+                if (!hadPlaceholder && avatarModalImage.dataset.openToken === openToken) {
                     avatarModalImage.src = avatarUrl;
                 }
             };
