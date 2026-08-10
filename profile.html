@@ -5158,59 +5158,23 @@ function updateProfileUI() {
         }
 
         async function openAvatarModal(targetAvatarElement) {
-            // Без фотографии увеличивать нечего — модалку не открываем вообще
+            // Без фотографии увеличивать нечего
             if (!userData.has_avatar && !userData.has_avatar_photo) {
                 return;
             }
 
-            avatarModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
-
-            const uid = userData.platform_user_id;
-            const openToken = String(Date.now()) + Math.random();
-            avatarModalImage.dataset.openToken = openToken;
-
-            // Мгновенный плейсхолдер — только полноразмерная копия.
-            // Обрезанный thumbnail из AvatarCache здесь НЕ используем.
-            const fullLocal = getFullAvatarLocal(uid);
-            if (fullLocal) {
-                avatarModalImage.src = fullLocal;
-            } else {
-                // Нечего показать без обрезки — не показываем ничего,
-                // чтобы не мигать квадратным кропом.
-                avatarModalImage.removeAttribute('src');
-            }
-            const hadPlaceholder = !!fullLocal;
-
-            // Версионируем URL, иначе браузер/CDN отдаёт прошлое фото из HTTP-кэша
-            const version = userData.avatar_version_hash
-                || (await fetchAvatarVersion(uid))
-                || userData.avatar_version
-                || null;
-
-            // Модалку могли закрыть/переоткрыть, пока шёл запрос версии
-            if (avatarModalImage.dataset.openToken !== openToken) return;
-
-            const bust = (version && version !== 'none') ? `v=${encodeURIComponent(version)}` : `t=${Date.now()}`;
-            const avatarUrl = `${SERVER_URL}/avatar/${uid}?${bust}`;
-
-            // Подменяем src только после реальной загрузки — без провалов и кропа
-            const preload = new Image();
-            preload.onload = () => {
-                if (avatarModalImage.dataset.openToken !== openToken) return;
-                avatarModalImage.src = avatarUrl;
-            };
-            preload.onerror = () => {
-                if (!hadPlaceholder && avatarModalImage.dataset.openToken === openToken) {
-                    avatarModalImage.src = avatarUrl;
-                }
-            };
-            preload.src = avatarUrl;
+            // Ровно как в contacts.html: локальная копия из AvatarCache, иначе
+            // серверный URL, и всё показывает полноэкранный photo viewer
+            // (object-fit: contain, без кропа и смещения).
+            const local = await AvatarCache.getLocal(userData.platform_user_id);
+            const src = local?.dataUrl || `${SERVER_URL}/avatar/${userData.platform_user_id}`;
+            openPhotoViewer(src, userData.nickname || '');
         }
 
         function closeAvatarModal() {
             avatarModal.classList.remove('active');
             document.body.style.overflow = '';
+            if (typeof window.closePhotoViewer === 'function') window.closePhotoViewer();
         }
 
         
@@ -6931,6 +6895,505 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 }
 </style>
+
+
+<!-- ==========================================================================
+     ПОЛНОЭКРАННЫЙ ПРОСМОТРЩИК ФОТО — 1:1 как в contacts.html
+     Открывается вторым нажатием по аватарке. Кнопки "Изменить"/"Удалить"
+     живут в футере просмотрщика (это свой профиль), старая .avatar-modal
+     больше не используется.
+     ========================================================================== -->
+<style id="vg-photo-viewer-styles">
+.photo-viewer-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #000;
+    display: flex;
+    flex-direction: column;
+    z-index: 3000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.photo-viewer-modal.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.photo-viewer-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 64px 12px;
+    z-index: 2;
+}
+
+.photo-viewer-back {
+    position: absolute;
+    left: 16px;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(60, 60, 60, 0.55);
+    color: #fff;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background 0.2s ease, transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.photo-viewer-back:hover {
+    background: rgba(80, 80, 80, 0.7);
+    transform: scale(1.05);
+}
+
+.photo-viewer-name-pill {
+    max-width: 100%;
+    padding: 9px 22px;
+    background: rgba(50, 50, 50, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 20px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+.photo-viewer-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    touch-action: none;
+}
+
+.photo-viewer-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    user-select: none;
+    -webkit-user-drag: none;
+    cursor: default;
+}
+
+.photo-viewer-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    align-items: center;
+    z-index: 2;
+}
+
+.photo-viewer-share {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(60, 60, 60, 0.55);
+    color: #fff;
+    font-size: 17px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.photo-viewer-share:hover {
+    background: rgba(80, 80, 80, 0.7);
+    transform: scale(1.08);
+}
+
+.photo-viewer-header-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+.photo-viewer-counter {
+    padding: 4px 14px;
+    background: rgba(50, 50, 50, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 20px;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.photo-viewer-time {
+    flex: 1;
+    text-align: center;
+    padding: 0 10px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.72);
+    white-space: nowrap;
+}
+.photo-viewer-footer-spacer {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+}
+
+/* Футер приложения не должен просвечивать поверх просмотрщика */
+.photo-viewer-modal.active ~ .bottom-nav,
+body.photo-viewer-open .bottom-nav { display: none !important; }
+
+/* Кнопки действий своего аватара в футере просмотрщика */
+.photo-viewer-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.photo-viewer-action {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(60, 60, 60, 0.55);
+    color: #fff;
+    font-size: 17px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+.photo-viewer-action:hover {
+    background: rgba(80, 80, 80, 0.7);
+    transform: scale(1.08);
+}
+.photo-viewer-action.delete { color: #ee686f; }
+</style>
+
+<div id="photoViewerModal" class="photo-viewer-modal">
+    <div class="photo-viewer-header">
+        <button id="photoViewerClose" class="photo-viewer-back" aria-label="Закрыть">
+            <i class="fas fa-chevron-left"></i>
+        </button>
+        <div class="photo-viewer-header-center">
+            <div id="photoViewerNamePill" class="photo-viewer-name-pill"></div>
+            <div id="photoViewerCounter" class="photo-viewer-counter" style="display:none;"></div>
+        </div>
+    </div>
+    <div id="photoViewerContent" class="photo-viewer-content">
+        <img id="photoViewerImg" class="photo-viewer-img" src="" alt="User Photo" draggable="false">
+    </div>
+    <div class="photo-viewer-footer">
+        <button id="photoViewerShare" class="photo-viewer-share" aria-label="Поделиться">
+            <i class="fa-solid fa-share-nodes"></i>
+        </button>
+        <span id="photoViewerTime" class="photo-viewer-time" style="display:none;"></span>
+        <div class="photo-viewer-actions">
+            <button id="photoViewerChange" class="photo-viewer-action" aria-label="Изменить фото" title="Изменить">
+                <i class="fa-solid fa-camera"></i>
+            </button>
+            <button id="photoViewerDelete" class="photo-viewer-action delete" aria-label="Удалить фото" title="Удалить">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function setupPhotoViewer() {
+    const modal = document.getElementById('photoViewerModal');
+    const content = document.getElementById('photoViewerContent');
+    const img = document.getElementById('photoViewerImg');
+    const closeBtn = document.getElementById('photoViewerClose');
+    const namePill = document.getElementById('photoViewerNamePill');
+    const shareBtn = document.getElementById('photoViewerShare');
+    const counterEl = document.getElementById('photoViewerCounter');
+    const timeEl = document.getElementById('photoViewerTime');
+    if (!modal || !content || !img) return;
+
+    let scale = 1;
+    let translateX = 0, translateY = 0;
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
+
+    function clampTranslate() {
+        const rect = content.getBoundingClientRect();
+        const imgRect = img.getBoundingClientRect();
+        const naturalWidth = imgRect.width / scale;
+        const naturalHeight = imgRect.height / scale;
+        const scaledWidth = naturalWidth * scale;
+        const scaledHeight = naturalHeight * scale;
+        const maxX = Math.max(0, (scaledWidth - rect.width) / 2);
+        const maxY = Math.max(0, (scaledHeight - rect.height) / 2);
+        translateX = Math.min(maxX, Math.max(-maxX, translateX));
+        translateY = Math.min(maxY, Math.max(-maxY, translateY));
+    }
+
+    function updateTransform(animate = false) {
+        img.style.transition = animate ? 'transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none';
+        img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    }
+
+    function resetZoom(animate = true) {
+        scale = 1;
+        translateX = 0;
+        translateY = 0;
+        updateTransform(animate);
+    }
+
+    // meta (необязательно): { index, total, time } — показывает "N из M" и время отправки.
+    // Для аватарки meta не передаётся, и оба блока скрыты.
+    window.openPhotoViewer = function(photoUrl, displayName, meta) {
+        scale = 1; translateX = 0; translateY = 0;
+        img.style.transition = 'none';
+        img.style.opacity = '0';
+        img.style.transform = 'scale(0.92)';
+        img.src = photoUrl;
+        img.onload = () => {
+            img.style.transition = 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            img.style.opacity = '1';
+            img.style.transform = 'scale(1)';
+            setTimeout(() => { img.style.transition = 'none'; }, 230);
+        };
+        if (namePill) {
+            namePill.textContent = displayName || '';
+            namePill.style.display = displayName ? '' : 'none';
+        }
+        const hasCounter = meta && Number.isFinite(meta.total) && meta.total > 0 && Number.isFinite(meta.index);
+        if (counterEl) {
+            counterEl.textContent = hasCounter ? `${meta.index + 1} из ${meta.total}` : '';
+            counterEl.style.display = hasCounter ? '' : 'none';
+        }
+        if (timeEl) {
+            const t = meta && meta.time ? meta.time : '';
+            timeEl.textContent = t;
+            timeEl.style.display = t ? '' : 'none';
+        }
+        modal.classList.add('active');
+        document.body.classList.add('photo-viewer-open');
+        document.addEventListener('keydown', handleKeydown);
+    };
+
+    window.closePhotoViewer = function() {
+        modal.classList.remove('active');
+        document.body.classList.remove('photo-viewer-open');
+        resetZoom(false);
+        document.removeEventListener('keydown', handleKeydown);
+    };
+
+    function handleKeydown(e) {
+        if (e.key === 'Escape') closePhotoViewer();
+        else if (e.key === '0' || e.key === 'Numpad0') resetZoom();
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closePhotoViewer(); });
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal && scale === 1) closePhotoViewer();
+    });
+
+    // === Десктоп: колесо мыши для зума + перетаскивание при увеличении ===
+    content.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (e.deltaY < 0) scale = Math.min(scale * 1.15, 5);
+        else scale = Math.max(scale / 1.15, 1);
+        if (scale === 1) { translateX = 0; translateY = 0; }
+        clampTranslate();
+        updateTransform(false);
+    });
+
+    content.addEventListener('mousedown', (e) => {
+        if (scale <= 1) return;
+        isDragging = true;
+        dragStartX = e.clientX - translateX;
+        dragStartY = e.clientY - translateY;
+        img.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging || scale <= 1) return;
+        e.preventDefault();
+        translateX = e.clientX - dragStartX;
+        translateY = e.clientY - dragStartY;
+        clampTranslate();
+        updateTransform(false);
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        img.style.cursor = scale > 1 ? 'grab' : 'default';
+    });
+
+    img.addEventListener('dblclick', () => {
+        if (scale > 1) resetZoom();
+        else { scale = 2.5; updateTransform(true); }
+    });
+
+    // === Мобильные жесты: pinch-zoom (в т.ч. "рубber-band" уменьшение ниже 1x
+    // с плавным возвратом при отпускании, как в референсе), перемещение пальцем ===
+    let pinchStartDistance = null;
+    let pinchStartScale = 1;
+    let pinchStartTranslate = { x: 0, y: 0 };
+    let pinchMidpoint = { x: 0, y: 0 };
+    let panActive = false;
+    let panStartX = 0, panStartY = 0;
+    let lastTapTime = 0;
+
+    function getMidpoint(t1, t2) {
+        const rect = content.getBoundingClientRect();
+        return {
+            x: (t1.clientX + t2.clientX) / 2 - rect.left - rect.width / 2,
+            y: (t1.clientY + t2.clientY) / 2 - rect.top - rect.height / 2
+        };
+    }
+
+    content.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const t1 = e.touches[0], t2 = e.touches[1];
+            pinchStartDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            pinchStartScale = scale;
+            pinchStartTranslate = { x: translateX, y: translateY };
+            pinchMidpoint = getMidpoint(t1, t2);
+            panActive = false;
+            img.style.transition = 'none';
+        } else if (e.touches.length === 1) {
+            const touch = e.touches[0];
+            if (scale > 1.01) {
+                panActive = true;
+                panStartX = touch.clientX - translateX;
+                panStartY = touch.clientY - translateY;
+                img.style.transition = 'none';
+            }
+            const now = Date.now();
+            if (now - lastTapTime < 300) {
+                if (scale > 1.01) {
+                    resetZoom();
+                } else {
+                    const rect = content.getBoundingClientRect();
+                    translateX = -((touch.clientX - rect.left - rect.width / 2)) * 1.5;
+                    translateY = -((touch.clientY - rect.top - rect.height / 2)) * 1.5;
+                    scale = 2.5;
+                    clampTranslate();
+                    updateTransform(true);
+                }
+                panActive = false;
+            }
+            lastTapTime = now;
+        }
+    }, { passive: false });
+
+    content.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && pinchStartDistance !== null) {
+            e.preventDefault();
+            const t1 = e.touches[0], t2 = e.touches[1];
+            const currentDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            const ratio = currentDistance / pinchStartDistance;
+            // Разрешаем "резиновое" уменьшение ниже 1x (как в референсном видео),
+            // окончательный отскок к 1x происходит на touchend.
+            scale = Math.max(0.5, Math.min(pinchStartScale * ratio, 5));
+            const scaleDelta = scale / pinchStartScale;
+            translateX = pinchStartTranslate.x * scaleDelta + pinchMidpoint.x * (1 - scaleDelta);
+            translateY = pinchStartTranslate.y * scaleDelta + pinchMidpoint.y * (1 - scaleDelta);
+            updateTransform(false);
+        } else if (e.touches.length === 1 && panActive && scale > 1.01) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            translateX = touch.clientX - panStartX;
+            translateY = touch.clientY - panStartY;
+            clampTranslate();
+            updateTransform(false);
+        }
+    }, { passive: false });
+
+    content.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) pinchStartDistance = null;
+        if (scale < 1) {
+            // Отскок обратно к исходному размеру, если пользователь "растянул" фото ниже 1x
+            resetZoom(true);
+        } else if (scale === 1) {
+            translateX = 0; translateY = 0;
+            updateTransform(true);
+        } else {
+            clampTranslate();
+            updateTransform(true);
+        }
+        panActive = false;
+    });
+
+    // === Кнопка "Поделиться" ===
+    if (shareBtn) {
+        shareBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const currentSrc = img.src;
+            try {
+                const response = await fetch(currentSrc);
+                const blob = await response.blob();
+                const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+                const file = new File([blob], `avatar.${ext}`, { type: blob.type });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file] });
+                } else if (navigator.share) {
+                    await navigator.share({ url: currentSrc });
+                } else {
+                    await navigator.clipboard.writeText(currentSrc);
+                    shareBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    setTimeout(() => { shareBtn.innerHTML = '<i class="fa-solid fa-share-nodes"></i>'; }, 1500);
+                }
+            } catch {}
+        });
+    }
+})();
+
+// Кнопки "Изменить"/"Удалить" внутри просмотрщика — вместо кнопок старой .avatar-modal
+(function setupOwnPhotoViewerActions() {
+    const changeBtn = document.getElementById('photoViewerChange');
+    const deleteBtn = document.getElementById('photoViewerDelete');
+    if (changeBtn) {
+        changeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof window.closePhotoViewer === 'function') window.closePhotoViewer();
+            const input = document.getElementById('avatar-input');
+            if (input) input.click();
+        });
+    }
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof window.closePhotoViewer === 'function') window.closePhotoViewer();
+            const legacyDelete = document.getElementById('deleteAvatarBtn');
+            if (legacyDelete) legacyDelete.click();
+        });
+    }
+})();
+</script>
 
 </body>
 </html>
