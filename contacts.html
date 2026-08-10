@@ -972,6 +972,7 @@
 
         .nav-icon-wrap {
             position: relative;
+            overflow: visible;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -982,30 +983,43 @@
             transition: background-color 0.25s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* Красный бейдж непрочитанных на иконке "Чаты" в футере */
+        /* Красный бейдж непрочитанных на иконке "Чаты" в футере.
+           Идеальный круг фиксированного размера (width == height, 50%),
+           смещён так, что целиком лежит внутри капсулы футера —
+           поэтому его физически нечему обрезать. */
         .nav-badge {
             position: absolute;
-            top: -1px;
+            top: 1px;
             left: 50%;
-            transform: translateX(5px);
+            margin-left: 4px;
             display: none;
             align-items: center;
             justify-content: center;
             box-sizing: border-box;
-            min-width: 18px;
+            width: 18px;
             height: 18px;
-            padding: 0 5px;
-            border-radius: 9px;
-            background: #ff3b30;
-            border: 2px solid rgba(255, 255, 255, 0.92);
+            padding: 0;
+            border-radius: 50%;
+            aspect-ratio: 1 / 1;
+            flex: 0 0 auto;
+            background: #ff5252;
+            border: none;
             color: #fff;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             line-height: 1;
             letter-spacing: -0.2px;
+            text-align: center;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             pointer-events: none;
-            z-index: 2;
+            overflow: hidden;
+            z-index: 5;
+        }
+
+        /* две цифры (10+) — чуть мельче шрифт, круг остаётся круглым */
+        .nav-badge.two-chars {
+            font-size: 8.5px;
+            letter-spacing: -0.5px;
         }
 
         .nav-badge.visible {
@@ -1014,14 +1028,8 @@
         }
 
         @keyframes navBadgePop {
-            from { transform: translateX(5px) scale(0.5); opacity: 0; }
-            to   { transform: translateX(5px) scale(1);   opacity: 1; }
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .nav-badge {
-                border-color: rgba(33, 33, 33, 0.85);
-            }
+            from { transform: scale(0.5); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
         }
 
 
@@ -8417,11 +8425,15 @@ function setupSearchHandlers() {
             for (var i = 0; i < nodes.length; i++) {
                 var el = nodes[i];
                 if (count > 0) {
-                    var text = count > 99 ? '99+' : String(count);
+                    // круг фиксированного размера: максимум 2 символа
+                    var text = count > 9 ? '9+' : String(count);
                     if (el.textContent !== text) el.textContent = text;
+                    if (text.length > 1) { el.classList.add('two-chars'); }
+                    else { el.classList.remove('two-chars'); }
                     if (!el.classList.contains('visible')) el.classList.add('visible');
                 } else {
                     el.classList.remove('visible');
+                    el.classList.remove('two-chars');
                     el.textContent = '';
                 }
             }
