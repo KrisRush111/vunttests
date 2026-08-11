@@ -3603,7 +3603,10 @@ input:checked + .toggle-slider:before {
                 !!(user.has_avatar_photo || user.has_avatar),
                 user.main_school_name, user.class_number, user.class_letter,
                 user.additional_school_name, user.specialization, user.course,
-                user.identity, user.subject1, user.subject2
+                user.identity, user.subject1, user.subject2,
+                // без этого поля профиль не перерисуется после выдачи галочки:
+                // fingerprint не изменится и DOM останется старым
+                !!user.is_verified
             ]);
         }
 
@@ -4913,6 +4916,53 @@ function isNotSpecified(value) {
     return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук' || lower === 'NULL';
 }
 
+/* ==========================================================================
+   ГАЛОЧКА ВЕРИФИКАЦИИ
+   Флаг userData.is_verified приходит из /get_user_data. Проставляется он
+   только Telegram-ботом через POST /admin/grant_verification, поэтому
+   подделать его с фронта нельзя.
+   Чтобы заменить SVG на свою картинку — впиши путь в VERIFIED_BADGE_SRC.
+   ========================================================================== */
+const VERIFIED_BADGE_SRC = 'gal.webp'; // файл лежит в репозитории сайта, рядом с profile.html
+const VERIFIED_BADGE_SVG = `
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M12 1.5l2.4 2.06 3.15-.3.9 3.04 2.85 1.4-1.2 2.93 1.2 2.93-2.85 1.4-.9 3.04-3.15-.3L12 19.76l-2.4-2.06-3.15.3-.9-3.04-2.85-1.4 1.2-2.93-1.2-2.93 2.85-1.4.9-3.04 3.15.3L12 1.5z" fill="#3390EC"/>
+  <path d="M7.9 10.9l2.7 2.7 5.1-5.1" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+function isUserVerified() {
+    return userData.is_verified === true || userData.is_verified === 'true' || userData.is_verified === 1;
+}
+
+function setNicknameWithBadge(el, nickname, verified) {
+    if (!el) return;
+    el.textContent = '';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'vg-nick-text';
+    nameSpan.textContent = nickname || 'Не указано';
+    el.appendChild(nameSpan);
+
+    if (verified) {
+        const badge = document.createElement('span');
+        badge.className = 'vg-verified-badge';
+        badge.title = 'Подтверждённый аккаунт';
+        if (VERIFIED_BADGE_SRC) {
+            const img = document.createElement('img');
+            img.src = VERIFIED_BADGE_SRC;
+            img.alt = 'Подтверждён';
+            img.decoding = 'async';
+            // Если gal.webp не найден — не показываем "битую" картинку, рисуем SVG
+            img.onerror = () => { badge.innerHTML = VERIFIED_BADGE_SVG; };
+            badge.appendChild(img);
+        } else {
+            badge.innerHTML = VERIFIED_BADGE_SVG;
+        }
+        el.appendChild(badge);
+    }
+    el.classList.toggle('is-verified', !!verified);
+}
+
 function updateProfileUI() {
     const nickname = userData.nickname || '';
     const firstLetter = nickname.charAt(0).toUpperCase() || '?';
@@ -4944,7 +4994,7 @@ function updateProfileUI() {
 
     // Update mobile profile elements (used in profileModalMobile)
     AvatarCache.render(SERVER_URL, profileAvatarMobile, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
-    profileNicknameMobile.textContent = nickname || 'Не указано';
+    setNicknameWithBadge(profileNicknameMobile, nickname, isUserVerified());
     profileIdMobile.textContent = `ID: ${platformId}`;
     
     // Проверка и отображение полей в "О себе" для мобильной версии
@@ -5033,17 +5083,17 @@ function updateProfileUI() {
 
     // Update desktop sidebar elements
     AvatarCache.render(SERVER_URL, sidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
-    sidebarProfileNickname.textContent = nickname || 'Не указано';
+    setNicknameWithBadge(sidebarProfileNickname, nickname, isUserVerified());
     sidebarProfileId.textContent = `id: ${platformId}`; 
 
     // Update mobile sidebar elements (new)
     AvatarCache.render(SERVER_URL, mobileSidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
-    mobileSidebarProfileNickname.textContent = nickname || 'Не указано';
+    setNicknameWithBadge(mobileSidebarProfileNickname, nickname, isUserVerified());
     mobileSidebarProfileId.textContent = `id: ${platformId}`; 
 
     // Update desktop profile modal elements
     AvatarCache.render(SERVER_URL, desktopProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
-    desktopProfileNickname.textContent = nickname || 'Не указано';
+    setNicknameWithBadge(desktopProfileNickname, nickname, isUserVerified());
     desktopProfileId.textContent = `ID: ${platformId}`;
     
     // Проверка и отображение полей в "О себе" для десктопной версии
@@ -5479,6 +5529,48 @@ document.addEventListener('visibilitychange', function() {
 
 // Периодическое обновление статуса (каждые 20 секунд)
 setInterval(updateUserActivityStatus, 20000);
+
+/* ==========================================================================
+   СИНХРОНИЗАЦИЯ ГАЛОЧКИ
+   Бот выдал или забрал галочку -> страница обновляет её сама, без F5.
+   Опрашиваем лёгкий эндпоинт /verification_status раз в 20 секунд.
+   ========================================================================== */
+async function refreshVerificationBadge() {
+    const pid = userData && userData.platform_user_id;
+    if (!pid || document.visibilityState !== 'visible') return;
+    try {
+        const r = await fetch(
+            `${SERVER_URL}/verification_status?platform_user_id=${encodeURIComponent(pid)}&_=${Date.now()}`,
+            { credentials: 'include', cache: 'no-store' }
+        );
+        const d = await r.json();
+        if (!d || d.status !== 'success') return;
+
+        const now = !!d.verified;
+        if (now === isUserVerified()) return; // ничего не изменилось
+
+        userData.is_verified = now;
+        try { sessionStorage.setItem('userData', JSON.stringify(userData)); } catch (e) {}
+        try {
+            if (localStorage.getItem('rememberedUser')) {
+                localStorage.setItem('rememberedUser', JSON.stringify(userData));
+            }
+        } catch (e) {}
+        try { setCacheItem(ownProfileCacheKey(pid), userData, OWN_PROFILE_TTL); } catch (e) {}
+
+        const nick = userData.nickname || '';
+        ['profile-nickname', 'sidebar-profile-nickname',
+         'mobile-sidebar-profile-nickname', 'desktop-profile-nickname'].forEach(id => {
+            setNicknameWithBadge(document.getElementById(id), nick, now);
+        });
+    } catch (e) {}
+}
+
+setInterval(refreshVerificationBadge, 20000);
+document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') setTimeout(refreshVerificationBadge, 300);
+});
+setTimeout(refreshVerificationBadge, 1500);
 
 // Обработчик перед закрытием страницы
 window.addEventListener('beforeunload', function() {
@@ -7394,6 +7486,65 @@ body.photo-viewer-open .bottom-nav { display: none !important; }
     }
 })();
 </script>
+
+<!-- ==========================================================================
+     ГАЛОЧКА ВЕРИФИКАЦИИ — рядом с ником во всех четырёх местах
+     (мобильный профиль, десктопный профиль, десктопный и мобильный сайдбар)
+     ========================================================================== -->
+<style id="vg-verified-badge-styles">
+/* Ник превращаем в inline-flex: сам ник обрезается многоточием,
+   галочка всегда остаётся видимой справа. Выравнивание (по центру
+   в профиле, слева в сайдбаре) наследуется от родителя как раньше. */
+.vg-hero-nickname,
+.profile-nickname.vg-hero-nickname,
+#profile-nickname,
+#desktop-profile-nickname,
+#sidebar-profile-nickname,
+#mobile-sidebar-profile-nickname {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    vertical-align: middle;
+}
+
+.vg-nick-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.vg-verified-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    line-height: 0;
+    /* чуть приподнимаем, чтобы центр галочки совпал с центром букв */
+    transform: translateY(-1px);
+}
+
+.vg-verified-badge svg,
+.vg-verified-badge img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+/* В развёрнутой шапке ник крупнее — галочка масштабируется вместе с ним,
+   потому что размер задан в em. Дополнительно ничего делать не нужно. */
+
+/* Сайдбар: ник меньше — немного уменьшаем галочку, чтобы не доминировала */
+#sidebar-profile-nickname .vg-verified-badge,
+#mobile-sidebar-profile-nickname .vg-verified-badge {
+    width: .95em;
+    height: .95em;
+}
+</style>
 
 </body>
 </html>
