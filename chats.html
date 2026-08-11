@@ -7275,6 +7275,7 @@
             const { chatModal } = getActiveElements();
             
             if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+                if (window.vgGuardBotStatus && window.vgGuardBotStatus()) return;
                 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 // Системный бот: статус фиксированный — «бот», сеть не опрашиваем
                 if (otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id)))) {
@@ -12275,7 +12276,15 @@ function getActiveElements() {
             if (chatModal.classList.contains('changing')) chatModal.classList.remove('changing');
 
             if (chatTitle) chatTitle.textContent = tempChat.name || 'Новый чат';
-            if (chatStatus) chatStatus.textContent = 'был(а) недавно';
+            // Чат с системным ботом: под именем всегда только «бот», никакого
+            // времени посещения (см. vgGuardBotStatus в конце файла).
+            const tempOther = tempChat.participants && tempChat.participants[0];
+            const tempIsBot = !!(tempOther && (tempOther.is_bot === true || (window.vgIsBotId && window.vgIsBotId(tempOther.platform_user_id))));
+            if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(tempIsBot);
+            if (chatStatus) {
+                chatStatus.textContent = tempIsBot ? 'бот' : 'был(а) недавно';
+                chatStatus.classList.remove('online');
+            }
             
             if (chatAvatar) {
                 const initials = tempChat.initials || (tempChat.name ? tempChat.name[0].toUpperCase() : '?');
@@ -14436,6 +14445,8 @@ function stopProfileDataPolling() {
                     await updateChatStatuses();
                     
                     if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
+                        // У бота статус фиксированный — «бот», сеть не опрашиваем
+                        if (window.vgGuardBotStatus && window.vgGuardBotStatus()) return;
                         const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                         if (otherParticipant) {
                             const activityData = await getCachedActivityStatus([otherParticipant.platform_user_id]);
@@ -14471,7 +14482,7 @@ function stopProfileDataPolling() {
                     updateChatStatuses();
                     updateUserActivity(true);
                     
-                    if (currentChat) {
+                    if (currentChat && !(window.vgGuardBotStatus && window.vgGuardBotStatus())) {
                         const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                         if (otherParticipant) {
                             getCachedActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
@@ -16594,7 +16605,7 @@ function stopProfileDataPolling() {
 }
 
 /* В списке чатов имя мельче — не даём галочке распирать строку */
-.chat-name.vg-has-badge .vg-verified-badge { width: 1.4em; height: 1.4em; }
+.chat-name.vg-has-badge .vg-verified-badge { width: 1.58em; height: 1.58em; }
 
 /* ==========================================================================
    ЧАТ С СИСТЕМНЫМ БОТОМ
@@ -16728,11 +16739,53 @@ window.vgHydrateBadges = function (root) {
 
 /* Режим «чат с ботом»: скрывает поле ввода и показывает заглушку.
    Класс ставим на оба чат-модала — CSS выше сам разберётся, какой активен. */
+window.VG_CURRENT_CHAT_IS_BOT = false;
+
+function vgBotStatusEls() {
+    return ['chatStatusDesktop', 'chatStatusMobile']
+        .map(id => document.getElementById(id))
+        .filter(Boolean);
+}
+
+/* Если открыт чат с ботом — принудительно держим под именем текст «бот».
+   Возвращает true, если чат ботовый (вызывающий код должен выйти и НЕ писать
+   туда время последнего посещения). */
+window.vgGuardBotStatus = function () {
+    if (!window.VG_CURRENT_CHAT_IS_BOT) return false;
+    vgBotStatusEls().forEach(el => {
+        if (el.textContent !== 'бот') el.textContent = 'бот';
+        el.classList.remove('online', 'offline');
+    });
+    return true;
+};
+
+/* Страховка от любых будущих/пропущенных путей записи статуса: пока открыт
+   чат с ботом, любое изменение текста статуса возвращаем к «бот». */
+let vgBotStatusObserver = null;
+function vgStartBotStatusWatch() {
+    vgStopBotStatusWatch();
+    if (typeof MutationObserver === 'undefined') return;
+    vgBotStatusObserver = new MutationObserver(() => { window.vgGuardBotStatus(); });
+    vgBotStatusEls().forEach(el => {
+        vgBotStatusObserver.observe(el, { childList: true, characterData: true, subtree: true });
+    });
+}
+function vgStopBotStatusWatch() {
+    if (vgBotStatusObserver) { vgBotStatusObserver.disconnect(); vgBotStatusObserver = null; }
+}
+
 window.vgApplyBotChatUI = function (isBot) {
     ['chatModalDesktop', 'chatModalMobile'].forEach(id => {
         const modal = document.getElementById(id);
         if (modal) modal.classList.toggle('vg-bot-chat', !!isBot);
     });
+    window.VG_CURRENT_CHAT_IS_BOT = !!isBot;
+    if (isBot) {
+        window.vgGuardBotStatus();
+        vgStartBotStatusWatch();
+    } else {
+        vgStopBotStatusWatch();
+    }
     // На всякий случай снимаем фокус/черновик, чтобы клавиатура не всплывала
     if (isBot) {
         ['messageInputDesktop', 'messageInputMobile'].forEach(id => {
