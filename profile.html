@@ -7623,12 +7623,31 @@ body.photo-viewer-open .bottom-nav { display: none !important; }
     -webkit-user-select: none;
     pointer-events: none;
     opacity: 0;
-    transform: translateY(4px) scale(0.96);
-    transition: opacity 0.16s ease, transform 0.16s cubic-bezier(0.34, 1.4, 0.64, 1);
+    /* Всплывает вверх: стартует чуть ниже своего места и плавно поднимается */
+    transform: translateY(8px) scale(0.94);
+    transform-origin: 50% 100%;
+    transition: opacity 0.26s cubic-bezier(0.22, 0.61, 0.36, 1),
+                transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
 }
 
 .vg-verified-tooltip.visible {
     opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+/* Скрытие — чуть быстрее, тем же движением вниз, без «дёрганья» */
+.vg-verified-tooltip.hiding {
+    transition: opacity 0.15s ease, transform 0.18s ease;
+}
+
+/* Когда подсказка вынужденно показана снизу (сверху нет места) */
+.vg-verified-tooltip.below {
+    transform-origin: 50% 0%;
+    transform: translateY(-8px) scale(0.94);
+}
+
+.vg-verified-tooltip.below.visible {
     transform: translateY(0) scale(1);
 }
 
@@ -7688,18 +7707,36 @@ html[data-theme="dark"] .vg-verified-tooltip {
         let left = r.left + r.width / 2 - tw / 2;
         left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin));
 
-        // по умолчанию под галочкой, если не влезает — над ней
-        let top = r.bottom + gap;
-        if (top + th > window.innerHeight - margin) top = r.top - th - gap;
-        if (top < margin) top = margin;
+        // По умолчанию НАД галочкой; уходим под неё только если сверху
+        // физически не хватает места.
+        let top = r.top - th - gap;
+        let below = false;
+        if (top < margin) {
+            const under = r.bottom + gap;
+            if (under + th <= window.innerHeight - margin) {
+                top = under;
+                below = true;
+            } else {
+                top = margin;
+            }
+        }
 
+        t.classList.toggle('below', below);
         t.style.left = left + 'px';
         t.style.top = top + 'px';
         t.style.visibility = '';
     }
 
+    function isShown() {
+        return !!(tip && tip.classList.contains('visible'));
+    }
+
     function show(badge) {
         currentBadge = badge;
+        const t = ensureTip();
+        t.classList.remove('hiding');
+        // reflow, чтобы стартовое состояние применилось и анимация проиграла
+        void t.offsetWidth;
         place(badge);
         clearTimeout(hideTimer);
         hideTimer = setTimeout(hide, HIDE_AFTER);
@@ -7708,7 +7745,14 @@ html[data-theme="dark"] .vg-verified-tooltip {
     function hide() {
         clearTimeout(hideTimer);
         currentBadge = null;
-        if (tip) tip.classList.remove('visible');
+        if (!tip || !tip.classList.contains('visible')) return;
+        tip.classList.add('hiding');
+        tip.classList.remove('visible');
+        // класс hiding снимаем после анимации, иначе следующий показ
+        // проиграет ускоренным таймингом
+        setTimeout(() => {
+            if (tip && !tip.classList.contains('visible')) tip.classList.remove('hiding');
+        }, 200);
     }
 
     document.addEventListener('click', function (e) {
@@ -7725,7 +7769,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
                 badge.setAttribute('aria-label', TEXT);
                 badge.removeAttribute('title');
             }
-            if (currentBadge === badge && tip && tip.classList.contains('visible')) {
+            if (currentBadge === badge && isShown()) {
                 hide();
             } else {
                 show(badge);
@@ -7735,8 +7779,24 @@ html[data-theme="dark"] .vg-verified-tooltip {
         hide();
     }, true);
 
+    // Гасим подсказку в самом начале взаимодействия (pointerdown/touchstart),
+    // не дожидаясь click. Иначе тап по аватарке успевал раскрыть фото, а
+    // подсказка ещё висела поверх.
+    function hideOnOutsideStart(e) {
+        if (!isShown()) return;
+        const onBadge = e.target && e.target.closest
+            ? e.target.closest('.vg-verified-badge')
+            : null;
+        if (!onBadge) hide();
+    }
+    document.addEventListener('pointerdown', hideOnOutsideStart, true);
+    document.addEventListener('touchstart', hideOnOutsideStart, true);
+    document.addEventListener('mousedown', hideOnOutsideStart, true);
+
     window.addEventListener('scroll', hide, true);
     window.addEventListener('resize', hide);
+    window.addEventListener('blur', hide);
+    document.addEventListener('visibilitychange', hide);
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') hide();
     });
