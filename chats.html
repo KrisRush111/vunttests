@@ -7272,6 +7272,15 @@
             
             if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
                 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                // Системный бот: статус фиксированный — «бот», сеть не опрашиваем
+                if (otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id)))) {
+                    const chatStatusBot = getActiveElements().chatStatus;
+                    if (chatStatusBot) {
+                        chatStatusBot.textContent = 'бот';
+                        chatStatusBot.classList.remove('online');
+                    }
+                    return;
+                }
                 if (otherParticipant) {
                     const activityData = await getCachedActivityStatus([otherParticipant.platform_user_id]);
                     const userActivity = activityData[otherParticipant.platform_user_id];
@@ -7479,9 +7488,11 @@ function renderProfileMediaSections(profileUserId) {
     // Медиа показываем только для переписки с ЭТИМ же человеком. Если чат не открыт
     // или профиль принадлежит другому пользователю — никаких медиа/файлов быть не
     // должно (иначе в профиль утекали бы фото из предыдущего открытого чата).
-    const partnerId = currentChat && currentChat.participants && currentChat.participants[0]
-        ? String(currentChat.participants[0].platform_user_id)
-        : null;
+    // Собеседник — участник, отличный от меня (participants[0] может быть я сам,
+    // например в чате с системным ботом), с откатом на participants[0].
+    const _parts = (currentChat && currentChat.participants) || [];
+    const _other = _parts.find(p => String(p.platform_user_id) !== String(userData.platform_user_id)) || _parts[0];
+    const partnerId = _other ? String(_other.platform_user_id) : null;
     const sameUser = profileUserId == null ? !!currentChat : (partnerId && String(profileUserId) === partnerId);
     if (!currentChat || !sameUser) {
         ['desktop', 'mobile'].forEach(sfx => {
@@ -10929,6 +10940,15 @@ function getActiveElements() {
 
         function applyChatItemOnlineStatus(chatItem, userActivity) {
             if (!chatItem) return;
+            // У системного бота статус фиксированный — «бот»
+            if (chatItem.dataset && chatItem.dataset.bot === '1') {
+                const botStatus = chatItem.querySelector('.chat-status');
+                if (botStatus) {
+                    botStatus.textContent = 'бот';
+                    botStatus.classList.remove('online');
+                }
+                return;
+            }
             const statusElement = chatItem.querySelector('.chat-status');
             const avatarElement = chatItem.querySelector('.chat-avatar');
             const isOnline = !!(userActivity && userActivity.is_online);
@@ -10988,11 +11008,19 @@ function getActiveElements() {
 
                 const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 if (otherParticipant) chatItem.setAttribute('data-participant-id', otherParticipant.platform_user_id);
-                
+
+                // Системный бот Vuntgram: всегда с галочкой и статусом «бот»
+                const isBotChat = !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
+                const isChatVerified = isBotChat || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant));
+                if (isBotChat) chatItem.dataset.bot = '1';
+                if (isChatVerified) chatItem.dataset.verified = '1';
+
                 let statusText = 'был(а) недавно';
                 let isOnline = false;
 
-                if (otherParticipant) {
+                if (isBotChat) {
+                    statusText = 'бот';
+                } else if (otherParticipant) {
                     const userActivity = activityData[otherParticipant.platform_user_id];
                     if (userActivity) {
                         if (userActivity.is_online) {
@@ -11018,10 +11046,10 @@ function getActiveElements() {
                     <div class="chat-avatar ${isOnline ? 'is-online' : ''}" style="background: ${avatarStyle}">${initials}</div>
                     <div class="chat-info">
                         <div class="chat-top-row">
-                            <div class="chat-name">${chat.name || 'Новый чат'}</div>
+                            <div class="chat-name${isChatVerified ? ' vg-has-badge' : ''}">${isChatVerified ? `<span class="vg-nick-text">${chat.name || 'Новый чат'}</span>${(window.vgBadgeHtml ? window.vgBadgeHtml(true) : '')}` : (chat.name || 'Новый чат')}</div>
                         </div>
                         <div class="last-message">${lastMessageText}</div>
-                        <div class="chat-status user-status ${isOnline ? 'online' : ''}">${isOnline ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
+                        <div class="chat-status user-status ${(!isBotChat && isOnline) ? 'online' : ''}">${(!isBotChat && isOnline) ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
                     </div>
                     <div class="chat-right-col">
                         <div class="chat-time-wrap">
@@ -11033,8 +11061,12 @@ function getActiveElements() {
                 `;
                 
                 if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-                    loadChatAvatar(chatItem.querySelector('.chat-avatar'), chat.participants[0].platform_user_id, initials, bgColor);
+                    const avatarOwnerId = isBotChat && otherParticipant
+                        ? otherParticipant.platform_user_id
+                        : chat.participants[0].platform_user_id;
+                    loadChatAvatar(chatItem.querySelector('.chat-avatar'), avatarOwnerId, initials, bgColor);
                 }
+                if (isChatVerified && window.vgHydrateBadges) window.vgHydrateBadges(chatItem);
                 
                 chatItem.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -12775,19 +12807,28 @@ async function openChat(chatId) {
 
     let statusFetchParticipantId = null;
     if (cachedChat) {
-        chatTitle.textContent = cachedChat.name || 'Новый чат';
+        const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+        const cachedIsBot = !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
+        const cachedIsVerified = cachedIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant));
+        if (window.vgSetTitle) {
+            window.vgSetTitle(chatTitle, cachedChat.name || 'Новый чат', cachedIsVerified);
+        } else {
+            chatTitle.textContent = cachedChat.name || 'Новый чат';
+        }
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
-        const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
         if (otherParticipant) {
             loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
-            statusFetchParticipantId = otherParticipant.platform_user_id;
+            statusFetchParticipantId = cachedIsBot ? null : otherParticipant.platform_user_id;
 
             // Мгновенно показываем статус, только если он реально свежий
             // (в пределах CACHE.STATUS_TTL) — иначе не тащим устаревшее
             // "в сети" из скрытого кэша списка чатов, а ждём проверку ниже.
-            const syncStatus = getCachedActivityStatusSync([otherParticipant.platform_user_id])[otherParticipant.platform_user_id];
-            if (syncStatus) {
+            const syncStatus = cachedIsBot ? null : getCachedActivityStatusSync([otherParticipant.platform_user_id])[otherParticipant.platform_user_id];
+            if (cachedIsBot) {
+                chatStatus.textContent = 'бот';
+                chatStatus.classList.remove('online');
+            } else if (syncStatus) {
                 if (syncStatus.is_online) {
                     chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                     chatStatus.classList.add('online');
@@ -12869,14 +12910,27 @@ async function openChat(chatId) {
             // оставался пустым. Подстраховываемся и заполняем его сейчас уже
             // точными данными, полученными с сервера.
             if (!cachedChat) {
-                chatTitle.textContent = currentChat.name || 'Чат';
+                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                const freshIsBot = !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
+                const freshIsVerified = freshIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant));
+                if (window.vgSetTitle) {
+                    window.vgSetTitle(chatTitle, currentChat.name || 'Чат', freshIsVerified);
+                } else {
+                    chatTitle.textContent = currentChat.name || 'Чат';
+                }
                 const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
                 const bgColor = currentChat.avatar_background || '#0088cc';
-                const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 if (otherParticipant) {
                     loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
                     statusFetchParticipantId = otherParticipant.platform_user_id;
                     const { chatStatus: freshChatStatus } = getActiveElements();
+                    if (freshIsBot) {
+                        statusFetchParticipantId = null;
+                        if (freshChatStatus) {
+                            freshChatStatus.textContent = 'бот';
+                            freshChatStatus.classList.remove('online');
+                        }
+                    } else {
                     if (freshChatStatus) {
                         freshChatStatus.textContent = 'был(а) недавно';
                         freshChatStatus.classList.remove('online');
@@ -12896,6 +12950,7 @@ async function openChat(chatId) {
                             }
                         }
                     });
+                    }
                 } else {
                     chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
                     chatAvatar.textContent = initials;
@@ -13046,14 +13101,40 @@ async function updateProfileModalUI(user) {
         }
     }
 
+    // Системный бот Vuntgram — особый профиль
+    const profileIsBot = !!(user.is_bot === true || (window.vgIsBotId && window.vgIsBotId(user.platform_user_id)));
+    const profileIsVerified = profileIsBot || !!(window.vgIsVerified && window.vgIsVerified(user));
+
     // Основная информация
-    activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+    if (window.vgSetTitle) {
+        window.vgSetTitle(activeElements.modalProfileNickname, user.nickname || 'Не указано', profileIsVerified);
+    } else {
+        activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+    }
     activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
 
-    // Обновление статуса
-    updateProfileModalStatus(user.platform_user_id);
-    startProfileStatusPolling(user.platform_user_id);
-    startProfileDataPolling(user.platform_user_id);
+    // У бота нет онлайн-статуса: пишем «бот» и не опрашиваем сервер
+    if (profileIsBot) {
+        stopProfileStatusPolling();
+        stopProfileDataPolling();
+        const botStatusEl = activeElements.modalProfileStatus;
+        if (botStatusEl) {
+            const span = botStatusEl.querySelector('.status-text');
+            if (span) span.textContent = 'бот';
+            else botStatusEl.textContent = 'бот';
+            botStatusEl.classList.remove('online', 'offline');
+        }
+    } else {
+        // Обновление статуса
+        updateProfileModalStatus(user.platform_user_id);
+        startProfileStatusPolling(user.platform_user_id);
+        startProfileDataPolling(user.platform_user_id);
+    }
+
+    // Кнопка «ещё» (три точки) для бота не нужна
+    if (activeElements.moreButton) {
+        activeElements.moreButton.style.display = profileIsBot ? 'none' : '';
+    }
 
     // Функция для проверки и отображения поля
     function updateField(fieldValue, fieldElement, containerElement, fieldName) {
@@ -13118,8 +13199,8 @@ async function updateProfileModalUI(user) {
         activeElements.modalSubjectContainer.style.display = 'none';
     }
 
-    // Проверяем статус дружбы для кнопки чата
-    const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
+    // Проверяем статус дружбы для кнопки чата (боту дружба не нужна)
+    const friendshipStatus = profileIsBot ? 'accepted' : await checkFriendshipStatus(user.platform_user_id);
     
     if (activeElements.chatButton) {
         if (friendshipStatus === 'accepted') {
@@ -13144,11 +13225,14 @@ async function openChatWithContact(user) {
         return;
     }
     
-    // Проверяем статус дружбы
-    const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
-    if (friendshipStatus !== 'accepted') {
-        showMessage('Чат доступен только для друзей', 'error');
-        return;
+    // Проверяем статус дружбы (с системным ботом чат доступен всегда)
+    const isBotContact = !!(user.is_bot === true || (window.vgIsBotId && window.vgIsBotId(user.platform_user_id)));
+    if (!isBotContact) {
+        const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
+        if (friendshipStatus !== 'accepted') {
+            showMessage('Чат доступен только для друзей', 'error');
+            return;
+        }
     }
     
     try {
@@ -13199,7 +13283,16 @@ function updateProfileModalStatus(userId) {
     const statusElement = activeElements.modalProfileStatus;
     
     if (!statusElement) return;
-    
+
+    // Системный бот: фиксированный статус
+    if (window.vgIsBotId && window.vgIsBotId(userId)) {
+        const botSpan = statusElement.querySelector('.status-text');
+        if (botSpan) botSpan.textContent = 'бот';
+        else statusElement.textContent = 'бот';
+        statusElement.classList.remove('online', 'offline');
+        return;
+    }
+
     const activity = currentActivityData && currentActivityData[userId];
     const statusTextSpan = statusElement.querySelector('.status-text');
     
@@ -16430,6 +16523,163 @@ function stopProfileDataPolling() {
     }
 }
 </style>
+
+<style id="vg-verified-badge-styles">
+/* ==========================================================================
+   ГАЛОЧКА ВЕРИФИКАЦИИ (перенесено из profile.html)
+   ========================================================================== */
+.vg-nick-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.vg-verified-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.45em;
+    height: 1.45em;
+    line-height: 0;
+    align-self: center;
+    transform: translateY(0.02em);
+    margin-left: -0.1em;
+}
+
+.vg-verified-badge svg,
+.vg-verified-badge img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+.vg-verified-badge img { transform: scale(1.08); }
+
+/* Контейнеры имени, в которые вставляется галочка */
+.chat-name.vg-has-badge,
+.chat-title.vg-has-badge,
+.modal-profile-nickname.vg-has-badge,
+.profile-nickname.vg-has-badge,
+[id^="modal-profile-nickname"].vg-has-badge {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 0.1em;
+    max-width: 100%;
+    vertical-align: middle;
+}
+
+/* В списке чатов имя мельче — не даём галочке распирать строку */
+.chat-name.vg-has-badge .vg-verified-badge { width: 1.25em; height: 1.25em; }
+</style>
+
+<script>
+/* ==========================================================================
+   Vuntgram: галочка верификации + системный бот
+   ========================================================================== */
+window.VG_BOT_ID = 'vuntgram_bot';
+
+const VG_VERIFIED_BADGE_CANDIDATES = [
+    'gal.webp',
+    '/gal.webp',
+    './gal.webp',
+    '../gal.webp',
+    '/static/gal.webp',
+    '/images/gal.webp',
+    '/assets/gal.webp'
+];
+let VG_BADGE_RESOLVED_SRC = null;
+
+const VG_VERIFIED_BADGE_SVG = `
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M12 1.5l2.4 2.06 3.15-.3.9 3.04 2.85 1.4-1.2 2.93 1.2 2.93-2.85 1.4-.9 3.04-3.15-.3L12 19.76l-2.4-2.06-3.15.3-.9-3.04-2.85-1.4 1.2-2.93-1.2-2.93 2.85-1.4.9-3.04 3.15.3L12 1.5z" fill="#3390EC"/>
+  <path d="M7.9 10.9l2.7 2.7 5.1-5.1" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+function vgApplyBadgeImage(badge) {
+    const img = document.createElement('img');
+    img.alt = 'Подтверждён';
+    img.decoding = 'async';
+
+    let i = 0;
+    const tryNext = () => {
+        if (VG_BADGE_RESOLVED_SRC) { img.src = VG_BADGE_RESOLVED_SRC; return; }
+        if (i >= VG_VERIFIED_BADGE_CANDIDATES.length) {
+            badge.innerHTML = VG_VERIFIED_BADGE_SVG;
+            return;
+        }
+        img.src = VG_VERIFIED_BADGE_CANDIDATES[i++];
+    };
+    img.onerror = tryNext;
+    img.onload = () => { VG_BADGE_RESOLVED_SRC = img.getAttribute('src'); };
+    tryNext();
+    badge.appendChild(img);
+}
+window.vgApplyBadgeImage = vgApplyBadgeImage;
+
+/* Является ли id ботом Vuntgram */
+window.vgIsBotId = function (id) {
+    if (!id) return false;
+    return String(id) === String(window.VG_BOT_ID);
+};
+
+/* Верифицирован ли участник (объект из participants / user_data) */
+window.vgIsVerified = function (obj) {
+    if (!obj) return false;
+    const v = obj.is_verified;
+    return v === true || v === 'true' || v === 1 || v === '1';
+};
+
+/* Готовый HTML галочки для вставки в шаблонные строки.
+   Картинку подгружаем после вставки через vgHydrateBadges(root). */
+window.vgBadgeHtml = function (verified) {
+    if (!verified) return '';
+    return '<span class="vg-verified-badge" data-vg-badge="1" title="Подтверждённый аккаунт"></span>';
+};
+
+/* Подставляет картинку/SVG во все пустые бейджи внутри root */
+window.vgHydrateBadges = function (root) {
+    const scope = root || document;
+    scope.querySelectorAll('.vg-verified-badge[data-vg-badge="1"]').forEach(badge => {
+        badge.removeAttribute('data-vg-badge');
+        vgApplyBadgeImage(badge);
+    });
+};
+
+/* Как vgSetNameWithBadge, но без галочки просто ставит текст и чистит классы */
+window.vgSetTitle = function (el, name, verified) {
+    if (!el) return;
+    if (verified) {
+        window.vgSetNameWithBadge(el, name, true);
+    } else {
+        el.textContent = name || '';
+        el.classList.remove('vg-has-badge', 'is-verified');
+    }
+};
+
+/* Ставит текст имени + галочку в существующий элемент (без innerHTML-шаблона) */
+window.vgSetNameWithBadge = function (el, name, verified) {
+    if (!el) return;
+    el.textContent = '';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'vg-nick-text';
+    nameSpan.textContent = name || '';
+    el.appendChild(nameSpan);
+
+    if (verified) {
+        const badge = document.createElement('span');
+        badge.className = 'vg-verified-badge';
+        badge.title = 'Подтверждённый аккаунт';
+        vgApplyBadgeImage(badge);
+        el.appendChild(badge);
+    }
+    el.classList.toggle('vg-has-badge', true);
+    el.classList.toggle('is-verified', !!verified);
+};
+</script>
 
 </body>
 </html>
