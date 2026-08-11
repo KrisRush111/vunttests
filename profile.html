@@ -4924,6 +4924,41 @@ function isNotSpecified(value) {
    Чтобы заменить SVG на свою картинку — впиши путь в VERIFIED_BADGE_SRC.
    ========================================================================== */
 const VERIFIED_BADGE_SRC = 'gal.webp'; // файл лежит в репозитории сайта, рядом с profile.html
+// Если страница открыта не из корня сайта, относительный 'gal.webp' даст 404
+// и раньше молча подставлялся синий SVG. Теперь перебираем варианты пути и
+// запоминаем тот, который реально загрузился.
+const VERIFIED_BADGE_CANDIDATES = [
+    VERIFIED_BADGE_SRC,
+    '/gal.webp',
+    './gal.webp',
+    '../gal.webp',
+    '/static/gal.webp',
+    '/images/gal.webp',
+    '/assets/gal.webp'
+];
+let VG_BADGE_RESOLVED_SRC = null; // сюда попадёт рабочий путь
+
+function vgApplyBadgeImage(badge) {
+    const img = document.createElement('img');
+    img.alt = 'Подтверждён';
+    img.decoding = 'async';
+
+    let i = 0;
+    const tryNext = () => {
+        if (VG_BADGE_RESOLVED_SRC) { img.src = VG_BADGE_RESOLVED_SRC; return; }
+        if (i >= VERIFIED_BADGE_CANDIDATES.length) {
+            console.warn('[verified badge] gal.webp не найден ни по одному пути:',
+                VERIFIED_BADGE_CANDIDATES, '— показываю встроенный SVG');
+            badge.innerHTML = VERIFIED_BADGE_SVG;
+            return;
+        }
+        img.src = VERIFIED_BADGE_CANDIDATES[i++];
+    };
+    img.onerror = tryNext;
+    img.onload = () => { VG_BADGE_RESOLVED_SRC = img.getAttribute('src'); };
+    tryNext();
+    badge.appendChild(img);
+}
 const VERIFIED_BADGE_SVG = `
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <path d="M12 1.5l2.4 2.06 3.15-.3.9 3.04 2.85 1.4-1.2 2.93 1.2 2.93-2.85 1.4-.9 3.04-3.15-.3L12 19.76l-2.4-2.06-3.15.3-.9-3.04-2.85-1.4 1.2-2.93-1.2-2.93 2.85-1.4.9-3.04 3.15.3L12 1.5z" fill="#3390EC"/>
@@ -4948,13 +4983,7 @@ function setNicknameWithBadge(el, nickname, verified) {
         badge.className = 'vg-verified-badge';
         badge.title = 'Подтверждённый аккаунт';
         if (VERIFIED_BADGE_SRC) {
-            const img = document.createElement('img');
-            img.src = VERIFIED_BADGE_SRC;
-            img.alt = 'Подтверждён';
-            img.decoding = 'async';
-            // Если gal.webp не найден — не показываем "битую" картинку, рисуем SVG
-            img.onerror = () => { badge.innerHTML = VERIFIED_BADGE_SVG; };
-            badge.appendChild(img);
+            vgApplyBadgeImage(badge);
         } else {
             badge.innerHTML = VERIFIED_BADGE_SVG;
         }
@@ -7520,11 +7549,14 @@ body.photo-viewer-open .bottom-nav { display: none !important; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1em;
-    height: 1em;
+    /* Крупнее ника: размер в em, поэтому масштабируется вместе с текстом */
+    width: 1.3em;
+    height: 1.3em;
     line-height: 0;
-    /* чуть приподнимаем, чтобы центр галочки совпал с центром букв */
-    transform: translateY(-1px);
+    /* Выравнивание по оптическому центру строчных букв, а не по line-box.
+       cap-height ≈ 0.7em, поэтому центр текста чуть выше центра строки. */
+    align-self: center;
+    transform: translateY(0.045em);
 }
 
 .vg-verified-badge svg,
@@ -7541,8 +7573,15 @@ body.photo-viewer-open .bottom-nav { display: none !important; }
 /* Сайдбар: ник меньше — немного уменьшаем галочку, чтобы не доминировала */
 #sidebar-profile-nickname .vg-verified-badge,
 #mobile-sidebar-profile-nickname .vg-verified-badge {
-    width: .95em;
-    height: .95em;
+    width: 1.15em;
+    height: 1.15em;
+}
+
+/* Картинка gal.webp по краям имеет прозрачные поля, из-за которых видимая
+   галочка кажется меньше и «сидит» не по центру строки. Компенсируем
+   лёгким масштабом внутри бокса — сам бокс остаётся ровным. */
+.vg-verified-badge img {
+    transform: scale(1.08);
 }
 </style>
 
