@@ -47,7 +47,7 @@
             --desktop-sidebar-width: 340px;
             --my-message-gradient: linear-gradient(135deg, #9501ff, #a043fd);
             --their-message-gradient: #ffffff;
-            --wallpaper-url: url('фон.webp');
+            --wallpaper-url: url('фон.jpg');
             --animation-timing: cubic-bezier(0.22, 1, 0.36, 1);
             --animation-duration: 0.5s;
         }
@@ -134,7 +134,7 @@
                 height: 100vh;
                 display: flex;
                 flex-direction: column;
-                background-image: url('фон.webp');
+                background-image: var(--wallpaper-url);
                 background-size: cover;
                 background-position: center;
                 background-repeat: no-repeat;
@@ -960,7 +960,8 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-image: url('фон.webp');
+            background-image: none;
+            background-color: var(--telegram-secondary-bg);
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
@@ -969,6 +970,15 @@
             flex-direction: column;
             transform: translateX(100%);
             transition: transform var(--animation-duration) var(--animation-timing);
+        }
+
+        /* Обои чата: одно правило для всех breakpoint'ов, картинка берётся из переменной,
+           поэтому браузер грузит её один раз и держит в кэше. */
+        .chat-modal.wallpaper-enabled {
+            background-image: var(--wallpaper-url);
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
         }
 
         .chat-modal.active {
@@ -4495,8 +4505,10 @@
                 background-repeat: no-repeat !important;
             }
             
-            .chat-modal:not(.active) {
-                background-image: none !important;
+            /* Неактивное окно и так уехало за экран (display:none / translateX),
+               поэтому обои НЕ сбрасываем — иначе картинка выгружается из памяти
+               и при следующем открытии чата подгружается заново (белый/рваный фон). */
+            .chat-modal:not(.active):not(.wallpaper-enabled) {
                 background-color: transparent !important;
             }
         }
@@ -6889,6 +6901,42 @@
 
         let wallpaperState = { enabled: false, selectedWallpaper: 'default' };
 
+        // Имена файлов обоев кириллицей ('фон.jpg') — часть серверов/браузеров
+        // отдают 404 на неэкранированный путь, поэтому всегда кодируем.
+        function wallpaperCssUrl(url) {
+            return `url("${encodeURI(url)}")`;
+        }
+
+        // Держим Image-объекты живыми: браузер не выбрасывает декодированную
+        // картинку из кэша, поэтому обои появляются мгновенно и целиком,
+        // а не «дорисовываются» при открытии чата.
+        const _wallpaperPreloadCache = new Map();
+
+        function preloadWallpaper(url) {
+            if (!url) return Promise.resolve(false);
+            if (_wallpaperPreloadCache.has(url)) return _wallpaperPreloadCache.get(url).promise;
+            const img = new Image();
+            img.decoding = 'sync';
+            const promise = new Promise((resolve) => {
+                img.onload = () => {
+                    if (img.decode) img.decode().catch(() => {}).finally(() => resolve(true));
+                    else resolve(true);
+                };
+                img.onerror = () => resolve(false);
+            });
+            _wallpaperPreloadCache.set(url, { img, promise });
+            img.src = encodeURI(url);
+            return promise;
+        }
+
+        function preloadAllWallpapers() {
+            const selected = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper) || WALLPAPERS[0];
+            // Сначала выбранные обои, остальные — в фоне, чтобы переключение было без мигания.
+            preloadWallpaper(selected.url).then(() => {
+                WALLPAPERS.forEach(w => { if (w.url !== selected.url) preloadWallpaper(w.url); });
+            });
+        }
+
         function setCookie(name, value, days = 7) {
             const date = new Date();
             date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
@@ -7149,6 +7197,7 @@
 
         function initializeWallpaperSystem() {
             loadWallpaperSettings();
+            preloadAllWallpapers();
             applyWallpaper();
             setupWallpaperBroadcastListener();
             window.addEventListener('resize', () => applyWallpaper());
@@ -7176,7 +7225,9 @@
                 return;
             }
             
-            document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
+            const cssUrl = wallpaperCssUrl(selectedWallpaper.url);
+            document.documentElement.style.setProperty('--wallpaper-url', cssUrl);
+            preloadWallpaper(selectedWallpaper.url);
             
             const desktopPlaceholder = document.getElementById('desktopPlaceholder');
             const chatModalDesktop = document.getElementById('chatModalDesktop');
@@ -7188,7 +7239,7 @@
                 if (!isMobile) {
                     document.body.classList.add('wallpaper-enabled');
                     document.body.classList.toggle('wallpaper-light-text', needsLightText);
-                    document.body.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+                    document.body.style.backgroundImage = cssUrl;
                     document.body.style.backgroundSize = 'cover';
                     document.body.style.backgroundPosition = 'center';
                     document.body.style.backgroundRepeat = 'no-repeat';
@@ -7198,29 +7249,25 @@
                 if (desktopPlaceholder && !isMobile) {
                     desktopPlaceholder.classList.add('wallpaper-enabled');
                     desktopPlaceholder.classList.toggle('wallpaper-light-text', needsLightText);
-                    desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+                    desktopPlaceholder.style.backgroundImage = cssUrl;
                     desktopPlaceholder.style.backgroundSize = 'cover';
                     desktopPlaceholder.style.backgroundPosition = 'center';
                     desktopPlaceholder.style.backgroundRepeat = 'no-repeat';
                 }
                 
-                if (chatModalDesktop && !isMobile) {
-                    chatModalDesktop.classList.add('wallpaper-enabled');
-                    chatModalDesktop.classList.toggle('wallpaper-light-text', needsLightText);
-                    chatModalDesktop.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-                    chatModalDesktop.style.backgroundSize = 'cover';
-                    chatModalDesktop.style.backgroundPosition = 'center';
-                    chatModalDesktop.style.backgroundRepeat = 'no-repeat';
-                }
-                
-                if (chatModalMobile && isMobile) {
-                    chatModalMobile.classList.add('wallpaper-enabled');
-                    chatModalMobile.classList.toggle('wallpaper-light-text', needsLightText);
-                    chatModalMobile.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-                    chatModalMobile.style.backgroundSize = 'cover';
-                    chatModalMobile.style.backgroundPosition = 'center';
-                    chatModalMobile.style.backgroundRepeat = 'no-repeat';
-                }
+                // Обои ставим СРАЗУ на оба окна чата, независимо от текущей ширины:
+                // раньше при resize/повороте или если applyWallpaper успел отработать
+                // в «десктопном» состоянии, мобильному окну фон вообще не доставался.
+                [chatModalDesktop, chatModalMobile].forEach(modal => {
+                    if (!modal) return;
+                    modal.classList.add('wallpaper-enabled');
+                    modal.classList.toggle('wallpaper-light-text', needsLightText);
+                    modal.style.backgroundImage = cssUrl;
+                    modal.style.backgroundSize = 'cover';
+                    modal.style.backgroundPosition = 'center';
+                    modal.style.backgroundRepeat = 'no-repeat';
+                    modal.style.backgroundColor = '';
+                });
             } else {
                 document.body.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
                 document.body.style.backgroundImage = '';
@@ -7267,15 +7314,21 @@
             const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
             const needsLightText = wallpaperState.enabled && !!selectedWallpaper && WALLPAPERS_LIGHT_TEXT_IDS.includes(selectedWallpaper.id);
             
-            if (wallpaperState.enabled) {
-                if (chatModalDesktop && chatModalDesktop.style.display === 'flex') {
-                    chatModalDesktop.classList.add('wallpaper-enabled');
-                    chatModalDesktop.classList.toggle('wallpaper-light-text', needsLightText);
-                }
-                if (chatModalMobile && chatModalMobile.classList.contains('active')) {
-                    chatModalMobile.classList.add('wallpaper-enabled');
-                    chatModalMobile.classList.toggle('wallpaper-light-text', needsLightText);
-                }
+            if (wallpaperState.enabled && selectedWallpaper) {
+                const cssUrl = wallpaperCssUrl(selectedWallpaper.url);
+                preloadWallpaper(selectedWallpaper.url);
+                [chatModalDesktop, chatModalMobile].forEach(modal => {
+                    if (!modal) return;
+                    modal.classList.add('wallpaper-enabled');
+                    modal.classList.toggle('wallpaper-light-text', needsLightText);
+                    if (modal.style.backgroundImage !== cssUrl) {
+                        modal.style.backgroundImage = cssUrl;
+                        modal.style.backgroundSize = 'cover';
+                        modal.style.backgroundPosition = 'center';
+                        modal.style.backgroundRepeat = 'no-repeat';
+                    }
+                    modal.style.backgroundColor = '';
+                });
             } else {
                 if (chatModalDesktop) chatModalDesktop.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
                 if (chatModalMobile) chatModalMobile.classList.remove('wallpaper-enabled', 'wallpaper-light-text');
