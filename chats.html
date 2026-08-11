@@ -16687,6 +16687,83 @@ function stopProfileDataPolling() {
 
 .vg-verified-badge img { transform: scale(1.08); }
 
+/* ==========================================================================
+   ПОДСКАЗКА «Верифицирован Vuntgram» — по нажатию на галочку
+   (идентична profile.html)
+   ========================================================================== */
+.vg-verified-badge {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.vg-verified-tooltip {
+    position: fixed;
+    z-index: 100000;
+    box-sizing: border-box;
+    padding: 8px 13px;
+    border-radius: 14px;
+    /* тонкая полупрозрачная рамка */
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
+    color: rgba(0, 0, 0, 0.82);
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    letter-spacing: 0.1px;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
+    opacity: 0;
+    /* Всплывает вверх: стартует чуть ниже своего места и плавно поднимается */
+    transform: translateY(8px) scale(0.94);
+    transform-origin: 50% 100%;
+    transition: opacity 0.26s cubic-bezier(0.22, 0.61, 0.36, 1),
+                transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+}
+
+.vg-verified-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+/* Скрытие — чуть быстрее, тем же движением вниз */
+.vg-verified-tooltip.hiding {
+    transition: opacity 0.15s ease, transform 0.18s ease;
+}
+
+/* Когда подсказка вынужденно показана снизу (сверху нет места) */
+.vg-verified-tooltip.below {
+    transform-origin: 50% 0%;
+    transform: translateY(-8px) scale(0.94);
+}
+
+.vg-verified-tooltip.below.visible {
+    transform: translateY(0) scale(1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .vg-verified-tooltip {
+        border-color: rgba(255, 255, 255, 0.16);
+        background: rgba(28, 28, 30, 0.78);
+        color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+    }
+}
+
+body.dark-theme .vg-verified-tooltip,
+body.theme-dark .vg-verified-tooltip,
+html[data-theme="dark"] .vg-verified-tooltip {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(28, 28, 30, 0.78);
+    color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+
 /* Контейнеры имени, в которые вставляется галочка */
 .chat-name.vg-has-badge,
 .chat-title.vg-has-badge,
@@ -16999,6 +17076,133 @@ window.vgSetNameWithBadge = function (el, name, verified) {
 /* Прогреваем путь к картинке галочки сразу при загрузке страницы, чтобы
    первая же отрисовка бейджа была финальной. */
 vgResolveBadgeSrc();
+</script>
+
+<script>
+/* ==========================================================================
+   Тап по галочке верификации -> подсказка «Верифицирован Vuntgram».
+   Один общий элемент на страницу + делегированный обработчик, поэтому
+   работает для галочек в списке чатов, в шапке чата и в профиле контакта,
+   включая созданные позже при ре-рендере.
+   ========================================================================== */
+(function () {
+    const TEXT = 'Верифицирован Vuntgram';
+    const HIDE_AFTER = 2600;
+    let tip = null;
+    let hideTimer = null;
+    let currentBadge = null;
+
+    function ensureTip() {
+        if (tip && tip.isConnected) return tip;
+        tip = document.createElement('div');
+        tip.className = 'vg-verified-tooltip';
+        tip.setAttribute('role', 'status');
+        tip.textContent = TEXT;
+        document.body.appendChild(tip);
+        return tip;
+    }
+
+    function isShown() {
+        return !!(tip && tip.classList.contains('visible'));
+    }
+
+    function place(badge) {
+        const t = ensureTip();
+        t.style.visibility = 'hidden';
+        t.classList.add('visible');
+
+        const r = badge.getBoundingClientRect();
+        const tw = t.offsetWidth;
+        const th = t.offsetHeight;
+        const gap = 8;
+        const margin = 8;
+
+        let left = r.left + r.width / 2 - tw / 2;
+        left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin));
+
+        // По умолчанию НАД галочкой; уходим под неё только если сверху
+        // физически не хватает места.
+        let top = r.top - th - gap;
+        let below = false;
+        if (top < margin) {
+            const under = r.bottom + gap;
+            if (under + th <= window.innerHeight - margin) {
+                top = under;
+                below = true;
+            } else {
+                top = margin;
+            }
+        }
+
+        t.classList.toggle('below', below);
+        t.style.left = left + 'px';
+        t.style.top = top + 'px';
+        t.style.visibility = '';
+    }
+
+    function show(badge) {
+        currentBadge = badge;
+        const t = ensureTip();
+        t.classList.remove('hiding');
+        void t.offsetWidth; // reflow, чтобы анимация проиграла с нуля
+        place(badge);
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hide, HIDE_AFTER);
+    }
+
+    function hide() {
+        clearTimeout(hideTimer);
+        currentBadge = null;
+        if (!tip || !tip.classList.contains('visible')) return;
+        tip.classList.add('hiding');
+        tip.classList.remove('visible');
+        setTimeout(() => {
+            if (tip && !tip.classList.contains('visible')) tip.classList.remove('hiding');
+        }, 200);
+    }
+
+    document.addEventListener('click', function (e) {
+        const badge = e.target && e.target.closest
+            ? e.target.closest('.vg-verified-badge')
+            : null;
+
+        if (badge) {
+            // Не даём клику уйти в строку чата / шапку / ник — иначе тап по
+            // галочке открывал бы чат или раскрывал аватар.
+            e.preventDefault();
+            e.stopPropagation();
+            if (badge.hasAttribute('title')) {
+                badge.setAttribute('aria-label', TEXT);
+                badge.removeAttribute('title');
+            }
+            if (currentBadge === badge && isShown()) {
+                hide();
+            } else {
+                show(badge);
+            }
+            return;
+        }
+        hide();
+    }, true);
+
+    // Гасим подсказку в самом начале взаимодействия, не дожидаясь click:
+    // тап по аватарке/чату не должен оставлять подсказку висеть поверх.
+    function hideOnOutsideStart(e) {
+        if (!isShown()) return;
+        const onBadge = e.target && e.target.closest
+            ? e.target.closest('.vg-verified-badge')
+            : null;
+        if (!onBadge) hide();
+    }
+    document.addEventListener('pointerdown', hideOnOutsideStart, true);
+    document.addEventListener('touchstart', hideOnOutsideStart, true);
+    document.addEventListener('mousedown', hideOnOutsideStart, true);
+
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    window.addEventListener('blur', hide);
+    document.addEventListener('visibilitychange', hide);
+})();
 </script>
 
 </body>
