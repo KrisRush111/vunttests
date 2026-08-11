@@ -13087,6 +13087,9 @@ async function openChat(chatId) {
 // в contacts.html, раскрывается та же самая картинка, что уже показана в
 // кружке аватара — анимация чистая, без смещения.
 
+// Запомненное состояние верификации текущего открытого профиля (см. ниже)
+let VG_VERIFIED_STICKY = { id: null, value: false };
+
 async function updateProfileModalUI(user) {
     const activeElements = getActiveElements();
     
@@ -13150,7 +13153,17 @@ async function updateProfileModalUI(user) {
 
     // Системный бот Vuntgram — особый профиль
     const profileIsBot = !!(user.is_bot === true || (window.vgIsBotId && window.vgIsBotId(user.platform_user_id)));
-    const profileIsVerified = profileIsBot || !!(window.vgIsVerified && window.vgIsVerified(user));
+    let profileIsVerified = profileIsBot || !!(window.vgIsVerified && window.vgIsVerified(user));
+    // Ответы приходят из разных источников (кэш → /get_user_data → поллинг), и
+    // не в каждом есть is_verified. Пока открыт ОДИН и тот же профиль, не
+    // гасим уже показанную галочку из-за ответа без флага — иначе она мигает.
+    if (!profileIsVerified && VG_VERIFIED_STICKY.id
+        && String(VG_VERIFIED_STICKY.id) === String(user.platform_user_id)
+        && VG_VERIFIED_STICKY.value
+        && !('is_verified' in user)) {
+        profileIsVerified = true;
+    }
+    VG_VERIFIED_STICKY = { id: user.platform_user_id, value: profileIsVerified };
 
     // Основная информация
     if (window.vgSetTitle) {
@@ -13436,6 +13449,10 @@ function profileFingerprint(user) {
     return JSON.stringify([
         user.nickname, user.avatar_background,
         !!(user.has_avatar_photo || user.has_avatar),
+        // без is_verified/is_bot поллинг не замечал смену верификации, а
+        // расхождение кэша и сервера давало мигание галочки
+        !!(window.vgIsVerified && window.vgIsVerified(user)),
+        !!user.is_bot,
         user.main_school_name, user.class_number, user.class_letter,
         user.additional_school_name, user.specialization, user.course,
         user.identity, user.subject1, user.subject2
@@ -13478,6 +13495,7 @@ function stopProfileDataPolling() {
     }
     _profileDataViewedUserId = null;
     _profileDataLastFingerprint = null;
+    VG_VERIFIED_STICKY = { id: null, value: false };
 }
 
         function closeChat() {
@@ -16757,7 +16775,13 @@ const VG_VERIFIED_BADGE_CANDIDATES = [
     '/images/gal.webp',
     '/assets/gal.webp'
 ];
+/* Путь к картинке галочки резолвим ОДИН раз за сессию и запоминаем в
+   localStorage. Раньше каждый новый бейдж заново перебирал 7 путей через
+   img.onerror — из-за этого галочка успевала мигнуть пустотой/SVG. */
+const VG_BADGE_SRC_LS_KEY = 'vgBadgeSrc';
 let VG_BADGE_RESOLVED_SRC = null;
+try { VG_BADGE_RESOLVED_SRC = localStorage.getItem(VG_BADGE_SRC_LS_KEY) || null; } catch (e) {}
+let VG_BADGE_RESOLVE_PROMISE = null;
 
 const VG_VERIFIED_BADGE_SVG = `
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -16765,24 +16789,70 @@ const VG_VERIFIED_BADGE_SVG = `
   <path d="M7.9 10.9l2.7 2.7 5.1-5.1" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
-function vgApplyBadgeImage(badge) {
-    const img = document.createElement('img');
-    img.alt = 'Подтверждён';
-    img.decoding = 'async';
+/* Один раз находит рабочий путь к gal.webp (без вставки в DOM) и кэширует его.
+   Пока путь не найден — бейдж показывает inline-SVG, поэтому пустого кадра
+   не бывает вообще. */
+function vgResolveBadgeSrc() {
+    if (VG_BADGE_RESOLVED_SRC) return Promise.resolve(VG_BADGE_RESOLVED_SRC);
+    if (VG_BADGE_RESOLVE_PROMISE) return VG_BADGE_RESOLVE_PROMISE;
 
-    let i = 0;
-    const tryNext = () => {
-        if (VG_BADGE_RESOLVED_SRC) { img.src = VG_BADGE_RESOLVED_SRC; return; }
-        if (i >= VG_VERIFIED_BADGE_CANDIDATES.length) {
-            badge.innerHTML = VG_VERIFIED_BADGE_SVG;
+    VG_BADGE_RESOLVE_PROMISE = new Promise(resolve => {
+        let i = 0;
+        const probe = new Image();
+        probe.decoding = 'async';
+        const tryNext = () => {
+            if (i >= VG_VERIFIED_BADGE_CANDIDATES.length) { resolve(null); return; }
+            probe.src = VG_VERIFIED_BADGE_CANDIDATES[i++];
+        };
+        probe.onerror = tryNext;
+        probe.onload = () => {
+            VG_BADGE_RESOLVED_SRC = probe.getAttribute('src');
+            try { localStorage.setItem(VG_BADGE_SRC_LS_KEY, VG_BADGE_RESOLVED_SRC); } catch (e) {}
+            resolve(VG_BADGE_RESOLVED_SRC);
+        };
+        tryNext();
+    });
+    return VG_BADGE_RESOLVE_PROMISE;
+}
+window.vgResolveBadgeSrc = vgResolveBadgeSrc;
+
+/* Наполняет бейдж содержимым. Идемпотентна: если внутри уже есть нужная
+   картинка/SVG — ничего не трогает (иначе каждый ре-рендер профиля заново
+   грузил <img> и галочка мигала). */
+function vgApplyBadgeImage(badge) {
+    if (!badge) return;
+
+    if (VG_BADGE_RESOLVED_SRC) {
+        const existing = badge.querySelector('img');
+        if (existing) {
+            if (existing.getAttribute('src') !== VG_BADGE_RESOLVED_SRC) {
+                existing.setAttribute('src', VG_BADGE_RESOLVED_SRC);
+            }
             return;
         }
-        img.src = VG_VERIFIED_BADGE_CANDIDATES[i++];
-    };
-    img.onerror = tryNext;
-    img.onload = () => { VG_BADGE_RESOLVED_SRC = img.getAttribute('src'); };
-    tryNext();
-    badge.appendChild(img);
+        const img = document.createElement('img');
+        img.alt = 'Подтверждён';
+        img.decoding = 'async';
+        img.src = VG_BADGE_RESOLVED_SRC;
+        badge.textContent = '';
+        badge.appendChild(img);
+        return;
+    }
+
+    // Пути ещё не знаем — сразу рисуем SVG (не пустоту), а когда путь
+    // зарезолвится, аккуратно заменим содержимое на картинку.
+    if (!badge.querySelector('svg') && !badge.querySelector('img')) {
+        badge.innerHTML = VG_VERIFIED_BADGE_SVG;
+    }
+    vgResolveBadgeSrc().then(src => {
+        if (!src || !badge.isConnected) return;
+        if (badge.querySelector('img')) return;
+        const img = document.createElement('img');
+        img.alt = 'Подтверждён';
+        img.decoding = 'async';
+        img.src = src;
+        img.onload = () => { badge.textContent = ''; badge.appendChild(img); };
+    });
 }
 window.vgApplyBadgeImage = vgApplyBadgeImage;
 
@@ -16876,34 +16946,59 @@ window.vgApplyBotChatUI = function (isBot) {
 /* Как vgSetNameWithBadge, но без галочки просто ставит текст и чистит классы */
 window.vgSetTitle = function (el, name, verified) {
     if (!el) return;
-    if (verified) {
-        window.vgSetNameWithBadge(el, name, true);
-    } else {
-        el.textContent = name || '';
-        el.classList.remove('vg-has-badge', 'is-verified');
-    }
+    window.vgSetNameWithBadge(el, name, !!verified);
 };
 
-/* Ставит текст имени + галочку в существующий элемент (без innerHTML-шаблона) */
+/* Ставит текст имени + галочку в существующий элемент.
+   ИДЕМПОТЕНТНА: повторный вызов с теми же данными не пересоздаёт ни имя, ни
+   бейдж. Раньше здесь был el.textContent = '' — и при каждом обновлении
+   профиля (кэш → сеть → поллинг раз в 15 с) галочка удалялась и создавалась
+   заново, что и выглядело как мигание. */
 window.vgSetNameWithBadge = function (el, name, verified) {
     if (!el) return;
-    el.textContent = '';
+    const text = name || '';
+    verified = !!verified;
 
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'vg-nick-text';
-    nameSpan.textContent = name || '';
-    el.appendChild(nameSpan);
+    let nameSpan = el.querySelector(':scope > .vg-nick-text');
+    let badge = el.querySelector(':scope > .vg-verified-badge');
 
-    if (verified) {
-        const badge = document.createElement('span');
+    // Без галочки — ровно старое поведение: обычный текст в элементе,
+    // без обёртки и без flex-классов (чтобы не менялась вёрстка/обрезка).
+    if (!verified) {
+        if (badge) badge.remove();
+        if (nameSpan) el.textContent = '';
+        if (el.textContent !== text) el.textContent = text;
+        el.classList.remove('vg-has-badge', 'is-verified');
+        return;
+    }
+
+    // Элемент ещё не в нашей структуре (или в нём остался «сырой» текст) —
+    // создаём разметку один раз.
+    if (!nameSpan) {
+        el.textContent = '';
+        nameSpan = document.createElement('span');
+        nameSpan.className = 'vg-nick-text';
+        el.appendChild(nameSpan);
+        badge = null;
+    }
+
+    if (nameSpan.textContent !== text) nameSpan.textContent = text;
+
+    if (!badge) {
+        badge = document.createElement('span');
         badge.className = 'vg-verified-badge';
         badge.title = 'Подтверждённый аккаунт';
-        vgApplyBadgeImage(badge);
         el.appendChild(badge);
     }
-    el.classList.toggle('vg-has-badge', true);
-    el.classList.toggle('is-verified', !!verified);
+    // Не пересоздаём содержимое бейджа, если оно уже есть
+    vgApplyBadgeImage(badge);
+
+    el.classList.add('vg-has-badge', 'is-verified');
 };
+
+/* Прогреваем путь к картинке галочки сразу при загрузке страницы, чтобы
+   первая же отрисовка бейджа была финальной. */
+vgResolveBadgeSrc();
 </script>
 
 </body>
