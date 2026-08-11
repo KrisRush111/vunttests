@@ -3747,6 +3747,16 @@ function setupWallpaperBroadcastListener() {
 
 
 
+/* ==========================================================================
+   СЛУЖЕБНЫЙ БОТ VUNTGRAM — скрыт из контактов
+   Бот не должен попадать ни в блок «Возможно вы также знаете», ни в поиск
+   по ID. Значение совпадает с VUNT_BOT_ID на сервере (server-for-vvv.py).
+   ========================================================================== */
+window.VUNT_BOT_ID = 'vuntgram_bot';
+window.vgIsBotId = function (id) {
+    return String(id || '').trim().toLowerCase() === window.VUNT_BOT_ID.toLowerCase();
+};
+
 // Функция для загрузки рекомендаций
 async function loadFriendsRecommendations() {
     if (!userData || !userData.platform_user_id) return;
@@ -3767,7 +3777,9 @@ async function loadFriendsRecommendations() {
         const data = await response.json();
 
         if (data.status === 'success') {
-            friendsRecommendations = data.recommendations || [];
+            // Служебный бот Vuntgram не показывается в рекомендациях
+            friendsRecommendations = (data.recommendations || [])
+                .filter(u => !window.vgIsBotId(u && u.platform_user_id));
             
             // Логируем количество полученных рекомендаций
             console.log(`Получено рекомендаций: ${friendsRecommendations.length}`);
@@ -5571,6 +5583,14 @@ async function updateProfileModalUI(user) {
     searchResults.innerHTML = '';
     noContacts.style.display = 'none';
 
+    // Служебный бот Vuntgram не находится через поиск по ID —
+    // отвечаем так же, как на несуществующего пользователя.
+    if (window.vgIsBotId(cleanUserId)) {
+        noContacts.textContent = 'Пользователь не найден';
+        noContacts.style.display = 'block';
+        return;
+    }
+
     showLoading('Поиск пользователя...');
 
     try {
@@ -5594,7 +5614,7 @@ async function updateProfileModalUI(user) {
             throw new Error(data.error || `HTTP error! status: ${response.status}`);
         }
 
-        if (data.status === 'success' && data.user) {
+        if (data.status === 'success' && data.user && !window.vgIsBotId(data.user.platform_user_id)) {
             // Проверяем статус дружбы для правильного отображения кнопки
             const friendshipStatus = await checkFriendshipStatus(cleanUserId);
             await displayUserResult(data.user, friendshipStatus === 'accepted' ? 'added' : 
