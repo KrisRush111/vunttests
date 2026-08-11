@@ -3843,7 +3843,12 @@ function createRecommendationUserElement(user) {
 
     const nicknameElement = document.createElement('div');
     nicknameElement.className = 'recommendation-nickname';
-    nicknameElement.textContent = user.nickname || 'Не указано';
+    if (window.vgSetNameWithBadge) {
+        window.vgSetNameWithBadge(nicknameElement, user.nickname || 'Не указано',
+            window.vgIsVerified && window.vgIsVerified(user));
+    } else {
+        nicknameElement.textContent = user.nickname || 'Не указано';
+    }
 
     const detailsElement = document.createElement('div');
     detailsElement.className = 'recommendation-details';
@@ -4887,7 +4892,12 @@ async function updateProfileModalUI(user) {
     }
 
     // Основная информация (заголовок всегда виден)
-    activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+    if (window.vgSetTitle) {
+        window.vgSetTitle(activeElements.modalProfileNickname, user.nickname || 'Не указано',
+            window.vgIsVerified && window.vgIsVerified(user));
+    } else {
+        activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
+    }
     activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
 
     // Обновление статуса - используем кэшированные данные
@@ -5269,7 +5279,12 @@ async function updateProfileModalUI(user) {
 
             const nicknameElement = document.createElement('div');
             nicknameElement.className = 'user-nickname';
-            nicknameElement.textContent = user.nickname || 'Не указано';
+            if (window.vgSetNameWithBadge) {
+                window.vgSetNameWithBadge(nicknameElement, user.nickname || 'Не указано',
+                    window.vgIsVerified && window.vgIsVerified(user));
+            } else {
+                nicknameElement.textContent = user.nickname || 'Не указано';
+            }
 
             const idElement = document.createElement('div');
             idElement.className = 'user-id';
@@ -5368,7 +5383,12 @@ async function updateProfileModalUI(user) {
 
             const nicknameElement = document.createElement('div');
             nicknameElement.className = 'user-nickname';
-            nicknameElement.textContent = user.nickname || 'Не указано';
+            if (window.vgSetNameWithBadge) {
+                window.vgSetNameWithBadge(nicknameElement, user.nickname || 'Не указано',
+                    window.vgIsVerified && window.vgIsVerified(user));
+            } else {
+                nicknameElement.textContent = user.nickname || 'Не указано';
+            }
 
             const idElement = document.createElement('div');
             idElement.className = 'user-id';
@@ -8635,6 +8655,422 @@ function setupSearchHandlers() {
     }
 }
 </style>
+
+<style id="vg-verified-badge-styles">
+/* ==========================================================================
+   ГАЛОЧКА ВЕРИФИКАЦИИ (как в profile.html / chats.html)
+   ========================================================================== */
+.vg-nick-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.vg-verified-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.58em;
+    height: 1.58em;
+    line-height: 0;
+    align-self: center;
+    transform: translateY(0.02em);
+    margin-left: -0.1em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.vg-verified-badge svg,
+.vg-verified-badge img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+.vg-verified-badge img { transform: scale(1.12); }
+
+/* Контейнеры имени, в которые вставляется галочка. Ник обрезается
+   многоточием, галочка всегда остаётся видимой справа. */
+.user-nickname.vg-has-badge,
+.recommendation-nickname.vg-has-badge,
+.profile-nickname.vg-has-badge,
+[id^="modal-profile-nickname"].vg-has-badge {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 0.1em;
+    max-width: 100%;
+    vertical-align: middle;
+    /* у inline-flex overflow:hidden на самом контейнере не нужен —
+       обрезкой занимается .vg-nick-text внутри */
+    overflow: visible;
+}
+
+/* В профиле ник центрируется родителем (text-align: center), поэтому
+   inline-flex не ломает выравнивание — но в развёрнутой шапке оно слева. */
+.hero-expanded .profile-nickname.vg-has-badge { max-width: 100%; }
+
+/* В списках ник мельче — фиксируем одинаковый абсолютный размер галочки,
+   чтобы она совпадала с профилем и не распирала строку. */
+.user-nickname.vg-has-badge .vg-verified-badge,
+.recommendation-nickname.vg-has-badge .vg-verified-badge {
+    width: 20px;
+    height: 20px;
+}
+
+[id^="modal-profile-nickname"].vg-has-badge .vg-verified-badge {
+    width: 29px;
+    height: 29px;
+}
+
+/* ==========================================================================
+   ПОДСКАЗКА «Верифицирован Vuntgram» — по нажатию на галочку
+   ========================================================================== */
+.vg-verified-tooltip {
+    position: fixed;
+    z-index: 100000;
+    box-sizing: border-box;
+    padding: 8px 13px;
+    border-radius: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
+    color: rgba(0, 0, 0, 0.82);
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    letter-spacing: 0.1px;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+    transform-origin: 50% 100%;
+    transition: opacity 0.26s cubic-bezier(0.22, 0.61, 0.36, 1),
+                transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+}
+
+.vg-verified-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.vg-verified-tooltip.hiding {
+    transition: opacity 0.15s ease, transform 0.18s ease;
+}
+
+.vg-verified-tooltip.below {
+    transform-origin: 50% 0%;
+    transform: translateY(-8px) scale(0.94);
+}
+
+.vg-verified-tooltip.below.visible {
+    transform: translateY(0) scale(1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .vg-verified-tooltip {
+        border-color: rgba(255, 255, 255, 0.16);
+        background: rgba(28, 28, 30, 0.78);
+        color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+    }
+}
+
+body.dark-theme .vg-verified-tooltip,
+body.theme-dark .vg-verified-tooltip,
+html[data-theme="dark"] .vg-verified-tooltip {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(28, 28, 30, 0.78);
+    color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+</style>
+
+<script>
+/* ==========================================================================
+   Vuntgram: галочка верификации (перенесено из profile.html / chats.html)
+   ========================================================================== */
+window.VG_BOT_ID = 'vuntgram_bot';
+
+const VG_VERIFIED_BADGE_CANDIDATES = [
+    'gal.webp',
+    '/gal.webp',
+    './gal.webp',
+    '../gal.webp',
+    '/static/gal.webp',
+    '/images/gal.webp',
+    '/assets/gal.webp'
+];
+
+const VG_BADGE_SRC_LS_KEY = 'vgBadgeSrc';
+let VG_BADGE_RESOLVED_SRC = null;
+try { VG_BADGE_RESOLVED_SRC = localStorage.getItem(VG_BADGE_SRC_LS_KEY) || null; } catch (e) {}
+let VG_BADGE_RESOLVE_PROMISE = null;
+
+const VG_VERIFIED_BADGE_SVG = `
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M12 1.5l2.4 2.06 3.15-.3.9 3.04 2.85 1.4-1.2 2.93 1.2 2.93-2.85 1.4-.9 3.04-3.15-.3L12 19.76l-2.4-2.06-3.15.3-.9-3.04-2.85-1.4 1.2-2.93-1.2-2.93 2.85-1.4.9-3.04 3.15.3L12 1.5z" fill="#3390EC"/>
+  <path d="M7.9 10.9l2.7 2.7 5.1-5.1" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+/* Путь к картинке ищем один раз за сессию и кэшируем, иначе каждый новый
+   бейдж перебирал бы 7 путей через onerror и галочка мигала. */
+function vgResolveBadgeSrc() {
+    if (VG_BADGE_RESOLVED_SRC) return Promise.resolve(VG_BADGE_RESOLVED_SRC);
+    if (VG_BADGE_RESOLVE_PROMISE) return VG_BADGE_RESOLVE_PROMISE;
+
+    VG_BADGE_RESOLVE_PROMISE = new Promise(resolve => {
+        let i = 0;
+        const probe = new Image();
+        probe.decoding = 'async';
+        const tryNext = () => {
+            if (i >= VG_VERIFIED_BADGE_CANDIDATES.length) { resolve(null); return; }
+            probe.src = VG_VERIFIED_BADGE_CANDIDATES[i++];
+        };
+        probe.onerror = tryNext;
+        probe.onload = () => {
+            VG_BADGE_RESOLVED_SRC = probe.getAttribute('src');
+            try { localStorage.setItem(VG_BADGE_SRC_LS_KEY, VG_BADGE_RESOLVED_SRC); } catch (e) {}
+            resolve(VG_BADGE_RESOLVED_SRC);
+        };
+        tryNext();
+    });
+    return VG_BADGE_RESOLVE_PROMISE;
+}
+window.vgResolveBadgeSrc = vgResolveBadgeSrc;
+
+/* Идемпотентно наполняет бейдж: если содержимое уже нужное — не трогает. */
+function vgApplyBadgeImage(badge) {
+    if (!badge) return;
+
+    if (VG_BADGE_RESOLVED_SRC) {
+        const existing = badge.querySelector('img');
+        if (existing) {
+            if (existing.getAttribute('src') !== VG_BADGE_RESOLVED_SRC) {
+                existing.setAttribute('src', VG_BADGE_RESOLVED_SRC);
+            }
+            return;
+        }
+        const img = document.createElement('img');
+        img.alt = 'Подтверждён';
+        img.decoding = 'async';
+        img.src = VG_BADGE_RESOLVED_SRC;
+        badge.textContent = '';
+        badge.appendChild(img);
+        return;
+    }
+
+    if (!badge.querySelector('svg') && !badge.querySelector('img')) {
+        badge.innerHTML = VG_VERIFIED_BADGE_SVG;
+    }
+    vgResolveBadgeSrc().then(src => {
+        if (!src || !badge.isConnected) return;
+        if (badge.querySelector('img')) return;
+        const img = document.createElement('img');
+        img.alt = 'Подтверждён';
+        img.decoding = 'async';
+        img.src = src;
+        img.onload = () => { badge.textContent = ''; badge.appendChild(img); };
+    });
+}
+window.vgApplyBadgeImage = vgApplyBadgeImage;
+
+window.vgIsBotId = function (id) {
+    if (!id) return false;
+    return String(id) === String(window.VG_BOT_ID);
+};
+
+/* Верифицирован ли пользователь (объект из contacts / user_data) */
+window.vgIsVerified = function (obj) {
+    if (!obj) return false;
+    if (obj.is_bot === true || window.vgIsBotId(obj.platform_user_id)) return true;
+    const v = obj.is_verified;
+    return v === true || v === 'true' || v === 1 || v === '1';
+};
+
+/* Ставит имя + галочку в элемент. ИДЕМПОТЕНТНА: повторный вызов с теми же
+   данными не пересоздаёт ни имя, ни бейдж (иначе галочка мигает). */
+window.vgSetNameWithBadge = function (el, name, verified) {
+    if (!el) return;
+    const text = name || '';
+    verified = !!verified;
+
+    let nameSpan = el.querySelector(':scope > .vg-nick-text');
+    let badge = el.querySelector(':scope > .vg-verified-badge');
+
+    // Без галочки — ровно старое поведение: обычный текст, без обёртки
+    if (!verified) {
+        if (badge) badge.remove();
+        if (nameSpan) el.textContent = '';
+        if (el.textContent !== text) el.textContent = text;
+        el.classList.remove('vg-has-badge', 'is-verified');
+        return;
+    }
+
+    if (!nameSpan) {
+        el.textContent = '';
+        nameSpan = document.createElement('span');
+        nameSpan.className = 'vg-nick-text';
+        el.appendChild(nameSpan);
+        badge = null;
+    }
+
+    if (nameSpan.textContent !== text) nameSpan.textContent = text;
+
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'vg-verified-badge';
+        badge.setAttribute('aria-label', 'Верифицирован Vuntgram');
+        el.appendChild(badge);
+    }
+    vgApplyBadgeImage(badge);
+
+    el.classList.add('vg-has-badge', 'is-verified');
+};
+
+window.vgSetTitle = function (el, name, verified) {
+    if (!el) return;
+    window.vgSetNameWithBadge(el, name, !!verified);
+};
+
+/* Подставляет содержимое во все пустые бейджи внутри root */
+window.vgHydrateBadges = function (root) {
+    (root || document).querySelectorAll('.vg-verified-badge').forEach(vgApplyBadgeImage);
+};
+
+/* Прогреваем путь к картинке сразу, чтобы первая отрисовка была финальной */
+vgResolveBadgeSrc();
+</script>
+
+<script>
+/* ==========================================================================
+   Тап по галочке -> подсказка «Верифицирован Vuntgram».
+   Один общий элемент + делегированный обработчик: работает для галочек в
+   списке контактов, в заявках, в рекомендациях и в профиле контакта,
+   включая созданные позже при ре-рендере.
+   ========================================================================== */
+(function () {
+    const TEXT = 'Верифицирован Vuntgram';
+    const HIDE_AFTER = 2600;
+    let tip = null;
+    let hideTimer = null;
+    let currentBadge = null;
+
+    function ensureTip() {
+        if (tip && tip.isConnected) return tip;
+        tip = document.createElement('div');
+        tip.className = 'vg-verified-tooltip';
+        tip.setAttribute('role', 'status');
+        tip.textContent = TEXT;
+        document.body.appendChild(tip);
+        return tip;
+    }
+
+    function isShown() {
+        return !!(tip && tip.classList.contains('visible'));
+    }
+
+    function place(badge) {
+        const t = ensureTip();
+        t.style.visibility = 'hidden';
+        t.classList.add('visible');
+
+        const r = badge.getBoundingClientRect();
+        const tw = t.offsetWidth;
+        const th = t.offsetHeight;
+        const gap = 8;
+        const margin = 8;
+
+        let left = r.left + r.width / 2 - tw / 2;
+        left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin));
+
+        // По умолчанию НАД галочкой; под неё — только если сверху нет места
+        let top = r.top - th - gap;
+        let below = false;
+        if (top < margin) {
+            const under = r.bottom + gap;
+            if (under + th <= window.innerHeight - margin) {
+                top = under;
+                below = true;
+            } else {
+                top = margin;
+            }
+        }
+
+        t.classList.toggle('below', below);
+        t.style.left = left + 'px';
+        t.style.top = top + 'px';
+        t.style.visibility = '';
+    }
+
+    function show(badge) {
+        currentBadge = badge;
+        const t = ensureTip();
+        t.classList.remove('hiding');
+        void t.offsetWidth;
+        place(badge);
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hide, HIDE_AFTER);
+    }
+
+    function hide() {
+        clearTimeout(hideTimer);
+        currentBadge = null;
+        if (!tip || !tip.classList.contains('visible')) return;
+        tip.classList.add('hiding');
+        tip.classList.remove('visible');
+        setTimeout(() => {
+            if (tip && !tip.classList.contains('visible')) tip.classList.remove('hiding');
+        }, 200);
+    }
+
+    document.addEventListener('click', function (e) {
+        const badge = e.target && e.target.closest
+            ? e.target.closest('.vg-verified-badge')
+            : null;
+
+        if (badge) {
+            // Не даём клику уйти в строку контакта — иначе откроется профиль
+            e.preventDefault();
+            e.stopPropagation();
+            if (badge.hasAttribute('title')) {
+                badge.setAttribute('aria-label', TEXT);
+                badge.removeAttribute('title');
+            }
+            if (currentBadge === badge && isShown()) {
+                hide();
+            } else {
+                show(badge);
+            }
+            return;
+        }
+        hide();
+    }, true);
+
+    function hideOnOutsideStart(e) {
+        if (!isShown()) return;
+        const onBadge = e.target && e.target.closest
+            ? e.target.closest('.vg-verified-badge')
+            : null;
+        if (!onBadge) hide();
+    }
+    document.addEventListener('pointerdown', hideOnOutsideStart, true);
+    document.addEventListener('touchstart', hideOnOutsideStart, true);
+    document.addEventListener('mousedown', hideOnOutsideStart, true);
+
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    window.addEventListener('blur', hide);
+    document.addEventListener('visibilitychange', hide);
+})();
+</script>
 
 </body>
 </html>
