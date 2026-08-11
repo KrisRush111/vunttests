@@ -6305,6 +6305,8 @@
             <div id="noMessagesDesktop" class="no-messages">Сообщений пока нет...</div>
             
             <div class="message-input-container">
+                <!-- Заглушка вместо поля ввода в чате с системным ботом -->
+                <div id="botInputLockedDesktop" class="vg-bot-input-locked">Боту пока нельзя писать</div>
                 <div class="message-input-wrapper">
                     <button id="attachButtonDesktop" class="attach-button">
                         <i class="fas fa-paperclip"></i>
@@ -6453,6 +6455,8 @@
         <div id="noMessagesMobile" class="no-messages">Сообщений пока нет...</div>
         
         <div class="message-input-container">
+            <!-- Заглушка вместо поля ввода в чате с системным ботом -->
+            <div id="botInputLockedMobile" class="vg-bot-input-locked">Боту пока нельзя писать</div>
             <div class="message-input-wrapper">
                 <button id="attachButtonMobile" class="attach-button">
                     <i class="fas fa-paperclip"></i>
@@ -12511,6 +12515,16 @@ function getActiveElements() {
             
             if (!content || !currentChat || isSendingMessage) return;
 
+            // Системному боту писать нельзя — панель ввода в таком чате скрыта,
+            // но глушим и саму отправку (горячие клавиши, вставка, автотесты).
+            if (window.vgIsBotId) {
+                const other = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                if (other && (other.is_bot === true || window.vgIsBotId(other.platform_user_id))) {
+                    messageInput.value = '';
+                    return;
+                }
+            }
+
             if (content.length > MAX_MESSAGE_LENGTH) {
                 showCharLimitExceeded(messageInput, content.length);
                 return;
@@ -12815,6 +12829,7 @@ async function openChat(chatId) {
         } else {
             chatTitle.textContent = cachedChat.name || 'Новый чат';
         }
+        if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(cachedIsBot);
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
         if (otherParticipant) {
@@ -12898,6 +12913,11 @@ async function openChat(chatId) {
 
         if (chatData.status === 'success' && chatData.chat) {
             currentChat = chatData.chat;
+            // Подстраховка: точные данные с сервера могли уточнить, что это бот
+            if (window.vgApplyBotChatUI) {
+                const srvOther = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
+                window.vgApplyBotChatUI(!!(srvOther && (srvOther.is_bot === true || (window.vgIsBotId && window.vgIsBotId(srvOther.platform_user_id)))));
+            }
             updateChatItemInDOM(chatId, { unread_count: 0 });
             const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
             if (chatIndex !== -1 && currentChatsList[chatIndex].unread_count !== 0) {
@@ -12918,6 +12938,7 @@ async function openChat(chatId) {
                 } else {
                     chatTitle.textContent = currentChat.name || 'Чат';
                 }
+                if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(freshIsBot);
                 const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
                 const bgColor = currentChat.avatar_background || '#0088cc';
                 if (otherParticipant) {
@@ -13451,6 +13472,7 @@ function stopProfileDataPolling() {
             currentChatId = null;
             currentChat = null;
             currentMessages = [];
+            if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(false);
 
             // ПОДСТРАХОВКА: markAllMessagesAsRead уже вызывается при открытии
             // чата (см. loadMessages), но раньше это был единственный вызов —
@@ -16573,6 +16595,62 @@ function stopProfileDataPolling() {
 
 /* В списке чатов имя мельче — не даём галочке распирать строку */
 .chat-name.vg-has-badge .vg-verified-badge { width: 1.25em; height: 1.25em; }
+
+/* ==========================================================================
+   ЧАТ С СИСТЕМНЫМ БОТОМ
+   ========================================================================== */
+
+/* Подпись к фото у бота — тем же кеглем, что обычный текст сообщения
+   (по умолчанию .image-caption мельче, 14px). */
+.vg-bot-chat .message-with-image .image-caption,
+.vg-bot-chat .image-caption {
+    font-size: inherit;
+    line-height: 1.45;
+    opacity: 1;
+}
+
+/* Заглушка вместо поля ввода */
+.vg-bot-input-locked {
+    display: none;
+    box-sizing: border-box;
+    max-width: 380px;
+    width: 85%;
+    padding: 13px 18px;
+    border-radius: 24px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.2;
+    color: rgba(0, 0, 0, 0.55);
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid #ffffff;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* В чате с ботом: вместо панели ввода — заглушка */
+.vg-bot-chat .message-input-wrapper { display: none !important; }
+.vg-bot-chat .vg-bot-input-locked { display: block; }
+
+@media (prefers-color-scheme: dark) {
+    .vg-bot-input-locked {
+        color: #ffffff;
+        background: #000000;
+        border-color: #1C1C1E;
+        box-shadow: none;
+    }
+}
+
+body.dark-theme .vg-bot-input-locked,
+body.theme-dark .vg-bot-input-locked,
+html[data-theme="dark"] .vg-bot-input-locked {
+    color: #ffffff;
+    background: #000000;
+    border-color: #1C1C1E;
+    box-shadow: none;
+}
 </style>
 
 <script>
@@ -16646,6 +16724,22 @@ window.vgHydrateBadges = function (root) {
         badge.removeAttribute('data-vg-badge');
         vgApplyBadgeImage(badge);
     });
+};
+
+/* Режим «чат с ботом»: скрывает поле ввода и показывает заглушку.
+   Класс ставим на оба чат-модала — CSS выше сам разберётся, какой активен. */
+window.vgApplyBotChatUI = function (isBot) {
+    ['chatModalDesktop', 'chatModalMobile'].forEach(id => {
+        const modal = document.getElementById(id);
+        if (modal) modal.classList.toggle('vg-bot-chat', !!isBot);
+    });
+    // На всякий случай снимаем фокус/черновик, чтобы клавиатура не всплывала
+    if (isBot) {
+        ['messageInputDesktop', 'messageInputMobile'].forEach(id => {
+            const input = document.getElementById(id);
+            if (input) { input.blur(); input.value = ''; }
+        });
+    }
 };
 
 /* Как vgSetNameWithBadge, но без галочки просто ставит текст и чистит классы */
