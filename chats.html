@@ -6801,6 +6801,23 @@
                     updateSingleChat(payload.chat_id);
                 });
 
+                // Новое сообщение приходит в комнату чата (publish_new_message на
+                // сервере). Раньше список чатов слушал ТОЛЬКО chat_activity — если
+                // это событие терялось (шина/комната), список молчал. Теперь
+                // подстраховываемся вторым событием: оба ведут к одной и той же
+                // точечной перезагрузке чата в списке.
+                appSocket.on('new_message', (payload) => {
+                    if (!payload || payload.chat_id == null) return;
+                    const alreadyInList = currentChatsList.some(c => String(c.id) === String(payload.chat_id));
+                    if (currentChatId != null && String(currentChatId) === String(payload.chat_id) && alreadyInList) return;
+                    updateSingleChat(payload.chat_id);
+                });
+
+                // Пока соединения нет (или оно только что восстановилось), список
+                // мог разойтись с сервером — делаем внеочередную полную сверку.
+                appSocket.on('connect', () => { if (typeof pollUnreadOnce === 'function') pollUnreadOnce(); });
+                appSocket.on('disconnect', () => { if (typeof pollUnreadOnce === 'function') pollUnreadOnce(); });
+
                 appSocket.on('connect_error', () => {}); // молча достаточно — polling уже работает как fallback
             } catch (e) {
                 console.warn('WS connect failed, staying on polling-only mode', e);
@@ -13534,9 +13551,35 @@ function stopProfileDataPolling() {
         function moveChatToTop(chatId) {
             [chatsListDesktop, chatsListMobile].forEach(list => {
                 if (!list) return;
-                
+
+                // БЫЛО: list.prepend(chatItem) — .chat-item лежит ВНУТРИ обёртки
+                // .chat-item-swipe (в ней же кнопки свайпа), поэтому prepend
+                // вырывал элемент из обёртки и клал прямо в список: чат терял
+                // свайп-кнопки, а на его прежнем месте оставалась пустая обёртка.
+                // СТАЛО: перемещаем именно обёртку.
                 const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-                if (chatItem) list.prepend(chatItem);
+                if (!chatItem) return;
+                const node = chatItem.closest('.chat-item-swipe') || chatItem;
+                if (node.parentElement !== list) return;
+
+                // Закреплённые чаты всегда идут бакетом сверху — обычный чат
+                // не поднимаем выше них, иначе порядок в DOM разойдётся с
+                // порядком в currentChatsList (sortChats).
+                if (chatItem.classList.contains('is-pinned')) {
+                    list.prepend(node);
+                    return;
+                }
+                let firstUnpinned = null;
+                for (const child of list.children) {
+                    if (child === node) continue;
+                    const inner = (child.classList && child.classList.contains('chat-item'))
+                        ? child
+                        : (child.querySelector ? child.querySelector('.chat-item') : null);
+                    if (!inner) continue;
+                    if (!inner.classList.contains('is-pinned')) { firstUnpinned = child; break; }
+                }
+                if (firstUnpinned) list.insertBefore(node, firstUnpinned);
+                else list.appendChild(node);
             });
         }
 
@@ -14477,10 +14520,17 @@ function stopProfileDataPolling() {
             document.addEventListener('gesturechange', (e) => e.preventDefault());
             document.addEventListener('gestureend', (e) => e.preventDefault());
 
+            // Сеть только что вернулась — список чатов мог пропустить события,
+            // сверяемся с сервером сразу, не ожидая 5-секундного тика.
+            window.addEventListener('online', () => {
+                if (typeof pollUnreadOnce === 'function') pollUnreadOnce();
+            });
+
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') {
                     updateChatStatuses();
                     updateUserActivity(true);
+                    if (typeof pollUnreadOnce === 'function') pollUnreadOnce();
                     
                     if (currentChat && !(window.vgGuardBotStatus && window.vgGuardBotStatus())) {
                         const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
@@ -14509,6 +14559,7 @@ function stopProfileDataPolling() {
             window.addEventListener('focus', () => {
                 updateChatStatuses();
                 updateUserActivity(true);
+                if (typeof pollUnreadOnce === 'function') pollUnreadOnce();
             });
 
             setTimeout(() => updateUserActivity(true), 100);
@@ -14579,6 +14630,64 @@ function stopProfileDataPolling() {
         // видимым до 5 секунд (или пока пользователь не откроет чат ещё раз,
         // если в этот момент был in-flight запрос к серверу), а не пропадать
         // сразу же после выхода из чата.
+        // Компактный "отпечаток" списка — по нему понимаем, изменилось ли
+        // вообще что-то видимое, чтобы не трогать DOM на каждом тике.
+        function chatsListSignature(list) {
+            return (list || []).map(c => [
+                c.id,
+                c.is_pinned ? 1 : 0,
+                c.last_message_time || '',
+                c.last_message || '',
+                c.last_message_type || '',
+                c.unread_count || 0,
+                c.last_message_is_me ? 1 : 0,
+                c.last_message_is_read ? 1 : 0
+            ].join('~')).join('|');
+        }
+
+        // Приводит список чатов к тому, что реально вернул сервер.
+        // БЫЛО: поллинг обновлял только те чаты, которые уже есть в
+        // currentChatsList, и никогда не пересортировывал список. Поэтому если
+        // real-time событие chat_activity не доходило (WS не поднялся/упал,
+        // Redis-шина недоступна), новое сообщение не появлялось в списке вообще
+        // до перезагрузки страницы: новый чат не вставлялся, а существующий не
+        // поднимался наверх.
+        // СТАЛО: сверяем весь снимок с сервера — добавляем новые чаты, убираем
+        // удалённые, обновляем превью и пересортировываем; полный ре-рендер
+        // только когда реально изменился состав/порядок.
+        function applyServerChatsSnapshot(serverChats) {
+            if (!Array.isArray(serverChats)) return;
+
+            const sorted = sortChats(serverChats);
+            const prevIds = (currentChatsList || []).map(c => String(c.id));
+            const nextIds = sorted.map(c => String(c.id));
+            const orderChanged = prevIds.join(',') !== nextIds.join(',');
+            const prevSignature = chatsListSignature(currentChatsList);
+            const nextSignature = chatsListSignature(sorted);
+
+            const { chatsList } = getActiveElements();
+            const missingInDOM = !chatsList || nextIds.some(id =>
+                !chatsList.querySelector(`.chat-item[data-chat-id="${id}"]`));
+
+            if (!orderChanged && !missingInDOM && prevSignature === nextSignature) {
+                currentChatsList = sorted;
+                return;
+            }
+
+            const addedIds = nextIds.filter(id => !prevIds.includes(id));
+            currentChatsList = sorted;
+            setCacheItem('chats_list', sorted, CACHE.CHATS_TTL);
+
+            if (orderChanged || missingInDOM) {
+                renderChats(sorted);
+                if (addedIds.length) {
+                    preloadAllMessages(sorted.filter(c => addedIds.includes(String(c.id))));
+                }
+            } else {
+                sorted.forEach(chat => updateChatItemInDOM(chat.id, chat));
+            }
+        }
+
         async function pollUnreadOnce() {
             // Пока пользователь реально внутри чата — не трогаем список,
             // там своя, более частая синхронизация (startMessagePolling).
@@ -14594,40 +14703,9 @@ function stopProfileDataPolling() {
                 });
                 const data = await response.json();
                 if (data.status === 'success' && data.chats) {
-                    data.chats.forEach(serverChat => {
-                        const localChat = currentChatsList.find(c => c.id === serverChat.id);
-                        const oldCount = localChat ? (localChat.unread_count || 0) : 0;
-                        const newCount = serverChat.unread_count || 0;
-                        if (oldCount !== newCount) {
-                            updateChatItemInDOM(serverChat.id, { unread_count: newCount });
-                            if (localChat) localChat.unread_count = newCount;
-                        }
-                        // Also update last_message preview if changed
-                        if (localChat && localChat.last_message !== serverChat.last_message) {
-                            updateChatItemInDOM(serverChat.id, { 
-                                last_message: serverChat.last_message, 
-                                last_message_time: serverChat.last_message_time,
-                                last_message_type: serverChat.last_message_type,
-                                last_message_is_me: serverChat.last_message_is_me,
-                                last_message_is_read: serverChat.last_message_is_read,
-                                unread_count: newCount
-                            });
-                            localChat.last_message = serverChat.last_message;
-                            localChat.last_message_time = serverChat.last_message_time;
-                            localChat.last_message_type = serverChat.last_message_type;
-                            localChat.last_message_is_me = serverChat.last_message_is_me;
-                            localChat.last_message_is_read = serverChat.last_message_is_read;
-                        } else if (localChat && localChat.last_message_is_read !== serverChat.last_message_is_read) {
-                            // Текст последнего сообщения не изменился, но собеседник мог только что
-                            // его прочитать — обновляем галочку в списке чатов на "прочитано".
-                            updateChatItemInDOM(serverChat.id, {
-                                last_message_is_me: serverChat.last_message_is_me,
-                                last_message_is_read: serverChat.last_message_is_read
-                            });
-                            localChat.last_message_is_me = serverChat.last_message_is_me;
-                            localChat.last_message_is_read = serverChat.last_message_is_read;
-                        }
-                    });
+                    // Полная сверка: вставит новые чаты, поднимет наверх те, где
+                    // появилось новое сообщение, уберёт удалённые.
+                    applyServerChatsSnapshot(data.chats);
                 }
             } catch(e) {}
         }
