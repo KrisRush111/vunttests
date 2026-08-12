@@ -17648,5 +17648,133 @@ vgResolveBadgeSrc();
 })();
 </script>
 
+<!-- ==========================================================================
+     ЛОКАЛЬНОЕ ОТКЛЮЧЕНИЕ ЗВУКА У ЧАТА (кнопка "Звук" в профиле контакта).
+
+     Тап по кнопке переключает иконку колокольчика на перечёркнутую — пуш-
+     уведомления от этого собеседника перестают показываться НА ЭТОМ
+     устройстве. В базе данных ничего не меняется: список замьюченных живёт
+     в localStorage и дублируется в IndexedDB service worker'а (он и решает,
+     показывать ли пуш). На других устройствах/в другом браузере уведомления
+     продолжают приходить как обычно.
+
+     Реализация мьюта (vgIsMuted / vgToggleMuted / vgSyncMutedToSW) лежит в
+     push-notifications.js, чтобы её могли переиспользовать другие страницы
+     (например, профиль контакта в contacts.html).
+     ========================================================================== -->
+<script>
+(function () {
+    const SOUND_BUTTON_IDS = ['soundButtonDesktop', 'soundButtonMobile'];
+
+    // Кому сейчас открыт профиль — этот же id использует кнопка "жалоба"
+    function profileUserId() {
+        const id = window.__reportTargetUserId;
+        return (id === undefined || id === null || id === '') ? null : id;
+    }
+
+    // chat_id открытого чата, но только если он с ТЕМ ЖЕ человеком, чей
+    // профиль открыт (иначе замьютили бы чужой чат). Нужен лишь как
+    // подстраховка для пушей без senderId — основной ключ мьюта это user id.
+    function chatIdFor(userId) {
+        try {
+            if (typeof currentChat === 'undefined' || !currentChat || currentChat.is_temp) return null;
+            const parts = currentChat.participants || [];
+            const me = (typeof userData !== 'undefined' && userData) ? String(userData.platform_user_id) : null;
+            const other = parts.find(p => String(p.platform_user_id) !== me) || parts[0];
+            if (userId != null && other && String(other.platform_user_id) !== String(userId)) return null;
+            return currentChat.id != null ? currentChat.id : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function paint(btn, muted) {
+        const icon = btn.querySelector('.action-button-icon i');
+        const label = btn.querySelector('.action-button-label');
+        if (icon) {
+            icon.classList.toggle('fa-bell', !muted);
+            icon.classList.toggle('fa-bell-slash', muted);
+        }
+        if (label) label.textContent = muted ? 'Без звука' : 'Звук';
+        btn.classList.toggle('vg-muted', muted);
+        btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    }
+
+    // Приводит кнопки в соответствие с сохранённым состоянием — вызывается
+    // при каждом открытии профиля (профиль переиспользует одну и ту же
+    // разметку для всех контактов, поэтому состояние надо перерисовывать)
+    function refresh() {
+        if (typeof window.vgIsMuted !== 'function') return;
+        const uid = profileUserId();
+        const muted = window.vgIsMuted(uid, chatIdFor(uid));
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (btn) paint(btn, muted);
+        });
+    }
+
+    function onClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (typeof window.vgToggleMuted !== 'function') {
+            console.warn('vgToggleMuted недоступен — не подключён push-notifications.js');
+            return;
+        }
+
+        const uid = profileUserId();
+        if (uid == null) return;
+
+        const muted = window.vgToggleMuted(uid, chatIdFor(uid));
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (btn) paint(btn, muted);
+        });
+
+        if (typeof showMessage === 'function') {
+            showMessage(muted ? 'Уведомления от этого чата выключены' : 'Уведомления от этого чата включены', 'success');
+        }
+    }
+
+    function bind() {
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (!btn || btn.dataset.muteBound === '1') return;
+            btn.dataset.muteBound = '1';
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('click', onClick);
+        });
+        refresh();
+    }
+
+    // Перерисовываем состояние ровно в момент показа профиля: openProfileModal
+    // сначала выставляет window.__reportTargetUserId, а уже потом добавляет
+    // класс видимости — так что к срабатыванию observer'а id всегда актуален.
+    function watchProfileModals() {
+        ['profileModalDesktop', 'profileModalMobile'].forEach((id) => {
+            const modal = document.getElementById(id);
+            if (!modal) return;
+            new MutationObserver(() => {
+                if (modal.classList.contains('visible') || modal.classList.contains('active')) refresh();
+            }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+        });
+    }
+
+    function init() {
+        bind();
+        watchProfileModals();
+        // Список мог измениться на другой странице — держим SW в курсе
+        if (typeof window.vgSyncMutedToSW === 'function') window.vgSyncMutedToSW();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+    window.addEventListener('pageshow', bind);
+})();
+</script>
+
 </body>
 </html>
