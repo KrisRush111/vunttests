@@ -2075,6 +2075,65 @@
             to { stroke-dashoffset: 0; }
         }
 
+        /* ===== Тост «Жалоба отправлена» — квадратная почти белая карточка ===== */
+        /* Отдельный вариант: тост «Скопировано» остаётся прежним тёмным.
+           Размеры вынесены в переменную, чтобы карточка гарантированно была
+           квадратной — меняй только --report-toast-size. */
+        .copy-toast.report-toast {
+            --report-toast-size: 132px;
+            top: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            flex-direction: column;
+            justify-content: center;
+            gap: 12px;
+            width: var(--report-toast-size);
+            height: var(--report-toast-size);
+            padding: 0 12px;
+            border-radius: 14px;
+            /* почти белый, полупрозрачный + размытие подложки */
+            background: rgba(245, 245, 247, 0.82);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+            color: #6e6e73;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            white-space: normal;
+            line-height: 1.25;
+        }
+
+        .copy-toast.report-toast.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* В тёмной теме карточка остаётся светлой (так просил дизайн),
+           поэтому текст здесь НЕ перекрашиваем — только чуть глушим фон. */
+        @media (prefers-color-scheme: dark) {
+            .copy-toast.report-toast {
+                background: rgba(235, 235, 240, 0.80);
+                border-color: rgba(255, 255, 255, 0.35);
+                box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+            }
+        }
+
+        .copy-toast.report-toast .copy-toast-check {
+            width: 46px;
+            height: 46px;
+        }
+
+        /* Галочка серая, а не зелёная */
+        .copy-toast.report-toast .copy-toast-check circle {
+            stroke: #8e8e93;
+            stroke-width: 1.6;
+        }
+
+        .copy-toast.report-toast .copy-toast-check path {
+            stroke: #8e8e93;
+            stroke-width: 2.2;
+        }
+
         /* ===== Режим множественного выбора сообщений ===== */
         .message-select-row {
             display: flex;
@@ -9364,6 +9423,32 @@ function getActiveElements() {
             return menu;
         }
 
+        /* Центрирование тоста на десктопе.
+           Раньше здесь брался chatModalDesktop без проверки: он скрыт
+           (display: none), когда открыт профиль контакта, а у скрытого
+           элемента getBoundingClientRect() возвращает нули -> left = 0px,
+           и тост с translateX(-50%) уезжал за левый край экрана. Теперь
+           берём первую РЕАЛЬНО видимую панель (ширина > 0), а если такой
+           нет — центрируем по viewport. */
+        function positionToast(toast) {
+            let rect = null;
+
+            if (isDesktop) {
+                const panes = [
+                    document.getElementById('profileModalDesktop'),
+                    document.getElementById('chatModalDesktop'),
+                    document.querySelector('.desktop-content')
+                ];
+                for (const el of panes) {
+                    if (!el) continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) { rect = r; break; }
+                }
+            }
+
+            toast.style.left = rect ? `${rect.left + rect.width / 2}px` : '50%';
+        }
+
         function showSimpleToast(text) {
             const existing = document.querySelector('.copy-toast');
             if (existing) existing.remove();
@@ -9373,13 +9458,7 @@ function getActiveElements() {
             toast.innerHTML = `<span>${text}</span>`;
             document.body.appendChild(toast);
 
-            const { chatModal } = getActiveElements();
-            if (isDesktop && chatModal) {
-                const rect = chatModal.getBoundingClientRect();
-                toast.style.left = `${rect.left + rect.width / 2}px`;
-            } else {
-                toast.style.left = '50%';
-            }
+            positionToast(toast);
 
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => toast.classList.add('show'));
@@ -9390,6 +9469,37 @@ function getActiveElements() {
                 setTimeout(() => toast.remove(), 250);
             }, 1400);
         }
+
+        /* Тост об успешной жалобе: квадратная почти белая карточка с серой
+           анимированной галочкой. Держим чуть дольше обычного (1900 мс) —
+           анимация галочки занимает ~0.6 с. */
+        function showReportToast(text) {
+            const existing = document.querySelector('.copy-toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'copy-toast report-toast';
+            toast.innerHTML = `
+                <svg class="copy-toast-check" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M7 12.5l3 3 7-7"></path>
+                </svg>
+                <span>${text}</span>
+            `;
+            document.body.appendChild(toast);
+
+            positionToast(toast);
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => toast.classList.add('show'));
+            });
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 250);
+            }, 1900);
+        }
+        window.showReportToast = showReportToast;
 
         function showCopyToast() {
             const existing = document.querySelector('.copy-toast');
@@ -9406,15 +9516,10 @@ function getActiveElements() {
             `;
             document.body.appendChild(toast);
 
-            // На десктопе окно чата занимает не всю ширину экрана (слева список чатов),
-            // поэтому центрируем тост относительно самой панели чата, а не всего viewport
-            const { chatModal } = getActiveElements();
-            if (isDesktop && chatModal) {
-                const rect = chatModal.getBoundingClientRect();
-                toast.style.left = `${rect.left + rect.width / 2}px`;
-            } else {
-                toast.style.left = '50%';
-            }
+            // На десктопе окно чата занимает не всю ширину экрана (слева список
+            // чатов), поэтому центрируем тост относительно видимой панели,
+            // а не всего viewport.
+            positionToast(toast);
 
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => toast.classList.add('show'));
@@ -16004,7 +16109,12 @@ function stopProfileDataPolling() {
                         reportSending = false;
                         if (ok) {
                             closeSheet();
-                            reportToast('Жалоба отправлена');
+                            // Свой тост: квадратная светлая карточка с галочкой.
+                            if (typeof window.showReportToast === 'function') {
+                                window.showReportToast('Жалоба отправлена');
+                            } else {
+                                reportToast('Жалоба отправлена');
+                            }
                         } else {
                             sendBtn.disabled = false;
                             cancelBtn.disabled = false;
