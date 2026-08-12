@@ -9507,18 +9507,41 @@ function getActiveElements() {
             return !message.is_image && !(message.content && isImageUrl(message.content));
         }
 
+        // Достаёт текст, который имеет смысл копировать:
+        //  - обычное сообщение -> сам текст;
+        //  - фото с подписью    -> подпись (message.caption);
+        //  - альбом (media_group) -> подпись группы. Тут нельзя опираться на message.caption:
+        //    в attachMessageLongPress для альбома передаётся lastMsg, а подпись может лежать
+        //    на любом сообщении группы, поэтому читаем её из DOM (.image-caption),
+        //    предварительно выкинув служебный блок времени/статуса.
+        function getMessageCopyText(message, messageElement) {
+            if (!message) return '';
+            if (isTextMessage(message)) return message.content || '';
+            if (message.caption) return String(message.caption).trim();
+
+            const captionEl = messageElement && messageElement.querySelector('.image-caption');
+            if (captionEl) {
+                const clone = captionEl.cloneNode(true);
+                clone.querySelectorAll('.message-time, .edited-label, .message-status').forEach(n => n.remove());
+                return (clone.textContent || '').trim();
+            }
+            return '';
+        }
+
         function buildMessageActionMenu(messageElement, message) {
             const menu = document.createElement('div');
             menu.className = 'message-action-menu animate__animated animate__fadeIn';
 
-            if (isTextMessage(message)) {
+            // Кнопка "Скопировать" теперь есть и у фото/альбома с подписью — копируется подпись.
+            // У фото без подписи копировать нечего, поэтому кнопка не показывается.
+            if (getMessageCopyText(message, messageElement)) {
                 const copyBtn = document.createElement('button');
                 copyBtn.type = 'button';
                 copyBtn.className = 'message-action-item';
                 copyBtn.innerHTML = '<span>Скопировать</span><span class="message-action-item-icon"><i class="fa-solid fa-copy"></i></span>';
                 copyBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    copyMessageText(message);
+                    copyMessageText(message, messageElement);
                     closeReactionPicker();
                 });
                 menu.appendChild(copyBtn);
@@ -9675,8 +9698,9 @@ function getActiveElements() {
             }, 1400);
         }
 
-        function copyMessageText(message) {
-            const text = message.content || '';
+        function copyMessageText(message, messageElement) {
+            const text = getMessageCopyText(message, messageElement);
+            if (!text) return;
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(text).catch(() => {});
             } else {
