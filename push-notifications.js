@@ -23,77 +23,88 @@ const API_BASE = 'https://vuntserverrr.site'; // бэкенд на Render, фр�
 // Ключуем по platform_user_id собеседника (работает даже если чата ещё нет),
 // плюс, если чат известен, по chat_id — как подстраховка для пушей без
 // senderId.
+//
+// ВАЖНО: весь блок обёрнут в IIFE и НЕ использует const/let на верхнем
+// уровне файла. Все классические <script> страницы делят одну глобальную
+// лексическую область, поэтому объявленный здесь верхнеуровневый
+// `const VG_MUTED_USERS_KEY` конфликтовал с повторной загрузкой/другим
+// скриптом и биндинг оставался в TDZ — при клике по кнопке "Звук" падало
+// "Cannot access 'VG_MUTED_USERS_KEY' before initialization", а иконка не
+// менялась. Внутри функции-обёртки такой конфликт невозможен.
 // ---------------------------------------------------------
-const VG_MUTED_USERS_KEY = 'vg_muted_users_v1';
-const VG_MUTED_CHATS_KEY = 'vg_muted_chats_v1';
+(function () {
+  var USERS_KEY = 'vg_muted_users_v1';
+  var CHATS_KEY = 'vg_muted_chats_v1';
 
-function vgReadMutedList(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.map(String) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function vgWriteMutedList(key, list) {
-  try {
-    localStorage.setItem(key, JSON.stringify(Array.from(new Set(list.map(String)))));
-  } catch (e) {
-    console.warn('⚠️ Не удалось сохранить список чатов без звука:', e);
-  }
-}
-
-// Выключен ли звук у этого собеседника (userId) или чата (chatId)
-function vgIsMuted(userId, chatId) {
-  const users = vgReadMutedList(VG_MUTED_USERS_KEY);
-  const chats = vgReadMutedList(VG_MUTED_CHATS_KEY);
-  if (userId != null && users.includes(String(userId))) return true;
-  if (chatId != null && chats.includes(String(chatId))) return true;
-  return false;
-}
-
-// Переключает мьют и возвращает новое состояние (true = без звука)
-function vgToggleMuted(userId, chatId) {
-  const nowMuted = !vgIsMuted(userId, chatId);
-  let users = vgReadMutedList(VG_MUTED_USERS_KEY);
-  let chats = vgReadMutedList(VG_MUTED_CHATS_KEY);
-
-  if (nowMuted) {
-    if (userId != null) users.push(String(userId));
-    if (chatId != null) chats.push(String(chatId));
-  } else {
-    if (userId != null) users = users.filter(id => id !== String(userId));
-    if (chatId != null) chats = chats.filter(id => id !== String(chatId));
+  function readList(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch (e) {
+      return [];
+    }
   }
 
-  vgWriteMutedList(VG_MUTED_USERS_KEY, users);
-  vgWriteMutedList(VG_MUTED_CHATS_KEY, chats);
-  vgSyncMutedToSW();
-  return nowMuted;
-}
+  function writeList(key, list) {
+    try {
+      var unique = [];
+      list.map(String).forEach(function (id) {
+        if (unique.indexOf(id) === -1) unique.push(id);
+      });
+      localStorage.setItem(key, JSON.stringify(unique));
+    } catch (e) {
+      console.warn('⚠️ Не удалось сохранить список чатов без звука:', e);
+    }
+  }
 
-// Отдаём актуальный список service worker'у
-async function vgSyncMutedToSW() {
-  if (!('serviceWorker' in navigator)) return;
-  try {
-    const registration = await navigator.serviceWorker.ready;
-    const target = registration.active || navigator.serviceWorker.controller;
-    if (!target) return;
-    target.postMessage({
-      type: 'SET_MUTED',
-      users: vgReadMutedList(VG_MUTED_USERS_KEY),
-      chats: vgReadMutedList(VG_MUTED_CHATS_KEY)
+  // Выключен ли звук у этого собеседника (userId) или чата (chatId)
+  function vgIsMuted(userId, chatId) {
+    if (userId != null && readList(USERS_KEY).indexOf(String(userId)) !== -1) return true;
+    if (chatId != null && readList(CHATS_KEY).indexOf(String(chatId)) !== -1) return true;
+    return false;
+  }
+
+  // Переключает мьют и возвращает новое состояние (true = без звука)
+  function vgToggleMuted(userId, chatId) {
+    var nowMuted = !vgIsMuted(userId, chatId);
+    var users = readList(USERS_KEY);
+    var chats = readList(CHATS_KEY);
+
+    if (nowMuted) {
+      if (userId != null) users.push(String(userId));
+      if (chatId != null) chats.push(String(chatId));
+    } else {
+      if (userId != null) users = users.filter(function (id) { return id !== String(userId); });
+      if (chatId != null) chats = chats.filter(function (id) { return id !== String(chatId); });
+    }
+
+    writeList(USERS_KEY, users);
+    writeList(CHATS_KEY, chats);
+    vgSyncMutedToSW();
+    return nowMuted;
+  }
+
+  // Отдаём актуальный список service worker'у
+  function vgSyncMutedToSW() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve();
+    return navigator.serviceWorker.ready.then(function (registration) {
+      var target = registration.active || navigator.serviceWorker.controller;
+      if (!target) return;
+      target.postMessage({
+        type: 'SET_MUTED',
+        users: readList(USERS_KEY),
+        chats: readList(CHATS_KEY)
+      });
+    }).catch(function (err) {
+      console.warn('⚠️ Не удалось синхронизировать список без звука с service worker:', err);
     });
-  } catch (err) {
-    console.warn('⚠️ Не удалось синхронизировать список без звука с service worker:', err);
   }
-}
 
-window.vgIsMuted = vgIsMuted;
-window.vgToggleMuted = vgToggleMuted;
-window.vgSyncMutedToSW = vgSyncMutedToSW;
+  window.vgIsMuted = vgIsMuted;
+  window.vgToggleMuted = vgToggleMuted;
+  window.vgSyncMutedToSW = vgSyncMutedToSW;
+})();
 
 // ---------------------------------------------------------
 // Преобразование VAPID public key (base64url) в Uint8Array
@@ -179,7 +190,7 @@ async function initPushNotifications(userId) {
 
   // Отдаём SW локальный список "без звука" — он мог измениться на другой
   // странице или в другой сессии, а SW-хранилище живёт отдельно
-  vgSyncMutedToSW();
+  window.vgSyncMutedToSW();
 
   // Если уже есть активная подписка — просто убеждаемся, что сервер её знает
   const existingSubscription = await registration.pushManager.getSubscription();
