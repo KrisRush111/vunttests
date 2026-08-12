@@ -1997,6 +1997,38 @@
             transform: scale(1);
         }
 
+        /* Обёртка вокруг "поднятой" копии сообщения. Нужна только для длинных
+           сообщений: если реакции + сообщение + меню не влезают в экран, обёртке
+           ставится max-height (через JS) и она скроллится внутри себя, а само
+           сообщение прокручивается к концу — как в Telegram, где длинный текст
+           уезжает вверх, освобождая место панелям сверху и снизу. */
+        .message-context-float-scroll {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-radius: 18px;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            scrollbar-width: none;
+            flex-shrink: 0;
+        }
+
+        .message-context-float-scroll::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Скроллится только когда реально не влезло (класс ставит JS) */
+        .message-context-float-scroll.scrollable {
+            overflow-y: auto;
+            pointer-events: auto;
+            touch-action: pan-y;
+            box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
+        }
+
+        .message-context-float-scroll.scrollable .message-context-float {
+            box-shadow: none !important;
+        }
+
         .message-context-float {
             pointer-events: none !important;
             animation: none !important;
@@ -9230,6 +9262,15 @@ function getActiveElements() {
                 return;
             }
 
+            // Прокрутка ВНУТРИ обрезанного длинного сообщения (message-context-float-scroll)
+            // не должна закрывать меню — иначе длинный текст нельзя дочитать: document-listener
+            // на 'scroll' срабатывает от любого вложенного скролла на capture-фазе.
+            if (e && e.type === 'scroll' && e.target && e.target.closest &&
+                (e.target.classList && e.target.classList.contains('message-context-float-scroll')
+                    || (e.target.closest && e.target.closest('.message-context-overlay')))) {
+                return;
+            }
+
             // Закрывает весь набор всплывающих меню сообщения: реакции, меню действий и выбор удаления
             if (activeReactionPicker) {
                 activeReactionPicker.remove();
@@ -9264,6 +9305,8 @@ function getActiveElements() {
         const MESSAGE_CONTEXT_BOTTOM_SAFE = 76;
         const MESSAGE_CONTEXT_SIDE_PADDING = 10;
         const MESSAGE_CONTEXT_GAP = 10;
+        // Минимальная видимая высота обрезанного длинного сообщения
+        const MESSAGE_CONTEXT_MIN_MESSAGE_H = 96;
 
         // Считает и применяет позицию стопки так, чтобы сообщение осталось на том же
         // месте по горизонтали (слева или справа — как было в ленте), а по вертикали
@@ -9272,7 +9315,7 @@ function getActiveElements() {
         // у самого верха и реакции туда не помещались — стопка автоматически "приподнимается"
         // вниз ровно настолько, чтобы реакции стали видны целиком.
         function positionMessageContextStack(ctx) {
-            const { stack, picker, menu, isOutgoing, originalRect } = ctx;
+            const { stack, picker, menu, floatWrap, isOutgoing, originalRect } = ctx;
 
             const viewportW = window.innerWidth;
             const viewportH = window.innerHeight;
@@ -9294,21 +9337,50 @@ function getActiveElements() {
                 stack.style.right = 'auto';
             }
 
-            // --- вертикаль: стараемся оставить сообщение там же, где оно было ---
+            // --- вертикаль ---
             const pickerH = picker.offsetHeight;
             const menuH = menu.offsetHeight;
-            const stackHeight = pickerH + MESSAGE_CONTEXT_GAP + originalRect.height + MESSAGE_CONTEXT_GAP + menuH;
+            const bottomLimit = viewportH - MESSAGE_CONTEXT_BOTTOM_SAFE;
 
+            // Сколько места реально есть под всю стопку и сколько нужно сообщению
+            const available = bottomLimit - MESSAGE_CONTEXT_TOP_SAFE;
+            const chromeH = pickerH + menuH + MESSAGE_CONTEXT_GAP * 2; // реакции + меню + зазоры
+            const fullMsgH = floatWrap.scrollHeight || originalRect.height;
+
+            // ДЛИННОЕ СООБЩЕНИЕ: реакции сверху + текст + меню снизу не влезают в экран.
+            // Ограничиваем высоту сообщения и прокручиваем его к КОНЦУ — текст уезжает
+            // вверх (обрезается сверху), а обе панели помещаются целиком.
+            // Ровно так это ведёт себя в Telegram.
+            let msgH = fullMsgH;
+            if (chromeH + fullMsgH > available) {
+                msgH = Math.max(MESSAGE_CONTEXT_MIN_MESSAGE_H, available - chromeH);
+                floatWrap.style.maxHeight = msgH + 'px';
+                floatWrap.classList.add('scrollable');
+                // показываем хвост сообщения (последние строки + время), как на скриншоте
+                floatWrap.scrollTop = floatWrap.scrollHeight;
+            } else {
+                floatWrap.style.maxHeight = '';
+                floatWrap.classList.remove('scrollable');
+            }
+
+            const stackHeight = pickerH + MESSAGE_CONTEXT_GAP + msgH + MESSAGE_CONTEXT_GAP + menuH;
+
+            // Стараемся оставить сообщение там же, где оно было в ленте...
             let top = originalRect.top - pickerH - MESSAGE_CONTEXT_GAP;
 
+            // ...а если сообщение обрезали — привязываемся к его нижнему краю,
+            // чтобы «хвост» остался примерно на прежнем месте и стопка не прыгала.
+            if (msgH < fullMsgH) {
+                top = originalRect.bottom - msgH - pickerH - MESSAGE_CONTEXT_GAP;
+            }
+
             // Сообщение у самого верха и панель реакций перекрывается шапкой —
-            // автоматически приподнимаем всю стопку вниз, чтобы реакции стали видны.
+            // сдвигаем всю стопку вниз, чтобы реакции стали видны.
             if (top < MESSAGE_CONTEXT_TOP_SAFE) {
                 top = MESSAGE_CONTEXT_TOP_SAFE;
             }
 
-            // Если снизу всё упирается в поле ввода — сдвигаем стопку вверх (но не выше шапки).
-            const bottomLimit = viewportH - MESSAGE_CONTEXT_BOTTOM_SAFE;
+            // Если снизу всё упирается в поле ввода — поднимаем стопку вверх (но не выше шапки).
             if (top + stackHeight > bottomLimit) {
                 top = Math.max(MESSAGE_CONTEXT_TOP_SAFE, bottomLimit - stackHeight);
             }
@@ -9354,14 +9426,22 @@ function getActiveElements() {
             menu.style.position = 'static';
             menu.style.alignSelf = isOutgoing ? 'flex-end' : 'flex-start';
 
+            // Обёртка-скроллер: для длинных сообщений именно она получает max-height
+            // и прокручивается внутри себя (см. positionMessageContextStack).
+            const floatWrap = document.createElement('div');
+            floatWrap.className = 'message-context-float-scroll';
+            floatWrap.style.alignSelf = isOutgoing ? 'flex-end' : 'flex-start';
+            floatWrap.style.width = originalRect.width + 'px';
+            floatWrap.appendChild(floatEl);
+
             stack.appendChild(picker);
-            stack.appendChild(floatEl);
+            stack.appendChild(floatWrap);
             stack.appendChild(menu);
 
             document.body.appendChild(overlay);
             messageElement.style.visibility = 'hidden';
 
-            const ctx = { overlay, stack, picker, menu, floatEl, isOutgoing, originalRect, originalEl: messageElement };
+            const ctx = { overlay, stack, picker, menu, floatEl, floatWrap, isOutgoing, originalRect, originalEl: messageElement };
             positionMessageContextStack(ctx);
 
             requestAnimationFrame(() => overlay.classList.add('visible'));
