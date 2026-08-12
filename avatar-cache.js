@@ -39,6 +39,26 @@ const AvatarCache = (function () {
     }
 
     const LS_PREFIX = 'vg_avatar_';
+    // Отдельный лёгкий флаг "у этого пользователя есть фото". Нужен, чтобы
+    // решить, показывать ли инициалы, пока фото ещё качается: если мы точно
+    // знаем, что фото есть, инициалы не рисуем (они бы мигнули), но фон
+    // (градиент) показываем СРАЗУ — круг никогда не остаётся пустым.
+    const LS_HAS_PREFIX = 'vg_avatar_has_';
+
+    function knownHasPhoto(userId) {
+        try {
+            return localStorage.getItem(LS_HAS_PREFIX + String(userId)) === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setKnownHasPhoto(userId, val) {
+        try {
+            if (val) localStorage.setItem(LS_HAS_PREFIX + String(userId), '1');
+            else localStorage.removeItem(LS_HAS_PREFIX + String(userId));
+        } catch (e) {}
+    }
 
     // ------------------------------------------------------------------
     // Размер запрашиваемой картинки (борьба с размытыми аватарками)
@@ -109,6 +129,7 @@ const AvatarCache = (function () {
                 LS_PREFIX + String(userId),
                 JSON.stringify({ version, dataUrl, bucket: bucket || null })
             );
+            setKnownHasPhoto(userId, true);
         } catch (e) {
             // Квота localStorage превышена или недоступен — не критично,
             // IndexedDB всё равно продолжит работать как обычно
@@ -119,6 +140,7 @@ const AvatarCache = (function () {
         try {
             localStorage.removeItem(LS_PREFIX + String(userId));
         } catch (e) {}
+        setKnownHasPhoto(userId, false);
     }
 
     async function getLocal(userId) {
@@ -226,6 +248,7 @@ const AvatarCache = (function () {
 
         if (!hasAvatar) {
             applyPlaceholder(el, initials, bgColor);
+            setKnownHasPhoto(userId, false);
             removeLocal(userId);
             return;
         }
@@ -237,6 +260,16 @@ const AvatarCache = (function () {
         const syncLocal = getLocalSync(userId);
         if (syncLocal && syncLocal.dataUrl) {
             applyImage(el, syncLocal.dataUrl);
+        } else {
+            // Локальной копии нет (первый заход, новое устройство, кэш
+            // очищен) — фото придётся качать из сети, но ЖДАТЬ его с пустым
+            // кругом нельзя: именно поэтому в шапке чата аватарка
+            // "подгружалась", а не появлялась сразу. Поэтому синхронно, в
+            // том же тике, рисуем фон-градиент.
+            //   • если мы уже знаем, что у пользователя есть фото — рисуем
+            //     только фон, без инициалов (чтобы буква не мигнула);
+            //   • если не знаем — рисуем полноценный плейсхолдер с инициалами.
+            applyPlaceholder(el, knownHasPhoto(userId) ? '' : (initials || ''), bgColor);
         }
 
         // 1) Сверяемся с IndexedDB (источник истины). Обычно совпадает с
@@ -246,11 +279,9 @@ const AvatarCache = (function () {
         if (!syncLocal && local && local.dataUrl) {
             applyImage(el, local.dataUrl);
         }
-        // Если локальной копии нет вовсе, но у пользователя точно есть
-        // фото — плейсхолдер-фон НЕ показываем: он всё равно будет тут же
-        // перекрыт настоящей фотографией, и получится лишнее мигание.
-        // Просто ждём саму фотографию (см. checkAndUpdate ниже — она
-        // качается максимально быстро, параллельно с проверкой версии).
+        // Фон уже нарисован выше синхронно, поэтому пустого круга не
+        // бывает ни при каком стечении обстоятельств; когда придёт само
+        // фото — оно просто перекроет фон (см. checkAndUpdate ниже).
 
         // 2) В фоне — дешёвая проверка версии на сервере.
         //    Ключ включает bucket: если этот же аватар уже качался в мелком
@@ -356,6 +387,8 @@ const AvatarCache = (function () {
         getLocalSync, saveLocalSync, removeLocalSync,
         // Служебные хелперы для страниц: fullUrl нужен везде, где аватар
         // показывается крупно (полноэкранный просмотрщик, раскрытая шапка).
-        fullUrl, avatarUrl, bucketFor, screenDpr
+        fullUrl, avatarUrl, bucketFor, screenDpr,
+        knownHasPhoto, setKnownHasPhoto,
+        applyImage, applyPlaceholder
     };
 })();
