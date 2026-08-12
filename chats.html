@@ -953,6 +953,12 @@
             color: white;
             background: var(--telegram-success);
         }
+
+        /* Предупреждение автомодерации (мат): не ошибка, но и не успех */
+        .message-box.warning {
+            color: #3d2b00;
+            background: #ffcf4d;
+        }
         
         .chat-modal {
             position: fixed;
@@ -8084,6 +8090,42 @@ function getActiveElements() {
             }, 3000);
         }
 
+        /* ---------------------------------------------- автомодерация
+           Сервер отдаёт в ответе на отправку/правку сообщения поле moderation:
+             {action:'ok'}                              — ничего не делаем
+             {action:'warn', count, limit, ban_label}   — предупреждение о мате
+             {action:'ban',  duration_label, reason}    — бан уже выдан, надо
+                                                          поднять бан-оверлей
+             {action:'flagged'}                         — ушло админу молча
+           Сообщение при этом отправлено: оно уже в переписке. */
+        function handleModerationResult(mod) {
+            try {
+                if (!mod || typeof mod !== 'object') return;
+                if (mod.action === 'warn') {
+                    const total = mod.count || 0;
+                    const limit = mod.limit || 4;
+                    const label = mod.ban_label || '3 часа';
+                    showMessage(
+                        `Предупреждение: нецензурная лексика ${total}/${limit}. ` +
+                        `Ещё одно — блокировка на ${label}`,
+                        'warning'
+                    );
+                } else if (mod.action === 'ban') {
+                    const label = mod.duration_label || '';
+                    showMessage(
+                        'Аккаунт заблокирован' + (label ? ` на ${label}` : '') +
+                        (mod.reason ? `: ${mod.reason}` : ''),
+                        'error'
+                    );
+                    // Бан приходит и через сокет, но не ждём его: подтягиваем статус сразу.
+                    if (window.BanGuard) window.BanGuard.refresh();
+                    setTimeout(() => { if (window.BanGuard) window.BanGuard.refresh(); }, 1500);
+                }
+            } catch (e) {
+                console.error('handleModerationResult', e);
+            }
+        }
+
         function handleImageSelection(event) {
             const files = event.target.files;
             if (!files || files.length === 0) return;
@@ -8414,6 +8456,7 @@ function getActiveElements() {
                 
                 const messageData = await messageResponse.json();
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
+                handleModerationResult(messageData.moderation);
 
                 // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
                 // тихо удаляем его на сервере, ничего не показывая в UI.
@@ -8601,6 +8644,7 @@ function getActiveElements() {
 
                 const messageData = await messageResponse.json();
                 if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить фотографии');
+                handleModerationResult(messageData.moderation);
 
                 const newMessages = messageData.messages.map((m) => ({
                     id: m.message_id,
@@ -10064,6 +10108,7 @@ function getActiveElements() {
                     showMessage('Не удалось изменить сообщение', 'error');
                     return;
                 }
+                handleModerationResult(data.moderation);
                 // Синхронизируем точным временем редактирования с сервера
                 applyEditedContentLocally(chatId, messageId, data.content, data.edited_at);
 
@@ -12720,6 +12765,7 @@ function getActiveElements() {
                     
                     const messageData = await messageResponse.json();
                     if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить сообщение');
+                    handleModerationResult(messageData.moderation);
 
                     // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
                     // тихо удаляем его на сервере, ничего не показывая в UI.
