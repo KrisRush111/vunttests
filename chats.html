@@ -9288,7 +9288,9 @@ function getActiveElements() {
             // Если сообщение было "поднято" на затемнённый фон (реакции/меню как в Telegram) —
             // плавно гасим оверлей и возвращаем видимость оригиналу в ленте сообщений.
             if (activeContextOverlay) {
-                const { overlay, originalEl } = activeContextOverlay;
+                const { overlay, originalEl, resizeObserver, onWindowResize } = activeContextOverlay;
+                if (resizeObserver) resizeObserver.disconnect();
+                if (onWindowResize) window.removeEventListener('resize', onWindowResize);
                 activeContextOverlay = null;
                 overlay.classList.remove('visible');
                 if (originalEl) originalEl.style.visibility = '';
@@ -9353,7 +9355,11 @@ function getActiveElements() {
             // Ровно так это ведёт себя в Telegram.
             let msgH = fullMsgH;
             if (chromeH + fullMsgH > available) {
-                msgH = Math.max(MESSAGE_CONTEXT_MIN_MESSAGE_H, available - chromeH);
+                // Math.min со вторым Math.max — чтобы «минимальная» высота никогда
+                // не оказалась больше реально доступного места: иначе стопка снова
+                // становится выше экрана и меню действий уезжает за нижний край.
+                msgH = Math.min(Math.max(MESSAGE_CONTEXT_MIN_MESSAGE_H, available - chromeH),
+                                Math.max(0, available - chromeH));
                 floatWrap.style.maxHeight = msgH + 'px';
                 floatWrap.classList.add('scrollable');
                 // показываем хвост сообщения (последние строки + время), как на скриншоте
@@ -9413,6 +9419,28 @@ function getActiveElements() {
             // когда меню закроется.
             const floatEl = messageElement.cloneNode(true);
             floatEl.classList.add('message-context-float');
+
+            // ВАЖНО для сообщений с фото. У картинок в ленте стоят loading="lazy",
+            // height:auto и min-height:80px, а у КЛОНА картинка ещё не декодирована,
+            // поэтому в момент замера её высота = 80px вместо реальной. Стопка считалась
+            // низкой, обрезка не включалась, а через мгновение фото разворачивалось на
+            // всю высоту и меню действий уезжало за край экрана (рамка «обрезалась»).
+            // Поэтому переносим на клон уже измеренные размеры оригинала и снимаем lazy.
+            const originalMedia = messageElement.querySelectorAll('img, video');
+            floatEl.querySelectorAll('img, video').forEach((node, i) => {
+                const srcNode = originalMedia[i];
+                if (!srcNode) return;
+                const r = srcNode.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    node.style.width = r.width + 'px';
+                    node.style.height = r.height + 'px';
+                    node.style.minHeight = '0';
+                    node.style.maxHeight = 'none';
+                }
+                node.removeAttribute('loading');
+                node.style.opacity = '1';
+                node.style.transition = 'none';
+            });
             floatEl.style.position = 'static';
             floatEl.style.pointerEvents = 'none';
             floatEl.style.width = originalRect.width + 'px';
@@ -9443,6 +9471,25 @@ function getActiveElements() {
 
             const ctx = { overlay, stack, picker, menu, floatEl, floatWrap, isOutgoing, originalRect, originalEl: messageElement };
             positionMessageContextStack(ctx);
+
+            // Страховка: если высота стопки всё-таки изменилась позже (догрузился шрифт
+            // иконок в меню, доехало фото без заранее известных размеров, поворот экрана) —
+            // пересчитываем позицию, чтобы реакции и меню снова полностью влезли.
+            const repositionCtx = () => { if (activeContextOverlay === ctx) positionMessageContextStack(ctx); };
+            requestAnimationFrame(repositionCtx);
+            floatEl.querySelectorAll('img').forEach(im => {
+                if (!im.complete) im.addEventListener('load', repositionCtx, { once: true });
+            });
+            if (document.fonts && document.fonts.ready) document.fonts.ready.then(repositionCtx).catch(() => {});
+            if (window.ResizeObserver) {
+                const ro = new ResizeObserver(() => repositionCtx());
+                ro.observe(floatEl);
+                ro.observe(menu);
+                ro.observe(picker);
+                ctx.resizeObserver = ro;
+            }
+            window.addEventListener('resize', repositionCtx);
+            ctx.onWindowResize = repositionCtx;
 
             requestAnimationFrame(() => overlay.classList.add('visible'));
 
