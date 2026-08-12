@@ -1,7 +1,7 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.2.5';
+const CACHE_NAME = 'vuntgram-v2.2.6';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
@@ -418,6 +418,94 @@ function createDefaultAvatarResponse() {
 
 
 // ============================
+// ЛОКАЛЬНЫЙ "БЕЗ ЗВУКА" ДЛЯ ЧАТА (только это устройство)
+//
+// Пользователь может выключить звук у конкретного собеседника кнопкой
+// "Звук" в профиле контакта. Это НЕ хранится на сервере — только локально
+// на устройстве, поэтому фильтровать пуши обязан сам service worker.
+//
+// localStorage из service worker недоступен, поэтому список замьюченных
+// живёт в IndexedDB: страница шлёт его через postMessage (SET_MUTED), а SW
+// читает его в момент прихода push — в том числе когда ни одной вкладки
+// не открыто (приложение свёрнуто/закрыто) и спросить страницу нельзя.
+// ============================
+
+const MUTE_DB_NAME = 'vuntgram-mute';
+const MUTE_STORE = 'settings';
+const MUTE_KEY = 'muted';
+
+function openMuteDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(MUTE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(MUTE_STORE)) {
+        db.createObjectStore(MUTE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// { users: ['123', ...], chats: ['45', ...] }
+async function saveMutedState(state) {
+  try {
+    const db = await openMuteDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(MUTE_STORE, 'readwrite');
+      tx.objectStore(MUTE_STORE).put(state, MUTE_KEY);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (err) {
+    console.warn('⚠️ TheVuntgram SW: не удалось сохранить список без звука', err);
+  }
+}
+
+async function readMutedState() {
+  try {
+    const db = await openMuteDb();
+    const state = await new Promise((resolve, reject) => {
+      const tx = db.transaction(MUTE_STORE, 'readonly');
+      const req = tx.objectStore(MUTE_STORE).get(MUTE_KEY);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return state && typeof state === 'object' ? state : { users: [], chats: [] };
+  } catch (err) {
+    console.warn('⚠️ TheVuntgram SW: не удалось прочитать список без звука', err);
+    return { users: [], chats: [] };
+  }
+}
+
+// Замьючен ли этот push? Основной признак — senderId (его кладёт сервер),
+// подстраховка — chat_id, вытащенный из tag "chat-<id>" или из url, чтобы
+// мьют работал и со старым бэкендом без senderId в payload.
+async function isPushMuted(data) {
+  const state = await readMutedState();
+  const users = (state.users || []).map(String);
+  const chats = (state.chats || []).map(String);
+  if (!users.length && !chats.length) return false;
+
+  if (data.senderId != null && users.includes(String(data.senderId))) return true;
+
+  let chatId = data.chatId != null ? String(data.chatId) : null;
+  if (!chatId && typeof data.tag === 'string') {
+    const m = data.tag.match(/^chat-(.+)$/);
+    if (m) chatId = m[1];
+  }
+  if (!chatId && typeof data.url === 'string') {
+    const m = data.url.match(/chat_id=([^&]+)/);
+    if (m) chatId = decodeURIComponent(m[1]);
+  }
+
+  return !!chatId && chats.includes(chatId);
+}
+
+// ============================
 // PUSH-УВЕДОМЛЕНИЯ
 // ============================
 
@@ -441,6 +529,30 @@ self.addEventListener('push', (event) => {
     return;
   }
 
+  event.waitUntil(handleMessagePush(data));
+});
+
+// Показ обычного уведомления о новом сообщении — с учётом локального мьюта.
+//
+// Если чат/собеседник выключен по звуку на ЭТОМ устройстве, уведомление не
+// показываем вообще, но бейдж на иконке всё равно обновляем: сообщение
+// реально не прочитано, просто пользователь не хочет, чтобы его дёргали.
+// (Мьют не влияет на другие устройства — он локальный.)
+async function handleMessagePush(data) {
+  let muted = false;
+  try {
+    muted = await isPushMuted(data);
+  } catch (err) {
+    muted = false; // при любой ошибке лучше показать уведомление, чем потерять его
+  }
+
+  await updateAppBadge(data.unreadCount);
+
+  if (muted) {
+    console.log('🔇 TheVuntgram SW: уведомление скрыто (чат без звука)', data.tag);
+    return;
+  }
+
   const title = data.title || 'Vuntgram';
   const options = {
     body: data.body || 'Новое сообщение',
@@ -455,13 +567,8 @@ self.addEventListener('push', (event) => {
     requireInteraction: false
   };
 
-  event.waitUntil(
-    Promise.all([
-      self.registration.showNotification(title, options),
-      updateAppBadge(data.unreadCount)
-    ])
-  );
-});
+  await self.registration.showNotification(title, options);
+}
 
 // ---------------------------------------------------------
 // Обработка "тихого" read_receipt пуша.
@@ -566,6 +673,19 @@ self.addEventListener('message', (event) => {
 
   if (event.data && event.data.type === 'CLEAR_BADGE') {
     updateAppBadge(0);
+  }
+
+  // Страница синхронизирует локальный список "чатов без звука"
+  // (localStorage → IndexedDB service worker'а). Присылается при загрузке
+  // страницы и при каждом нажатии кнопки "Звук" в профиле контакта.
+  if (event.data && event.data.type === 'SET_MUTED') {
+    const state = {
+      users: Array.isArray(event.data.users) ? event.data.users.map(String) : [],
+      chats: Array.isArray(event.data.chats) ? event.data.chats.map(String) : []
+    };
+    event.waitUntil
+      ? event.waitUntil(saveMutedState(state))
+      : saveMutedState(state);
   }
 
   // Раздел "Уведомления" в profile.html спрашивает активный service worker,
