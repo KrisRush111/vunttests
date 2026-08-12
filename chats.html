@@ -17688,6 +17688,50 @@ vgResolveBadgeSrc();
         }
     }
 
+    // Резервная реализация мьюта — на случай, если push-notifications.js не
+    // загрузился (офлайн, кэш старой версии, блокировщик): кнопка всё равно
+    // должна работать и переключаться, а SW подхватит список при следующей
+    // синхронизации.
+    const MUTED_USERS_KEY = 'vg_muted_users_v1';
+    const MUTED_CHATS_KEY = 'vg_muted_chats_v1';
+
+    function readList(key) {
+        try {
+            const arr = JSON.parse(localStorage.getItem(key) || '[]');
+            return Array.isArray(arr) ? arr.map(String) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function isMuted(userId, chatId) {
+        if (typeof window.vgIsMuted === 'function') return window.vgIsMuted(userId, chatId);
+        if (userId != null && readList(MUTED_USERS_KEY).includes(String(userId))) return true;
+        if (chatId != null && readList(MUTED_CHATS_KEY).includes(String(chatId))) return true;
+        return false;
+    }
+
+    function toggleMuted(userId, chatId) {
+        if (typeof window.vgToggleMuted === 'function') return window.vgToggleMuted(userId, chatId);
+
+        const nowMuted = !isMuted(userId, chatId);
+        let users = readList(MUTED_USERS_KEY);
+        let chats = readList(MUTED_CHATS_KEY);
+        if (nowMuted) {
+            if (userId != null) users.push(String(userId));
+            if (chatId != null) chats.push(String(chatId));
+        } else {
+            if (userId != null) users = users.filter(id => id !== String(userId));
+            if (chatId != null) chats = chats.filter(id => id !== String(chatId));
+        }
+        try {
+            localStorage.setItem(MUTED_USERS_KEY, JSON.stringify([...new Set(users)]));
+            localStorage.setItem(MUTED_CHATS_KEY, JSON.stringify([...new Set(chats)]));
+        } catch (e) {}
+        if (typeof window.vgSyncMutedToSW === 'function') window.vgSyncMutedToSW();
+        return nowMuted;
+    }
+
     function paint(btn, muted) {
         const icon = btn.querySelector('.action-button-icon i');
         const label = btn.querySelector('.action-button-label');
@@ -17704,9 +17748,8 @@ vgResolveBadgeSrc();
     // при каждом открытии профиля (профиль переиспользует одну и ту же
     // разметку для всех контактов, поэтому состояние надо перерисовывать)
     function refresh() {
-        if (typeof window.vgIsMuted !== 'function') return;
         const uid = profileUserId();
-        const muted = window.vgIsMuted(uid, chatIdFor(uid));
+        const muted = isMuted(uid, chatIdFor(uid));
         SOUND_BUTTON_IDS.forEach((id) => {
             const btn = document.getElementById(id);
             if (btn) paint(btn, muted);
@@ -17717,15 +17760,13 @@ vgResolveBadgeSrc();
         e.preventDefault();
         e.stopPropagation();
 
-        if (typeof window.vgToggleMuted !== 'function') {
-            console.warn('vgToggleMuted недоступен — не подключён push-notifications.js');
+        const uid = profileUserId();
+        if (uid == null) {
+            console.warn('Кнопка "Звук": не известен id собеседника — профиль ещё не открыт');
             return;
         }
 
-        const uid = profileUserId();
-        if (uid == null) return;
-
-        const muted = window.vgToggleMuted(uid, chatIdFor(uid));
+        const muted = toggleMuted(uid, chatIdFor(uid));
         SOUND_BUTTON_IDS.forEach((id) => {
             const btn = document.getElementById(id);
             if (btn) paint(btn, muted);
