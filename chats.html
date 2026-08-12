@@ -8553,13 +8553,42 @@ function getActiveElements() {
         // через AvatarCache: сразу показываем то, что сохранено на устройстве,
         // а в фоне дёшево проверяем на сервере, не изменился ли аватар, и
         // перекачиваем/перерисовываем только если он реально сменился.
-        function loadChatAvatar(avatarElement, userId, initials, bgColor) {
+        function loadChatAvatar(avatarElement, userId, initials, bgColor, hasAvatar = true) {
             if (!avatarElement) return;
+            // Фон рисуем СРАЗУ, синхронно, до любого сетевого запроса — иначе
+            // круг в шапке чата какое-то время остаётся пустым ("аватарка
+            // подгружается"). Инициалы не рисуем, если знаем, что фото есть и
+            // оно вот-вот перекроет фон.
+            paintAvatarPlaceholder(avatarElement, userId, initials, bgColor, hasAvatar);
             // 50 — размер .chat-avatar в CSS-пикселях. Передаём его явно:
             // элемент в этот момент может быть ещё не в потоке (offsetWidth = 0),
             // и без подсказки AvatarCache взял бы дефолт и запросил картинку
             // не того размера.
-            AvatarCache.render(SERVER_URL, avatarElement, userId, initials, bgColor, true, 50);
+            AvatarCache.render(SERVER_URL, avatarElement, userId, initials, bgColor, hasAvatar, 50);
+        }
+
+        // Мгновенная (без await, без сети) отрисовка аватарки: если фото уже
+        // лежит в локальном кэше — ставим само фото, иначе цветной фон.
+        function paintAvatarPlaceholder(el, userId, initials, bgColor, hasAvatar = true) {
+            if (!el) return;
+            const cached = (hasAvatar && userId && AvatarCache.getLocalSync)
+                ? AvatarCache.getLocalSync(userId)
+                : null;
+            if (cached && cached.dataUrl) {
+                el.style.backgroundImage = `url(${cached.dataUrl})`;
+                el.style.backgroundSize = 'cover';
+                el.style.backgroundPosition = 'center';
+                el.style.backgroundRepeat = 'no-repeat';
+                el.style.backgroundColor = '';
+                el.textContent = '';
+                return;
+            }
+            const color = bgColor || '#0088cc';
+            const knowsPhoto = hasAvatar && userId && AvatarCache.knownHasPhoto
+                && AvatarCache.knownHasPhoto(userId);
+            el.style.backgroundImage = 'none';
+            el.style.background = `linear-gradient(135deg, ${color}, ${adjustColor(color, 20)})`;
+            el.textContent = knowsPhoto ? '' : (initials || '');
         }
 
         function loadContactAvatar(avatarElement, userId, initials, bgColor) {
@@ -13381,6 +13410,19 @@ async function openChat(chatId) {
     // Показываем имя/аватар из кэша немедленно (не ждём сеть)
     const cachedChat = currentChatsList.find(c => c.id === chatId);
 
+    // Список чатов ещё мог не загрузиться (например, чат открывается сразу
+    // после перезагрузки страницы по sessionStorage/URL). Тогда данных об
+    // участнике нет, но пустой круг всё равно показывать нельзя — рисуем фон
+    // по имени, которое известно.
+    if (!cachedChat) {
+        const pendingName = sessionStorage.getItem('openChatName') || '';
+        paintAvatarPlaceholder(
+            chatAvatar, null,
+            pendingName ? pendingName.trim()[0].toUpperCase() : '',
+            '#0088cc', false
+        );
+    }
+
     // Пользователь открыл чат — сразу гасим бейдж непрочитанных, не дожидаясь
     // ответа сервера (get_messages/get_chat_info могут занять секунду и больше).
     // Раньше unread_count обнулялся только после обоих запросов, из-за чего
@@ -13407,7 +13449,8 @@ async function openChat(chatId) {
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
         if (otherParticipant) {
-            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
+            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor,
+                           cachedChat.has_avatar_photo !== false);
             statusFetchParticipantId = cachedIsBot ? null : otherParticipant.platform_user_id;
 
             // Мгновенно показываем статус, только если он реально свежий
@@ -13524,7 +13567,8 @@ async function openChat(chatId) {
                 const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
                 const bgColor = currentChat.avatar_background || '#0088cc';
                 if (otherParticipant) {
-                    loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor);
+                    loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor,
+                                   currentChat.has_avatar_photo !== false);
                     statusFetchParticipantId = otherParticipant.platform_user_id;
                     const { chatStatus: freshChatStatus } = getActiveElements();
                     if (freshIsBot) {
@@ -14093,6 +14137,10 @@ function stopProfileDataPolling() {
             }
 
             if (chatAvatar) {
+                // Чистим полностью (включая background-shorthand): иначе от
+                // предыдущего чата остаётся его цвет и мелькает при открытии
+                // следующего. Фон нового чата ставится синхронно в openChat.
+                chatAvatar.style.background = '';
                 chatAvatar.style.backgroundImage = '';
                 chatAvatar.style.backgroundColor = '';
                 chatAvatar.textContent = '';
