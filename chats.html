@@ -594,7 +594,8 @@
         .chat-swipe-circle.sound {
             background: #7ce98b;
             box-shadow: 0 2px 10px rgba(124, 233, 139, 0.35);
-            color: #10461f;
+            /* Колокольчик и подпись белые — как на остальных свайп-кнопках */
+            color: #fff;
             transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.18s ease, color 0.18s ease;
         }
 
@@ -867,6 +868,38 @@
             justify-content: flex-start;
             gap: 6px;
             min-width: 0;
+        }
+
+        /* Строка "имя + значок без звука" в хедере открытого чата и у никнейма
+           в профиле: обёртку ставит JS (vgRefreshChatsMuteUi), чтобы значок был
+           сиблингом заголовка — сам заголовок постоянно перезаписывается
+           (vgSetTitle / textContent), и вложенная в него иконка исчезала бы. */
+        .vg-title-mute-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        .vg-title-mute-row > .chat-title,
+        .vg-title-mute-row > .profile-nickname {
+            min-width: 0;
+        }
+
+        /* Значок в хедере чата — того же размера, что и имя рядом */
+        .chat-header .chat-muted-icon {
+            font-size: 14px;
+            margin-bottom: 0;
+        }
+
+        /* У никнейма в профиле имя крупнее — значок подтягиваем к нему */
+        .vg-title-mute-row > .chat-muted-icon.is-profile {
+            font-size: 0.72em;
+            /* тот же margin-bottom, что у .profile-nickname — иначе значок
+               оказывался бы ниже середины строки с ником */
+            margin-bottom: 4px;
         }
 
         /* Перечёркнутый динамик у имени чата — этот чат без звука на этом
@@ -13361,6 +13394,8 @@ async function openChat(chatId) {
         } else {
             chatTitle.textContent = cachedChat.name || 'Новый чат';
         }
+        // Значок "без звука" рядом с именем в хедере открытого чата
+        if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
         if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(cachedIsBot);
         const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
@@ -13470,6 +13505,7 @@ async function openChat(chatId) {
                 } else {
                     chatTitle.textContent = currentChat.name || 'Чат';
                 }
+                if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
                 if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(freshIsBot);
                 const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
                 const bgColor = currentChat.avatar_background || '#0088cc';
@@ -13677,6 +13713,8 @@ async function updateProfileModalUI(user) {
     } else {
         activeElements.modalProfileNickname.textContent = user.nickname || 'Не указано';
     }
+    // Значок "без звука" рядом с никнеймом в профиле
+    if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
     activeElements.modalProfileId.textContent = `ID: ${user.platform_user_id || 'Не указано'}`;
 
     // У бота нет онлайн-статуса: пишем «бот» и не опрашиваем сервер
@@ -17878,9 +17916,12 @@ vgResolveBadgeSrc();
 
         const wrap = document.createElement('span');
         wrap.className = 'vg-sound-icons';
+        // Выключенное состояние — тот же перечёркнутый динамик (fa-volume-xmark),
+        // что стоит рядом с именем чата в списке и с ником в профиле: одна
+        // иконка на все места, где показывается "без звука".
         wrap.innerHTML =
             '<i class="fas fa-bell vg-sound-ico vg-sound-ico--on"></i>' +
-            '<i class="fas fa-bell-slash vg-sound-ico vg-sound-ico--off"></i>';
+            '<i class="fa-solid fa-volume-xmark vg-sound-ico vg-sound-ico--off"></i>';
 
         box.innerHTML = '';
         box.appendChild(wrap);
@@ -18090,8 +18131,75 @@ vgResolveBadgeSrc();
         }
     }
 
+    // Значок-сиблинг рядом с заголовком: заголовок (.chat-title /
+    // .profile-nickname) переписывается целиком при каждом обновлении данных,
+    // поэтому иконку держим НЕ внутри него, а в общей flex-обёртке рядом.
+    function ensureTitleIcon(titleEl, isProfile) {
+        if (!titleEl) return null;
+
+        let row = titleEl.parentElement;
+        if (!row || !row.classList.contains('vg-title-mute-row')) {
+            row = document.createElement('div');
+            row.className = 'vg-title-mute-row';
+            titleEl.parentNode.insertBefore(row, titleEl);
+            row.appendChild(titleEl);
+        }
+
+        let icon = row.querySelector(':scope > .chat-muted-icon');
+        if (!icon) {
+            icon = document.createElement('i');
+            icon.className = 'fa-solid fa-volume-xmark chat-muted-icon' + (isProfile ? ' is-profile' : '');
+            icon.setAttribute('title', 'Без звука');
+            icon.style.display = 'none';
+            row.appendChild(icon);
+        }
+        return icon;
+    }
+
+    // Собеседник открытого сейчас чата (по нему и определяем мьют хедера)
+    function openChatTarget() {
+        try {
+            if (typeof currentChat === 'undefined' || !currentChat) return null;
+            const me = (typeof userData !== 'undefined' && userData) ? String(userData.platform_user_id) : null;
+            const parts = currentChat.participants || [];
+            const other = parts.find(pp => String(pp.platform_user_id) !== me) || parts[0];
+            return {
+                userId: other ? other.platform_user_id : null,
+                chatId: currentChat.is_temp ? null : (currentChat.id != null ? currentChat.id : null)
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Хедер открытого чата: значок рядом с именем собеседника
+    function paintChatHeaders() {
+        const target = openChatTarget();
+        const muted = target ? isMuted(target.userId, target.chatId) : false;
+        ['chatTitleDesktop', 'chatTitleMobile'].forEach((id) => {
+            const icon = ensureTitleIcon(document.getElementById(id), false);
+            if (icon) icon.style.display = (target && muted) ? '' : 'none';
+        });
+    }
+
+    // Профиль контакта: значок рядом с никнеймом
+    function paintProfileNicknames() {
+        const uid = (window.__reportTargetUserId === undefined || window.__reportTargetUserId === null || window.__reportTargetUserId === '')
+            ? null
+            : window.__reportTargetUserId;
+        const target = openChatTarget();
+        const chatId = (target && uid != null && String(target.userId) === String(uid)) ? target.chatId : null;
+        const muted = uid != null && isMuted(uid, chatId);
+        ['modal-profile-nickname-desktop', 'modal-profile-nickname-mobile'].forEach((id) => {
+            const icon = ensureTitleIcon(document.getElementById(id), true);
+            if (icon) icon.style.display = muted ? '' : 'none';
+        });
+    }
+
     function refresh() {
         document.querySelectorAll('.chat-item-swipe').forEach(paintRow);
+        paintChatHeaders();
+        paintProfileNicknames();
     }
 
     // Тап по свайп-кнопке "Звук": переключаем мьют, перекрашиваем список
