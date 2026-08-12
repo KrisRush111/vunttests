@@ -12,6 +12,90 @@
 const API_BASE = 'https://vuntserverrr.site'; // бэкенд на Render, фронтенд на Vercel — домены разные
 
 // ---------------------------------------------------------
+// ЛОКАЛЬНЫЙ МЬЮТ ЧАТА ("Звук" в профиле контакта)
+//
+// Хранится ТОЛЬКО на этом устройстве, в localStorage — на сервер ничего не
+// уходит, на других устройствах пользователя уведомления продолжают
+// приходить. Список дублируется в IndexedDB service worker'а (через
+// postMessage), потому что именно SW решает, показывать ли пуш, и делает
+// это в том числе когда ни одной вкладки не открыто.
+//
+// Ключуем по platform_user_id собеседника (работает даже если чата ещё нет),
+// плюс, если чат известен, по chat_id — как подстраховка для пушей без
+// senderId.
+// ---------------------------------------------------------
+const VG_MUTED_USERS_KEY = 'vg_muted_users_v1';
+const VG_MUTED_CHATS_KEY = 'vg_muted_chats_v1';
+
+function vgReadMutedList(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.map(String) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function vgWriteMutedList(key, list) {
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(new Set(list.map(String)))));
+  } catch (e) {
+    console.warn('⚠️ Не удалось сохранить список чатов без звука:', e);
+  }
+}
+
+// Выключен ли звук у этого собеседника (userId) или чата (chatId)
+function vgIsMuted(userId, chatId) {
+  const users = vgReadMutedList(VG_MUTED_USERS_KEY);
+  const chats = vgReadMutedList(VG_MUTED_CHATS_KEY);
+  if (userId != null && users.includes(String(userId))) return true;
+  if (chatId != null && chats.includes(String(chatId))) return true;
+  return false;
+}
+
+// Переключает мьют и возвращает новое состояние (true = без звука)
+function vgToggleMuted(userId, chatId) {
+  const nowMuted = !vgIsMuted(userId, chatId);
+  let users = vgReadMutedList(VG_MUTED_USERS_KEY);
+  let chats = vgReadMutedList(VG_MUTED_CHATS_KEY);
+
+  if (nowMuted) {
+    if (userId != null) users.push(String(userId));
+    if (chatId != null) chats.push(String(chatId));
+  } else {
+    if (userId != null) users = users.filter(id => id !== String(userId));
+    if (chatId != null) chats = chats.filter(id => id !== String(chatId));
+  }
+
+  vgWriteMutedList(VG_MUTED_USERS_KEY, users);
+  vgWriteMutedList(VG_MUTED_CHATS_KEY, chats);
+  vgSyncMutedToSW();
+  return nowMuted;
+}
+
+// Отдаём актуальный список service worker'у
+async function vgSyncMutedToSW() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const target = registration.active || navigator.serviceWorker.controller;
+    if (!target) return;
+    target.postMessage({
+      type: 'SET_MUTED',
+      users: vgReadMutedList(VG_MUTED_USERS_KEY),
+      chats: vgReadMutedList(VG_MUTED_CHATS_KEY)
+    });
+  } catch (err) {
+    console.warn('⚠️ Не удалось синхронизировать список без звука с service worker:', err);
+  }
+}
+
+window.vgIsMuted = vgIsMuted;
+window.vgToggleMuted = vgToggleMuted;
+window.vgSyncMutedToSW = vgSyncMutedToSW;
+
+// ---------------------------------------------------------
 // Преобразование VAPID public key (base64url) в Uint8Array
 // ---------------------------------------------------------
 function urlBase64ToUint8Array(base64String) {
@@ -92,6 +176,10 @@ async function initPushNotifications(userId) {
   if (registration.active) {
     registration.active.postMessage({ type: 'SET_USER_ID', userId });
   }
+
+  // Отдаём SW локальный список "без звука" — он мог измениться на другой
+  // странице или в другой сессии, а SW-хранилище живёт отдельно
+  vgSyncMutedToSW();
 
   // Если уже есть активная подписка — просто убеждаемся, что сервер её знает
   const existingSubscription = await registration.pushManager.getSubscription();
