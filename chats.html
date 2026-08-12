@@ -10463,6 +10463,126 @@ function getActiveElements() {
             return false;
         }
 
+        /* ============================================================
+           СОХРАНЕНИЕ ФОТО В ГАЛЕРЕЮ (а не как "файл")
+           ------------------------------------------------------------
+           Почему фото попадало в "Файлы", а не в галерею:
+           1) Cloudinary часто отдаёт .webp / octet-stream — Android
+              MediaStore и iOS Photos такие файлы не индексируют.
+           2) fl_attachment / <a download> на телефоне = загрузка файла
+              в Downloads, а не картинка в галерее.
+           3) В галерею на мобильных попадает только File с MIME
+              image/jpeg|png и расширением .jpg/.png, отданный через
+              navigator.share() -> "Сохранить изображение" / "Фото".
+           ============================================================ */
+        const isIOSDevice = () => /iP(hone|ad|od)/.test(navigator.userAgent)
+            || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isAndroidDevice = () => /Android/i.test(navigator.userAgent);
+        const isMobileForSave = () => isIOSDevice() || isAndroidDevice()
+            || ('ontouchstart' in window && window.innerWidth < 900);
+
+        // Заставляем Cloudinary отдать настоящий JPEG (без webp/heic)
+        function toJpegDeliveryUrl(url) {
+            try {
+                if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
+                if (url.includes('cloudinary.com') && url.includes('/upload/')) {
+                    if (/\/upload\/[^/]*f_jpg/.test(url)) return url;
+                    return url.replace('/upload/', '/upload/f_jpg,q_auto:good/');
+                }
+            } catch {}
+            return url;
+        }
+
+        // Перерисовываем картинку в canvas -> гарантированный image/jpeg
+        function rasterizeToJpeg(src) {
+            return new Promise((resolve, reject) => {
+                const im = new Image();
+                im.crossOrigin = 'anonymous';
+                im.decoding = 'sync';
+                im.onload = () => {
+                    try {
+                        const c = document.createElement('canvas');
+                        c.width = im.naturalWidth || im.width;
+                        c.height = im.naturalHeight || im.height;
+                        const ctx = c.getContext('2d');
+                        ctx.fillStyle = '#ffffff';           // JPEG не умеет прозрачность
+                        ctx.fillRect(0, 0, c.width, c.height);
+                        ctx.drawImage(im, 0, 0);
+                        c.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.95);
+                    } catch (err) { reject(err); }
+                };
+                im.onerror = () => reject(new Error('image load failed'));
+                im.src = src;
+            });
+        }
+
+        // Готовит File, который телефон положит именно в галерею
+        async function buildGalleryImageFile(src) {
+            const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            let blob = null;
+            try {
+                const res = await fetch(toJpegDeliveryUrl(src), { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
+                if (res.ok) blob = await res.blob();
+            } catch {}
+
+            const good = blob && blob.size > 0 && /^image\/(jpeg|png)$/i.test(blob.type);
+            if (!good) {
+                // webp / octet-stream / CORS-фейл -> конвертируем сами
+                const srcForCanvas = (blob && blob.size > 0) ? URL.createObjectURL(blob) : toJpegDeliveryUrl(src);
+                blob = await rasterizeToJpeg(srcForCanvas);
+                if (srcForCanvas.startsWith('blob:')) URL.revokeObjectURL(srcForCanvas);
+            }
+            const ext = /png$/i.test(blob.type) ? 'png' : 'jpg';
+            return new File([blob], `Vuntgram-${stamp}.${ext}`, { type: blob.type, lastModified: Date.now() });
+        }
+
+        // Кэш: файл готовим ЗАРАНЕЕ, иначе Safari режет share() после await (NotAllowedError)
+        const galleryFileCache = new Map();
+        function prewarmGalleryFile(src) {
+            if (!src || galleryFileCache.has(src)) return galleryFileCache.get(src);
+            const p = buildGalleryImageFile(src).catch(() => null);
+            galleryFileCache.set(src, p);
+            if (galleryFileCache.size > 12) galleryFileCache.delete(galleryFileCache.keys().next().value);
+            return p;
+        }
+
+        // Единая точка: сохранить фото (мобилка -> галерея, десктоп -> скачать)
+        async function saveImageToGallery(src, btn) {
+            const ok = () => {
+                if (!btn) return;
+                const prev = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                setTimeout(() => { btn.innerHTML = prev; }, 1500);
+            };
+
+            const file = await prewarmGalleryFile(src);
+
+            if (isMobileForSave() && file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    // iOS: "Сохранить изображение" -> Фото. Android: "Фото"/"Галерея".
+                    await navigator.share({ files: [file] });
+                    ok();
+                    return;
+                } catch (err) {
+                    if (err && err.name === 'AbortError') return; // пользователь закрыл шторку
+                }
+            }
+
+            // Fallback: Android без share-файлов кладёт .jpg в Downloads,
+            // MediaStore его подхватывает и фото видно в галерее.
+            const blobUrl = URL.createObjectURL(file || new Blob());
+            const a = document.createElement('a');
+            a.href = file ? blobUrl : toJpegDeliveryUrl(src);
+            a.download = file ? file.name : 'Vuntgram-photo.jpg';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+            ok();
+        }
+        window.saveImageToGallery = saveImageToGallery;
+
         window.openImageModal = function(imageUrl, messageIndex = 0) {
             const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
             const currentIndex = messageIndex;
@@ -10520,6 +10640,7 @@ function getActiveElements() {
             const img = document.createElement('img');
             img.src = imageUrl;
             img.className = 'zoomable-image';
+            prewarmGalleryFile(imageUrl); // готовим JPEG заранее — нужно для iOS share
             img.draggable = false;
             img.style.opacity = '0';
             img.style.transform = 'scale(0.92)';
@@ -10572,66 +10693,10 @@ function getActiveElements() {
             saveBtn.addEventListener('mouseleave', () => { saveBtn.style.background = 'rgba(255,255,255,0.15)'; saveBtn.style.transform = 'scale(1)'; });
             saveBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                const currentSrc = img.src;
-
-                // Получаем расширение из URL (Cloudinary содержит .jpg/.png/.webp в пути)
-                const urlExt = (currentSrc.match(/\.(\w+)(?:\?|$)/) || [])[1] || 'jpg';
-                const ext = urlExt.replace('jpeg', 'jpg');
-                const fileName = `photo.${ext}`;
-
                 try {
-                    const response = await fetch(currentSrc);
-                    if (!response.ok) throw new Error('fetch failed');
-                    const blob = await response.blob();
-                    if (!blob || blob.size === 0) throw new Error('empty blob');
-
-                    const blobType = blob.type || `image/${ext}`;
-                    const file = new File([blob], fileName, { type: blobType });
-
-                    // Web Share API только на мобильных (тач-устройства)
-                    const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window && window.innerWidth < 768);
-                    if (isMobileDevice && navigator.canShare && navigator.canShare({ files: [file] })) {
-                        await navigator.share({ files: [file] });
-                        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                        setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
-                    } else {
-                        // Десктоп — скачивание через blob URL
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = fileName;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                        setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
-                    }
-                } catch {
-                    // Fallback для десктопа: добавляем fl_attachment в Cloudinary URL
-                    // чтобы сервер сам отдал файл с Content-Disposition: attachment
-                    try {
-                        let downloadUrl = currentSrc;
-                        if (currentSrc.includes('cloudinary.com')) {
-                            // Вставляем fl_attachment перед версией или именем файла
-                            downloadUrl = currentSrc.replace('/upload/', `/upload/fl_attachment:${fileName.replace('.', '_')}/`);
-                        }
-                        const a = document.createElement('a');
-                        a.href = downloadUrl;
-                        a.download = fileName;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                        setTimeout(() => { saveBtn.innerHTML = '<i class="fa-solid fa-download"></i>'; }, 1500);
-                    } catch {
-                        const a = document.createElement('a');
-                        a.href = currentSrc;
-                        a.download = fileName;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                    }
+                    await saveImageToGallery(img.src, saveBtn);
+                } catch (err) {
+                    console.warn('save failed', err);
                 }
             });
 
@@ -10888,6 +10953,7 @@ function getActiveElements() {
                 if (newMessage) {
                     title.textContent = `${newIndex + 1} из ${totalImages}`;
                     img.src = newMessage.content;
+                    prewarmGalleryFile(newMessage.content); // заранее готовим JPEG для сохранения
                     resetZoom();
                     footerTime.textContent = `${formatChatMessageTime(newMessage.sent_at)}`;
                     currentImageIndex = newIndex;
