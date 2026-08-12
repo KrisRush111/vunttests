@@ -7862,6 +7862,8 @@ function switchProfileMediaTab(variant, tab) {
 
 function closeProfileModal() {
     if (window.ProfileHero) window.ProfileHero.resetAll();
+    // профиль закрыт — цель для значка "без звука" снова чат, а не профиль
+    window.__reportTargetUserId = null;
     stopProfileStatusPolling();
     stopProfileDataPolling();
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
@@ -7887,6 +7889,10 @@ function closeProfileModal() {
             }
         }
     }
+
+    // Чат снова виден — восстанавливаем значок "без звука" в его хедере
+    // (состояние берётся из локального списка мьюта, а не из UI профиля).
+    if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
 }
 
 // ПРИМЕЧАНИЕ: единственное определение closeChat() теперь ниже по файлу —
@@ -18216,10 +18222,15 @@ vgResolveBadgeSrc();
     // Хедер открытого чата: значок рядом с именем собеседника
     function paintChatHeaders() {
         const target = openChatTarget();
-        const muted = target ? isMuted(target.userId, target.chatId) : false;
+        // Пока чат скрыт (открыт профиль контакта / вернулись в список) —
+        // НИЧЕГО не трогаем. Иначе refresh, случившийся при открытом профиле,
+        // прятал значок, а при возврате в чат его никто не возвращал:
+        // выглядело как "звук сам включился".
+        if (!target) return;
+        const muted = isMuted(target.userId, target.chatId);
         ['chatTitleDesktop', 'chatTitleMobile'].forEach((id) => {
             const icon = ensureTitleIcon(document.getElementById(id), false);
-            if (icon) icon.style.display = (target && muted) ? '' : 'none';
+            if (icon) icon.style.display = muted ? '' : 'none';
         });
     }
 
