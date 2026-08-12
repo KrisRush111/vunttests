@@ -896,7 +896,8 @@
 
         /* У никнейма в профиле имя крупнее — значок подтягиваем к нему */
         .vg-title-mute-row > .chat-muted-icon.is-profile {
-            font-size: 0.72em;
+            /* ровно как значок в списке чатов (14px), независимо от размера ника */
+            font-size: 14px;
             /* тот же margin-bottom, что у .profile-nickname — иначе значок
                оказывался бы ниже середины строки с ником */
             margin-bottom: 4px;
@@ -13456,6 +13457,11 @@ async function openChat(chatId) {
         document.body.style.overflow = 'hidden';
     }
 
+    // Значок "без звука" в хедере рисуем сразу после открытия модала (до этого
+    // модал ещё не был .active и значок считался скрытым) — из локального
+    // списка мьюта, без ожидания /get_chat_info.
+    if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
+
     try {
         // Сообщения и метаданные чата (включая participants, нужные хедеру
         // для открытия профиля) раньше запрашивались строго по очереди —
@@ -13480,6 +13486,8 @@ async function openChat(chatId) {
 
         if (chatData.status === 'success' && chatData.chat) {
             currentChat = chatData.chat;
+            // точные participants пришли — обновляем значок "без звука" в хедере
+            if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
             // Подстраховка: точные данные с сервера могли уточнить, что это бот
             if (window.vgApplyBotChatUI) {
                 const srvOther = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
@@ -18154,16 +18162,52 @@ vgResolveBadgeSrc();
     }
 
     // Собеседник открытого сейчас чата (по нему и определяем мьют хедера)
+    // Открыт ли сейчас модал чата (на мобиле .active, на десктопе он всегда
+    // в разметке — там ориентируемся на наличие currentChatId).
+    function isChatOpen() {
+        try {
+            const mob = document.getElementById('chatModalMobile');
+            if (mob && mob.classList.contains('active')) return true;
+            const desk = document.getElementById('chatModalDesktop');
+            if (desk && typeof isDesktop !== 'undefined' && isDesktop) {
+                return !!(typeof currentChatId !== 'undefined' && currentChatId != null);
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    // Собеседник открытого сейчас чата.
+    // ВАЖНО: openChat() сначала ставит currentChat = null и лишь потом (после
+    // сети /get_chat_info) заполняет его. Раньше мы читали только currentChat,
+    // поэтому значок "без звука" в хедере при открытии чата пропадал и
+    // появлялся с задержкой (визуальный сбой). Теперь берём данные из первого
+    // доступного источника: currentChat → кэш списка чатов → DOM-строка списка.
     function openChatTarget() {
         try {
-            if (typeof currentChat === 'undefined' || !currentChat) return null;
+            if (!isChatOpen()) return null;
             const me = (typeof userData !== 'undefined' && userData) ? String(userData.platform_user_id) : null;
-            const parts = currentChat.participants || [];
-            const other = parts.find(pp => String(pp.platform_user_id) !== me) || parts[0];
-            return {
-                userId: other ? other.platform_user_id : null,
-                chatId: currentChat.is_temp ? null : (currentChat.id != null ? currentChat.id : null)
-            };
+            const cc = (typeof currentChat !== 'undefined' && currentChat) ? currentChat : null;
+
+            let chatId = null;
+            if (cc) chatId = cc.is_temp ? null : (cc.id != null ? cc.id : null);
+            else if (typeof currentChatId !== 'undefined' && currentChatId != null) chatId = currentChatId;
+
+            let src = cc;
+            if (!src && chatId != null && typeof currentChatsList !== 'undefined' && Array.isArray(currentChatsList)) {
+                src = currentChatsList.find(c => String(c.id) === String(chatId)) || null;
+            }
+
+            const parts = (src && src.participants) || [];
+            const other = parts.find(pp => String(pp.platform_user_id) !== me) || parts[0] || null;
+            let userId = other ? other.platform_user_id : null;
+
+            if (userId == null && chatId != null) {
+                const row = document.querySelector('.chat-item-swipe[data-chat-id="' + chatId + '"]');
+                if (row) userId = row.getAttribute('data-participant-id');
+            }
+
+            if (userId == null && chatId == null) return null;
+            return { userId: userId, chatId: chatId };
         } catch (e) {
             return null;
         }
