@@ -9307,5 +9307,418 @@ vgResolveBadgeSrc();
 })();
 </script>
 
+<!-- ==========================================================================
+     ЛОКАЛЬНОЕ ОТКЛЮЧЕНИЕ ЗВУКА В ПРОФИЛЕ КОНТАКТА (как в chats.html)
+
+     Кнопка "Звук" в профиле контакта переключает тот же локальный список
+     мьюта, что и chats.html: localStorage (vg_muted_users_v1 /
+     vg_muted_chats_v1) + IndexedDB service worker'а + RAM сервера.
+     Реализация (vgIsMuted / vgToggleMuted / vgSyncMutedToSW) живёт в
+     push-notifications.js, здесь только UI: кроссфейд колокольчиков,
+     подпись "Звук" ↔ "Без звука" и значок "без звука" рядом с никнеймом.
+
+     ВАЖНО: в СПИСКЕ контактов значок "без звука" НЕ показываем — только в
+     открытом профиле контакта.
+     ========================================================================== -->
+<style>
+/* --- значок "без звука" рядом с никнеймом (1:1 с chats.html) --- */
+.vg-title-mute-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.vg-title-mute-row > .profile-nickname {
+    min-width: 0;
+}
+
+.chat-muted-icon {
+    flex: 0 0 auto;
+    font-size: 14px;
+    line-height: 1;
+    color: var(--telegram-hint);
+    opacity: 0.9;
+    margin-bottom: 2px;
+}
+
+/* у никнейма в профиле имя крупнее — значок подтягиваем к нему */
+.vg-title-mute-row > .chat-muted-icon.is-profile {
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+/* при раскрытом фото шапки имя уезжает в левый нижний угол и становится
+   белым — значок ведём за ним */
+.hero-expanded .vg-title-mute-row {
+    justify-content: flex-start;
+}
+
+.hero-expanded .vg-title-mute-row > .chat-muted-icon {
+    color: rgba(255, 255, 255, .82);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, .28);
+}
+
+/* --- кнопка "Звук": два колокольчика друг поверх друга (кроссфейд) --- */
+.vg-sound-icons {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    line-height: 1;
+}
+
+.vg-sound-ico {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: 50% 15%;
+    transition:
+        opacity 0.22s ease,
+        transform 0.42s cubic-bezier(0.34, 1.46, 0.64, 1);
+    will-change: opacity, transform;
+}
+
+.vg-sound-ico--on  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+.vg-sound-ico--off { opacity: 0; transform: translate(-50%, -50%) scale(0.55) rotate(-18deg); }
+
+.vg-muted .vg-sound-ico--on  { opacity: 0; transform: translate(-50%, -50%) scale(0.55) rotate(18deg); }
+.vg-muted .vg-sound-ico--off { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+
+.vg-sound-pulse .action-button-icon {
+    animation: vgSoundPulse 0.5s cubic-bezier(0.34, 1.46, 0.64, 1);
+}
+
+@keyframes vgSoundPulse {
+    0%   { transform: scale(1); }
+    32%  { transform: scale(0.88); }
+    68%  { transform: scale(1.07); }
+    100% { transform: scale(1); }
+}
+
+.action-button-label {
+    transition: opacity 0.13s ease;
+}
+
+.action-button-label.vg-label-swap {
+    opacity: 0;
+}
+
+/* первая отрисовка при открытии профиля — состояние ставим мгновенно */
+.vg-no-anim .vg-sound-ico,
+.vg-no-anim .action-button-label {
+    transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vg-sound-ico,
+    .action-button-label { transition: none !important; }
+    .vg-sound-pulse .action-button-icon { animation: none !important; }
+}
+</style>
+<script>
+(function () {
+    const SERVER = 'https://vuntserverrr.site';
+    const SOUND_BUTTON_IDS = ['soundButtonDesktop', 'soundButtonMobile'];
+    const NICKNAME_IDS = ['modal-profile-nickname-desktop', 'modal-profile-nickname-mobile'];
+    const MUTED_USERS_KEY = 'vg_muted_users_v1';
+    const MUTED_CHATS_KEY = 'vg_muted_chats_v1';
+
+    // Чей профиль открыт — тот же id, что использует блок жалоб
+    function profileUserId() {
+        const id = window.__reportTargetUserId;
+        return (id === undefined || id === null || id === '') ? null : id;
+    }
+
+    function readList(key) {
+        try {
+            const arr = JSON.parse(localStorage.getItem(key) || '[]');
+            return Array.isArray(arr) ? arr.map(String) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function writeList(key, arr) {
+        try { localStorage.setItem(key, JSON.stringify([...new Set(arr.map(String))])); } catch (e) {}
+    }
+
+    // Резерв, если push-notifications.js не загрузился
+    function isMuted(userId, chatId) {
+        if (typeof window.vgIsMuted === 'function') return window.vgIsMuted(userId, chatId);
+        if (userId != null && readList(MUTED_USERS_KEY).includes(String(userId))) return true;
+        if (chatId != null && readList(MUTED_CHATS_KEY).includes(String(chatId))) return true;
+        return false;
+    }
+
+    function toggleMuted(userId, chatId) {
+        if (typeof window.vgToggleMuted === 'function') return window.vgToggleMuted(userId, chatId);
+
+        const nowMuted = !isMuted(userId, chatId);
+        let users = readList(MUTED_USERS_KEY);
+        let chats = readList(MUTED_CHATS_KEY);
+        if (nowMuted) {
+            if (userId != null) users.push(String(userId));
+            if (chatId != null) chats.push(String(chatId));
+        } else {
+            if (userId != null) users = users.filter(id => id !== String(userId));
+            if (chatId != null) chats = chats.filter(id => id !== String(chatId));
+        }
+        writeList(MUTED_USERS_KEY, users);
+        writeList(MUTED_CHATS_KEY, chats);
+        if (typeof window.vgSyncMutedToSW === 'function') window.vgSyncMutedToSW();
+        return nowMuted;
+    }
+
+    /* ---------- chat_id собеседника ----------
+       chats.html мьютит парой (user_id + chat_id). Здесь списка чатов нет,
+       поэтому карту "собеседник → чат" один раз тянем с сервера и кэшируем:
+       без chat_id снятие мьюта тут оставляло бы чат в vg_muted_chats_v1 и в
+       chats.html он выглядел бы всё ещё без звука. */
+    const chatIdByUser = Object.create(null);
+    let chatMapPromise = null;
+
+    function meId() {
+        if (window.__vuntgramCurrentUserId) return String(window.__vuntgramCurrentUserId);
+        let raw = null;
+        try { raw = sessionStorage.getItem('userData'); } catch (e) {}
+        if (!raw) { try { raw = localStorage.getItem('rememberedUser'); } catch (e) {} }
+        if (!raw) return null;
+        try {
+            const u = JSON.parse(raw);
+            return (u && u.platform_user_id) ? String(u.platform_user_id) : null;
+        } catch (e) { return null; }
+    }
+
+    function loadChatMap(force) {
+        if (chatMapPromise && !force) return chatMapPromise;
+        const uid = meId();
+        if (!uid) return Promise.resolve(chatIdByUser);
+
+        chatMapPromise = fetch(SERVER + '/get_chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ platform_user_id: uid })
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (d && d.status === 'success' && Array.isArray(d.chats)) {
+                d.chats.forEach(c => {
+                    const parts = (c && c.participants) || [];
+                    const other = parts.find(p => String(p.platform_user_id) !== String(uid)) || parts[0] || null;
+                    if (other && c.id != null) chatIdByUser[String(other.platform_user_id)] = c.id;
+                });
+            }
+            return chatIdByUser;
+        })
+        .catch(() => { chatMapPromise = null; return chatIdByUser; });
+
+        return chatMapPromise;
+    }
+
+    function chatIdFor(userId) {
+        if (userId == null) return null;
+        const cid = chatIdByUser[String(userId)];
+        return (cid === undefined) ? null : cid;
+    }
+
+    // Догоняем chat_id, если он приехал уже после тапа: держим списки users и
+    // chats в одном состоянии, чтобы chats.html показывал то же самое.
+    function alignChatId(userId, muted) {
+        loadChatMap().then(() => {
+            const cid = chatIdFor(userId);
+            if (cid == null) return;
+            let chats = readList(MUTED_CHATS_KEY);
+            const has = chats.includes(String(cid));
+            if (muted === has) return;
+            chats = muted ? chats.concat(String(cid)) : chats.filter(id => id !== String(cid));
+            writeList(MUTED_CHATS_KEY, chats);
+            if (typeof window.vgSyncMutedToSW === 'function') window.vgSyncMutedToSW();
+            if (typeof window.vgSyncMutedUnreadTotal === 'function') window.vgSyncMutedUnreadTotal();
+        });
+    }
+
+    /* ---------- кнопка "Звук" ---------- */
+    function ensureIcons(btn) {
+        const box = btn.querySelector('.action-button-icon');
+        if (!box || box.querySelector('.vg-sound-icons')) return box;
+
+        const wrap = document.createElement('span');
+        wrap.className = 'vg-sound-icons';
+        wrap.innerHTML =
+            '<i class="fas fa-bell vg-sound-ico vg-sound-ico--on"></i>' +
+            '<i class="fas fa-bell-slash vg-sound-ico vg-sound-ico--off"></i>';
+
+        box.innerHTML = '';
+        box.appendChild(wrap);
+        return box;
+    }
+
+    // animate=false — первая отрисовка при открытии профиля
+    function paint(btn, muted, animate) {
+        ensureIcons(btn);
+        const label = btn.querySelector('.action-button-label');
+        const nextLabel = muted ? 'Без звука' : 'Звук';
+        const changed = btn.classList.contains('vg-muted') !== muted;
+
+        btn.classList.toggle('vg-no-anim', !animate);
+        void btn.offsetWidth;
+
+        btn.classList.toggle('vg-muted', muted);
+        btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+
+        if (animate && changed) {
+            btn.classList.remove('vg-sound-pulse');
+            void btn.offsetWidth;
+            btn.classList.add('vg-sound-pulse');
+            setTimeout(() => btn.classList.remove('vg-sound-pulse'), 520);
+        }
+
+        if (label && label.textContent !== nextLabel) {
+            if (animate && changed) {
+                label.classList.add('vg-label-swap');
+                setTimeout(() => {
+                    label.textContent = nextLabel;
+                    label.classList.remove('vg-label-swap');
+                }, 130);
+            } else {
+                label.textContent = nextLabel;
+            }
+        }
+
+        if (!animate) {
+            setTimeout(() => btn.classList.remove('vg-no-anim'), 60);
+        }
+    }
+
+    /* ---------- значок "без звука" у никнейма ----------
+       Никнейм перезаписывается при каждой загрузке профиля (textContent),
+       поэтому иконку держим НЕ внутри него, а сиблингом в flex-обёртке. */
+    function ensureTitleIcon(titleEl) {
+        if (!titleEl) return null;
+
+        let row = titleEl.parentElement;
+        if (!row || !row.classList.contains('vg-title-mute-row')) {
+            row = document.createElement('div');
+            row.className = 'vg-title-mute-row';
+            titleEl.parentNode.insertBefore(row, titleEl);
+            row.appendChild(titleEl);
+        }
+
+        let icon = row.querySelector(':scope > .chat-muted-icon');
+        if (!icon) {
+            icon = document.createElement('i');
+            icon.className = 'fa-solid fa-volume-xmark chat-muted-icon is-profile';
+            icon.setAttribute('title', 'Без звука');
+            icon.style.display = 'none';
+            row.appendChild(icon);
+        }
+        return icon;
+    }
+
+    function paintNickname(muted) {
+        NICKNAME_IDS.forEach((id) => {
+            const icon = ensureTitleIcon(document.getElementById(id));
+            if (icon) icon.style.display = muted ? '' : 'none';
+        });
+    }
+
+    // Состояние профиля перерисовываем при каждом открытии: разметка профиля
+    // одна для всех контактов.
+    function refresh() {
+        const uid = profileUserId();
+        const muted = uid != null && isMuted(uid, chatIdFor(uid));
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (btn) paint(btn, muted, false);
+        });
+        paintNickname(muted);
+    }
+
+    function onClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const uid = profileUserId();
+        if (uid == null) {
+            console.warn('Кнопка "Звук": не известен id собеседника — профиль ещё не открыт');
+            return;
+        }
+
+        const muted = toggleMuted(uid, chatIdFor(uid));
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (btn) paint(btn, muted, true);
+        });
+        paintNickname(muted);
+
+        alignChatId(uid, muted);
+
+        // счётчик непрочитанных из чатов без звука (красный значок в футере)
+        if (typeof window.vgSyncMutedUnreadTotal === 'function') window.vgSyncMutedUnreadTotal();
+        // другие страницы (chats.html в соседней вкладке) поймают storage,
+        // этой странице сообщаем событием
+        try { window.dispatchEvent(new CustomEvent('vg-mute-changed', { detail: { userId: uid, muted: muted } })); } catch (err) {}
+
+        // Тост намеренно не показываем: смена иконки и подписи — достаточная
+        // обратная связь (ровно как в chats.html).
+    }
+
+    function bind() {
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (!btn || btn.dataset.muteBound === '1') return;
+            btn.dataset.muteBound = '1';
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('click', onClick);
+        });
+        refresh();
+    }
+
+    // Профиль открывается сначала установкой __reportTargetUserId, потом
+    // класса видимости — к срабатыванию observer'а id уже актуален.
+    function watchProfileModals() {
+        ['profileModalDesktop', 'profileModalMobile'].forEach((id) => {
+            const modal = document.getElementById(id);
+            if (!modal) return;
+            new MutationObserver(() => {
+                if (modal.classList.contains('visible') || modal.classList.contains('active')) {
+                    refresh();
+                    loadChatMap().then(refresh);
+                }
+            }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+        });
+    }
+
+    window.vgRefreshProfileSoundButton = refresh;
+
+    // Правка из chats.html (другая вкладка) — прилетает событием storage
+    window.addEventListener('storage', (e) => {
+        if (!e.key || e.key === MUTED_USERS_KEY || e.key === MUTED_CHATS_KEY) refresh();
+    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    window.addEventListener('pageshow', () => { bind(); refresh(); });
+    window.addEventListener('vg-mute-changed', refresh);
+
+    function init() {
+        bind();
+        watchProfileModals();
+        loadChatMap();
+        if (typeof window.vgSyncMutedToSW === 'function') window.vgSyncMutedToSW();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>
+
 </body>
 </html>
