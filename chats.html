@@ -11389,6 +11389,7 @@ function getActiveElements() {
             const hadCache = !!(cachedChats && cachedChats.length);
 
             if (hadCache) {
+                vgSanitizeUnreadList(cachedChats);
                 const sortedChats = sortChats(cachedChats);
                 currentChatsList = sortedChats;
                 renderChats(sortedChats);
@@ -11407,6 +11408,7 @@ function getActiveElements() {
                 const data = await response.json();
 
                 if (data.status === 'success') {
+                    vgSanitizeUnreadList(data.chats);
                     const sortedChats = sortChats(data.chats);
                     currentChatsList = sortedChats;
                     renderChats(sortedChats);
@@ -11448,6 +11450,8 @@ function getActiveElements() {
                 const data = await response.json();
                 
                 if (data.status === 'success') {
+                    // Ответ мог прийти уже после того, как чат открыли/прочитали
+                    vgSanitizeUnread(data.chat);
                     const chatIndex = currentChatsList.findIndex(chat => String(chat.id) === String(chatId));
                     const isNewChat = chatIndex === -1;
                     if (!isNewChat) currentChatsList[chatIndex] = data.chat;
@@ -11551,6 +11555,7 @@ function getActiveElements() {
         }
 
         async function renderChats(chats) {
+            vgSanitizeUnreadList(chats);
             const { chatsList, noChats } = getActiveElements();
             chatsList.innerHTML = '';
 
@@ -13405,6 +13410,82 @@ function getActiveElements() {
             });
         }
 
+// ===== ЗАЩИТА БЕЙДЖА НЕПРОЧИТАННЫХ ОТ "ВОСКРЕШЕНИЯ" =====
+// Проблема: пользователь открывает чат, openChat() гасит синий кружок локально,
+// но параллельно в полёте уже висит запрос, снятый ДО открытия чата
+// (pollUnreadOnce/get_chats каждые 5с, visibilitychange/focus/online,
+// updateSingleChat по WS-событию). Его ответ приходит через доли секунды ПОСЛЕ
+// открытия чата и содержит ещё unread_count = 1 — список и DOM перезаписываются
+// старыми данными, и кружок возвращается. Пока чат открыт, поллинг списка
+// молчит, поэтому кружок остаётся висеть — и пропадает только со второго захода.
+//
+// Решение: помним по каждому чату, ДО какого сообщения он уже прочитан
+// (сравниваем ТОЛЬКО серверные timestamp'ы между собой — часы клиента ни на что
+// не влияют). Любые данные о непрочитанных, не новее этой отметки, считаем
+// устаревшими и приводим unread_count к 0 в одной точке — vgSanitizeUnread().
+var vgReadChats = Object.create(null);
+
+function vgTs(value) {
+    if (!value) return 0;
+    const t = new Date(value).getTime();
+    return Number.isNaN(t) ? 0 : t;
+}
+
+// Окно, в течение которого гасим непрочитанные у чата, время последнего
+// сообщения которого неизвестно (его хватает, чтобы перекрыть любой запрос,
+// висящий "в полёте" в момент открытия чата).
+var VG_READ_GRACE_MS = 15000;
+
+// Отметить чат прочитанным вплоть до сообщения lastMessageTime (СЕРВЕРНОЕ время).
+// Если серверное время неизвестно (чата ещё нет в локальном списке — открытие по
+// URL/из push-уведомления), запоминаем только момент по локальным часам и
+// защищаем бейдж коротким окном: сравнивать серверное время с локальными часами
+// нельзя — расхождение часов клиента дало бы либо ложные, либо потерянные бейджи.
+function vgMarkChatRead(chatId, lastMessageTime) {
+    if (chatId == null) return;
+    const key = String(chatId);
+    const t = vgTs(lastMessageTime);
+    const prev = vgReadChats[key] || { t: 0, at: 0 };
+    vgReadChats[key] = { t: Math.max(prev.t, t), at: Date.now() };
+}
+window.vgMarkChatRead = vgMarkChatRead;
+
+// true — данные о непрочитанных для этого чата устарели (мы его уже прочитали).
+function vgUnreadIsStale(chatId, lastMessageTime) {
+    if (chatId == null) return false;
+    const key = String(chatId);
+    const mark = vgReadChats[key];
+    if (!mark) return false;
+    if (mark.t > 0) {
+        // Пришло сообщение НОВЕЕ того, на котором мы закрыли чат — это реально
+        // новое непрочитанное: бейдж нужен, отметку сбрасываем.
+        if (vgTs(lastMessageTime) > mark.t) {
+            delete vgReadChats[key];
+            return false;
+        }
+        return true;
+    }
+    return (Date.now() - mark.at) < VG_READ_GRACE_MS;
+}
+
+// Единая точка нормализации: у открытого сейчас чата и у уже прочитанных чатов
+// непрочитанных быть не может.
+function vgSanitizeUnread(chat) {
+    if (!chat || chat.id == null) return chat;
+    if ((parseInt(chat.unread_count, 10) || 0) <= 0) return chat;
+    if (currentChatId != null && String(currentChatId) === String(chat.id)) {
+        chat.unread_count = 0;
+        return chat;
+    }
+    if (vgUnreadIsStale(chat.id, chat.last_message_time)) chat.unread_count = 0;
+    return chat;
+}
+
+function vgSanitizeUnreadList(list) {
+    if (Array.isArray(list)) list.forEach(vgSanitizeUnread);
+    return list;
+}
+
 async function openChat(chatId) {
     // ── Отменяем любой предыдущий openChat ──────────────────────────
     if (openChatAbortController) openChatAbortController.abort();
@@ -13449,7 +13530,11 @@ async function openChat(chatId) {
     noMessages.style.display = 'none';
 
     // Показываем имя/аватар из кэша немедленно (не ждём сеть)
-    const cachedChat = currentChatsList.find(c => c.id === chatId);
+    // ВАЖНО: сравнение через String() — chatId приходит и числом (тап по чату в
+    // списке), и строкой (открытие чата по URL/sessionStorage, например переход
+    // из push-уведомления). Строгое === промахивалось, и тогда бейдж вообще не
+    // гасился локально.
+    const cachedChat = currentChatsList.find(c => String(c.id) === String(chatId));
 
     // Список чатов ещё мог не загрузиться (например, чат открывается сразу
     // после перезагрузки страницы по sessionStorage/URL). Тогда данных об
@@ -13468,9 +13553,14 @@ async function openChat(chatId) {
     // ответа сервера (get_messages/get_chat_info могут занять секунду и больше).
     // Раньше unread_count обнулялся только после обоих запросов, из-за чего
     // синий бейдж оставался видимым какое-то время после открытия чата.
+    // Запоминаем, что чат прочитан вплоть до его последнего сообщения — после
+    // этого ни один "опоздавший" ответ сервера уже не вернёт кружок обратно
+    // (см. vgSanitizeUnread). Бейдж гасим всегда, даже если чата ещё нет в
+    // локальном списке (открытие по URL/из push-уведомления).
+    vgMarkChatRead(chatId, cachedChat ? cachedChat.last_message_time : null);
+    updateChatItemInDOM(chatId, { unread_count: 0 });
     if (cachedChat && cachedChat.unread_count > 0) {
         cachedChat.unread_count = 0;
-        updateChatItemInDOM(chatId, { unread_count: 0 });
         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
     }
 
@@ -13583,8 +13673,10 @@ async function openChat(chatId) {
                 const srvOther = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 window.vgApplyBotChatUI(!!(srvOther && (srvOther.is_bot === true || (window.vgIsBotId && window.vgIsBotId(srvOther.platform_user_id)))));
             }
+            vgMarkChatRead(chatId, currentChat.last_message_time || null);
             updateChatItemInDOM(chatId, { unread_count: 0 });
-            const chatIndex = currentChatsList.findIndex(c => c.id === chatId);
+            // String() — chatId может быть строкой (см. комментарий у cachedChat)
+            const chatIndex = currentChatsList.findIndex(c => String(c.id) === String(chatId));
             if (chatIndex !== -1 && currentChatsList[chatIndex].unread_count !== 0) {
                 currentChatsList[chatIndex].unread_count = 0;
                 setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
@@ -14279,7 +14371,15 @@ function stopProfileDataPolling() {
                         }
                     }
                     
-                    if (chatData.unread_count > 0) {
+                    // Последний фильтр: данные могли прийти из запроса, снятого
+                    // ДО того как пользователь открыл этот чат — тогда бейдж
+                    // рисовать нельзя (иначе он "воскресает" после захода в чат).
+                    const unreadCount = (chatData.unread_count > 0 &&
+                        ((currentChatId != null && String(currentChatId) === String(chatId)) ||
+                         vgUnreadIsStale(chatId, chatData.last_message_time)))
+                        ? 0 : chatData.unread_count;
+
+                    if (unreadCount > 0) {
                         let badge = chatItem.querySelector('.unread-badge');
                         if (!badge) {
                             badge = document.createElement('div');
@@ -14293,7 +14393,7 @@ function stopProfileDataPolling() {
                             }
                             slot.appendChild(badge);
                         }
-                        badge.textContent = chatData.unread_count;
+                        badge.textContent = unreadCount;
                         badge.classList.add('animate__animated', 'animate__pulse');
                     } else {
                         const badge = chatItem.querySelector('.unread-badge');
@@ -14669,6 +14769,7 @@ function stopProfileDataPolling() {
                                     currentChatsList[chatIdxPoll].last_message_is_me = !!lastRealMsg.is_me;
                                     currentChatsList[chatIdxPoll].last_message_is_read = !!lastRealMsg.is_read;
                                     currentChatsList[chatIdxPoll].unread_count = 0;
+                                    vgMarkChatRead(chatId, lastRealMsg.sent_at);
                                     const movedChat = currentChatsList.splice(chatIdxPoll, 1)[0];
                                     currentChatsList.unshift(movedChat);
                                     setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
@@ -14741,6 +14842,8 @@ function stopProfileDataPolling() {
                 const data = await response.json();
 
                 if (data.status === 'success') {
+                    const newestMsg = currentMessages.length ? currentMessages[currentMessages.length - 1] : null;
+                    vgMarkChatRead(chatId, (newestMsg && newestMsg.sent_at) || null);
                     currentMessages.forEach(message => { if (!message.is_me) message.is_read = true; });
                     updateAllMessageStatusesInUI();
 
@@ -15323,6 +15426,9 @@ function stopProfileDataPolling() {
         function applyServerChatsSnapshot(serverChats) {
             if (!Array.isArray(serverChats)) return;
 
+            // Снимок мог быть снят до того, как пользователь открыл чат/сервер
+            // успел обработать mark_all_as_read — гасим устаревшие непрочитанные.
+            vgSanitizeUnreadList(serverChats);
             const sorted = sortChats(serverChats);
             const prevIds = (currentChatsList || []).map(c => String(c.id));
             const nextIds = sorted.map(c => String(c.id));
@@ -15356,7 +15462,11 @@ function stopProfileDataPolling() {
         async function pollUnreadOnce() {
             // Пока пользователь реально внутри чата — не трогаем список,
             // там своя, более частая синхронизация (startMessagePolling).
-            if (currentChat) return;
+            // ВАЖНО: проверяем currentChatId, а не currentChat — currentChat
+            // появляется только после ответа /get_chat_info, и раньше в это окно
+            // (пока чат открывается) успевал влезть тик поллинга со старыми
+            // непрочитанными и возвращал синий кружок.
+            if (currentChatId != null) return;
             if (!userData || !userData.platform_user_id) return;
 
             try {
