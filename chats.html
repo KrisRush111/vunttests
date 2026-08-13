@@ -11720,8 +11720,9 @@ function getActiveElements() {
                 });
                 chatSwipeActions.appendChild(chatDeleteBtn);
 
-                // Десктоп: ПКМ по чату открывает компактное меню "Закрепить/Открепить"
-                // и "Удалить" (визуально как контекстное меню сообщения), свайп на десктопе не используется.
+                // Десктоп: ПКМ по чату открывает компактное меню "Закрепить/Открепить",
+                // "Вкл./Выкл. звук" и "Удалить" (визуально как контекстное меню
+                // сообщения), свайп на десктопе не используется.
                 chatItem.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
                     openChatContextMenu(e, chatItem, chat.id, chat.is_pinned, pinnedCount);
@@ -12030,6 +12031,33 @@ function getActiveElements() {
                 });
                 menu.appendChild(pinRow);
             }
+
+            // Звук — та же строка меню, что и "Закрепить": пишет в тот же
+            // локальный список мьюта (vg_muted_users_v1 / vg_muted_chats_v1),
+            // что и свайп-кнопка "Звук" на мобиле и кнопка "Звук" в профиле
+            // контакта. Поэтому значок перечёркнутого динамика у имени, серый
+            // бейдж непрочитанных и футер обновляются сразу же.
+            // Собеседника берём с самой строки списка (data-participant-id) —
+            // по нему мьют работает, даже если чата ещё нет на сервере.
+            const soundUserId = chatItem.getAttribute('data-participant-id');
+            const isChatMuted = (typeof window.vgIsMuted === 'function')
+                ? window.vgIsMuted(soundUserId, chatId)
+                : false;
+
+            const soundRow = document.createElement('button');
+            soundRow.type = 'button';
+            soundRow.className = 'message-action-item';
+            soundRow.innerHTML = isChatMuted
+                ? '<span>Вкл. звук</span><span class="message-action-item-icon"><i class="fa-solid fa-bell"></i></span>'
+                : '<span>Выкл. звук</span><span class="message-action-item-icon"><i class="fa-solid fa-bell-slash"></i></span>';
+            soundRow.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                closeChatContextMenu();
+                if (typeof window.vgToggleChatMuteFromList === 'function') {
+                    window.vgToggleChatMuteFromList(chatId, soundUserId);
+                }
+            });
+            menu.appendChild(soundRow);
 
             const deleteRow = document.createElement('button');
             deleteRow.type = 'button';
