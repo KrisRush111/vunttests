@@ -13456,6 +13456,19 @@ function vgUnreadIsStale(chatId, lastMessageTime) {
     const key = String(chatId);
     const mark = vgReadChats[key];
     if (!mark) return false;
+    // ГЛАВНОЕ ОГРАНИЧЕНИЕ (без него синий кружок вообще не появляется):
+    // отметка "чат прочитан" нужна ТОЛЬКО чтобы отфильтровать ответы сервера,
+    // снятые ДО открытия чата — они приходят в пределах секунд. Через
+    // VG_READ_GRACE_MS сервер уже обработал mark_all_as_read, и дальше верим
+    // исключительно серверу. Раньше отметка жила бессрочно, и расхождение
+    // шкал времени (сообщения отдаются в MSK = UTC+3, а last_message_time
+    // в /get_chats и /get_chat_info — в UTC) навсегда прятало бейдж: время
+    // нового сообщения оказывалось "не новее" отметки ещё ~3 часа.
+    if ((Date.now() - mark.at) >= VG_READ_GRACE_MS) {
+        delete vgReadChats[key];
+        return false;
+    }
+
     if (mark.t > 0) {
         // Пришло сообщение НОВЕЕ того, на котором мы закрыли чат — это реально
         // новое непрочитанное: бейдж нужен, отметку сбрасываем.
@@ -13463,9 +13476,8 @@ function vgUnreadIsStale(chatId, lastMessageTime) {
             delete vgReadChats[key];
             return false;
         }
-        return true;
     }
-    return (Date.now() - mark.at) < VG_READ_GRACE_MS;
+    return true;
 }
 
 // Единая точка нормализации: у открытого сейчас чата и у уже прочитанных чатов
