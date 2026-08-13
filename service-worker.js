@@ -1,7 +1,7 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.2.6';
+const CACHE_NAME = 'vuntgram-v2.2.7';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
@@ -481,13 +481,56 @@ async function readMutedState() {
   }
 }
 
+// Спрашиваем открытые вкладки/PWA их localStorage-список мьюта.
+//
+// Нужно как подстраховка: если SET_MUTED по какой-то причине не доехал до
+// IndexedDB (старый воркер, только что установленная версия, приватный режим),
+// в IDB лежит пустой список — и уведомление от замьюченного контакта всё равно
+// показывалось. Когда хоть один клиент открыт, берём правду у него.
+async function readMutedStateFromClients(timeoutMs = 400) {
+  try {
+    const clientsArr = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (!clientsArr.length) return null;
+
+    return await new Promise((resolve) => {
+      const channel = new MessageChannel();
+      const timer = setTimeout(() => resolve(null), timeoutMs);
+      channel.port1.onmessage = (event) => {
+        clearTimeout(timer);
+        const d = event.data;
+        resolve(d && typeof d === 'object' ? { users: d.users || [], chats: d.chats || [] } : null);
+      };
+      try {
+        clientsArr[0].postMessage({ type: 'GET_MUTED' }, [channel.port2]);
+      } catch (e) {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    });
+  } catch (err) {
+    return null;
+  }
+}
+
 // Замьючен ли этот push? Основной признак — senderId (его кладёт сервер),
 // подстраховка — chat_id, вытащенный из tag "chat-<id>" или из url, чтобы
 // мьют работал и со старым бэкендом без senderId в payload.
 async function isPushMuted(data) {
-  const state = await readMutedState();
-  const users = (state.users || []).map(String);
-  const chats = (state.chats || []).map(String);
+  let state = await readMutedState();
+  let users = (state.users || []).map(String);
+  let chats = (state.chats || []).map(String);
+
+  // Пусто в IndexedDB — возможно, список просто не успел синхронизироваться.
+  // Спросим открытую страницу и заодно сохраним ответ на будущее.
+  if (!users.length && !chats.length) {
+    const fromClient = await readMutedStateFromClients();
+    if (fromClient && ((fromClient.users || []).length || (fromClient.chats || []).length)) {
+      users = (fromClient.users || []).map(String);
+      chats = (fromClient.chats || []).map(String);
+      saveMutedState({ users, chats });
+    }
+  }
+
   if (!users.length && !chats.length) return false;
 
   if (data.senderId != null && users.includes(String(data.senderId))) return true;
@@ -683,9 +726,15 @@ self.addEventListener('message', (event) => {
       users: Array.isArray(event.data.users) ? event.data.users.map(String) : [],
       chats: Array.isArray(event.data.chats) ? event.data.chats.map(String) : []
     };
-    event.waitUntil
-      ? event.waitUntil(saveMutedState(state))
-      : saveMutedState(state);
+    const done = saveMutedState(state).then(() => {
+      const ack = { type: 'MUTED_SAVED', users: state.users, chats: state.chats };
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage(ack);
+      } else if (event.source) {
+        event.source.postMessage(ack);
+      }
+    });
+    if (event.waitUntil) event.waitUntil(done);
   }
 
   // Раздел "Уведомления" в profile.html спрашивает активный service worker,
