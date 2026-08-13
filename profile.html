@@ -6861,8 +6861,29 @@ window.addEventListener('DOMContentLoaded', () => {
             } catch (e) { return null; }
         }
 
-        function paint(count) {
-            count = parseInt(count, 10) || 0;
+        // Непрочитанные из чатов без звука не должны поднимать красный значок
+        // в футере (ровно как в chats.html): сервер отдаёт ОБЩИЙ счётчик,
+        // поэтому вычитаем из него сумму непрочитанных по замьюченным чатам.
+        // Это число считает блок "мьют" ниже и кладёт в localStorage
+        // (vg_muted_unread_v1) — оно общее для всех страниц.
+        var MUTED_UNREAD_KEY = 'vg_muted_unread_v1';
+        var lastRawCount = 0;
+
+        function mutedUnread() {
+            if (typeof window.vgMutedUnreadTotal === 'number') return window.vgMutedUnreadTotal;
+            try { return parseInt(localStorage.getItem(MUTED_UNREAD_KEY), 10) || 0; } catch (e) { return 0; }
+        }
+
+        function paint(rawCount) {
+            lastRawCount = parseInt(rawCount, 10) || 0;
+            try { localStorage.setItem(BADGE_CACHE_KEY, String(lastRawCount)); } catch (e) {}
+            render();
+        }
+
+        function repaint() { render(); }
+
+        function render() {
+            var count = Math.max(0, lastRawCount - mutedUnread());
             var nodes = document.querySelectorAll('[data-nav-badge="chats"]');
             for (var i = 0; i < nodes.length; i++) {
                 var el = nodes[i];
@@ -6879,7 +6900,6 @@ window.addEventListener('DOMContentLoaded', () => {
                     el.textContent = '';
                 }
             }
-            try { localStorage.setItem(BADGE_CACHE_KEY, String(count)); } catch (e) {}
             try {
                 if (navigator.setAppBadge) {
                     count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
@@ -6888,6 +6908,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         function refresh() {
+            if (typeof window.vgSyncMutedUnreadTotal === 'function') window.vgSyncMutedUnreadTotal();
             var uid = badgeUserId();
             if (!uid) { paint(0); return; }
             fetch(BADGE_SERVER_URL + '/get_unread_count', {
@@ -6918,6 +6939,16 @@ window.addEventListener('DOMContentLoaded', () => {
         });
         window.addEventListener('focus', refresh);
         window.addEventListener('pageshow', refresh);
+        // мьют поменяли здесь же / на другой вкладке (chats.html) — сразу
+        // перерисовываем значок, не дожидаясь следующего опроса
+        window.addEventListener('vg-muted-unread-changed', repaint);
+        window.addEventListener('vg-mute-changed', function () {
+            if (typeof window.vgSyncMutedUnreadTotal === 'function') window.vgSyncMutedUnreadTotal();
+            repaint();
+        });
+        window.addEventListener('storage', function (e) {
+            if (!e.key || e.key === MUTED_UNREAD_KEY || e.key === 'vg_muted_users_v1' || e.key === 'vg_muted_chats_v1') repaint();
+        });
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function () { refresh(); start(); });
@@ -7800,6 +7831,187 @@ html[data-theme="dark"] .vg-verified-tooltip {
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') hide();
     });
+})();
+</script>
+
+
+<!-- ==========================================================================
+     ЧАТЫ БЕЗ ЗВУКА: НЕ БЕСПОКОИМ И С ЭТОЙ СТРАНИЦЫ
+
+     Мьют включается кнопкой "Звук" (профиль контакта / свайп в chats.html) и
+     хранится ТОЛЬКО локально: localStorage (vg_muted_users_v1 /
+     vg_muted_chats_v1) + копия в IndexedDB service worker'а + копия в RAM
+     сервера (/set_muted_notifications), потому что решение "показывать пуш или
+     нет" принимают и сервер, и SW.
+
+     Проблема, которую закрывает этот блок: раньше список мьюта отдавали
+     сервером/воркеру только chats.html (и частично profile.html). Если
+     пользователь сидел на contacts.html / profile.html (или именно эта
+     страница была последней открытой перед сворачиванием PWA), то:
+       • сервер мог не знать актуальный список и всё равно слал push;
+       • SW спрашивал у открытой страницы GET_MUTED, а отвечать было некому;
+       • красный значок в футере поднимался из-за замьюченного чата.
+
+     Теперь эта страница:
+       1) при каждой загрузке/возврате отдаёт список мьюта серверу и SW;
+       2) сама считает, сколько непрочитанных лежит в чатах без звука
+          (vg_muted_unread_v1) — футер вычитает это из общего счётчика;
+       3) закрывает уже показанные уведомления замьюченных чатов
+          (подстраховка от старого закэшированного воркера).
+     ========================================================================== -->
+<script>
+(function () {
+    var SERVER = 'https://vuntserverrr.site';
+    var USERS_KEY = 'vg_muted_users_v1';
+    var CHATS_KEY = 'vg_muted_chats_v1';
+    var MUTED_UNREAD_KEY = 'vg_muted_unread_v1';
+    var POLL_MS = 15000;
+    var timer = null;
+
+    function readList(key) {
+        try {
+            var arr = JSON.parse(localStorage.getItem(key) || '[]');
+            return Array.isArray(arr) ? arr.map(String) : [];
+        } catch (e) { return []; }
+    }
+
+    // Резерв, если push-notifications.js почему-то не загрузился
+    function isMuted(userId, chatId) {
+        if (typeof window.vgIsMuted === 'function') return window.vgIsMuted(userId, chatId);
+        if (userId != null && readList(USERS_KEY).indexOf(String(userId)) !== -1) return true;
+        if (chatId != null && readList(CHATS_KEY).indexOf(String(chatId)) !== -1) return true;
+        return false;
+    }
+
+    function meId() {
+        if (window.__vuntgramCurrentUserId) return String(window.__vuntgramCurrentUserId);
+        var raw = null;
+        try { raw = sessionStorage.getItem('userData'); } catch (e) {}
+        if (!raw) { try { raw = localStorage.getItem('rememberedUser'); } catch (e) {} }
+        if (!raw) return null;
+        try {
+            var u = JSON.parse(raw);
+            return (u && u.platform_user_id) ? String(u.platform_user_id) : null;
+        } catch (e) { return null; }
+    }
+
+    // 1) Отдаём список мьюта серверу и service worker'у
+    function syncMute() {
+        var uid = meId();
+        if (uid && !window.__vuntgramCurrentUserId) window.__vuntgramCurrentUserId = uid;
+        if (typeof window.vgSyncMutedToSW === 'function') {
+            window.vgSyncMutedToSW();
+        } else if (typeof window.vgSyncMutedToServer === 'function') {
+            window.vgSyncMutedToServer();
+        }
+    }
+
+    // 3) Гасим уже показанные уведомления замьюченных чатов
+    function closeMutedNotifications() {
+        if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker.ready.then(function (reg) {
+            return reg.getNotifications ? reg.getNotifications() : [];
+        }).then(function (list) {
+            (list || []).forEach(function (n) {
+                var d = n.data || {};
+                var chatId = (d.chatId != null) ? String(d.chatId) : null;
+                if (!chatId && typeof n.tag === 'string') {
+                    var m = n.tag.match(/^chat-(.+)$/);
+                    if (m) chatId = m[1];
+                }
+                if (!chatId && d.url) {
+                    var mm = String(d.url).match(/chat_id=([^&]+)/);
+                    if (mm) { try { chatId = decodeURIComponent(mm[1]); } catch (e) { chatId = mm[1]; } }
+                }
+                if (isMuted(d.senderId != null ? d.senderId : null, chatId)) n.close();
+            });
+        }).catch(function () {});
+    }
+
+    // 2) Сколько непрочитанных лежит в чатах без звука.
+    // На этой странице списка чатов нет, поэтому берём его с сервера
+    // (/get_chats отдаёт unread_count и участников по каждому чату).
+    function store(total) {
+        var prev = 0;
+        try { prev = parseInt(localStorage.getItem(MUTED_UNREAD_KEY), 10) || 0; } catch (e) {}
+        try { localStorage.setItem(MUTED_UNREAD_KEY, String(total)); } catch (e) {}
+        window.vgMutedUnreadTotal = total;
+        if (prev !== total) {
+            try { window.dispatchEvent(new CustomEvent('vg-muted-unread-changed', { detail: total })); } catch (e) {}
+        }
+    }
+
+    function syncMutedUnreadTotal() {
+        var uid = meId();
+        if (!uid) return Promise.resolve(0);
+
+        // ничего не замьючено — считать нечего, обнуляем и выходим
+        if (!readList(USERS_KEY).length && !readList(CHATS_KEY).length) {
+            store(0);
+            return Promise.resolve(0);
+        }
+
+        return fetch(SERVER + '/get_chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ platform_user_id: uid })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d || d.status !== 'success' || !Array.isArray(d.chats)) return null;
+            var total = 0;
+            d.chats.forEach(function (c) {
+                var n = parseInt(c && c.unread_count, 10) || 0;
+                if (n <= 0) return;
+                var parts = (c && c.participants) || [];
+                var other = null;
+                for (var i = 0; i < parts.length; i++) {
+                    if (String(parts[i].platform_user_id) !== String(uid)) { other = parts[i]; break; }
+                }
+                if (!other) other = parts[0] || null;
+                if (isMuted(other ? other.platform_user_id : null, c.id)) total += n;
+            });
+            store(total);
+            closeMutedNotifications();
+            return total;
+        })
+        .catch(function () { return null; });
+    }
+
+    window.vgSyncMutedUnreadTotal = syncMutedUnreadTotal;
+
+    function refreshAll() {
+        syncMute();
+        syncMutedUnreadTotal();
+        closeMutedNotifications();
+    }
+
+    function start() {
+        stop();
+        timer = setInterval(syncMutedUnreadTotal, POLL_MS);
+    }
+    function stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+    }
+
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { stop(); } else { refreshAll(); start(); }
+    });
+    window.addEventListener('focus', refreshAll);
+    window.addEventListener('pageshow', refreshAll);
+    window.addEventListener('vg-mute-changed', refreshAll);
+    window.addEventListener('storage', function (e) {
+        if (!e.key || e.key === USERS_KEY || e.key === CHATS_KEY) refreshAll();
+    });
+    // новая версия SW взяла управление — сразу отдаём ей список
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('controllerchange', syncMute);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { refreshAll(); start(); });
+    } else { refreshAll(); start(); }
 })();
 </script>
 
