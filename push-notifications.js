@@ -82,28 +82,141 @@ const API_BASE = 'https://vuntserverrr.site'; // бэкенд на Render, фр�
     writeList(USERS_KEY, users);
     writeList(CHATS_KEY, chats);
     vgSyncMutedToSW();
+    try {
+      window.dispatchEvent(new CustomEvent('vg-mute-changed', {
+        detail: { userId: userId, chatId: chatId, muted: nowMuted }
+      }));
+    } catch (e) {}
     return nowMuted;
   }
 
-  // Отдаём актуальный список service worker'у
-  function vgSyncMutedToSW() {
-    if (!('serviceWorker' in navigator)) return Promise.resolve();
-    return navigator.serviceWorker.ready.then(function (registration) {
-      var target = registration.active || navigator.serviceWorker.controller;
-      if (!target) return;
-      target.postMessage({
-        type: 'SET_MUTED',
+  // Кому сейчас принадлежит сессия (нужно для серверной синхронизации мьюта)
+  function currentUserId() {
+    if (window.__vuntgramCurrentUserId) return String(window.__vuntgramCurrentUserId);
+    var raw = null;
+    try { raw = sessionStorage.getItem('userData'); } catch (e) {}
+    if (!raw) { try { raw = localStorage.getItem('rememberedUser'); } catch (e) {} }
+    if (!raw) return null;
+    try {
+      var u = JSON.parse(raw);
+      return (u && u.platform_user_id) ? String(u.platform_user_id) : null;
+    } catch (e) { return null; }
+  }
+
+  // Отдаём список мьюта серверу, чтобы он вообще не отправлял push по этим
+  // чатам. Сервер держит его ТОЛЬКО в памяти (в БД ничего не пишется), поэтому
+  // после его рестарта список просто заново прилетит с этого вызова — он
+  // повторяется при каждой загрузке страницы и при каждом переключении звука.
+  // Клиентский фильтр в service worker остаётся как подстраховка.
+  function vgSyncMutedToServer() {
+    var uid = currentUserId();
+    if (!uid) return Promise.resolve();
+    return fetch(API_BASE + '/set_muted_notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        user_id: uid,
         users: readList(USERS_KEY),
         chats: readList(CHATS_KEY)
-      });
+      })
     }).catch(function (err) {
-      console.warn('⚠️ Не удалось синхронизировать список без звука с service worker:', err);
+      console.warn('⚠️ Не удалось отправить список без звука на сервер:', err);
+    });
+  }
+
+  // Отдаём актуальный список service worker'у.
+  //
+  // ВАЖНО: раньше писали только в registration.active. Если в этот момент шла
+  // установка новой версии SW (или страницей ещё не управлял ни один воркер),
+  // сообщение уходило в никуда, IndexedDB оставалась со старым списком — и
+  // уведомление от замьюченного контакта всё равно показывалось. Теперь пишем
+  // во ВСЕ доступные воркеры (active / waiting / installing / controller) по
+  // всем регистрациям и повторяем при смене контроллера.
+  function postToAllWorkers(message) {
+    var targets = [];
+
+    function add(w) {
+      if (w && targets.indexOf(w) === -1) targets.push(w);
+    }
+
+    var regsPromise = navigator.serviceWorker.getRegistrations
+      ? navigator.serviceWorker.getRegistrations().catch(function () { return []; })
+      : Promise.resolve([]);
+
+    return regsPromise.then(function (regs) {
+      (regs || []).forEach(function (r) {
+        add(r.active); add(r.waiting); add(r.installing);
+      });
+      add(navigator.serviceWorker.controller);
+
+      if (targets.length) {
+        targets.forEach(function (w) {
+          try { w.postMessage(message); } catch (e) {}
+        });
+        return;
+      }
+
+      // ни одного воркера ещё нет — ждём готовности регистрации
+      return navigator.serviceWorker.ready.then(function (registration) {
+        var w = registration.active || registration.waiting || navigator.serviceWorker.controller;
+        if (w) { try { w.postMessage(message); } catch (e) {} }
+      });
+    });
+  }
+
+  function vgSyncMutedToSW() {
+    var message = {
+      type: 'SET_MUTED',
+      users: readList(USERS_KEY),
+      chats: readList(CHATS_KEY)
+    };
+
+    // серверная часть не зависит от service worker — шлём всегда
+    var serverDone = vgSyncMutedToServer();
+
+    if (!('serviceWorker' in navigator)) return serverDone;
+
+    return Promise.all([
+      serverDone,
+      postToAllWorkers(message).catch(function (err) {
+        console.warn('⚠️ Не удалось синхронизировать список без звука с service worker:', err);
+      })
+    ]);
+  }
+
+  // Новая версия SW взяла управление — пересылаем ей список сразу,
+  // не дожидаясь следующей загрузки страницы.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      vgSyncMutedToSW();
+    });
+  }
+
+  // Список поменяли на другой вкладке/странице
+  window.addEventListener('storage', function (e) {
+    if (!e.key || e.key === USERS_KEY || e.key === CHATS_KEY) vgSyncMutedToSW();
+  });
+
+  // Service worker в момент прихода push может спросить у открытой страницы
+  // актуальный список мьюта (GET_MUTED) — на случай, если его IndexedDB
+  // ещё пуста после обновления воркера.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (event) {
+      if (!event.data || event.data.type !== 'GET_MUTED') return;
+      var reply = { users: readList(USERS_KEY), chats: readList(CHATS_KEY) };
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage(reply);
+      } else if (event.source) {
+        event.source.postMessage(Object.assign({ type: 'MUTED_STATE' }, reply));
+      }
     });
   }
 
   window.vgIsMuted = vgIsMuted;
   window.vgToggleMuted = vgToggleMuted;
   window.vgSyncMutedToSW = vgSyncMutedToSW;
+  window.vgSyncMutedToServer = vgSyncMutedToServer;
 })();
 
 // ---------------------------------------------------------
@@ -181,6 +294,12 @@ async function initPushNotifications(userId) {
     return;
   }
   registration = await navigator.serviceWorker.ready;
+
+  // Просим браузер проверить, не появилась ли новая версия service worker'а:
+  // на устройствах со старым закэшированным воркером (без фильтра "без звука")
+  // уведомления от замьюченного контакта продолжали приходить, пока PWA не
+  // переустановят. update() + skipWaiting в самом SW заменяют его сразу.
+  try { registration.update(); } catch (err) {}
 
   // Сообщаем service worker'у, кто сейчас авторизован (нужно для
   // автоматического пересоздания подписки, если она протухнет)
