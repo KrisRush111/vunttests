@@ -1000,6 +1000,19 @@
             display: none;
         }
         
+        /* Чат без звука: круглый бейдж непрочитанных серый вместо синего.
+           Класс ставится на обёртку свайпа (см. paintRow), поэтому красятся
+           и бейджи, созданные позже в updateChatItemInDOM. */
+        .chat-item-swipe.vg-row-muted .unread-badge {
+            background: #8e8e93 !important;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-item-swipe.vg-row-muted .unread-badge {
+                background: #7c7c81 !important;
+            }
+        }
+
         .unread-badge {
             background: #0a84ff;
             color: white;
@@ -17007,8 +17020,29 @@ function stopProfileDataPolling() {
             } catch (e) { return null; }
         }
 
-        function paint(count) {
-            count = parseInt(count, 10) || 0;
+        // Непрочитанные из чатов без звука не должны поднимать красный значок
+        // в футере: сервер отдаёт общий счётчик, поэтому вычитаем из него сумму
+        // непрочитанных по замьюченным чатам (её считает блок мьюта ниже и
+        // кладёт в localStorage vg_muted_unread_v1). Включили звук — значение
+        // сбрасывается и значок снова появляется.
+        var MUTED_UNREAD_KEY = 'vg_muted_unread_v1';
+        var lastRawCount = 0;
+
+        function mutedUnread() {
+            if (typeof window.vgMutedUnreadTotal === 'number') return window.vgMutedUnreadTotal;
+            try { return parseInt(localStorage.getItem(MUTED_UNREAD_KEY), 10) || 0; } catch (e) { return 0; }
+        }
+
+        function paint(rawCount) {
+            lastRawCount = parseInt(rawCount, 10) || 0;
+            try { localStorage.setItem(BADGE_CACHE_KEY, String(lastRawCount)); } catch (e) {}
+            render();
+        }
+
+        function repaint() { render(); }
+
+        function render() {
+            var count = Math.max(0, lastRawCount - mutedUnread());
             var nodes = document.querySelectorAll('[data-nav-badge="chats"]');
             for (var i = 0; i < nodes.length; i++) {
                 var el = nodes[i];
@@ -17025,7 +17059,6 @@ function stopProfileDataPolling() {
                     el.textContent = '';
                 }
             }
-            try { localStorage.setItem(BADGE_CACHE_KEY, String(count)); } catch (e) {}
             try {
                 if (navigator.setAppBadge) {
                     count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
@@ -17034,6 +17067,7 @@ function stopProfileDataPolling() {
         }
 
         function refresh() {
+            if (typeof window.vgSyncMutedUnreadTotal === 'function') window.vgSyncMutedUnreadTotal();
             var uid = badgeUserId();
             if (!uid) { paint(0); return; }
             fetch(BADGE_SERVER_URL + '/get_unread_count', {
@@ -17064,6 +17098,14 @@ function stopProfileDataPolling() {
         });
         window.addEventListener('focus', refresh);
         window.addEventListener('pageshow', refresh);
+        window.addEventListener('vg-muted-unread-changed', repaint);
+        window.addEventListener('vg-mute-changed', function () {
+            if (typeof window.vgSyncMutedUnreadTotal === 'function') window.vgSyncMutedUnreadTotal();
+            repaint();
+        });
+        window.addEventListener('storage', function (e) {
+            if (!e.key || e.key === MUTED_UNREAD_KEY || e.key === 'vg_muted_users_v1' || e.key === 'vg_muted_chats_v1') repaint();
+        });
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function () { refresh(); start(); });
@@ -18176,6 +18218,9 @@ vgResolveBadgeSrc();
         const icon = wrapper.querySelector('.chat-muted-icon');
         if (icon) icon.style.display = muted ? '' : 'none';
 
+        // серый бейдж непрочитанных вместо синего, пока звук выключен
+        wrapper.classList.toggle('vg-row-muted', muted);
+
         const btn = wrapper.querySelector('.chat-swipe-btn-sound');
         if (btn) {
             const circle = btn.querySelector('.chat-swipe-circle');
@@ -18296,10 +18341,52 @@ vgResolveBadgeSrc();
         });
     }
 
+    // Сколько непрочитанных лежит в чатах без звука — ровно это число футер
+    // вычитает из общего счётчика, чтобы красный значок у иконки "Чаты" не
+    // появлялся из-за замьюченного чата. Пишем в localStorage, чтобы значение
+    // было доступно и на других страницах (contacts.html, profile.html).
+    const MUTED_UNREAD_KEY = 'vg_muted_unread_v1';
+
+    function syncMutedUnreadTotal() {
+        let total = 0;
+        try {
+            const me = (typeof userData !== 'undefined' && userData) ? String(userData.platform_user_id) : null;
+            const list = (typeof currentChatsList !== 'undefined' && Array.isArray(currentChatsList)) ? currentChatsList : null;
+            if (list) {
+                list.forEach(c => {
+                    const n = parseInt(c && c.unread_count, 10) || 0;
+                    if (n <= 0) return;
+                    const parts = (c && c.participants) || [];
+                    const other = parts.find(pp => String(pp.platform_user_id) !== me) || parts[0] || null;
+                    if (isMuted(other ? other.platform_user_id : null, c.id)) total += n;
+                });
+            } else {
+                // список ещё не загружен — считаем по DOM
+                document.querySelectorAll('.chat-item-swipe').forEach(w => {
+                    const b = w.querySelector('.unread-badge');
+                    const n = b ? (parseInt(b.textContent, 10) || 0) : 0;
+                    if (n > 0 && isMuted(w.getAttribute('data-participant-id'), w.getAttribute('data-chat-id'))) total += n;
+                });
+            }
+        } catch (e) {}
+
+        let prev = 0;
+        try { prev = parseInt(localStorage.getItem(MUTED_UNREAD_KEY), 10) || 0; } catch (e) {}
+        try { localStorage.setItem(MUTED_UNREAD_KEY, String(total)); } catch (e) {}
+        window.vgMutedUnreadTotal = total;
+        if (prev !== total) {
+            window.dispatchEvent(new CustomEvent('vg-muted-unread-changed', { detail: total }));
+        }
+        return total;
+    }
+
+    window.vgSyncMutedUnreadTotal = syncMutedUnreadTotal;
+
     function refresh() {
         document.querySelectorAll('.chat-item-swipe').forEach(paintRow);
         paintChatHeaders();
         paintProfileNicknames();
+        syncMutedUnreadTotal();
     }
 
     // Тап по свайп-кнопке "Звук": переключаем мьют, перекрашиваем список
