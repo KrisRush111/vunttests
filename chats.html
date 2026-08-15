@@ -2421,8 +2421,11 @@
             bottom: 0;
             left: 0;
             right: 0;
+            /* svh вместо dvh: dvh пересчитывается прямо во время свайпа, когда
+               Safari на iPhone сворачивает нижнюю панель, — высота рамки
+               меняется посреди жеста и контент подпрыгивает. svh фиксирован. */
             height: 95vh;
-            height: 95dvh;
+            height: 95svh;
             background: var(--telegram-bg);
             z-index: 1000;
             transform: translateY(100%);
@@ -2544,7 +2547,13 @@
 
         .contacts-list {
             flex: 1;
+            /* min-height: 0 обязателен: без него флекс-элемент не может стать
+               меньше своего контента, список не скроллится сам и тянется вся
+               рамка — отсюда рывок в начале жеста. */
+            min-height: 0;
             overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
             padding-bottom: 60px;
             position: relative;
         }
@@ -2738,7 +2747,8 @@
             animation: pulse 0.25s ease;
         }
 
-        .group-contacts-list .contact-item:hover {
+        .group-contacts-list .contact-item:hover,
+        .group-contacts-list .contact-item:active {
             transform: none;
         }
 
@@ -2849,31 +2859,41 @@
             cursor: default;
         }
 
+        /* ВАЖНО (список контактов дёргался в начале свайпа на телефоне):
+           раньше тут были transition: all, входная анимация slideInRight с
+           задержками и transform в :hover/:active. На iOS первое касание
+           вешает на строку :hover и :active — строка уезжала на 5px вправо и
+           ужималась, то есть список смещался ровно в момент, когда палец
+           только лёг на экран. Плюс строки ещё доигрывали въезд (список
+           рисуется асинхронно и перерисовывается поллингом раз в 6 сек), а
+           скролл во время transform-анимации даёт скачок.
+           Теперь: hover-эффект только для мыши, на тач никаких transform,
+           анимации появления нет. */
         .contact-item {
             display: flex;
             align-items: center;
             padding: 12px 16px;
             cursor: pointer;
-            transition: all var(--animation-duration) var(--animation-timing);
-            animation: slideInRight 0.3s var(--animation-timing);
-            animation-fill-mode: both;
+            transition: background-color 0.15s ease;
+            animation: none;
+            touch-action: pan-y;
         }
 
-        .contact-item:nth-child(odd) {
-            animation-delay: 0.05s;
-        }
-
+        .contact-item:nth-child(odd),
         .contact-item:nth-child(even) {
-            animation-delay: 0.1s;
+            animation-delay: 0s;
         }
 
-        .contact-item:hover {
-            background-color: rgba(0,0,0,0.05);
-            transform: translateX(5px);
+        @media (hover: hover) and (pointer: fine) {
+            .contact-item:hover {
+                background-color: rgba(0,0,0,0.05);
+                transform: translateX(5px);
+            }
         }
 
         .contact-item:active {
-            transform: scale(0.98);
+            transform: none;
+            background-color: rgba(0,0,0,0.06);
         }
 
         .contact-avatar {
@@ -3959,7 +3979,7 @@
             
             .contacts-modal {
                 height: 95vh;
-                height: 95dvh;
+                height: 95svh;
                 padding: 0;
             }
         }
@@ -18028,8 +18048,12 @@ function stopProfileDataPolling() {
         border-bottom: none !important;
     }
 
-    .contact-item:hover {
-        background-color: #0A0A0A !important;
+    /* hover только для мыши — на тач он залипал после тапа и строка
+       оставалась подсвеченной. */
+    @media (hover: hover) and (pointer: fine) {
+        .contact-item:hover {
+            background-color: #0A0A0A !important;
+        }
     }
 
     .contact-item:active {
@@ -18119,14 +18143,59 @@ function stopProfileDataPolling() {
 }
 
 .vg-verified-badge svg,
-.vg-verified-badge img {
+.vg-verified-badge img,
+.vg-verified-badge .vg-badge-img {
     width: 100%;
     height: 100%;
     display: block;
     object-fit: contain;
 }
 
-.vg-verified-badge img { transform: scale(1.08); }
+.vg-verified-badge img,
+.vg-verified-badge .vg-badge-img { transform: scale(1.08); }
+
+/* Галочка рисуется фоном у обычного <span>, а не тегом <img>: у фонового
+   изображения на iOS/Android нет системного меню «Сохранить изображение /
+   Скопировать», его нельзя перетащить и нельзя открыть в просмотрщике. */
+.vg-verified-badge .vg-badge-img {
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+}
+
+/* ==========================================================================
+   ЗАЩИТА ГАЛОЧКИ: без долгого нажатия, сохранения, копирования и зума
+   --------------------------------------------------------------------------
+   -webkit-touch-callout: none  — убирает системное меню по долгому нажатию на iOS;
+   user-select / -webkit-user-drag — нельзя выделить и перетащить;
+   touch-action: manipulation   — двойной тап и пинч по самой галочке
+                                  не масштабируют её (раньше сжатие пальцами
+                                  открывало картинку как фото);
+   pointer-events: none у детей — жест всегда достаётся контейнеру-span,
+                                  а не картинке внутри.
+   ========================================================================== */
+.vg-verified-badge,
+.vg-verified-badge * {
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+    -webkit-user-drag: none !important;
+    -khtml-user-drag: none !important;
+    user-drag: none !important;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.vg-verified-badge * {
+    pointer-events: none !important;
+}
+
+.vg-verified-badge img {
+    -webkit-touch-callout: none !important;
+    pointer-events: none !important;
+}
 
 /* ==========================================================================
    ПОДСКАЗКА «Верифицирован Vuntgram» — по нажатию на галочку
@@ -18337,39 +18406,54 @@ window.vgResolveBadgeSrc = vgResolveBadgeSrc;
 /* Наполняет бейдж содержимым. Идемпотентна: если внутри уже есть нужная
    картинка/SVG — ничего не трогает (иначе каждый ре-рендер профиля заново
    грузил <img> и галочка мигала). */
+/* Создаёт слой с галочкой. Это НЕ <img>, а <span> с background-image:
+   у фоновой картинки нет системного меню «Сохранить / Скопировать» по
+   долгому нажатию, её нельзя перетащить и нельзя открыть как фото. */
+function vgMakeBadgeLayer(src) {
+    const layer = document.createElement('span');
+    layer.className = 'vg-badge-img';
+    layer.setAttribute('role', 'img');
+    layer.setAttribute('aria-label', 'Подтверждён');
+    layer.style.backgroundImage = 'url("' + src + '")';
+    layer.dataset.vgSrc = src;
+    return layer;
+}
+
 function vgApplyBadgeImage(badge) {
     if (!badge) return;
 
     if (VG_BADGE_RESOLVED_SRC) {
-        const existing = badge.querySelector('img');
+        const existing = badge.querySelector('.vg-badge-img');
         if (existing) {
-            if (existing.getAttribute('src') !== VG_BADGE_RESOLVED_SRC) {
-                existing.setAttribute('src', VG_BADGE_RESOLVED_SRC);
+            if (existing.dataset.vgSrc !== VG_BADGE_RESOLVED_SRC) {
+                existing.style.backgroundImage = 'url("' + VG_BADGE_RESOLVED_SRC + '")';
+                existing.dataset.vgSrc = VG_BADGE_RESOLVED_SRC;
             }
             return;
         }
-        const img = document.createElement('img');
-        img.alt = 'Подтверждён';
-        img.decoding = 'async';
-        img.src = VG_BADGE_RESOLVED_SRC;
         badge.textContent = '';
-        badge.appendChild(img);
+        badge.appendChild(vgMakeBadgeLayer(VG_BADGE_RESOLVED_SRC));
         return;
     }
 
     // Пути ещё не знаем — сразу рисуем SVG (не пустоту), а когда путь
     // зарезолвится, аккуратно заменим содержимое на картинку.
-    if (!badge.querySelector('svg') && !badge.querySelector('img')) {
+    if (!badge.querySelector('svg') && !badge.querySelector('.vg-badge-img')) {
         badge.innerHTML = VG_VERIFIED_BADGE_SVG;
     }
     vgResolveBadgeSrc().then(src => {
         if (!src || !badge.isConnected) return;
-        if (badge.querySelector('img')) return;
-        const img = document.createElement('img');
-        img.alt = 'Подтверждён';
-        img.decoding = 'async';
-        img.src = src;
-        img.onload = () => { badge.textContent = ''; badge.appendChild(img); };
+        if (badge.querySelector('.vg-badge-img')) return;
+        // Прогреваем картинку в кэше и только потом подменяем содержимое,
+        // чтобы не было пустого кадра.
+        const probe = new Image();
+        probe.decoding = 'async';
+        probe.onload = () => {
+            if (!badge.isConnected || badge.querySelector('.vg-badge-img')) return;
+            badge.textContent = '';
+            badge.appendChild(vgMakeBadgeLayer(src));
+        };
+        probe.src = src;
     });
 }
 window.vgApplyBadgeImage = vgApplyBadgeImage;
@@ -18643,6 +18727,77 @@ vgResolveBadgeSrc();
     window.addEventListener('resize', hide);
     window.addEventListener('blur', hide);
     document.addEventListener('visibilitychange', hide);
+})();
+
+/* ==========================================================================
+   ГАЛОЧКА: запрет удержания, сохранения, копирования и зума
+   --------------------------------------------------------------------------
+   CSS выше убирает саму возможность (галочка — фон, а не <img>), а этот блок
+   закрывает остаток: контекстное меню правой кнопкой/долгим нажатием,
+   перетаскивание, выделение и копирование, а также pinch-zoom пальцами
+   именно по галочке (раньше сжатие открывало её как фото).
+   ========================================================================== */
+(function () {
+    function onBadge(e) {
+        const t = e.target;
+        return !!(t && t.closest && t.closest('.vg-verified-badge'));
+    }
+
+    function block(e) {
+        if (!onBadge(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+    }
+
+    // Контекстное меню: правый клик на десктопе и долгое нажатие в Android/Chrome.
+    document.addEventListener('contextmenu', block, true);
+    // Перетаскивание галочки мышью (в т.ч. drag&drop в другое приложение).
+    document.addEventListener('dragstart', block, true);
+    document.addEventListener('drag', block, true);
+    // Выделение текстом — без выделения нечего и копировать.
+    document.addEventListener('selectstart', block, true);
+    // Пинч именно по галочке (Safari): не даём масштабировать/раскрывать её.
+    document.addEventListener('gesturestart', block, true);
+    document.addEventListener('gesturechange', block, true);
+    document.addEventListener('gestureend', block, true);
+
+    // Долгое нажатие в iOS/Safari: системное меню появляется примерно через
+    // 500 мс удержания. Как только палец задержался на галочке — снимаем с
+    // неё фокус жеста, отменяя дальнейшую обработку касания.
+    let holdTimer = null;
+    document.addEventListener('touchstart', function (e) {
+        if (!onBadge(e)) return;
+        // Мультитач по галочке = попытка зума. Гасим сразу.
+        if (e.touches && e.touches.length > 1) { block(e); return; }
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(() => {
+            const sel = window.getSelection && window.getSelection();
+            if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        }, 300);
+    }, { capture: true, passive: true });
+
+    ['touchend', 'touchcancel', 'touchmove'].forEach(function (type) {
+        document.addEventListener(type, function () { clearTimeout(holdTimer); },
+            { capture: true, passive: true });
+    });
+
+    // Если галочка всё же попала в выделение — вырезаем её из буфера обмена.
+    ['copy', 'cut'].forEach(function (type) {
+        document.addEventListener(type, function (e) {
+            const sel = window.getSelection && window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+            const frag = sel.getRangeAt(0).cloneContents();
+            if (!frag.querySelector('.vg-verified-badge')) return;
+            frag.querySelectorAll('.vg-verified-badge').forEach(b => b.remove());
+            const box = document.createElement('div');
+            box.appendChild(frag);
+            if (e.clipboardData) {
+                e.preventDefault();
+                e.clipboardData.setData('text/plain', box.textContent.trim());
+            }
+        }, true);
+    });
 })();
 </script>
 
