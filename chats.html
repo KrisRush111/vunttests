@@ -4160,6 +4160,56 @@
             animation: fadeIn 0.3s var(--animation-timing);
         }
 
+        /* ==================================================================
+           СИСТЕМНОЕ СООБЩЕНИЕ О СОЗДАНИИ ГРУППЫ
+           Выглядит как плашка даты («Сегодня»), а не как пузырь сообщения
+           от владельца. Класс .message сохранён, чтобы инкрементальный
+           рендер по data-message-id продолжал работать, поэтому все
+           «пузырьковые» свойства здесь сбрасываются.
+           ================================================================== */
+        .message.vg-system-message {
+            align-self: center !important;
+            max-width: 80% !important;
+            width: fit-content;
+            margin: 12px auto !important;
+            padding: 4px 16px !important;
+            border-radius: 24px !important;
+            background: rgba(0, 0, 0, 0.2) !important;
+            background-image: none !important;
+            color: #fff !important;
+            font-size: 14px;
+            line-height: 1.4;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            opacity: 1;
+            transform: none;
+            animation: fadeIn 0.3s var(--animation-timing) !important;
+            animation-delay: 0s !important;
+            /* системную плашку нельзя выделять, отвечать на неё и реагировать */
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+            cursor: default;
+        }
+
+        .message.vg-system-message .message-content {
+            display: block;
+            padding: 0;
+            margin: 0;
+            background: none;
+            color: inherit;
+            font-size: inherit;
+        }
+
+        /* Ни времени, ни галочек прочтения, ни реакций у плашки не бывает */
+        .message.vg-system-message .message-time,
+        .message.vg-system-message .message-status,
+        .message.vg-system-message .reactions-row,
+        .message.vg-system-message .edited-label { display: none !important; }
+
         .message-status {
             display: flex;
             justify-content: flex-end;
@@ -9386,7 +9436,44 @@ function getActiveElements() {
             }
         }
 
+        /* Системное сообщение «Группа «X» создана»: сервер пишет его в messages
+           от имени владельца (иначе группа не попадает в /get_chats), но в чате
+           оно должно выглядеть плашкой по центру — как заголовок даты, а не
+           сообщением владельца. */
+        const VG_GROUP_CREATED_RE = /^Группа\s+[«"'][\s\S]*[»"']\s+создана$/;
+
+        function vgIsGroupSystemMessage(message) {
+            if (!message || message.is_image || message.caption) return false;
+            const text = (message.content || '').trim();
+            if (!text) return false;
+            if (message.is_system || message.type === 'system') return true;
+            if (!VG_GROUP_CREATED_RE.test(text)) return false;
+            // только в групповом чате и только для самого первого сообщения
+            const isGroup = window.vgHeaderChatIsGroup ? window.vgHeaderChatIsGroup()
+                : !!(currentChat && currentChat.is_group);
+            if (!isGroup) return false;
+            const first = (typeof currentMessages !== 'undefined' && currentMessages.length)
+                ? currentMessages[0] : null;
+            return !first || String(first.id) === String(message.id);
+        }
+
+        function renderSystemMessage(message) {
+            const el = document.createElement('div');
+            el.className = 'message vg-system-message';
+            el.setAttribute('data-message-id', message.id);
+            el.dataset.vgSystem = '1';
+            const content = document.createElement('div');
+            content.className = 'message-content';
+            content.textContent = (message.content || '').trim();
+            el.appendChild(content);
+            return el;
+        }
+
         function renderMessage(message) {
+            // Плашка вместо пузыря — без времени, статуса, реакций,
+            // long-press-меню, свайпа-ответа и выбора.
+            if (vgIsGroupSystemMessage(message)) return renderSystemMessage(message);
+
             const messageElement = document.createElement('div');
             messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
             messageElement.setAttribute('data-message-id', message.id);
@@ -10360,6 +10447,8 @@ function getActiveElements() {
             if (!messagesContainer) return;
             Array.from(messagesContainer.children).forEach(bubble => {
                 if (!bubble.classList || !bubble.classList.contains('message')) return;
+                // Системную плашку («Группа «X» создана») выбирать нельзя
+                if (bubble.classList.contains('vg-system-message')) return;
 
                 const row = document.createElement('div');
                 row.className = 'message-select-row';
@@ -15031,7 +15120,7 @@ function stopProfileDataPolling() {
                     }
 
                     // Обновляем текст и метку "изменено", если сообщение было отредактировано
-                    if (el && entry.type === 'single') {
+                    if (el && entry.type === 'single' && !el.classList.contains('vg-system-message')) {
                         const message = entry.item;
                         const textEl = el.querySelector('.message-text');
                         if (textEl && textEl.textContent !== message.content) {
@@ -19902,14 +19991,15 @@ vgResolveBadgeSrc();
 .vg-gm-add-icon {
     width: 30px;
     display: flex; align-items: center; justify-content: center;
-    color: var(--telegram-blue, #0A84FF);
+    /* тот же синий, что у кружка непрочитанных сообщений в списке чатов */
+    color: #0a84ff;
     font-size: 21px;
     flex-shrink: 0;
 }
 .vg-gm-add-text {
     font-size: 16px;
     font-weight: 400;
-    color: var(--telegram-blue, #0A84FF);
+    color: #0a84ff;
 }
 .vg-gm-add-row::after,
 .vg-gm-item::after {
@@ -19947,8 +20037,32 @@ vgResolveBadgeSrc();
     display: flex; align-items: center; gap: 5px;
     font-size: 16px; font-weight: 500;
     color: var(--telegram-text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden;
     line-height: 1.25;
+}
+/* Имя живёт в отдельном span — так текст можно обновлять, не задевая
+   узел галочки (иначе картинка перезагружалась и галочка мигала). */
+.vg-gm-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Галочка в списке участников: фиксированный размер и никаких переходов —
+   она не должна ни дёргаться, ни ужиматься при загрузке имени/аватара. */
+.vg-gm-name .vg-verified-badge,
+.vg-am-name .vg-verified-badge {
+    flex: 0 0 auto;
+    width: 1.15em;
+    height: 1.15em;
+    transition: none !important;
+    animation: none !important;
+}
+.vg-gm-name .vg-badge-img,
+.vg-am-name .vg-badge-img {
+    transition: none !important;
+    animation: none !important;
+    backface-visibility: hidden;
 }
 .vg-gm-status {
     margin-top: 2px;
@@ -19996,6 +20110,166 @@ vgResolveBadgeSrc();
     font-size: 15px;
     text-align: center;
     padding: 26px 16px 30px;
+}
+
+/* ---------------------------------------------------------------------------
+   ШТОРКА «ДОБАВИТЬ УЧАСТНИКОВ»
+   Список контактов: кто уже в группе — серая галочка (выбор недоступен),
+   остальных можно отметить синей галочкой и добавить.
+   --------------------------------------------------------------------------- */
+.vg-am-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 7000;
+    display: flex;
+    flex-direction: column;
+    background: var(--telegram-bg, #fff);
+    transform: translateY(100%);
+    visibility: hidden;
+    transition: transform .3s cubic-bezier(.32, .72, 0, 1), visibility .3s;
+    padding-top: env(safe-area-inset-top, 0px);
+}
+.vg-am-sheet.active { transform: none; visibility: visible; }
+
+.vg-am-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--telegram-divider, rgba(60, 60, 67, .12));
+}
+.vg-am-back {
+    width: 34px; height: 34px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(120, 120, 128, .12);
+    color: var(--telegram-text);
+    font-size: 15px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.vg-am-back:active { transform: scale(.94); }
+.vg-am-titles { flex: 1; min-width: 0; text-align: center; }
+.vg-am-title {
+    font-size: 17px; font-weight: 600;
+    color: var(--telegram-text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vg-am-sub { margin-top: 2px; font-size: 13px; color: var(--telegram-hint, #8e8e93); }
+.vg-am-done {
+    flex-shrink: 0;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 16px;
+    background: #0a84ff;
+    color: #fff;
+    font-family: inherit;
+    font-size: 15px; font-weight: 600;
+    cursor: pointer;
+    transition: opacity .2s ease, transform .15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+.vg-am-done:disabled { background: rgba(120, 120, 128, .18); color: var(--telegram-hint, #8e8e93); cursor: default; }
+.vg-am-done:not(:disabled):active { transform: scale(.96); }
+
+.vg-am-search {
+    margin: 12px 16px 4px;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 12px;
+    background: rgba(120, 120, 128, .12);
+    color: var(--telegram-text);
+    font-family: inherit;
+    font-size: 16px;
+    outline: none;
+}
+.vg-am-search::placeholder { color: var(--telegram-hint, #8e8e93); }
+
+.vg-am-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+.vg-am-section {
+    padding: 14px 16px 6px;
+    font-size: 13px; font-weight: 600; letter-spacing: .02em;
+    text-transform: uppercase;
+    color: var(--telegram-hint, #8e8e93);
+}
+.vg-am-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    min-height: 62px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.vg-am-item:active { background: rgba(120, 120, 128, .10); }
+.vg-am-item.in-group { cursor: default; }
+.vg-am-item.in-group:active { background: transparent; }
+
+.vg-am-check {
+    width: 26px; height: 26px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1.5px solid rgba(120, 120, 128, .6);
+    display: flex; align-items: center; justify-content: center;
+    color: transparent;
+    font-size: 12px;
+    transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.vg-am-item.selected .vg-am-check {
+    background: #0a84ff;
+    border-color: #0a84ff;
+    color: #fff;
+    transform: scale(1.04);
+}
+.vg-am-item.in-group .vg-am-check {
+    background: #8e8e93;
+    border-color: #8e8e93;
+    color: #fff;
+}
+.vg-am-avatar {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 600; font-size: 17px;
+    background-size: cover; background-position: center;
+}
+.vg-am-info { min-width: 0; flex: 1; }
+.vg-am-name {
+    font-size: 16px; font-weight: 500;
+    color: var(--telegram-text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vg-am-status {
+    margin-top: 2px;
+    font-size: 14px;
+    color: var(--telegram-hint, #8e8e93);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vg-am-status.online { color: #0a84ff; }
+.vg-am-item.in-group .vg-am-name,
+.vg-am-item.in-group .vg-am-status { opacity: .55; }
+
+.vg-am-empty {
+    color: var(--telegram-hint, #8e8e93);
+    font-size: 15px;
+    text-align: center;
+    padding: 30px 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .vg-am-sheet { background: #000; }
+    .vg-am-back { background: #1C1C1E; }
+    .vg-am-search { background: #1C1C1E; }
+    .vg-am-done:disabled { background: #1C1C1E; }
+    .vg-am-header { border-bottom-color: #1C1C1E; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vg-am-sheet { transition: none; }
+    .vg-am-check { transition: none; }
 }
 
 </style>
@@ -20175,6 +20449,174 @@ vgResolveBadgeSrc();
         return 'был(а) недавно';
     }
 
+    /* ---------------------------------------------------------------------
+       СПИСОК УЧАСТНИКОВ — инкрементальный рендер.
+       Раньше каждый refresh() делал list.innerHTML = '' и строил строки
+       заново: галочка верификации создавалась с нуля (сначала inline-SVG,
+       затем подмена на картинку) и из-за этого мигала при каждом открытии
+       профиля и каждом обновлении. Теперь существующие строки
+       переиспользуются: у них обновляется только текст/статус/роль,
+       а узел галочки и загруженный аватар не пересоздаются вообще.
+       --------------------------------------------------------------------- */
+
+    // Липкая память о верификации: если сервер разово не смог достать данные
+    // пользователя из основной БД (nickname приходит как 'Unknown User',
+    // is_verified = false), галочка не должна пропадать.
+    const VERIFIED_MEMO = window.__vgVerifiedMemo || (window.__vgVerifiedMemo = new Map());
+
+    function memberVerified(p) {
+        const id = String(p.platform_user_id);
+        const raw = window.vgIsVerified ? window.vgIsVerified(p) : !!p.is_verified;
+        const incomplete = !p.nickname || p.nickname === 'Unknown User';
+        if (raw) { VERIFIED_MEMO.set(id, true); return true; }
+        if (incomplete && VERIFIED_MEMO.get(id)) return true; // данных нет — держим прежнее
+        if (!incomplete) VERIFIED_MEMO.delete(id);            // галочку реально забрали
+        return false;
+    }
+
+    function memberInitials(p) {
+        return (p.nickname || '?').split(' ').slice(0, 2)
+            .map(w => w[0] || '').join('').toUpperCase();
+    }
+
+    function roleOf(p) {
+        if (p.role === 'owner') return { cls: 'owner', label: 'владелец' };
+        if (p.role === 'admin') return { cls: 'admin', label: 'админ' };
+        return null;
+    }
+
+    // Галочка внутри строки: только создаём/удаляем узел, никогда не трогаем
+    // уже отрисованный (иначе картинка перезагружается и мигает).
+    function syncBadge(nameEl, verified) {
+        const existing = nameEl.querySelector(':scope > .vg-verified-badge');
+        if (verified && !existing) {
+            const holder = document.createElement('span');
+            holder.innerHTML = window.vgBadgeHtml ? window.vgBadgeHtml(true) : '';
+            const badge = holder.firstElementChild;
+            if (badge) {
+                const you = nameEl.querySelector('.vg-gm-you');
+                nameEl.insertBefore(badge, you || null);
+                if (window.vgHydrateBadges) window.vgHydrateBadges(nameEl);
+            }
+        } else if (!verified && existing) {
+            existing.remove();
+        }
+    }
+
+    function createMemberRow(p, data) {
+        const item = document.createElement('div');
+        item.className = 'vg-gm-item';
+        item.dataset.userId = String(p.platform_user_id);
+
+        const bg = p.avatar_background || '#0088cc';
+        const grad = `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
+
+        item.innerHTML =
+            `<div class="vg-gm-avatar" style="background: ${grad}"></div>` +
+            '<div class="vg-gm-info">' +
+                '<div class="vg-gm-name"><span class="vg-gm-name-text"></span></div>' +
+                '<div class="vg-gm-status"></div>' +
+            '</div>';
+
+        // Тап по участнику — обычный профиль контакта. Данные читаем из
+        // item.__p, поэтому обработчик не нужно перевешивать при обновлении.
+        item.addEventListener('click', () => {
+            const cur = item.__p;
+            if (!cur || cur.is_me) return;
+            closeGroupProfile();
+            if (typeof openProfileModal === 'function') openProfileModal(cur.platform_user_id);
+        });
+
+        updateMemberRow(item, p, data);
+        return item;
+    }
+
+    function updateMemberRow(item, p, data) {
+        item.__p = p;
+
+        const bg = p.avatar_background || '#0088cc';
+        const initials = memberInitials(p);
+        const avatarEl = item.querySelector('.vg-gm-avatar');
+
+        // Аватар грузим один раз на строку (пока не сменился цвет/фото),
+        // иначе он тоже мигал бы при каждом обновлении.
+        const avatarKey = `${bg}|${p.has_avatar_photo ? 1 : 0}|${initials}`;
+        if (avatarEl && item.dataset.avatarKey !== avatarKey) {
+            item.dataset.avatarKey = avatarKey;
+            if (p.has_avatar_photo && typeof loadContactAvatar === 'function') {
+                avatarEl.textContent = initials;
+                loadContactAvatar(avatarEl, p.platform_user_id, initials, bg);
+            } else {
+                avatarEl.style.backgroundImage = '';
+                avatarEl.style.background =
+                    `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
+                avatarEl.textContent = initials;
+            }
+        }
+
+        // Имя — пишем в отдельный span, чтобы не перерисовывать галочку
+        const nameEl = item.querySelector('.vg-gm-name');
+        const textEl = nameEl.querySelector('.vg-gm-name-text');
+        const nick = p.nickname || 'Без имени';
+        if (textEl.textContent !== nick) textEl.textContent = nick;
+
+        // «вы» — отдельный узел после галочки
+        let youEl = nameEl.querySelector('.vg-gm-you');
+        if (p.is_me && !youEl) {
+            youEl = document.createElement('span');
+            youEl.className = 'vg-gm-you';
+            youEl.textContent = 'вы';
+            nameEl.appendChild(youEl);
+        } else if (!p.is_me && youEl) {
+            youEl.remove();
+        }
+
+        syncBadge(nameEl, memberVerified(p));
+
+        // Статус
+        const statusEl = item.querySelector('.vg-gm-status');
+        const statusText = memberStatusText(p);
+        if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
+        statusEl.classList.toggle('online', !!p.is_online);
+
+        // Плашка роли
+        const role = roleOf(p);
+        let roleEl = item.querySelector('.vg-gm-role');
+        if (role) {
+            if (!roleEl) {
+                roleEl = document.createElement('span');
+                item.appendChild(roleEl);
+            }
+            const cls = `vg-gm-role vg-gm-role--${role.cls}`;
+            if (roleEl.className !== cls) roleEl.className = cls;
+            if (roleEl.textContent !== role.label) roleEl.textContent = role.label;
+        } else if (roleEl) {
+            roleEl.remove();
+        }
+
+        // Кнопка удаления — только владельцу и не на себе
+        const canKick = !!data.is_admin && !p.is_me;
+        let kick = item.querySelector('.vg-gm-kick');
+        if (canKick && !kick) {
+            kick = document.createElement('button');
+            kick.type = 'button';
+            kick.className = 'vg-gm-kick';
+            kick.title = 'Удалить из группы';
+            kick.innerHTML = '<i class="fas fa-user-minus"></i>';
+            kick.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const cur = item.__p || p;
+                if (!confirm(`Удалить ${cur.nickname} из группы?`)) return;
+                await groupAction('/remove_group_member', { target_id: cur.platform_user_id },
+                                  'Участник удалён');
+                refresh();
+            });
+            item.appendChild(kick);
+        } else if (!canKick && kick) {
+            kick.remove();
+        }
+    }
+
     function renderMembers(suffix, data) {
         const box = ensureMembersBox(suffix);
         if (!box) return;
@@ -20182,20 +20624,26 @@ vgResolveBadgeSrc();
         const addBtn = box.querySelector('.vg-gm-add');
         if (addBtn) addBtn.style.display = 'none'; // старая кнопка не используется
 
-        list.innerHTML = '';
-
-        // Строка «Добавить участников» — только владельцу группы
-        if (data.is_admin) {
-            const add = document.createElement('div');
-            add.className = 'vg-gm-add-row';
-            add.innerHTML =
+        // Строка «Добавить участников» — создаётся один раз, только владельцу
+        let addRow = list.querySelector('.vg-gm-add-row');
+        if (data.is_admin && !addRow) {
+            addRow = document.createElement('div');
+            addRow.className = 'vg-gm-add-row';
+            addRow.innerHTML =
                 '<span class="vg-gm-add-icon"><i class="fas fa-user-plus"></i></span>' +
                 '<span class="vg-gm-add-text">Добавить участников</span>';
-            add.addEventListener('click', () => addMembersFlow());
-            list.appendChild(add);
+            addRow.addEventListener('click', () => addMembersFlow());
+            list.insertBefore(addRow, list.firstChild);
+        } else if (!data.is_admin && addRow) {
+            addRow.remove();
+            addRow = null;
         }
 
-        if (!data.participants || !data.participants.length) {
+        const participants = (data.participants || []);
+        list.querySelectorAll('.vg-gm-empty').forEach(el => el.remove());
+
+        if (!participants.length) {
+            list.querySelectorAll('.vg-gm-item').forEach(el => el.remove());
             const empty = document.createElement('div');
             empty.className = 'vg-gm-empty';
             empty.textContent = 'Участников нет';
@@ -20203,70 +20651,263 @@ vgResolveBadgeSrc();
             return;
         }
 
-        data.participants.forEach(p => {
-            const item = document.createElement('div');
-            item.className = 'vg-gm-item';
-            item.dataset.userId = p.platform_user_id;
+        // Переиспользуем строки по platform_user_id
+        const existing = new Map();
+        list.querySelectorAll('.vg-gm-item').forEach(el => existing.set(el.dataset.userId, el));
 
-            const bg = p.avatar_background || '#0088cc';
-            const initials = (p.nickname || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
-            const statusText = memberStatusText(p);
-            const badge = (p.is_verified && window.vgBadgeHtml) ? window.vgBadgeHtml(true) : '';
-            const role = p.role === 'owner' ? { cls: 'owner', label: 'владелец' }
-                       : (p.role === 'admin' ? { cls: 'admin', label: 'админ' } : null);
-
-            item.innerHTML =
-                `<div class="vg-gm-avatar" style="background: linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})">${esc(initials)}</div>` +
-                '<div class="vg-gm-info">' +
-                    `<div class="vg-gm-name">${esc(p.nickname)}${badge}${p.is_me ? ' <span class="vg-gm-you">вы</span>' : ''}</div>` +
-                    `<div class="vg-gm-status ${p.is_online ? 'online' : ''}">${esc(statusText)}</div>` +
-                '</div>' +
-                (role ? `<span class="vg-gm-role vg-gm-role--${role.cls}">${role.label}</span>` : '');
-
-            const avatarEl = item.querySelector('.vg-gm-avatar');
-            if (p.has_avatar_photo && typeof loadContactAvatar === 'function') {
-                loadContactAvatar(avatarEl, p.platform_user_id, initials, bg);
+        let anchor = addRow || null; // после какого узла ставим следующую строку
+        participants.forEach(p => {
+            const id = String(p.platform_user_id);
+            let item = existing.get(id);
+            if (item) {
+                existing.delete(id);
+                updateMemberRow(item, p, data);
+            } else {
+                item = createMemberRow(p, data);
             }
-            if (p.is_verified && window.vgHydrateBadges) window.vgHydrateBadges(item);
-
-            // Тап по участнику — обычный профиль контакта
-            item.addEventListener('click', () => {
-                if (p.is_me) return;
-                closeGroupProfile();
-                if (typeof openProfileModal === 'function') openProfileModal(p.platform_user_id);
-            });
-
-            // Владелец может удалить участника (кроме себя)
-            if (data.is_admin && !p.is_me) {
-                const kick = document.createElement('button');
-                kick.type = 'button';
-                kick.className = 'vg-gm-kick';
-                kick.title = 'Удалить из группы';
-                kick.innerHTML = '<i class="fas fa-user-minus"></i>';
-                kick.addEventListener('click', async (e) => {
-                    e.stopPropagation();
-                    if (!confirm(`Удалить ${p.nickname} из группы?`)) return;
-                    await groupAction('/remove_group_member', { target_id: p.platform_user_id },
-                                      'Участник удалён');
-                    refresh();
-                });
-                item.appendChild(kick);
+            const shouldBeAfter = anchor ? anchor.nextSibling : list.firstChild;
+            if (shouldBeAfter !== item) {
+                list.insertBefore(item, anchor ? anchor.nextSibling : list.firstChild);
             }
-
-            list.appendChild(item);
+            anchor = item;
         });
+
+        // Кто выбыл из группы — убираем
+        existing.forEach(el => el.remove());
     }
 
-    // Добавление участников (владелец) — ввод ID через запятую
+
+    /* =====================================================================
+       ДОБАВЛЕНИЕ УЧАСТНИКОВ — шторка со списком контактов.
+       Кто уже в группе — серая галочка и строка не выбирается,
+       остальных можно отметить (синяя галочка) и добавить одной кнопкой.
+       ===================================================================== */
+    let amSheet = null;                 // корневой элемент шторки
+    let amContacts = [];                // кэш контактов (/get_friends)
+    const amSelected = new Map();       // platform_user_id -> contact
+    let amInGroup = new Set();          // id тех, кто уже в группе
+
+    function amInitials(c) {
+        return (c.nickname || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+    }
+
+    function ensureAddSheet() {
+        if (amSheet) return amSheet;
+
+        amSheet = document.createElement('div');
+        amSheet.className = 'vg-am-sheet';
+        amSheet.id = 'vgAddMembersSheet';
+        amSheet.innerHTML =
+            '<div class="vg-am-header">' +
+                '<button type="button" class="vg-am-back"><i class="fas fa-chevron-left"></i></button>' +
+                '<div class="vg-am-titles">' +
+                    '<div class="vg-am-title">Добавить участников</div>' +
+                    '<div class="vg-am-sub"><span class="vg-am-count">0</span> выбрано</div>' +
+                '</div>' +
+                '<button type="button" class="vg-am-done" disabled>Добавить</button>' +
+            '</div>' +
+            '<input type="text" class="vg-am-search" placeholder="Поиск контактов">' +
+            '<div class="vg-am-list"></div>';
+        document.body.appendChild(amSheet);
+
+        amSheet.querySelector('.vg-am-back').addEventListener('click', closeAddSheet);
+        amSheet.querySelector('.vg-am-search').addEventListener('input', (e) => {
+            amFilter(e.target.value);
+        });
+        amSheet.querySelector('.vg-am-done').addEventListener('click', submitAddMembers);
+        return amSheet;
+    }
+
+    function amUpdateCounter() {
+        if (!amSheet) return;
+        const n = amSelected.size;
+        amSheet.querySelector('.vg-am-count').textContent = n;
+        amSheet.querySelector('.vg-am-done').disabled = n === 0;
+    }
+
+    function amToggle(contact) {
+        const id = String(contact.platform_user_id);
+        if (amInGroup.has(id)) return;               // уже в группе — не трогаем
+        if (amSelected.has(id)) amSelected.delete(id);
+        else amSelected.set(id, contact);
+
+        const row = amSheet.querySelector(`.vg-am-item[data-user-id="${id}"]`);
+        if (row) row.classList.toggle('selected', amSelected.has(id));
+        amUpdateCounter();
+    }
+
+    function amStatusFor(activity) {
+        if (activity && activity.is_online) return { online: true, text: 'в сети' };
+        if (activity && activity.last_online && typeof formatLastSeen === 'function') {
+            const t = formatLastSeen(activity.last_online);
+            if (t) return { online: false, text: /^был/i.test(t) ? t : `был(а) ${t}` };
+        }
+        return { online: false, text: 'был(а) недавно' };
+    }
+
+    function amRenderList() {
+        const list = amSheet.querySelector('.vg-am-list');
+        list.innerHTML = '';
+
+        if (!amContacts.length) {
+            list.innerHTML = '<div class="vg-am-empty">Нет контактов</div>';
+            return;
+        }
+
+        const sorted = [...amContacts].sort((a, b) =>
+            (a.nickname || '').localeCompare(b.nickname || '', 'ru'));
+
+        const activity = (typeof getCachedActivityStatusSync === 'function')
+            ? getCachedActivityStatusSync(sorted.map(c => c.platform_user_id)) : {};
+
+        // Сначала те, кого можно добавить, затем уже состоящие в группе
+        const free = sorted.filter(c => !amInGroup.has(String(c.platform_user_id)));
+        const inside = sorted.filter(c => amInGroup.has(String(c.platform_user_id)));
+
+        const frag = document.createDocumentFragment();
+
+        const addSection = (label, arr, isInGroup) => {
+            if (!arr.length) return;
+            if (label) {
+                const h = document.createElement('div');
+                h.className = 'vg-am-section';
+                h.textContent = label;
+                frag.appendChild(h);
+            }
+            arr.forEach(c => {
+                const id = String(c.platform_user_id);
+                const item = document.createElement('div');
+                item.className = 'vg-am-item' + (isInGroup ? ' in-group' : '')
+                    + (amSelected.has(id) ? ' selected' : '');
+                item.dataset.userId = id;
+
+                const initials = amInitials(c);
+                const bg = c.avatar_background || '#0088cc';
+                const grad = `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
+                const st = amStatusFor(activity[c.platform_user_id]);
+                const badge = (memberVerified(c) && window.vgBadgeHtml) ? window.vgBadgeHtml(true) : '';
+
+                item.innerHTML =
+                    '<div class="vg-am-check"><i class="fas fa-check"></i></div>' +
+                    `<div class="vg-am-avatar" style="background: ${grad}">${esc(initials)}</div>` +
+                    '<div class="vg-am-info">' +
+                        `<div class="vg-am-name">${esc(c.nickname || 'Без имени')}${badge}</div>` +
+                        `<div class="vg-am-status ${isInGroup ? '' : (st.online ? 'online' : '')}">` +
+                            (isInGroup ? 'уже в группе' : esc(st.text)) +
+                        '</div>' +
+                    '</div>';
+
+                const avatarEl = item.querySelector('.vg-am-avatar');
+                if (c.has_avatar_photo && typeof loadContactAvatar === 'function') {
+                    loadContactAvatar(avatarEl, c.platform_user_id, initials, bg);
+                }
+                if (window.vgHydrateBadges) window.vgHydrateBadges(item);
+
+                if (!isInGroup) item.addEventListener('click', () => amToggle(c));
+                frag.appendChild(item);
+            });
+        };
+
+        addSection(free.length && inside.length ? 'Можно добавить' : '', free, false);
+        addSection('Уже в группе', inside, true);
+
+        list.appendChild(frag);
+    }
+
+    function amFilter(term) {
+        const q = (term || '').trim().toLowerCase();
+        const list = amSheet.querySelector('.vg-am-list');
+        let header = null, visible = 0;
+        const finish = () => { if (header) header.style.display = visible ? '' : 'none'; };
+
+        Array.from(list.children).forEach(el => {
+            if (el.classList.contains('vg-am-section')) {
+                finish();
+                header = el; visible = 0;
+                return;
+            }
+            if (!el.classList.contains('vg-am-item')) return;
+            const name = (el.querySelector('.vg-am-name').textContent || '').toLowerCase();
+            const ok = !q || name.includes(q);
+            el.style.display = ok ? 'flex' : 'none';
+            if (ok) visible++;
+        });
+        finish();
+    }
+
+    async function amLoadContacts() {
+        // Сначала кэш — чтобы список открывался мгновенно
+        try {
+            if (typeof getCacheItemIgnoreTTL === 'function' && typeof CONTACTS_CACHE_KEY !== 'undefined') {
+                const cached = await getCacheItemIgnoreTTL(CONTACTS_CACHE_KEY);
+                if (cached && cached.length) { amContacts = cached; amRenderList(); }
+            }
+        } catch (e) {}
+
+        try {
+            const res = await fetch(`${SERVER_URL}/get_friends`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+                credentials: 'include'
+            });
+            const data = await res.json();
+            if (data.status === 'success' && data.friends) {
+                amContacts = data.friends;
+                if (typeof setCacheItem === 'function' && typeof CONTACTS_CACHE_KEY !== 'undefined') {
+                    setCacheItem(CONTACTS_CACHE_KEY, data.friends, CACHE.CHATS_TTL);
+                }
+                amRenderList();
+            } else if (!amContacts.length) {
+                amSheet.querySelector('.vg-am-list').innerHTML =
+                    '<div class="vg-am-empty">Не удалось загрузить контакты</div>';
+            }
+        } catch (e) {
+            if (!amContacts.length) {
+                amSheet.querySelector('.vg-am-list').innerHTML =
+                    '<div class="vg-am-empty">Нет соединения с сервером</div>';
+            }
+        }
+    }
+
+    function closeAddSheet() {
+        if (!amSheet) return;
+        amSheet.classList.remove('active');
+        amSelected.clear();
+    }
+
+    // Открытие шторки по строке «Добавить участников»
     async function addMembersFlow() {
         if (!isGroupMode()) return;
-        const ids = prompt('ID участников через запятую');
-        if (!ids) return;
-        const list = ids.split(',').map(x => x.trim()).filter(Boolean);
-        if (!list.length) return;
-        const ok = await groupAction('/add_group_members', { member_ids: list }, 'Участники добавлены');
-        if (ok) refresh();
+        ensureAddSheet();
+
+        amSelected.clear();
+        amInGroup = new Set(((groupData && groupData.participants) || [])
+            .map(p => String(p.platform_user_id)));
+        amSheet.querySelector('.vg-am-search').value = '';
+        amSheet.querySelector('.vg-am-list').innerHTML =
+            '<div class="vg-am-empty">Загрузка…</div>';
+        amUpdateCounter();
+
+        amSheet.classList.add('active');
+        amLoadContacts();
     }
+
+    async function submitAddMembers() {
+        if (!amSelected.size) return;
+        const btn = amSheet.querySelector('.vg-am-done');
+        btn.disabled = true;
+        const ids = Array.from(amSelected.keys());
+        const ok = await groupAction('/add_group_members', { member_ids: ids },
+                                     ids.length > 1 ? 'Участники добавлены' : 'Участник добавлен');
+        if (!ok) { btn.disabled = false; return; }
+        closeAddSheet();
+        refresh();
+        if (typeof loadChats === 'function') loadChats();
+    }
+
+    // Профиль группы закрыли — шторку тоже прячем
+    document.addEventListener('vg-group-profile-closed', closeAddSheet);
 
     async function groupAction(path, extra, okText) {
         const chatId = window.__vgGroupProfileChatId;
@@ -20342,6 +20983,9 @@ vgResolveBadgeSrc();
         window.__reportTargetUserId = null;
 
         const sfx = suffixNow();
+        // Путь к картинке галочки резолвим ДО первого рендера списка: тогда
+        // бейджи сразу рисуются картинкой, без промежуточного SVG-кадра.
+        if (window.vgResolveBadgeSrc) window.vgResolveBadgeSrc();
         ensureMembersBox('desktop');
         ensureMembersBox('mobile');
         setContactBlocksHidden(true);
@@ -20391,6 +21035,7 @@ vgResolveBadgeSrc();
         window.__vgGroupProfileChatId = null;
         groupData = null;
         setContactBlocksHidden(false);
+        document.dispatchEvent(new Event('vg-group-profile-closed'));
     }
 
     // Профиль закрыли штатной кнопкой "назад"/оверлеем — вернуть карточку
