@@ -8117,10 +8117,22 @@ function renderProfileMediaSections(profileUserId) {
             if (grid) grid.innerHTML = '';
             hideProfileMediaBlock(sfx);
         });
+        // Профиль открыт не из личной переписки (например, из списка участников
+        // группы) — медиа личного чата подтягиваем с сервера.
+        if (profileUserId != null) loadProfileMediaFromPrivateChat(profileUserId);
         return;
     }
 
+    _profileMediaFetchToken = null; // отменяем возможную фоновую подгрузку
     const photoMessages = (currentMessages || []).filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+    paintProfileMediaSections(photoMessages);
+}
+
+// Рисует переданные фото-сообщения в разделе «Медиа» профиля.
+function paintProfileMediaSections(photoMessages) {
+    const activeElements = getActiveElements();
+    if (!activeElements.modalPhotosGrid) return;
+
     const hasMedia = photoMessages.length > 0;
     const hasFiles = false; // файлов в переписке пока не бывает — вкладку не показываем
     const suffix = window.matchMedia("(min-width: 768px)").matches ? 'desktop' : 'mobile';
@@ -8142,6 +8154,72 @@ function renderProfileMediaSections(profileUserId) {
     }
 
     applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles);
+}
+
+// Медиа для профиля, открытого НЕ из личного чата (участник группы, поиск и т.п.).
+// Находим личный чат с этим человеком (сначала в уже загруженном списке чатов,
+// иначе спрашиваем сервер — /get_or_create_chat ничего не создаёт, а для нового
+// чата возвращает отрицательный временный id) и берём из него фото.
+let _profileMediaFetchToken = null;
+
+async function loadProfileMediaFromPrivateChat(profileUserId) {
+    const token = Symbol();
+    _profileMediaFetchToken = token;
+
+    if (!profileUserId || !userData || !userData.platform_user_id) return;
+    if (String(profileUserId) === String(userData.platform_user_id)) return;
+
+    try {
+        let chatId = null;
+
+        const list = (typeof currentChatsList !== 'undefined' && currentChatsList) ? currentChatsList : [];
+        const localChat = list.find(c => c && !c.is_group &&
+            (c.participants || []).some(p => String(p.platform_user_id) === String(profileUserId)));
+        if (localChat && localChat.id != null && !String(localChat.id).startsWith('temp_')) {
+            chatId = localChat.id;
+        }
+
+        if (chatId == null) {
+            const r = await fetch(`${SERVER_URL}/get_or_create_chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform_user_id: userData.platform_user_id,
+                    contact_id: profileUserId
+                }),
+                credentials: 'include'
+            });
+            const d = await r.json();
+            if (_profileMediaFetchToken !== token) return;
+            // is_new === true → личной переписки ещё нет, показывать нечего
+            if (d.status !== 'success' || d.is_new) return;
+            chatId = d.chat_id;
+        }
+
+        if (chatId == null || Number(chatId) <= 0) return;
+
+        const res = await fetch(`${SERVER_URL}/get_messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                platform_user_id: userData.platform_user_id,
+                mark_as_read: false   // просмотр профиля не читает чужие сообщения
+            }),
+            credentials: 'include'
+        });
+        const data = await res.json();
+        if (_profileMediaFetchToken !== token) return;   // успели открыть другой профиль
+        if (data.status !== 'success') return;
+
+        // Профиль мог уже закрыться/смениться, пока шёл запрос
+        if (String(window.__reportTargetUserId) !== String(profileUserId)) return;
+
+        const photos = (data.messages || []).filter(m => m.is_image || (m.content && isImageUrl(m.content)));
+        paintProfileMediaSections(photos);
+    } catch (e) {
+        console.warn('[PROFILE MEDIA] не удалось загрузить медиа личного чата:', e);
+    }
 }
 
 // Переключатель "Медиа | Файлы" показывается всегда, когда открыт чат с этим
@@ -11958,7 +12036,9 @@ function getActiveElements() {
                 if (otherParticipant) chatItem.setAttribute('data-participant-id', otherParticipant.platform_user_id);
                 // Тот же id дублируем на обёртку свайпа: по нему кнопка "Звук" и
                 // значок "без звука" находят состояние мьюта этого собеседника.
-                if (otherParticipant) chatSwipeWrapper.setAttribute('data-participant-id', otherParticipant.platform_user_id);
+                // У группы собеседника нет: otherParticipant — просто первый
+                // участник, и мьютить его личный чат вместе с группой нельзя.
+                if (otherParticipant && !isGroupChat) chatSwipeWrapper.setAttribute('data-participant-id', otherParticipant.platform_user_id);
 
                 // Системный бот Vuntgram: всегда с галочкой и статусом «бот»
                 const isBotChat = !isGroupChat && !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
@@ -12429,7 +12509,11 @@ function getActiveElements() {
             // бейдж непрочитанных и футер обновляются сразу же.
             // Собеседника берём с самой строки списка (data-participant-id) —
             // по нему мьют работает, даже если чата ещё нет на сервере.
-            const soundUserId = chatItem.getAttribute('data-participant-id');
+            // Для группы — только chat_id (см. выше): иначе "Выкл. звук" у группы
+            // заодно мьютил личный чат с одним из её участников.
+            const soundUserId = chatItem.dataset.group === '1'
+                ? null
+                : chatItem.getAttribute('data-participant-id');
             const isChatMuted = (typeof window.vgIsMuted === 'function')
                 ? window.vgIsMuted(soundUserId, chatId)
                 : false;
@@ -19041,6 +19125,23 @@ vgResolveBadgeSrc();
         return (id === undefined || id === null || id === '') ? null : id;
     }
 
+    // Открыт профиль ГРУППЫ? Тогда мьютить надо сам чат: у группы нет
+    // собеседника, а window.__reportTargetUserId в этом режиме всегда null.
+    function groupProfileChatId() {
+        const id = window.__vgGroupProfileChatId;
+        return (id === undefined || id === null || id === '') ? null : id;
+    }
+
+    // Единая цель для кнопки "Звук": {userId, chatId}. Раньше эта функция
+    // существовала только в контактном варианте, а профиль группы красил
+    // кнопки своим отдельным кодом — из-за этого состояния расходились.
+    function muteTarget() {
+        const gid = groupProfileChatId();
+        if (gid != null) return { userId: null, chatId: gid };
+        const uid = profileUserId();
+        return { userId: uid, chatId: chatIdFor(uid) };
+    }
+
     // chat_id открытого чата, но только если он с ТЕМ ЖЕ человеком, чей
     // профиль открыт (иначе замьютили бы чужой чат). Нужен лишь как
     // подстраховка для пушей без senderId — основной ключ мьюта это user id.
@@ -19127,6 +19228,13 @@ vgResolveBadgeSrc();
         const label = btn.querySelector('.action-button-label');
         const nextLabel = muted ? 'Без звука' : 'Звук';
         const changed = btn.classList.contains('vg-muted') !== muted;
+        const labelOk = !label || label.textContent === nextLabel;
+
+        // Нечего менять — не трогаем классы (иначе оборвём идущую анимацию)
+        if (!changed && labelOk) {
+            btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+            return;
+        }
 
         btn.classList.toggle('vg-no-anim', !animate);
         // Считываем стиль, чтобы браузер применил vg-no-anim до смены состояния
@@ -19167,29 +19275,46 @@ vgResolveBadgeSrc();
     // при каждом открытии профиля (профиль переиспользует одну и ту же
     // разметку для всех контактов, поэтому состояние надо перерисовывать)
     function refresh() {
-        const uid = profileUserId();
-        const muted = isMuted(uid, chatIdFor(uid));
+        const t = muteTarget();
+        // Ни контакта, ни группы — красить нечего. Раньше в этом случае
+        // кнопка принудительно рисовалась "звук включён", и состояние группы
+        // (её красит тот же элемент) сбрасывалось на глазах.
+        if (t.userId == null && t.chatId == null) return;
+        const muted = isMuted(t.userId, t.chatId);
         SOUND_BUTTON_IDS.forEach((id) => {
             const btn = document.getElementById(id);
             if (btn) paint(btn, muted, false);
         });
     }
 
+    // Тот же самый художник (кроссфейд колокольчиков + "толчок" кружка +
+    // мягкая смена подписи) доступен снаружи — профиль группы использует его,
+    // чтобы анимация была ровно такой же, как у контакта.
+    function paintAll(muted, animate) {
+        SOUND_BUTTON_IDS.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (btn) paint(btn, muted, animate);
+        });
+    }
+    window.vgPaintProfileSoundButtons = paintAll;
+    window.vgProfileToggleMuted = toggleMuted;
+    window.vgProfileIsMuted = isMuted;
+
     function onClick(e) {
         e.preventDefault();
         e.stopPropagation();
 
-        const uid = profileUserId();
-        if (uid == null) {
-            console.warn('Кнопка "Звук": не известен id собеседника — профиль ещё не открыт');
+        // В режиме профиля группы кликом занимается скрипт профиля группы
+        if (groupProfileChatId() != null) return;
+
+        const t = muteTarget();
+        if (t.userId == null && t.chatId == null) {
+            console.warn('Кнопка "Звук": не известно, что мьютить — профиль ещё не открыт');
             return;
         }
 
-        const muted = toggleMuted(uid, chatIdFor(uid));
-        SOUND_BUTTON_IDS.forEach((id) => {
-            const btn = document.getElementById(id);
-            if (btn) paint(btn, muted, true);
-        });
+        const muted = toggleMuted(t.userId, t.chatId);
+        paintAll(muted, true);
 
         // Список чатов на этой же странице обновляем сразу: у чата с этим
         // собеседником появляется/исчезает перечёркнутый динамик у имени, а
@@ -19303,7 +19428,9 @@ vgResolveBadgeSrc();
     // Красит одну строку списка: значок у имени + плитку кнопки "Звук"
     function paintRow(wrapper) {
         const chatId = wrapper.getAttribute('data-chat-id');
-        const userId = wrapper.getAttribute('data-participant-id');
+        const userId = wrapper.dataset.group === '1'
+            ? null
+            : wrapper.getAttribute('data-participant-id');
         const muted = isMuted(userId, chatId);
 
         const icon = wrapper.querySelector('.chat-muted-icon');
@@ -19389,9 +19516,12 @@ vgResolveBadgeSrc();
 
             const parts = (src && src.participants) || [];
             const other = parts.find(pp => String(pp.platform_user_id) !== me) || parts[0] || null;
-            let userId = other ? other.platform_user_id : null;
+            // В группе собеседника нет — иначе значок "без звука" в шапке
+            // группы зависел бы от мьюта личного чата случайного участника.
+            const isGroupSrc = !!(src && src.is_group);
+            let userId = (isGroupSrc || !other) ? null : other.platform_user_id;
 
-            if (userId == null && chatId != null) {
+            if (userId == null && !isGroupSrc && chatId != null) {
                 const row = document.querySelector('.chat-item-swipe[data-chat-id="' + chatId + '"]');
                 if (row) userId = row.getAttribute('data-participant-id');
             }
@@ -19420,12 +19550,16 @@ vgResolveBadgeSrc();
 
     // Профиль контакта: значок рядом с никнеймом
     function paintProfileNicknames() {
+        const gid = (window.__vgGroupProfileChatId === undefined || window.__vgGroupProfileChatId === null)
+            ? null
+            : window.__vgGroupProfileChatId;
         const uid = (window.__reportTargetUserId === undefined || window.__reportTargetUserId === null || window.__reportTargetUserId === '')
             ? null
             : window.__reportTargetUserId;
         const target = openChatTarget();
         const chatId = (target && uid != null && String(target.userId) === String(uid)) ? target.chatId : null;
-        const muted = uid != null && isMuted(uid, chatId);
+        // Профиль группы: мьют по chat_id группы, участника у неё нет
+        const muted = gid != null ? isMuted(null, gid) : (uid != null && isMuted(uid, chatId));
         ['modal-profile-nickname-desktop', 'modal-profile-nickname-mobile'].forEach((id) => {
             const icon = ensureTitleIcon(document.getElementById(id), true);
             if (icon) icon.style.display = muted ? '' : 'none';
@@ -19449,7 +19583,9 @@ vgResolveBadgeSrc();
                     if (n <= 0) return;
                     const parts = (c && c.participants) || [];
                     const other = parts.find(pp => String(pp.platform_user_id) !== me) || parts[0] || null;
-                    if (isMuted(other ? other.platform_user_id : null, c.id)) total += n;
+                    // Группа мьютится по chat_id, участник тут ни при чём
+                    const uId = (c && c.is_group) ? null : (other ? other.platform_user_id : null);
+                    if (isMuted(uId, c.id)) total += n;
                 });
             } else {
                 // список ещё не загружен — считаем по DOM
@@ -19689,7 +19825,7 @@ vgResolveBadgeSrc();
 <style id="vg-group-members-styles">
 /* ---------------------------------------------------------------------------
    УЧАСТНИКИ ГРУППЫ — вид «как в Telegram iOS»:
-   сегментированный переключатель (Участники / Медиа / Файлы / Голосовые)
+   сегментированный переключатель (Участники / Медиа / Файлы)
    и белая скруглённая карточка со строкой «Добавить участников» и списком
    участников (аватар 46px, имя, статус, плашка роли справа).
    --------------------------------------------------------------------------- */
@@ -19861,9 +19997,6 @@ vgResolveBadgeSrc();
     padding: 26px 16px 30px;
 }
 
-/* Раздел «Голосовые» (пока пустой) */
-.vg-gm-voice { display: none; }
-.vg-gm-voice.active { display: block; }
 </style>
 <script>
 (function () {
@@ -19887,14 +20020,13 @@ vgResolveBadgeSrc();
         })[c]);
     }
 
-    // Разделы профиля группы: «Участники / Медиа / Файлы / Голосовые».
+    // Разделы профиля группы: «Участники / Медиа / Файлы».
     // Переключатель и карточка списка создаются один раз в каждой карточке
     // профиля (desktop/mobile), сразу после блока «О себе».
     const GROUP_TABS = [
         { id: 'members', label: 'Участники' },
         { id: 'media',   label: 'Медиа' },
-        { id: 'files',   label: 'Файлы' },
-        { id: 'voice',   label: 'Голосовые' }
+        { id: 'files',   label: 'Файлы' }
     ];
     let groupTab = 'members';
 
@@ -19905,6 +20037,9 @@ vgResolveBadgeSrc();
     function ensureMembersBox(suffix) {
         const modal = modalOf(suffix);
         if (!modal) return null;
+        // Чистим заглушку «Голосовые» из предыдущих версий разметки
+        modal.querySelectorAll('.vg-gm-voice').forEach(el => el.remove());
+
         let box = modal.querySelector('.vg-group-members');
         if (box) return box;
 
@@ -19933,18 +20068,11 @@ vgResolveBadgeSrc();
             '</div>' +
             '<div class="vg-gm-list"></div>';
 
-        // Раздел «Голосовые» — пока заглушка
-        const voice = document.createElement('div');
-        voice.className = 'profile-details vg-gm-voice';
-        voice.id = 'vg-gm-voice-' + suffix;
-        voice.innerHTML = '<div class="vg-gm-empty">Голосовых сообщений пока нет</div>';
-
         const parent = (details && details.parentNode) || modal.querySelector('.profile-modal-content');
         if (!parent) return box;
         const anchor = details ? details.nextSibling : null;
         parent.insertBefore(tabbar, anchor);
         parent.insertBefore(box, anchor);
-        parent.insertBefore(voice, anchor);
         return box;
     }
 
@@ -19963,11 +20091,9 @@ vgResolveBadgeSrc();
                 });
             }
             const box = modal.querySelector('.vg-group-members');
-            const voice = modal.querySelector('.vg-gm-voice');
             const photos = document.getElementById('modal-photos-section-' + sfx);
             const files = document.getElementById('modal-files-section-' + sfx);
             if (box) box.classList.toggle('active', tab === 'members');
-            if (voice) voice.classList.toggle('active', tab === 'voice');
             if (photos) {
                 photos.style.display = tab === 'media' ? 'block' : 'none';
                 photos.classList.toggle('active', tab === 'media');
@@ -19993,9 +20119,7 @@ vgResolveBadgeSrc();
                 if (oldTabs) { oldTabs.style.display = 'none'; oldTabs.classList.add('media-hidden'); }
             } else {
                 const box = modal.querySelector('.vg-group-members');
-                const voice = modal.querySelector('.vg-gm-voice');
                 if (box) box.classList.remove('active');
-                if (voice) voice.classList.remove('active');
                 // Дальше видимостью медиа-секций управляет
                 // renderProfileMediaSections() профиля контакта
                 if (oldTabs) oldTabs.classList.remove('media-hidden');
@@ -20253,7 +20377,12 @@ vgResolveBadgeSrc();
             if (overlay) overlay.classList.add('active');
         }
 
-        paintSoundButtons();
+        paintSoundButtons(false);
+        // MutationObserver контактной кнопки срабатывает после текущей задачи
+        // (класс видимости мы только что поставили) — раньше он перекрашивал
+        // кнопку "чужим" состоянием уже после нашей отрисовки. Ставим своё
+        // состояние ещё раз, когда все наблюдатели отработали.
+        setTimeout(() => paintSoundButtons(false), 0);
         refresh();
     }
 
@@ -20295,10 +20424,31 @@ vgResolveBadgeSrc();
     // stopImmediatePropagation, только когда открыт профиль группы.
     function isGroupMode() { return window.__vgGroupProfileChatId != null; }
 
-    function paintSoundButtons() {
-        if (!isGroupMode()) return;
+    // Состояние группы читаем/пишем ТОЛЬКО по chat_id: участника у группы нет.
+    function isGroupMuted() {
         const chatId = window.__vgGroupProfileChatId;
-        const muted = (typeof window.vgIsMuted === 'function') ? window.vgIsMuted(null, chatId) : false;
+        if (chatId == null) return false;
+        if (typeof window.vgIsMuted === 'function') return window.vgIsMuted(null, chatId);
+        if (typeof window.vgProfileIsMuted === 'function') return window.vgProfileIsMuted(null, chatId);
+        return false;
+    }
+
+    // Рисуем кнопку общим художником профиля (window.vgPaintProfileSoundButtons):
+    // те же два колокольчика с кроссфейдом, упругий "толчок" кружка и мягкая
+    // смена подписи «Звук» ↔ «Без звука». Раньше здесь был свой упрощённый
+    // код, который просто переставлял классы и текст — поэтому в профиле
+    // группы кнопка "Звук" переключалась рывком, без анимации.
+    // animate=false — первая отрисовка при открытии профиля.
+    function paintSoundButtons(animate) {
+        if (!isGroupMode()) return;
+        const muted = isGroupMuted();
+
+        if (typeof window.vgPaintProfileSoundButtons === 'function') {
+            window.vgPaintProfileSoundButtons(muted, !!animate);
+            return;
+        }
+
+        // Фолбэк, если основной скрипт кнопки не загрузился
         ['soundButtonDesktop', 'soundButtonMobile'].forEach(id => {
             const btn = document.getElementById(id);
             if (!btn) return;
@@ -20314,6 +20464,10 @@ vgResolveBadgeSrc();
             if (label) label.textContent = muted ? 'Без звука' : 'Звук';
         });
     }
+
+    // Кнопка живёт в общей карточке профиля, поэтому её состояние надо
+    // возвращать к группе после любого чужого перерисовывания.
+    window.vgRefreshGroupSoundButton = () => paintSoundButtons(false);
 
     ['chatButtonDesktop', 'chatButtonMobile'].forEach(id => {
         const btn = document.getElementById(id);
@@ -20354,9 +20508,15 @@ vgResolveBadgeSrc();
             const chatId = window.__vgGroupProfileChatId;
             // Мьют группы — по chat_id (участника у группы нет)
             if (typeof window.vgToggleMuted === 'function') window.vgToggleMuted(null, chatId);
+            else if (typeof window.vgProfileToggleMuted === 'function') window.vgProfileToggleMuted(null, chatId);
             else if (window.vgToggleChatMuteFromList) window.vgToggleChatMuteFromList(chatId, null);
-            paintSoundButtons();
+
+            // animate=true — колокольчик перечёркивается плавно, как у контакта
+            paintSoundButtons(true);
+            // Список чатов перерисовывает и профиль (vgRefreshProfileSoundButton),
+            // поэтому состояние группы возвращаем последним.
             if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
+            paintSoundButtons(false);
         }, true);
     });
 
