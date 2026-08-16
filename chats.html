@@ -15792,14 +15792,34 @@ function stopProfileDataPolling() {
                 window.addEventListener('resize', setupMobileChatHeight);
             }
             // Добавьте после строк с profileBackButtonMobile обработчиками
+            // ВАЖНО: если открыт профиль ГРУППЫ, эти "контактные" обработчики
+            // должны молчать. Раньше они висели на том же элементе и были
+            // зарегистрированы РАНЬШЕ группового обработчика, поэтому при тапе
+            // прямо по кнопке срабатывали первыми (порядок регистрации важнее
+            // фазы capture на самом target) и открывали карточку контакта с
+            // блоком "О себе" вместо чата группы.
+            function vgGroupProfileOpen() { return window.__vgGroupProfileChatId != null; }
+
             if (chatButtonDesktop) {
                 chatButtonDesktop.addEventListener('click', () => {
+                    if (vgGroupProfileOpen()) {
+                        const gid = window.__vgGroupProfileChatId;
+                        if (window.vgCloseGroupProfile) window.vgCloseGroupProfile();
+                        openChat(gid);
+                        return;
+                    }
                     openChatWithContact(currentViewedUser);
                 });
             }
 
             if (chatButtonMobile) {
                 chatButtonMobile.addEventListener('click', () => {
+                    if (vgGroupProfileOpen()) {
+                        const gid = window.__vgGroupProfileChatId;
+                        if (window.vgCloseGroupProfile) window.vgCloseGroupProfile();
+                        openChat(gid);
+                        return;
+                    }
                     openChatWithContact(currentViewedUser);
                 });
             }
@@ -19726,10 +19746,21 @@ vgResolveBadgeSrc();
         ['desktop', 'mobile'].forEach(sfx => {
             const modal = document.getElementById(sfx === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
             if (!modal) return;
+            // display выставляем с !important: карточку "О себе" на мобильных
+            // стилизует блок about-card-unified с !important, из-за чего обычный
+            // style.display мог не сработать (О себе оставалась видимой, а
+            // список участников — скрытым).
             const details = modal.querySelector('.profile-details:not(.vg-group-members)');
-            if (details) details.style.display = hidden ? 'none' : '';
+            if (details) {
+                if (hidden) details.style.setProperty('display', 'none', 'important');
+                else details.style.removeProperty('display');
+            }
             const box = modal.querySelector('.vg-group-members');
-            if (box) box.classList.toggle('active', hidden);
+            if (box) {
+                box.classList.toggle('active', hidden);
+                if (hidden) box.style.setProperty('display', 'block', 'important');
+                else box.style.setProperty('display', 'none', 'important');
+            }
         });
     }
 
@@ -19866,7 +19897,10 @@ vgResolveBadgeSrc();
         const res = await fetch(`${SERVER_URL}/get_group_info`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id })
+            body: JSON.stringify({
+                chat_id: isNaN(Number(chatId)) ? chatId : Number(chatId),
+                platform_user_id: userData.platform_user_id
+            })
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') throw new Error(data.error || 'group info failed');
@@ -19878,12 +19912,24 @@ vgResolveBadgeSrc();
         if (chatId == null) return;
         try {
             groupData = await fetchGroupInfo(chatId);
-            if (window.__vgGroupProfileChatId !== chatId) return; // успели закрыть/сменить
-            const sfx = suffixNow();
-            renderHero(sfx, groupData);
-            renderMembers(sfx, groupData);
+            if (String(window.__vgGroupProfileChatId) !== String(chatId)) return; // успели закрыть/сменить
+            // Рисуем в ОБА макета (desktop+mobile): раньше рисовали только в
+            // текущий, и если карточка профиля открывалась в другом макете
+            // (или ширина менялась), список участников оставался пустым.
+            ['desktop', 'mobile'].forEach(sfx => {
+                renderHero(sfx, groupData);
+                renderMembers(sfx, groupData);
+            });
+            setContactBlocksHidden(true);
         } catch (err) {
             console.error('[GROUP PROFILE]', err);
+            ['desktop', 'mobile'].forEach(sfx => {
+                const box = ensureMembersBox(sfx);
+                const list = box && box.querySelector('.vg-gm-list');
+                if (list && !list.children.length) {
+                    list.innerHTML = '<div class="vg-gm-empty">Не удалось загрузить участников</div>';
+                }
+            });
         }
     }
 
@@ -19912,6 +19958,28 @@ vgResolveBadgeSrc();
 
         // Медиа/Файлы берём из открытого чата — тот же механизм, что у контакта
         if (typeof renderProfileMediaSections === 'function') renderProfileMediaSections(null);
+
+        // Пока идёт /get_group_info — сразу показываем участников из кэша
+        // списка чатов (chat.participants), чтобы раздел не был пустым.
+        const cachedParts = (cached && Array.isArray(cached.participants)) ? cached.participants : [];
+        if (cachedParts.length) {
+            const preview = {
+                is_admin: false,
+                participants: cachedParts.map(p => ({
+                    platform_user_id: p.platform_user_id,
+                    nickname: p.nickname || 'Unknown User',
+                    avatar_background: p.avatar_background || '#0088cc',
+                    has_avatar_photo: !!p.avatar_url,
+                    is_verified: !!p.is_verified,
+                    role: String(p.platform_user_id) === String(cached.group_creator_id) ? 'owner' : 'member',
+                    is_online: false,
+                    last_online: null,
+                    is_me: String(p.platform_user_id) === String(userData.platform_user_id)
+                }))
+            };
+            ['desktop', 'mobile'].forEach(sfx => renderMembers(sfx, preview));
+        }
+        setContactBlocksHidden(true);
 
         if (sfx === 'desktop') {
             updateDesktopVisibility(false, true);
