@@ -11891,6 +11891,16 @@ function getActiveElements() {
             if (avatarElement) avatarElement.classList.toggle('is-online', isOnline);
         }
 
+        // "1 участник / 2 участника / 5 участников"
+        function vgPluralMembers(n) {
+            const a = Math.abs(n) % 100, b = a % 10;
+            if (a > 10 && a < 20) return 'участников';
+            if (b > 1 && b < 5) return 'участника';
+            if (b === 1) return 'участник';
+            return 'участников';
+        }
+        window.vgPluralMembers = vgPluralMembers;
+
         async function renderChats(chats) {
             vgSanitizeUnreadList(chats);
             const { chatsList, noChats } = getActiveElements();
@@ -11930,8 +11940,19 @@ function getActiveElements() {
                 chatItem.setAttribute('data-chat-id', chat.id);
                 chatItem.style.animationDelay = `${index * 0.05}s`;
                 
-                const initials = chat.name ? chat.name.split(' ').map(n => n[0]).join('') : '?';
+                // Группа: инициалы из названия заглавными (Telegram так же),
+                // аватар — фото группы (group_photo_url), а не аватар участника.
+                const isGroupChat = !!chat.is_group;
+                const initials = chat.name
+                    ? (isGroupChat
+                        ? chat.name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
+                        : chat.name.split(' ').map(n => n[0]).join(''))
+                    : '?';
                 const bgColor = chat.avatar_background || getRandomColor();
+                if (isGroupChat) {
+                    chatItem.dataset.group = '1';
+                    chatSwipeWrapper.dataset.group = '1';
+                }
 
                 const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 if (otherParticipant) chatItem.setAttribute('data-participant-id', otherParticipant.platform_user_id);
@@ -11940,15 +11961,22 @@ function getActiveElements() {
                 if (otherParticipant) chatSwipeWrapper.setAttribute('data-participant-id', otherParticipant.platform_user_id);
 
                 // Системный бот Vuntgram: всегда с галочкой и статусом «бот»
-                const isBotChat = !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
-                const isChatVerified = isBotChat || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant));
+                const isBotChat = !isGroupChat && !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
+                // ВАЖНО: для группы галочку не рисуем — otherParticipant тут это
+                // просто первый попавшийся участник, его верификация к группе
+                // отношения не имеет.
+                const isChatVerified = !isGroupChat && (isBotChat || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant)));
                 if (isBotChat) chatItem.dataset.bot = '1';
                 if (isChatVerified) chatItem.dataset.verified = '1';
 
                 let statusText = 'был(а) недавно';
                 let isOnline = false;
 
-                if (isBotChat) {
+                if (isGroupChat) {
+                    // Вместо статуса собеседника — число участников
+                    const membersCount = chat.members_count || ((chat.participants ? chat.participants.length : 0) + 1);
+                    statusText = `${membersCount} ${vgPluralMembers(membersCount)}`;
+                } else if (isBotChat) {
                     statusText = 'бот';
                 } else if (otherParticipant) {
                     const userActivity = activityData[otherParticipant.platform_user_id];
@@ -11968,6 +11996,17 @@ function getActiveElements() {
                 let lastMessageText = chat.last_message || '';
                 
                 if (isImageUrl(lastMessageText) || chat.last_message_type === 'image') lastMessageText = '📷 Фото';
+
+                // В группе показываем, кто написал. Своё сообщение — "Вы:",
+                // чужое — ник отправителя, если сервер его прислал
+                // (last_message_sender_nickname); иначе просто текст.
+                if (isGroupChat && lastMessageText) {
+                    if (chat.last_message_is_me) {
+                        lastMessageText = `Вы: ${lastMessageText}`;
+                    } else if (chat.last_message_sender_nickname) {
+                        lastMessageText = `${chat.last_message_sender_nickname}: ${lastMessageText}`;
+                    }
+                }
 
                 const timeLabel = formatChatListDate(chat.last_message_time);
                 const readStatusIcon = getChatReadStatusIcon(chat);
@@ -11991,7 +12030,15 @@ function getActiveElements() {
                     </div>
                 `;
                 
-                if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
+                if (isGroupChat) {
+                    if (chat.group_photo_url) {
+                        const gAv = chatItem.querySelector('.chat-avatar');
+                        gAv.textContent = '';
+                        gAv.style.backgroundImage = `url("${chat.group_photo_url}")`;
+                        gAv.style.backgroundSize = 'cover';
+                        gAv.style.backgroundPosition = 'center';
+                    }
+                } else if (chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
                     const avatarOwnerId = isBotChat && otherParticipant
                         ? otherParticipant.platform_user_id
                         : chat.participants[0].platform_user_id;
@@ -12045,7 +12092,8 @@ function getActiveElements() {
                     e.preventDefault();
                     e.stopPropagation();
                     if (window.vgToggleChatMuteFromList) {
-                        window.vgToggleChatMuteFromList(chat.id, otherParticipant ? otherParticipant.platform_user_id : null);
+                        // В группе мьютим сам чат (участника тут нет)
+                        window.vgToggleChatMuteFromList(chat.id, isGroupChat ? null : (otherParticipant ? otherParticipant.platform_user_id : null));
                     }
                 });
                 chatSwipeActions.appendChild(chatSoundBtn);
@@ -15364,6 +15412,15 @@ function stopProfileDataPolling() {
             const chatHeaderDesktop = document.querySelector('#chatModalDesktop .chat-header');
             const chatHeaderMobile = document.querySelector('#chatModalMobile .chat-header');
 
+            // Открытый сейчас чат — групповой? (currentChat может ещё грузиться,
+            // поэтому смотрим и в кэш списка чатов)
+            function vgHeaderChatIsGroup() {
+                if (currentChat && currentChat.is_group) return true;
+                const cached = currentChatsList.find(c => String(c.id) === String(currentChatId));
+                return !!(cached && cached.is_group);
+            }
+            window.vgHeaderChatIsGroup = vgHeaderChatIsGroup;
+
             function getOtherParticipantForHeaderClick() {
                 const fromCurrentChat = currentChat && currentChat.participants;
                 if (fromCurrentChat && fromCurrentChat.length > 0) {
@@ -15383,6 +15440,11 @@ function stopProfileDataPolling() {
                 chatHeaderDesktop.addEventListener('click', (e) => {
                     e.stopPropagation();
                     if (selectionModeActive) return;
+                    // Группа — открываем профиль группы, а не участника
+                    if (vgHeaderChatIsGroup()) {
+                        if (window.openGroupProfileModal) window.openGroupProfileModal(currentChatId);
+                        return;
+                    }
                     const otherParticipant = getOtherParticipantForHeaderClick();
                     if (otherParticipant) {
                         openProfileModal(otherParticipant.platform_user_id);
@@ -15395,6 +15457,11 @@ function stopProfileDataPolling() {
                 chatHeaderMobile.addEventListener('click', (e) => {
                     e.stopPropagation();
                     if (selectionModeActive) return;
+                    // Группа — открываем профиль группы, а не участника
+                    if (vgHeaderChatIsGroup()) {
+                        if (window.openGroupProfileModal) window.openGroupProfileModal(currentChatId);
+                        return;
+                    }
                     const otherParticipant = getOtherParticipantForHeaderClick();
                     if (otherParticipant) {
                         openProfileModal(otherParticipant.platform_user_id);
@@ -16216,11 +16283,42 @@ function stopProfileDataPolling() {
             }
 
             if (groupCreateSubmitBtn) {
-                groupCreateSubmitBtn.addEventListener('click', () => {
-                    // Пока только визуально: сама группа не создаётся
+                groupCreateSubmitBtn.addEventListener('click', async () => {
                     if (groupCreateSubmitBtn.disabled) return;
-                    closeGroupCreateModal();
-                    showMessage('Создание групп появится позже', 'success');
+
+                    const name = (groupNameInput.value || '').trim().slice(0, 100);
+                    const memberIds = Array.from(groupSelected.keys());
+                    if (!name) { showMessage('Введите название группы'); return; }
+                    if (!memberIds.length) { showMessage('Выберите участников'); return; }
+
+                    groupCreateSubmitBtn.disabled = true;
+                    try {
+                        const res = await fetch(`${SERVER_URL}/create_group`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                platform_user_id: userData.platform_user_id,
+                                name: name,
+                                member_ids: memberIds,
+                                photo_url: window.__vgPendingGroupPhotoUrl || null
+                            })
+                        });
+                        const data = await res.json();
+                        if (!res.ok || data.status !== 'success') {
+                            showMessage(data.error || 'Не удалось создать группу');
+                            groupCreateSubmitBtn.disabled = false;
+                            return;
+                        }
+                        window.__vgPendingGroupPhotoUrl = null;
+                        groupSelected.clear();
+                        closeGroupCreateModal();
+                        await loadChats();
+                        await openChat(data.chat_id);
+                    } catch (err) {
+                        console.error('[CREATE GROUP]', err);
+                        showMessage('Ошибка сети при создании группы');
+                        groupCreateSubmitBtn.disabled = false;
+                    }
                 });
             }
 
@@ -19529,6 +19627,507 @@ vgResolveBadgeSrc();
     }
 }
 </style>
+
+<!-- ==========================================================================
+     ПРОФИЛЬ ГРУППЫ
+     Переиспользует существующие карточки профиля (#profileModalDesktop /
+     #profileModalMobile): те же hero-аватар, кнопки Чат/Звук/ещё и блок
+     Медиа/Файлы. Отличие только в содержимом: вместо "О себе" — раздел
+     "Участники" (данные из /get_group_info), в шапке вместо статуса —
+     "N участников".
+     ========================================================================== -->
+<style>
+    .vg-group-members { display: none; }
+    .vg-group-members.active { display: block; }
+
+    .vg-gm-title {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; margin-bottom: 10px;
+    }
+    .vg-gm-add {
+        background: none; border: none; color: var(--telegram-blue, #0088cc);
+        font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 6px;
+    }
+    .vg-gm-item {
+        display: flex; align-items: center; gap: 12px;
+        padding: 8px 0; cursor: pointer; position: relative;
+    }
+    .vg-gm-item:active { opacity: .6; }
+    .vg-gm-avatar {
+        width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-weight: 600; font-size: 15px;
+        background-size: cover; background-position: center;
+    }
+    .vg-gm-info { min-width: 0; flex: 1; }
+    .vg-gm-name {
+        display: flex; align-items: center; gap: 5px;
+        font-size: 15px; font-weight: 500;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .vg-gm-status { font-size: 13px; color: var(--telegram-hint, #8e8e93); }
+    .vg-gm-status.online { color: var(--telegram-blue, #0088cc); }
+    .vg-gm-role {
+        font-size: 12px; color: var(--telegram-hint, #8e8e93);
+        flex-shrink: 0; margin-left: 6px;
+    }
+    .vg-gm-kick {
+        background: none; border: none; color: #ff3b30;
+        font-size: 15px; padding: 6px 8px; cursor: pointer; flex-shrink: 0;
+    }
+    .vg-gm-empty { color: var(--telegram-hint, #8e8e93); font-size: 14px; padding: 8px 0; }
+</style>
+<script>
+(function () {
+    // Состояние открытого профиля группы. window.__vgGroupProfileChatId !== null
+    // означает "сейчас открыт профиль группы" — по нему кнопки Чат/Звук/ещё
+    // понимают, что работать надо с группой, а не с контактом.
+    window.__vgGroupProfileChatId = null;
+    let groupData = null;
+
+    function suffixNow() {
+        return window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
+    }
+
+    function plural(n) {
+        return window.vgPluralMembers ? window.vgPluralMembers(n) : 'участников';
+    }
+
+    function esc(str) {
+        return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[c]);
+    }
+
+    // Контейнер "Участники" создаём один раз в каждой карточке профиля,
+    // сразу после блока "О себе" (.profile-details), и переключаем видимость.
+    function ensureMembersBox(suffix) {
+        const modal = document.getElementById(suffix === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
+        if (!modal) return null;
+        let box = modal.querySelector('.vg-group-members');
+        if (box) return box;
+
+        const details = modal.querySelector('.profile-details');
+        box = document.createElement('div');
+        box.className = 'profile-details vg-group-members';
+        box.id = 'vg-group-members-' + suffix;
+        box.innerHTML =
+            '<div class="vg-gm-title">' +
+                '<div class="profile-details-title">Участники</div>' +
+                '<button type="button" class="vg-gm-add" style="display:none;">Добавить</button>' +
+            '</div>' +
+            '<div class="vg-gm-list"></div>';
+        if (details && details.parentNode) details.parentNode.insertBefore(box, details.nextSibling);
+        else modal.querySelector('.profile-modal-content').appendChild(box);
+        return box;
+    }
+
+    function setContactBlocksHidden(hidden) {
+        ['desktop', 'mobile'].forEach(sfx => {
+            const modal = document.getElementById(sfx === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
+            if (!modal) return;
+            const details = modal.querySelector('.profile-details:not(.vg-group-members)');
+            if (details) details.style.display = hidden ? 'none' : '';
+            const box = modal.querySelector('.vg-group-members');
+            if (box) box.classList.toggle('active', hidden);
+        });
+    }
+
+    function renderHero(suffix, data) {
+        const nickEl = document.getElementById('modal-profile-nickname-' + suffix);
+        const idEl = document.getElementById('modal-profile-id-' + suffix);
+        const statusEl = document.getElementById('modal-profile-status-' + suffix);
+        const avatarEl = document.getElementById('modal-profile-avatar-' + suffix);
+
+        if (nickEl) {
+            // Ник может быть завёрнут в .vg-title-mute-row (значок "без звука"),
+            // поэтому пишем в текстовый узел, а не в innerHTML всей строки.
+            const textSpan = nickEl.querySelector('.vg-nick-text');
+            if (textSpan) textSpan.textContent = data.name;
+            else nickEl.textContent = data.name;
+        }
+        if (idEl) idEl.textContent = `${data.members_count} ${plural(data.members_count)}`;
+        if (statusEl) {
+            const t = statusEl.querySelector('.status-text');
+            const ind = statusEl.querySelector('.status-indicator');
+            if (t) t.textContent = '';
+            if (ind) ind.style.display = 'none';
+            statusEl.classList.remove('online');
+        }
+        if (avatarEl) {
+            const initials = (data.name || '').split(' ').slice(0, 2)
+                .map(w => w[0] || '').join('').toUpperCase() || 'ГР';
+            avatarEl.textContent = data.photo_url ? '' : initials;
+            avatarEl.style.backgroundImage = data.photo_url ? `url("${data.photo_url}")` : 'none';
+            avatarEl.style.backgroundSize = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            if (!data.photo_url) {
+                const bg = '#0088cc';
+                avatarEl.style.background = `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
+            }
+        }
+    }
+
+    function renderMembers(suffix, data) {
+        const box = ensureMembersBox(suffix);
+        if (!box) return;
+        const list = box.querySelector('.vg-gm-list');
+        const addBtn = box.querySelector('.vg-gm-add');
+        if (addBtn) addBtn.style.display = data.is_admin ? '' : 'none';
+
+        if (!data.participants || !data.participants.length) {
+            list.innerHTML = '<div class="vg-gm-empty">Участников нет</div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        data.participants.forEach(p => {
+            const item = document.createElement('div');
+            item.className = 'vg-gm-item';
+            item.dataset.userId = p.platform_user_id;
+
+            const bg = p.avatar_background || '#0088cc';
+            const initials = (p.nickname || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+            const statusText = p.is_online
+                ? 'В сети'
+                : (p.last_online && typeof formatLastSeen === 'function' ? formatLastSeen(p.last_online) : 'был(а) недавно');
+            const badge = (p.is_verified && window.vgBadgeHtml) ? window.vgBadgeHtml(true) : '';
+            const roleLabel = p.role === 'owner' ? 'владелец' : '';
+
+            item.innerHTML =
+                `<div class="vg-gm-avatar" style="background: linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})">${esc(initials)}</div>` +
+                '<div class="vg-gm-info">' +
+                    `<div class="vg-gm-name">${esc(p.nickname)}${badge}${p.is_me ? ' <span class="vg-gm-role">вы</span>' : ''}</div>` +
+                    `<div class="vg-gm-status ${p.is_online ? 'online' : ''}">${esc(statusText)}</div>` +
+                '</div>' +
+                (roleLabel ? `<span class="vg-gm-role">${roleLabel}</span>` : '');
+
+            const avatarEl = item.querySelector('.vg-gm-avatar');
+            if (p.has_avatar_photo && typeof loadContactAvatar === 'function') {
+                loadContactAvatar(avatarEl, p.platform_user_id, initials, bg);
+            }
+            if (p.is_verified && window.vgHydrateBadges) window.vgHydrateBadges(item);
+
+            // Тап по участнику — обычный профиль контакта
+            item.addEventListener('click', () => {
+                if (p.is_me) return;
+                closeGroupProfile();
+                if (typeof openProfileModal === 'function') openProfileModal(p.platform_user_id);
+            });
+
+            // Владелец может удалить участника (кроме себя)
+            if (data.is_admin && !p.is_me) {
+                const kick = document.createElement('button');
+                kick.type = 'button';
+                kick.className = 'vg-gm-kick';
+                kick.title = 'Удалить из группы';
+                kick.innerHTML = '<i class="fas fa-user-minus"></i>';
+                kick.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Удалить ${p.nickname} из группы?`)) return;
+                    await groupAction('/remove_group_member', { target_id: p.platform_user_id },
+                                      'Участник удалён');
+                    refresh();
+                });
+                item.appendChild(kick);
+            }
+
+            list.appendChild(item);
+        });
+    }
+
+    async function groupAction(path, extra, okText) {
+        const chatId = window.__vgGroupProfileChatId;
+        if (chatId == null) return null;
+        try {
+            const res = await fetch(`${SERVER_URL}${path}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(Object.assign({
+                    chat_id: chatId,
+                    platform_user_id: userData.platform_user_id
+                }, extra || {}))
+            });
+            const data = await res.json();
+            if (!res.ok || data.status !== 'success') {
+                showMessage(data.error || 'Не удалось выполнить действие');
+                return null;
+            }
+            if (okText) showMessage(okText, 'success');
+            return data;
+        } catch (err) {
+            console.error('[GROUP ACTION]', path, err);
+            showMessage('Ошибка сети');
+            return null;
+        }
+    }
+
+    async function fetchGroupInfo(chatId) {
+        const res = await fetch(`${SERVER_URL}/get_group_info`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.error || 'group info failed');
+        return data;
+    }
+
+    async function refresh() {
+        const chatId = window.__vgGroupProfileChatId;
+        if (chatId == null) return;
+        try {
+            groupData = await fetchGroupInfo(chatId);
+            if (window.__vgGroupProfileChatId !== chatId) return; // успели закрыть/сменить
+            const sfx = suffixNow();
+            renderHero(sfx, groupData);
+            renderMembers(sfx, groupData);
+        } catch (err) {
+            console.error('[GROUP PROFILE]', err);
+        }
+    }
+
+    async function openGroupProfileModal(chatId) {
+        if (chatId == null) return;
+        window.__vgGroupProfileChatId = chatId;
+        // Профиль группы — жалоба/мьют не про конкретного пользователя
+        window.__reportTargetUserId = null;
+
+        const sfx = suffixNow();
+        ensureMembersBox('desktop');
+        ensureMembersBox('mobile');
+        setContactBlocksHidden(true);
+        if (window.ProfileHero) window.ProfileHero.resetAll();
+
+        // Мгновенно показываем то, что уже известно из списка чатов,
+        // чтобы карточка не открывалась пустой на время запроса.
+        const cached = (typeof currentChatsList !== 'undefined' ? currentChatsList : [])
+            .find(c => String(c.id) === String(chatId));
+        renderHero(sfx, {
+            name: (cached && cached.name) || 'Группа',
+            photo_url: cached && cached.group_photo_url,
+            members_count: (cached && cached.members_count) || 0,
+            is_admin: false
+        });
+
+        // Медиа/Файлы берём из открытого чата — тот же механизм, что у контакта
+        if (typeof renderProfileMediaSections === 'function') renderProfileMediaSections(null);
+
+        if (sfx === 'desktop') {
+            updateDesktopVisibility(false, true);
+            const dc = document.querySelector('.desktop-content');
+            if (dc) dc.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            document.body.classList.add('modal-open');
+            const chatModal = document.getElementById('chatModalMobile');
+            if (chatModal) chatModal.classList.remove('active');
+            document.getElementById('profileModalMobile').classList.add('active');
+            const overlay = document.getElementById('modalOverlay');
+            if (overlay) overlay.classList.add('active');
+        }
+
+        paintSoundButtons();
+        refresh();
+    }
+
+    function closeGroupProfile() {
+        window.__vgGroupProfileChatId = null;
+        groupData = null;
+        setContactBlocksHidden(false);
+    }
+
+    // Профиль закрыли штатной кнопкой "назад"/оверлеем — вернуть карточку
+    // в режим контакта, иначе следующий открытый профиль покажет участников.
+    ['profileModalDesktop', 'profileModalMobile'].forEach(id => {
+        const modal = document.getElementById(id);
+        if (!modal) return;
+        new MutationObserver(() => {
+            const visible = modal.classList.contains('visible') || modal.classList.contains('active');
+            if (!visible && window.__vgGroupProfileChatId != null) closeGroupProfile();
+        }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+    });
+
+    // ---------- Кнопки Чат / Звук / ещё в режиме группы ----------
+    // Вешаем в фазе перехвата и глушим "контактные" обработчики через
+    // stopImmediatePropagation, только когда открыт профиль группы.
+    function isGroupMode() { return window.__vgGroupProfileChatId != null; }
+
+    function paintSoundButtons() {
+        if (!isGroupMode()) return;
+        const chatId = window.__vgGroupProfileChatId;
+        const muted = (typeof window.vgIsMuted === 'function') ? window.vgIsMuted(null, chatId) : false;
+        ['soundButtonDesktop', 'soundButtonMobile'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            const box = btn.querySelector('.action-button-icon');
+            if (box && !box.querySelector('.vg-sound-icons')) {
+                box.innerHTML = '<span class="vg-sound-icons">' +
+                    '<i class="fas fa-bell vg-sound-ico vg-sound-ico--on"></i>' +
+                    '<i class="fas fa-bell-slash vg-sound-ico vg-sound-ico--off"></i></span>';
+            }
+            btn.classList.toggle('vg-muted', muted);
+            btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+            const label = btn.querySelector('.action-button-label');
+            if (label) label.textContent = muted ? 'Без звука' : 'Звук';
+        });
+    }
+
+    ['chatButtonDesktop', 'chatButtonMobile'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('click', (e) => {
+            if (!isGroupMode()) return;
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            const chatId = window.__vgGroupProfileChatId;
+            closeGroupProfile();
+            if (typeof openChat === 'function') openChat(chatId);
+        }, true);
+    });
+
+    ['soundButtonDesktop', 'soundButtonMobile'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('click', (e) => {
+            if (!isGroupMode()) return;
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            const chatId = window.__vgGroupProfileChatId;
+            // Мьют группы — по chat_id (участника у группы нет)
+            if (typeof window.vgToggleMuted === 'function') window.vgToggleMuted(null, chatId);
+            else if (window.vgToggleChatMuteFromList) window.vgToggleChatMuteFromList(chatId, null);
+            paintSoundButtons();
+            if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
+        }, true);
+    });
+
+    ['moreButtonDesktop', 'moreButtonMobile'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('click', (e) => {
+            if (!isGroupMode()) return;
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            openGroupMoreMenu(btn);
+        }, true);
+    });
+
+    // ---------- Меню "ещё" для группы ----------
+    let menuEl = null;
+
+    function closeMenu() {
+        if (menuEl) { menuEl.remove(); menuEl = null; }
+        document.removeEventListener('click', onDocClick, true);
+    }
+
+    function onDocClick(e) {
+        if (menuEl && !menuEl.contains(e.target)) closeMenu();
+    }
+
+    function openGroupMoreMenu(anchor) {
+        closeMenu();
+        const isAdmin = !!(groupData && groupData.is_admin);
+
+        // Та же разметка и классы, что у меню «ещё» в профиле контакта —
+        // чтобы вид и анимация появления были идентичны.
+        menuEl = document.createElement('div');
+        menuEl.className = 'profile-more-menu';
+
+        const items = [
+            { label: 'Пожаловаться', icon: 'fa-flag', act: 'report' },
+        ];
+        if (isAdmin) {
+            items.push({ label: 'Переименовать', icon: 'fa-pen', act: 'rename' });
+            items.push({ label: 'Удалить группу', icon: 'fa-trash-can', act: 'delete', danger: true });
+        } else {
+            items.push({ label: 'Покинуть группу', icon: 'fa-arrow-right-from-bracket', act: 'leave', danger: true });
+        }
+
+        menuEl.innerHTML = items.map(it =>
+            `<button type="button" class="profile-more-item${it.danger ? ' destructive' : ''}" data-act="${it.act}">` +
+            `<span>${it.label}</span>` +
+            `<span class="profile-more-item-icon"><i class="fa-solid ${it.icon}"></i></span></button>`
+        ).join('');
+
+        document.body.appendChild(menuEl);
+        const r = anchor.getBoundingClientRect();
+        const mw = menuEl.offsetWidth, mh = menuEl.offsetHeight;
+        let left = Math.max(10, Math.min(r.left + r.width / 2 - mw / 2, window.innerWidth - mw - 10));
+        let top = r.bottom + 8;
+        if (top + mh > window.innerHeight - 10) top = Math.max(10, r.top - mh - 8);
+        menuEl.style.left = left + 'px';
+        menuEl.style.top = top + 'px';
+        requestAnimationFrame(() => menuEl.classList.add('visible'));
+
+        menuEl.querySelectorAll('.profile-more-item').forEach(b => {
+            b.addEventListener('click', async () => {
+                const act = b.dataset.act;
+                closeMenu();
+                if (act === 'report') {
+                    showMessage('Жалоба на группу отправлена', 'success');
+                } else if (act === 'rename') {
+                    const name = prompt('Новое название группы', groupData ? groupData.name : '');
+                    if (!name || !name.trim()) return;
+                    const ok = await groupAction('/update_group', { name: name.trim().slice(0, 100) }, 'Название изменено');
+                    if (ok) { refresh(); if (typeof loadChats === 'function') loadChats(); }
+                } else if (act === 'leave') {
+                    if (!confirm('Покинуть группу?')) return;
+                    const chatId = window.__vgGroupProfileChatId;
+                    const ok = await groupAction('/leave_group', {}, 'Вы покинули группу');
+                    if (ok) afterGroupGone(chatId);
+                } else if (act === 'delete') {
+                    if (!confirm('Удалить группу у всех участников?')) return;
+                    const chatId = window.__vgGroupProfileChatId;
+                    const ok = await groupAction('/delete_group', {}, 'Группа удалена');
+                    if (ok) afterGroupGone(chatId);
+                }
+            });
+        });
+
+        setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+    }
+
+    // После выхода/удаления: закрыть профиль и чат, убрать строку из списка
+    function afterGroupGone(chatId) {
+        closeGroupProfile();
+        const row = document.querySelector(`.chat-item-swipe[data-chat-id="${chatId}"]`);
+        if (row) row.remove();
+        if (typeof currentChatsList !== 'undefined' && Array.isArray(currentChatsList)) {
+            const i = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+            if (i > -1) currentChatsList.splice(i, 1);
+        }
+        if (typeof closeProfileModal === 'function') closeProfileModal();
+        if (window.matchMedia('(min-width: 768px)').matches) {
+            if (typeof updateDesktopVisibility === 'function') updateDesktopVisibility(false, false);
+        } else {
+            const chatModal = document.getElementById('chatModalMobile');
+            if (chatModal) chatModal.classList.remove('active');
+            document.body.classList.remove('modal-open');
+        }
+        if (typeof currentChatId !== 'undefined' && String(currentChatId) === String(chatId)) {
+            try { currentChat = null; currentChatId = null; } catch (e) {}
+        }
+        if (typeof loadChats === 'function') loadChats();
+    }
+
+    // Добавление участников (владелец) — пока через ввод ID; полноценный
+    // выбор из списка друзей подключим на шаге "управление участниками".
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest && e.target.closest('.vg-gm-add');
+        if (!btn || !isGroupMode()) return;
+        const ids = prompt('ID участников через запятую');
+        if (!ids) return;
+        const list = ids.split(',').map(x => x.trim()).filter(Boolean);
+        if (!list.length) return;
+        const ok = await groupAction('/add_group_members', { member_ids: list }, 'Участники добавлены');
+        if (ok) refresh();
+    });
+
+    window.openGroupProfileModal = openGroupProfileModal;
+    window.vgCloseGroupProfile = closeGroupProfile;
+    window.vgRefreshGroupProfile = refresh;
+})();
+</script>
 
 </body>
 </html>
