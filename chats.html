@@ -20013,6 +20013,22 @@ vgResolveBadgeSrc();
         }).observe(modal, { attributes: true, attributeFilter: ['class'] });
     });
 
+    // Открытие профиля КОНТАКТА обязано вернуть карточку в обычный режим.
+    // Раньше блок "О себе" скрывался в setContactBlocksHidden(true) при показе
+    // профиля группы, а обратно включался только через MutationObserver на
+    // classList модалки. На десктопе профиль живёт в правой панели и классы
+    // 'visible'/'active' не меняются (используется updateDesktopVisibility),
+    // поэтому closeGroupProfile() не вызывался — и у всех следующих контактов
+    // "О себе" оставался display:none до перезагрузки страницы.
+    const _vgOrigOpenProfileModal = window.openProfileModal;
+    if (typeof _vgOrigOpenProfileModal === 'function') {
+        window.openProfileModal = function () {
+            if (window.__vgGroupProfileChatId != null) closeGroupProfile();
+            else setContactBlocksHidden(false);
+            return _vgOrigOpenProfileModal.apply(this, arguments);
+        };
+    }
+
     // ---------- Кнопки Чат / Звук / ещё в режиме группы ----------
     // Вешаем в фазе перехвата и глушим "контактные" обработчики через
     // stopImmediatePropagation, только когда открыт профиль группы.
