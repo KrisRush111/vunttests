@@ -19686,46 +19686,184 @@ vgResolveBadgeSrc();
      "Участники" (данные из /get_group_info), в шапке вместо статуса —
      "N участников".
      ========================================================================== -->
-<style>
-    .vg-group-members { display: none; }
-    .vg-group-members.active { display: block; }
+<style id="vg-group-members-styles">
+/* ---------------------------------------------------------------------------
+   УЧАСТНИКИ ГРУППЫ — вид «как в Telegram iOS»:
+   сегментированный переключатель (Участники / Медиа / Файлы / Голосовые)
+   и белая скруглённая карточка со строкой «Добавить участников» и списком
+   участников (аватар 46px, имя, статус, плашка роли справа).
+   --------------------------------------------------------------------------- */
 
-    .vg-gm-title {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: 10px; margin-bottom: 10px;
+/* ---------- Переключатель разделов группы ---------- */
+.vg-gm-tabbar { display: none; }
+.vg-gm-tabbar.active {
+    display: flex;
+    gap: 2px;
+    width: fit-content;
+    max-width: calc(100% - 24px);
+    margin: 10px 12px 0;
+    padding: 3px;
+    background: rgba(120, 120, 128, .12);
+    border-radius: 999px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.vg-gm-tabbar.active::-webkit-scrollbar { display: none; }
+
+.vg-gm-tab {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    padding: 9px 20px;
+    border-radius: 999px;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    color: var(--telegram-text);
+    opacity: .7;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+.vg-gm-tab.active {
+    background: var(--telegram-bg, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .14), 0 1px 1px rgba(0, 0, 0, .04);
+    opacity: 1;
+}
+.vg-gm-tab:active { transform: scale(.98); }
+
+@media (prefers-color-scheme: dark) {
+    .vg-gm-tabbar.active { background: rgba(120, 120, 128, .26); }
+    .vg-gm-tab.active {
+        background: #1C1C1E;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
     }
-    .vg-gm-add {
-        background: none; border: none; color: var(--telegram-blue, #0088cc);
-        font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 6px;
-    }
-    .vg-gm-item {
-        display: flex; align-items: center; gap: 12px;
-        padding: 8px 0; cursor: pointer; position: relative;
-    }
-    .vg-gm-item:active { opacity: .6; }
-    .vg-gm-avatar {
-        width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
-        display: flex; align-items: center; justify-content: center;
-        color: #fff; font-weight: 600; font-size: 15px;
-        background-size: cover; background-position: center;
-    }
-    .vg-gm-info { min-width: 0; flex: 1; }
-    .vg-gm-name {
-        display: flex; align-items: center; gap: 5px;
-        font-size: 15px; font-weight: 500;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .vg-gm-status { font-size: 13px; color: var(--telegram-hint, #8e8e93); }
-    .vg-gm-status.online { color: var(--telegram-blue, #0088cc); }
-    .vg-gm-role {
-        font-size: 12px; color: var(--telegram-hint, #8e8e93);
-        flex-shrink: 0; margin-left: 6px;
-    }
-    .vg-gm-kick {
-        background: none; border: none; color: #ff3b30;
-        font-size: 15px; padding: 6px 8px; cursor: pointer; flex-shrink: 0;
-    }
-    .vg-gm-empty { color: var(--telegram-hint, #8e8e93); font-size: 14px; padding: 8px 0; }
+}
+
+/* ---------- Карточка со списком участников ---------- */
+.vg-group-members { display: none; }
+.vg-group-members.active { display: block; }
+
+/* Заголовок «Участники» внутри карточки не нужен — он в переключателе */
+.vg-group-members .vg-gm-title { display: none; }
+
+.vg-gm-list { display: block; }
+
+/* Строка «Добавить участников» */
+.vg-gm-add-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 16px;
+    cursor: pointer;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+}
+.vg-gm-add-row:active { background: rgba(120, 120, 128, .10); }
+.vg-gm-add-icon {
+    width: 30px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--telegram-blue, #0A84FF);
+    font-size: 21px;
+    flex-shrink: 0;
+}
+.vg-gm-add-text {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--telegram-blue, #0A84FF);
+}
+.vg-gm-add-row::after,
+.vg-gm-item::after {
+    content: '';
+    position: absolute;
+    left: 60px; right: 0; bottom: 0;
+    height: 1px;
+    background: var(--telegram-divider, rgba(60, 60, 67, .12));
+}
+.vg-gm-item:last-child::after { display: none; }
+
+/* Строка участника */
+.vg-gm-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    min-height: 62px;
+    cursor: pointer;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+}
+.vg-gm-item:active { background: rgba(120, 120, 128, .10); }
+
+.vg-gm-avatar {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 600; font-size: 17px;
+    background-size: cover; background-position: center;
+}
+.vg-gm-info { min-width: 0; flex: 1; }
+.vg-gm-name {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 16px; font-weight: 500;
+    color: var(--telegram-text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.25;
+}
+.vg-gm-status {
+    margin-top: 2px;
+    font-size: 14px;
+    color: var(--telegram-hint, #8e8e93);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vg-gm-status.online { color: var(--telegram-blue, #0A84FF); }
+
+/* «вы» — рядом с именем, без плашки */
+.vg-gm-you {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--telegram-hint, #8e8e93);
+    flex-shrink: 0;
+}
+
+/* Плашки роли справа: владелец — сиреневая, админ — зелёная */
+.vg-gm-role {
+    flex-shrink: 0;
+    margin-left: 6px;
+    padding: 4px 9px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+.vg-gm-role--owner { background: #EFE6FD; color: #8B5CF6; }
+.vg-gm-role--admin { background: #E4F6E7; color: #2FA84F; }
+
+@media (prefers-color-scheme: dark) {
+    .vg-gm-role--owner { background: rgba(139, 92, 246, .20); color: #C4A9FB; }
+    .vg-gm-role--admin { background: rgba(47, 168, 79, .20); color: #7BD694; }
+    .vg-gm-add-row:active,
+    .vg-gm-item:active { background: rgba(120, 120, 128, .22); }
+}
+
+.vg-gm-kick {
+    background: none; border: none; color: #ff3b30;
+    font-size: 16px; padding: 6px 8px; cursor: pointer; flex-shrink: 0;
+}
+.vg-gm-empty {
+    color: var(--telegram-hint, #8e8e93);
+    font-size: 15px;
+    text-align: center;
+    padding: 26px 16px 30px;
+}
+
+/* Раздел «Голосовые» (пока пустой) */
+.vg-gm-voice { display: none; }
+.vg-gm-voice.active { display: block; }
 </style>
 <script>
 (function () {
@@ -19749,15 +19887,42 @@ vgResolveBadgeSrc();
         })[c]);
     }
 
-    // Контейнер "Участники" создаём один раз в каждой карточке профиля,
-    // сразу после блока "О себе" (.profile-details), и переключаем видимость.
+    // Разделы профиля группы: «Участники / Медиа / Файлы / Голосовые».
+    // Переключатель и карточка списка создаются один раз в каждой карточке
+    // профиля (desktop/mobile), сразу после блока «О себе».
+    const GROUP_TABS = [
+        { id: 'members', label: 'Участники' },
+        { id: 'media',   label: 'Медиа' },
+        { id: 'files',   label: 'Файлы' },
+        { id: 'voice',   label: 'Голосовые' }
+    ];
+    let groupTab = 'members';
+
+    function modalOf(suffix) {
+        return document.getElementById(suffix === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
+    }
+
     function ensureMembersBox(suffix) {
-        const modal = document.getElementById(suffix === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
+        const modal = modalOf(suffix);
         if (!modal) return null;
         let box = modal.querySelector('.vg-group-members');
         if (box) return box;
 
         const details = modal.querySelector('.profile-details');
+
+        // Сегментированный переключатель разделов
+        const tabbar = document.createElement('div');
+        tabbar.className = 'vg-gm-tabbar';
+        tabbar.id = 'vg-gm-tabbar-' + suffix;
+        tabbar.innerHTML = GROUP_TABS.map(t =>
+            `<button type="button" class="vg-gm-tab${t.id === 'members' ? ' active' : ''}" data-gtab="${t.id}">${t.label}</button>`
+        ).join('');
+        tabbar.addEventListener('click', (e) => {
+            const b = e.target.closest && e.target.closest('.vg-gm-tab');
+            if (b && b.dataset.gtab) setGroupTab(b.dataset.gtab);
+        });
+
+        // Карточка со списком участников
         box = document.createElement('div');
         box.className = 'profile-details vg-group-members';
         box.id = 'vg-group-members-' + suffix;
@@ -19767,20 +19932,76 @@ vgResolveBadgeSrc();
                 '<button type="button" class="vg-gm-add" style="display:none;">Добавить</button>' +
             '</div>' +
             '<div class="vg-gm-list"></div>';
-        if (details && details.parentNode) details.parentNode.insertBefore(box, details.nextSibling);
-        else modal.querySelector('.profile-modal-content').appendChild(box);
+
+        // Раздел «Голосовые» — пока заглушка
+        const voice = document.createElement('div');
+        voice.className = 'profile-details vg-gm-voice';
+        voice.id = 'vg-gm-voice-' + suffix;
+        voice.innerHTML = '<div class="vg-gm-empty">Голосовых сообщений пока нет</div>';
+
+        const parent = (details && details.parentNode) || modal.querySelector('.profile-modal-content');
+        if (!parent) return box;
+        const anchor = details ? details.nextSibling : null;
+        parent.insertBefore(tabbar, anchor);
+        parent.insertBefore(box, anchor);
+        parent.insertBefore(voice, anchor);
         return box;
+    }
+
+    // Переключение разделов группы. «Медиа»/«Файлы» — те же секции, что и у
+    // контакта, поэтому собственный переключатель Медиа|Файлы в режиме группы
+    // скрыт (его заменяет этот сегмент-контрол).
+    function setGroupTab(tab) {
+        groupTab = tab;
+        ['desktop', 'mobile'].forEach(sfx => {
+            const modal = modalOf(sfx);
+            if (!modal) return;
+            const tabbar = modal.querySelector('.vg-gm-tabbar');
+            if (tabbar) {
+                tabbar.querySelectorAll('.vg-gm-tab').forEach(b => {
+                    b.classList.toggle('active', b.dataset.gtab === tab);
+                });
+            }
+            const box = modal.querySelector('.vg-group-members');
+            const voice = modal.querySelector('.vg-gm-voice');
+            const photos = document.getElementById('modal-photos-section-' + sfx);
+            const files = document.getElementById('modal-files-section-' + sfx);
+            if (box) box.classList.toggle('active', tab === 'members');
+            if (voice) voice.classList.toggle('active', tab === 'voice');
+            if (photos) {
+                photos.style.display = tab === 'media' ? 'block' : 'none';
+                photos.classList.toggle('active', tab === 'media');
+            }
+            if (files) {
+                files.style.display = tab === 'files' ? 'block' : 'none';
+                files.classList.toggle('active', tab === 'files');
+            }
+        });
     }
 
     function setContactBlocksHidden(hidden) {
         ['desktop', 'mobile'].forEach(sfx => {
-            const modal = document.getElementById(sfx === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
+            const modal = modalOf(sfx);
             if (!modal) return;
-            const details = modal.querySelector('.profile-details:not(.vg-group-members)');
+            const details = modal.querySelector('.profile-details:not(.vg-group-members):not(.vg-gm-voice)');
             if (details) details.style.display = hidden ? 'none' : '';
-            const box = modal.querySelector('.vg-group-members');
-            if (box) box.classList.toggle('active', hidden);
+            const tabbar = modal.querySelector('.vg-gm-tabbar');
+            if (tabbar) tabbar.classList.toggle('active', hidden);
+            const oldTabs = document.getElementById('modal-media-tabs-' + sfx);
+            if (hidden) {
+                // В режиме группы старый переключатель Медиа|Файлы не нужен
+                if (oldTabs) { oldTabs.style.display = 'none'; oldTabs.classList.add('media-hidden'); }
+            } else {
+                const box = modal.querySelector('.vg-group-members');
+                const voice = modal.querySelector('.vg-gm-voice');
+                if (box) box.classList.remove('active');
+                if (voice) voice.classList.remove('active');
+                // Дальше видимостью медиа-секций управляет
+                // renderProfileMediaSections() профиля контакта
+                if (oldTabs) oldTabs.classList.remove('media-hidden');
+            }
         });
+        if (hidden) setGroupTab('members');
     }
 
     function renderHero(suffix, data) {
@@ -19818,19 +20039,45 @@ vgResolveBadgeSrc();
         }
     }
 
+    // Статус участника в стиле Telegram: «в сети» / «был(а) 6 минут назад»
+    function memberStatusText(p) {
+        if (p.is_online) return 'в сети';
+        if (p.last_online && typeof formatLastSeen === 'function') {
+            const t = formatLastSeen(p.last_online);
+            if (!t) return 'был(а) недавно';
+            return /^был/i.test(t) ? t : `был(а) ${t}`;
+        }
+        return 'был(а) недавно';
+    }
+
     function renderMembers(suffix, data) {
         const box = ensureMembersBox(suffix);
         if (!box) return;
         const list = box.querySelector('.vg-gm-list');
         const addBtn = box.querySelector('.vg-gm-add');
-        if (addBtn) addBtn.style.display = data.is_admin ? '' : 'none';
+        if (addBtn) addBtn.style.display = 'none'; // старая кнопка не используется
+
+        list.innerHTML = '';
+
+        // Строка «Добавить участников» — только владельцу группы
+        if (data.is_admin) {
+            const add = document.createElement('div');
+            add.className = 'vg-gm-add-row';
+            add.innerHTML =
+                '<span class="vg-gm-add-icon"><i class="fas fa-user-plus"></i></span>' +
+                '<span class="vg-gm-add-text">Добавить участников</span>';
+            add.addEventListener('click', () => addMembersFlow());
+            list.appendChild(add);
+        }
 
         if (!data.participants || !data.participants.length) {
-            list.innerHTML = '<div class="vg-gm-empty">Участников нет</div>';
+            const empty = document.createElement('div');
+            empty.className = 'vg-gm-empty';
+            empty.textContent = 'Участников нет';
+            list.appendChild(empty);
             return;
         }
 
-        list.innerHTML = '';
         data.participants.forEach(p => {
             const item = document.createElement('div');
             item.className = 'vg-gm-item';
@@ -19838,19 +20085,18 @@ vgResolveBadgeSrc();
 
             const bg = p.avatar_background || '#0088cc';
             const initials = (p.nickname || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
-            const statusText = p.is_online
-                ? 'В сети'
-                : (p.last_online && typeof formatLastSeen === 'function' ? formatLastSeen(p.last_online) : 'был(а) недавно');
+            const statusText = memberStatusText(p);
             const badge = (p.is_verified && window.vgBadgeHtml) ? window.vgBadgeHtml(true) : '';
-            const roleLabel = p.role === 'owner' ? 'владелец' : '';
+            const role = p.role === 'owner' ? { cls: 'owner', label: 'владелец' }
+                       : (p.role === 'admin' ? { cls: 'admin', label: 'админ' } : null);
 
             item.innerHTML =
                 `<div class="vg-gm-avatar" style="background: linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})">${esc(initials)}</div>` +
                 '<div class="vg-gm-info">' +
-                    `<div class="vg-gm-name">${esc(p.nickname)}${badge}${p.is_me ? ' <span class="vg-gm-role">вы</span>' : ''}</div>` +
+                    `<div class="vg-gm-name">${esc(p.nickname)}${badge}${p.is_me ? ' <span class="vg-gm-you">вы</span>' : ''}</div>` +
                     `<div class="vg-gm-status ${p.is_online ? 'online' : ''}">${esc(statusText)}</div>` +
                 '</div>' +
-                (roleLabel ? `<span class="vg-gm-role">${roleLabel}</span>` : '');
+                (role ? `<span class="vg-gm-role vg-gm-role--${role.cls}">${role.label}</span>` : '');
 
             const avatarEl = item.querySelector('.vg-gm-avatar');
             if (p.has_avatar_photo && typeof loadContactAvatar === 'function') {
@@ -19884,6 +20130,17 @@ vgResolveBadgeSrc();
 
             list.appendChild(item);
         });
+    }
+
+    // Добавление участников (владелец) — ввод ID через запятую
+    async function addMembersFlow() {
+        if (!isGroupMode()) return;
+        const ids = prompt('ID участников через запятую');
+        if (!ids) return;
+        const list = ids.split(',').map(x => x.trim()).filter(Boolean);
+        if (!list.length) return;
+        const ok = await groupAction('/add_group_members', { member_ids: list }, 'Участники добавлены');
+        if (ok) refresh();
     }
 
     async function groupAction(path, extra, okText) {
@@ -19978,6 +20235,10 @@ vgResolveBadgeSrc();
 
         // Медиа/Файлы берём из открытого чата — тот же механизм, что у контакта
         if (typeof renderProfileMediaSections === 'function') renderProfileMediaSections(null);
+        // renderProfileMediaSections() снова показывает свой переключатель
+        // «Медиа | Файлы» и активирует секцию медиа — в режиме группы разделами
+        // управляет наш сегмент-контрол, поэтому возвращаем состояние обратно.
+        setContactBlocksHidden(true);
 
         if (sfx === 'desktop') {
             updateDesktopVisibility(false, true);
@@ -20224,6 +20485,86 @@ vgResolveBadgeSrc();
     window.openGroupProfileModal = openGroupProfileModal;
     window.vgCloseGroupProfile = closeGroupProfile;
     window.vgRefreshGroupProfile = refresh;
+})();
+</script>
+
+<!-- ==========================================================================
+     ФИКС: профиль контакта, открытый ИЗ ГРУППЫ, выглядел «сломанным»
+     — карточка «О СЕБЕ» оставалась пустой, но растянутой на пол-экрана.
+     Причины было две:
+       1) строки .detail-item имеют базовый opacity: 0 и появляются только
+          через анимацию fadeIn. Когда карточка сначала прячется
+          (display:none в режиме группы), а потом показывается снова,
+          анимация могла не проигрываться — строки занимали место, но были
+          полностью прозрачными: визуально «пустая огромная рамка».
+       2) если у контакта не заполнено ни одно поле, все строки скрываются
+          через display:none, а сама карточка с заголовком «О СЕБЕ»
+          всё равно оставалась в разметке.
+     Ниже: строки всегда видимы, а пустая карточка «О себе» прячется целиком.
+     ========================================================================== -->
+<style id="vg-about-card-fix">
+    /* Строки «О себе» больше не зависят от того, проиграется ли анимация:
+       скрытые поля по-прежнему прячутся инлайновым display:none из JS. */
+    .profile-modal .profile-details .detail-item,
+    .profile-modal-content .profile-details .detail-item {
+        animation: none !important;
+        opacity: 1 !important;
+    }
+</style>
+<script>
+(function () {
+    function modalOf(sfx) {
+        return document.getElementById(sfx === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
+    }
+
+    // Прячем карточку «О себе», если в ней не осталось ни одной видимой строки
+    function syncAboutCard() {
+        // В режиме профиля группы карточкой управляет скрипт группы
+        if (window.__vgGroupProfileChatId != null) return;
+        ['desktop', 'mobile'].forEach(sfx => {
+            const modal = modalOf(sfx);
+            if (!modal) return;
+            const card = modal.querySelector('.profile-details:not(.vg-group-members):not(.vg-gm-voice)');
+            if (!card) return;
+            const rows = card.querySelectorAll('.detail-item');
+            let visible = 0;
+            rows.forEach(r => {
+                const inline = r.style.display;
+                if (inline === 'none') return;
+                if (!inline && getComputedStyle(r).display === 'none') return;
+                visible++;
+            });
+            card.style.display = visible ? '' : 'none';
+        });
+    }
+
+    window.vgSyncAboutCard = syncAboutCard;
+
+    // После каждой отрисовки профиля контакта пересчитываем карточку
+    const origUpdate = window.updateProfileModalUI;
+    if (typeof origUpdate === 'function') {
+        window.updateProfileModalUI = function () {
+            const res = origUpdate.apply(this, arguments);
+            syncAboutCard();
+            if (res && typeof res.then === 'function') res.then(syncAboutCard, syncAboutCard);
+            return res;
+        };
+    }
+
+    // Открытие профиля контакта: карточка могла остаться скрытой/пустой после
+    // профиля группы — пересчитываем и сразу, и после подгрузки данных.
+    const origOpen = window.openProfileModal;
+    if (typeof origOpen === 'function') {
+        window.openProfileModal = function () {
+            const res = origOpen.apply(this, arguments);
+            // до ответа сервера строки ещё в состоянии «Загрузка...» —
+            // карточку в этот момент не прячем, только убираем мусор
+            requestAnimationFrame(syncAboutCard);
+            setTimeout(syncAboutCard, 250);
+            setTimeout(syncAboutCard, 900);
+            return res;
+        };
+    }
 })();
 </script>
 
