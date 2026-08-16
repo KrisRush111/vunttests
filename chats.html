@@ -19660,6 +19660,12 @@ vgResolveBadgeSrc();
     .vg-group-members { display: none; }
     .vg-group-members.active { display: block; }
 
+    /* Режим группы: карточку "О себе" гасим правилом с !important на модале —
+       inline-стили сбрасывались кодом профиля контакта (карточка "О СЕБЕ"
+       успевала мигнуть пустой до ответа сервера). */
+    .profile-modal.vg-group-mode .profile-details:not(.vg-group-members) { display: none !important; }
+    .profile-modal.vg-group-mode .vg-group-members { display: block !important; }
+
     .vg-gm-title {
         display: flex; align-items: center; justify-content: space-between;
         gap: 10px; margin-bottom: 10px;
@@ -19750,16 +19756,13 @@ vgResolveBadgeSrc();
             // стилизует блок about-card-unified с !important, из-за чего обычный
             // style.display мог не сработать (О себе оставалась видимой, а
             // список участников — скрытым).
+            modal.classList.toggle('vg-group-mode', hidden);
             const details = modal.querySelector('.profile-details:not(.vg-group-members)');
-            if (details) {
-                if (hidden) details.style.setProperty('display', 'none', 'important');
-                else details.style.removeProperty('display');
-            }
+            if (details && !hidden) details.style.removeProperty('display');
             const box = modal.querySelector('.vg-group-members');
             if (box) {
                 box.classList.toggle('active', hidden);
-                if (hidden) box.style.setProperty('display', 'block', 'important');
-                else box.style.setProperty('display', 'none', 'important');
+                box.style.removeProperty('display');
             }
         });
     }
@@ -19926,8 +19929,14 @@ vgResolveBadgeSrc();
             ['desktop', 'mobile'].forEach(sfx => {
                 const box = ensureMembersBox(sfx);
                 const list = box && box.querySelector('.vg-gm-list');
-                if (list && !list.children.length) {
+                if (!list) return;
+                if (!list.children.length) {
                     list.innerHTML = '<div class="vg-gm-empty">Не удалось загрузить участников</div>';
+                } else if (!list.querySelector('.vg-gm-error')) {
+                    const w = document.createElement('div');
+                    w.className = 'vg-gm-empty vg-gm-error';
+                    w.textContent = 'Список показан из кэша: ' + (err && err.message ? err.message : 'ошибка сервера');
+                    list.appendChild(w);
                 }
             });
         }
@@ -19963,9 +19972,19 @@ vgResolveBadgeSrc();
         // списка чатов (chat.participants), чтобы раздел не был пустым.
         const cachedParts = (cached && Array.isArray(cached.participants)) ? cached.participants : [];
         if (cachedParts.length) {
+            const meRow = {
+                platform_user_id: userData.platform_user_id,
+                nickname: userData.nickname || 'Вы',
+                avatar_background: userData.avatar_background || '#0088cc',
+                has_avatar_photo: !!userData.avatar_url,
+                is_verified: !!userData.is_verified,
+                role: String(userData.platform_user_id) === String(cached.group_creator_id) ? 'owner' : 'member',
+                is_online: true, last_online: null, is_me: true
+            };
+            const hasMe = cachedParts.some(p => String(p.platform_user_id) === String(userData.platform_user_id));
             const preview = {
-                is_admin: false,
-                participants: cachedParts.map(p => ({
+                is_admin: String(cached.group_creator_id) === String(userData.platform_user_id),
+                participants: (hasMe ? [] : [meRow]).concat(cachedParts.map(p => ({
                     platform_user_id: p.platform_user_id,
                     nickname: p.nickname || 'Unknown User',
                     avatar_background: p.avatar_background || '#0088cc',
@@ -19975,7 +19994,7 @@ vgResolveBadgeSrc();
                     is_online: false,
                     last_online: null,
                     is_me: String(p.platform_user_id) === String(userData.platform_user_id)
-                }))
+                })))
             };
             ['desktop', 'mobile'].forEach(sfx => renderMembers(sfx, preview));
         }
