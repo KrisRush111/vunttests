@@ -19663,8 +19663,30 @@ vgResolveBadgeSrc();
     /* Режим группы: карточку "О себе" гасим правилом с !important на модале —
        inline-стили сбрасывались кодом профиля контакта (карточка "О СЕБЕ"
        успевала мигнуть пустой до ответа сервера). */
-    .profile-modal.vg-group-mode .profile-details:not(.vg-group-members) { display: none !important; }
-    .profile-modal.vg-group-mode .vg-group-members { display: block !important; }
+    /* Режим группы: карточки "О себе" в группах быть не должно вообще.
+       Дублируем селекторы (модал, body, сам блок), чтобы правило нельзя было
+       перебить ни поздним CSS, ни inline-стилями кода профиля контакта. */
+    .profile-modal.vg-group-mode .profile-details:not(.vg-group-members),
+    body.vg-group-mode .profile-modal .profile-details:not(.vg-group-members),
+    body.vg-group-mode .profile-modal-content .profile-details:not(.vg-group-members),
+    .profile-details.vg-hidden-in-group {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        overflow: hidden !important;
+    }
+
+    .profile-modal.vg-group-mode .vg-group-members,
+    body.vg-group-mode .vg-group-members {
+        display: block !important;
+        visibility: visible !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
 
     .vg-gm-title {
         display: flex; align-items: center; justify-content: space-between;
@@ -19749,6 +19771,7 @@ vgResolveBadgeSrc();
     }
 
     function setContactBlocksHidden(hidden) {
+        document.body.classList.toggle('vg-group-mode', hidden);
         ['desktop', 'mobile'].forEach(sfx => {
             const modal = document.getElementById(sfx === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
             if (!modal) return;
@@ -19757,14 +19780,46 @@ vgResolveBadgeSrc();
             // style.display мог не сработать (О себе оставалась видимой, а
             // список участников — скрытым).
             modal.classList.toggle('vg-group-mode', hidden);
-            const details = modal.querySelector('.profile-details:not(.vg-group-members)');
-            if (details && !hidden) details.style.removeProperty('display');
+            // "О себе" в группе прячем всеми способами разом: класс + inline
+            // important + hidden. Ищем ВСЕ такие блоки (их может быть несколько:
+            // О себе, медиа-обёртки и т.п.), а не только первый.
+            modal.querySelectorAll('.profile-details:not(.vg-group-members)').forEach(d => {
+                d.classList.toggle('vg-hidden-in-group', hidden);
+                if (hidden) {
+                    d.style.setProperty('display', 'none', 'important');
+                    d.setAttribute('hidden', 'hidden');
+                } else {
+                    d.style.removeProperty('display');
+                    d.removeAttribute('hidden');
+                }
+            });
             const box = modal.querySelector('.vg-group-members');
             if (box) {
                 box.classList.toggle('active', hidden);
-                box.style.removeProperty('display');
+                box.removeAttribute('hidden');
+                if (hidden) box.style.setProperty('display', 'block', 'important');
+                else box.style.setProperty('display', 'none', 'important');
             }
         });
+    }
+
+    // Профиль контакта при открытии/анимации может перерисовать и "расхлопнуть"
+    // свои блоки уже ПОСЛЕ нашего вызова — поэтому пару секунд подряд
+    // переприменяем режим группы, иначе "О себе" возвращалась, а список
+    // участников оставался скрытым.
+    let enforceTimer = null;
+    function enforceGroupMode() {
+        if (enforceTimer) clearInterval(enforceTimer);
+        let ticks = 0;
+        const tick = () => {
+            if (window.__vgGroupProfileChatId == null) { clearInterval(enforceTimer); enforceTimer = null; return; }
+            ensureMembersBox('desktop');
+            ensureMembersBox('mobile');
+            setContactBlocksHidden(true);
+            if (++ticks > 20) { clearInterval(enforceTimer); enforceTimer = null; }
+        };
+        tick();
+        enforceTimer = setInterval(tick, 150);
     }
 
     function renderHero(suffix, data) {
@@ -19924,8 +19979,10 @@ vgResolveBadgeSrc();
                 renderMembers(sfx, groupData);
             });
             setContactBlocksHidden(true);
+            enforceGroupMode();
         } catch (err) {
             console.error('[GROUP PROFILE]', err);
+            setContactBlocksHidden(true);
             ['desktop', 'mobile'].forEach(sfx => {
                 const box = ensureMembersBox(sfx);
                 const list = box && box.querySelector('.vg-gm-list');
@@ -19952,6 +20009,12 @@ vgResolveBadgeSrc();
         ensureMembersBox('desktop');
         ensureMembersBox('mobile');
         setContactBlocksHidden(true);
+        enforceGroupMode();
+        ['desktop', 'mobile'].forEach(x => {
+            const b = ensureMembersBox(x);
+            const l = b && b.querySelector('.vg-gm-list');
+            if (l && !l.children.length) l.innerHTML = '<div class="vg-gm-empty">Загрузка участников…</div>';
+        });
         if (window.ProfileHero) window.ProfileHero.resetAll();
 
         // Мгновенно показываем то, что уже известно из списка чатов,
@@ -19971,6 +20034,7 @@ vgResolveBadgeSrc();
         // Пока идёт /get_group_info — сразу показываем участников из кэша
         // списка чатов (chat.participants), чтобы раздел не был пустым.
         const cachedParts = (cached && Array.isArray(cached.participants)) ? cached.participants : [];
+        try {
         if (cachedParts.length) {
             const meRow = {
                 platform_user_id: userData.platform_user_id,
@@ -19998,6 +20062,7 @@ vgResolveBadgeSrc();
             };
             ['desktop', 'mobile'].forEach(sfx => renderMembers(sfx, preview));
         }
+        } catch (e) { console.error('[GROUP PROFILE preview]', e); }
         setContactBlocksHidden(true);
 
         if (sfx === 'desktop') {
@@ -20020,7 +20085,9 @@ vgResolveBadgeSrc();
     function closeGroupProfile() {
         window.__vgGroupProfileChatId = null;
         groupData = null;
+        if (enforceTimer) { clearInterval(enforceTimer); enforceTimer = null; }
         setContactBlocksHidden(false);
+        document.body.classList.remove('vg-group-mode');
     }
 
     // Профиль закрыли штатной кнопкой "назад"/оверлеем — вернуть карточку
