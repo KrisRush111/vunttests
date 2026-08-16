@@ -13963,9 +13963,10 @@ async function openChat(chatId) {
 
     let statusFetchParticipantId = null;
     if (cachedChat) {
+        const isGroupChat = !!cachedChat.is_group;
         const otherParticipant = cachedChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-        const cachedIsBot = !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
-        const cachedIsVerified = cachedIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant));
+        const cachedIsBot = !isGroupChat && !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
+        const cachedIsVerified = !isGroupChat && (cachedIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant)));
         if (window.vgSetTitle) {
             window.vgSetTitle(chatTitle, cachedChat.name || 'Новый чат', cachedIsVerified);
         } else {
@@ -13974,35 +13975,59 @@ async function openChat(chatId) {
         // Значок "без звука" рядом с именем в хедере открытого чата
         if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
         if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(cachedIsBot);
-        const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
         const bgColor = cachedChat.avatar_background || '#0088cc';
-        if (otherParticipant) {
-            loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor,
-                           cachedChat.has_avatar_photo !== false);
-            statusFetchParticipantId = cachedIsBot ? null : otherParticipant.platform_user_id;
 
-            // Мгновенно показываем статус, только если он реально свежий
-            // (в пределах CACHE.STATUS_TTL) — иначе не тащим устаревшее
-            // "в сети" из скрытого кэша списка чатов, а ждём проверку ниже.
-            const syncStatus = cachedIsBot ? null : getCachedActivityStatusSync([otherParticipant.platform_user_id])[otherParticipant.platform_user_id];
-            if (cachedIsBot) {
-                chatStatus.textContent = 'бот';
-                chatStatus.classList.remove('online');
-            } else if (syncStatus) {
-                if (syncStatus.is_online) {
-                    chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
-                    chatStatus.classList.add('online');
+        if (isGroupChat) {
+            // Группа: вместо "В сети"/"был(а) недавно" — число участников;
+            // аватар — фото группы (group_photo_url), а не аватар собеседника.
+            const initials = cachedChat.name
+                ? cachedChat.name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
+                : '?';
+            chatAvatar.style.backgroundImage = 'none';
+            if (cachedChat.group_photo_url) {
+                chatAvatar.textContent = '';
+                chatAvatar.style.backgroundImage = `url("${cachedChat.group_photo_url}")`;
+                chatAvatar.style.backgroundSize = 'cover';
+                chatAvatar.style.backgroundPosition = 'center';
+            } else {
+                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                chatAvatar.textContent = initials;
+            }
+            const membersCount = cachedChat.members_count || ((cachedChat.participants ? cachedChat.participants.length : 0) + 1);
+            chatStatus.textContent = `${membersCount} ${window.vgPluralMembers ? window.vgPluralMembers(membersCount) : 'участников'}`;
+            chatStatus.classList.remove('online');
+            // statusFetchParticipantId остаётся null — у группы нет "собеседника",
+            // сетевой статус запрашивать не нужно.
+        } else {
+            const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
+            if (otherParticipant) {
+                loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor,
+                               cachedChat.has_avatar_photo !== false);
+                statusFetchParticipantId = cachedIsBot ? null : otherParticipant.platform_user_id;
+
+                // Мгновенно показываем статус, только если он реально свежий
+                // (в пределах CACHE.STATUS_TTL) — иначе не тащим устаревшее
+                // "в сети" из скрытого кэша списка чатов, а ждём проверку ниже.
+                const syncStatus = cachedIsBot ? null : getCachedActivityStatusSync([otherParticipant.platform_user_id])[otherParticipant.platform_user_id];
+                if (cachedIsBot) {
+                    chatStatus.textContent = 'бот';
+                    chatStatus.classList.remove('online');
+                } else if (syncStatus) {
+                    if (syncStatus.is_online) {
+                        chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+                        chatStatus.classList.add('online');
+                    } else {
+                        chatStatus.textContent = formatLastSeen(syncStatus.last_online);
+                        chatStatus.classList.remove('online');
+                    }
                 } else {
-                    chatStatus.textContent = formatLastSeen(syncStatus.last_online);
+                    chatStatus.textContent = 'был(а) недавно';
                     chatStatus.classList.remove('online');
                 }
             } else {
-                chatStatus.textContent = 'был(а) недавно';
-                chatStatus.classList.remove('online');
+                chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                chatAvatar.textContent = initials;
             }
-        } else {
-            chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
-            chatAvatar.textContent = initials;
         }
     }
 
@@ -14084,9 +14109,10 @@ async function openChat(chatId) {
             // оставался пустым. Подстраховываемся и заполняем его сейчас уже
             // точными данными, полученными с сервера.
             if (!cachedChat) {
+                const freshIsGroupChat = !!currentChat.is_group;
                 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                const freshIsBot = !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
-                const freshIsVerified = freshIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant));
+                const freshIsBot = !freshIsGroupChat && !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
+                const freshIsVerified = !freshIsGroupChat && (freshIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant)));
                 if (window.vgSetTitle) {
                     window.vgSetTitle(chatTitle, currentChat.name || 'Чат', freshIsVerified);
                 } else {
@@ -14094,8 +14120,31 @@ async function openChat(chatId) {
                 }
                 if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
                 if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(freshIsBot);
-                const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
                 const bgColor = currentChat.avatar_background || '#0088cc';
+                if (freshIsGroupChat) {
+                    // Группа: число участников вместо статуса, фото группы вместо аватара собеседника.
+                    const groupInitials = currentChat.name
+                        ? currentChat.name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
+                        : '?';
+                    if (currentChat.group_photo_url) {
+                        chatAvatar.textContent = '';
+                        chatAvatar.style.backgroundImage = `url("${currentChat.group_photo_url}")`;
+                        chatAvatar.style.backgroundSize = 'cover';
+                        chatAvatar.style.backgroundPosition = 'center';
+                    } else {
+                        chatAvatar.style.backgroundImage = 'none';
+                        chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
+                        chatAvatar.textContent = groupInitials;
+                    }
+                    const { chatStatus: freshChatStatus } = getActiveElements();
+                    if (freshChatStatus) {
+                        const membersCount = currentChat.members_count || ((currentChat.participants ? currentChat.participants.length : 0) + 1);
+                        freshChatStatus.textContent = `${membersCount} ${window.vgPluralMembers ? window.vgPluralMembers(membersCount) : 'участников'}`;
+                        freshChatStatus.classList.remove('online');
+                    }
+                    statusFetchParticipantId = null;
+                } else {
+                const initials = currentChat.name ? currentChat.name.split(' ').map(n => n[0]).join('') : '?';
                 if (otherParticipant) {
                     loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor,
                                    currentChat.has_avatar_photo !== false);
@@ -14131,6 +14180,7 @@ async function openChat(chatId) {
                 } else {
                     chatAvatar.style.background = `linear-gradient(135deg, ${bgColor}, ${adjustColor(bgColor, 20)})`;
                     chatAvatar.textContent = initials;
+                }
                 }
             }
         }
@@ -15792,34 +15842,14 @@ function stopProfileDataPolling() {
                 window.addEventListener('resize', setupMobileChatHeight);
             }
             // Добавьте после строк с profileBackButtonMobile обработчиками
-            // ВАЖНО: если открыт профиль ГРУППЫ, эти "контактные" обработчики
-            // должны молчать. Раньше они висели на том же элементе и были
-            // зарегистрированы РАНЬШЕ группового обработчика, поэтому при тапе
-            // прямо по кнопке срабатывали первыми (порядок регистрации важнее
-            // фазы capture на самом target) и открывали карточку контакта с
-            // блоком "О себе" вместо чата группы.
-            function vgGroupProfileOpen() { return window.__vgGroupProfileChatId != null; }
-
             if (chatButtonDesktop) {
                 chatButtonDesktop.addEventListener('click', () => {
-                    if (vgGroupProfileOpen()) {
-                        const gid = window.__vgGroupProfileChatId;
-                        if (window.vgCloseGroupProfile) window.vgCloseGroupProfile();
-                        openChat(gid);
-                        return;
-                    }
                     openChatWithContact(currentViewedUser);
                 });
             }
 
             if (chatButtonMobile) {
                 chatButtonMobile.addEventListener('click', () => {
-                    if (vgGroupProfileOpen()) {
-                        const gid = window.__vgGroupProfileChatId;
-                        if (window.vgCloseGroupProfile) window.vgCloseGroupProfile();
-                        openChat(gid);
-                        return;
-                    }
                     openChatWithContact(currentViewedUser);
                 });
             }
@@ -19660,34 +19690,6 @@ vgResolveBadgeSrc();
     .vg-group-members { display: none; }
     .vg-group-members.active { display: block; }
 
-    /* Режим группы: карточку "О себе" гасим правилом с !important на модале —
-       inline-стили сбрасывались кодом профиля контакта (карточка "О СЕБЕ"
-       успевала мигнуть пустой до ответа сервера). */
-    /* Режим группы: карточки "О себе" в группах быть не должно вообще.
-       Дублируем селекторы (модал, body, сам блок), чтобы правило нельзя было
-       перебить ни поздним CSS, ни inline-стилями кода профиля контакта. */
-    .profile-modal.vg-group-mode .profile-details:not(.vg-group-members),
-    body.vg-group-mode .profile-modal .profile-details:not(.vg-group-members),
-    body.vg-group-mode .profile-modal-content .profile-details:not(.vg-group-members),
-    .profile-details.vg-hidden-in-group {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: 0 !important;
-        box-shadow: none !important;
-        overflow: hidden !important;
-    }
-
-    .profile-modal.vg-group-mode .vg-group-members,
-    body.vg-group-mode .vg-group-members {
-        display: block !important;
-        visibility: visible !important;
-        height: auto !important;
-        overflow: visible !important;
-    }
-
     .vg-gm-title {
         display: flex; align-items: center; justify-content: space-between;
         gap: 10px; margin-bottom: 10px;
@@ -19771,55 +19773,14 @@ vgResolveBadgeSrc();
     }
 
     function setContactBlocksHidden(hidden) {
-        document.body.classList.toggle('vg-group-mode', hidden);
         ['desktop', 'mobile'].forEach(sfx => {
             const modal = document.getElementById(sfx === 'desktop' ? 'profileModalDesktop' : 'profileModalMobile');
             if (!modal) return;
-            // display выставляем с !important: карточку "О себе" на мобильных
-            // стилизует блок about-card-unified с !important, из-за чего обычный
-            // style.display мог не сработать (О себе оставалась видимой, а
-            // список участников — скрытым).
-            modal.classList.toggle('vg-group-mode', hidden);
-            // "О себе" в группе прячем всеми способами разом: класс + inline
-            // important + hidden. Ищем ВСЕ такие блоки (их может быть несколько:
-            // О себе, медиа-обёртки и т.п.), а не только первый.
-            modal.querySelectorAll('.profile-details:not(.vg-group-members)').forEach(d => {
-                d.classList.toggle('vg-hidden-in-group', hidden);
-                if (hidden) {
-                    d.style.setProperty('display', 'none', 'important');
-                    d.setAttribute('hidden', 'hidden');
-                } else {
-                    d.style.removeProperty('display');
-                    d.removeAttribute('hidden');
-                }
-            });
+            const details = modal.querySelector('.profile-details:not(.vg-group-members)');
+            if (details) details.style.display = hidden ? 'none' : '';
             const box = modal.querySelector('.vg-group-members');
-            if (box) {
-                box.classList.toggle('active', hidden);
-                box.removeAttribute('hidden');
-                if (hidden) box.style.setProperty('display', 'block', 'important');
-                else box.style.setProperty('display', 'none', 'important');
-            }
+            if (box) box.classList.toggle('active', hidden);
         });
-    }
-
-    // Профиль контакта при открытии/анимации может перерисовать и "расхлопнуть"
-    // свои блоки уже ПОСЛЕ нашего вызова — поэтому пару секунд подряд
-    // переприменяем режим группы, иначе "О себе" возвращалась, а список
-    // участников оставался скрытым.
-    let enforceTimer = null;
-    function enforceGroupMode() {
-        if (enforceTimer) clearInterval(enforceTimer);
-        let ticks = 0;
-        const tick = () => {
-            if (window.__vgGroupProfileChatId == null) { clearInterval(enforceTimer); enforceTimer = null; return; }
-            ensureMembersBox('desktop');
-            ensureMembersBox('mobile');
-            setContactBlocksHidden(true);
-            if (++ticks > 20) { clearInterval(enforceTimer); enforceTimer = null; }
-        };
-        tick();
-        enforceTimer = setInterval(tick, 150);
     }
 
     function renderHero(suffix, data) {
@@ -19955,10 +19916,7 @@ vgResolveBadgeSrc();
         const res = await fetch(`${SERVER_URL}/get_group_info`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: isNaN(Number(chatId)) ? chatId : Number(chatId),
-                platform_user_id: userData.platform_user_id
-            })
+            body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id })
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') throw new Error(data.error || 'group info failed');
@@ -19970,32 +19928,28 @@ vgResolveBadgeSrc();
         if (chatId == null) return;
         try {
             groupData = await fetchGroupInfo(chatId);
-            if (String(window.__vgGroupProfileChatId) !== String(chatId)) return; // успели закрыть/сменить
-            // Рисуем в ОБА макета (desktop+mobile): раньше рисовали только в
-            // текущий, и если карточка профиля открывалась в другом макете
-            // (или ширина менялась), список участников оставался пустым.
-            ['desktop', 'mobile'].forEach(sfx => {
-                renderHero(sfx, groupData);
-                renderMembers(sfx, groupData);
-            });
-            setContactBlocksHidden(true);
-            enforceGroupMode();
+            if (window.__vgGroupProfileChatId !== chatId) return; // успели закрыть/сменить
+            const sfx = suffixNow();
+            renderHero(sfx, groupData);
+            renderMembers(sfx, groupData);
         } catch (err) {
             console.error('[GROUP PROFILE]', err);
-            setContactBlocksHidden(true);
-            ['desktop', 'mobile'].forEach(sfx => {
+            // Раньше при ошибке (сеть/сервер) список участников молча оставался
+            // пустым — снаружи это выглядело так, будто участники "просто не
+            // отображаются", без единой подсказки, что запрос вообще упал.
+            // Показываем причину прямо в карточке и даём кнопку "Повторить".
+            if (window.__vgGroupProfileChatId === chatId) {
+                const sfx = suffixNow();
                 const box = ensureMembersBox(sfx);
                 const list = box && box.querySelector('.vg-gm-list');
-                if (!list) return;
-                if (!list.children.length) {
-                    list.innerHTML = '<div class="vg-gm-empty">Не удалось загрузить участников</div>';
-                } else if (!list.querySelector('.vg-gm-error')) {
-                    const w = document.createElement('div');
-                    w.className = 'vg-gm-empty vg-gm-error';
-                    w.textContent = 'Список показан из кэша: ' + (err && err.message ? err.message : 'ошибка сервера');
-                    list.appendChild(w);
+                if (list) {
+                    list.innerHTML = '<div class="vg-gm-empty">Не удалось загрузить участников' +
+                        (err && err.message ? ': ' + esc(err.message) : '') +
+                        '. <a href="#" class="vg-gm-retry">Повторить</a></div>';
+                    const retryLink = list.querySelector('.vg-gm-retry');
+                    if (retryLink) retryLink.addEventListener('click', (e) => { e.preventDefault(); refresh(); });
                 }
-            });
+            }
         }
     }
 
@@ -20009,12 +19963,6 @@ vgResolveBadgeSrc();
         ensureMembersBox('desktop');
         ensureMembersBox('mobile');
         setContactBlocksHidden(true);
-        enforceGroupMode();
-        ['desktop', 'mobile'].forEach(x => {
-            const b = ensureMembersBox(x);
-            const l = b && b.querySelector('.vg-gm-list');
-            if (l && !l.children.length) l.innerHTML = '<div class="vg-gm-empty">Загрузка участников…</div>';
-        });
         if (window.ProfileHero) window.ProfileHero.resetAll();
 
         // Мгновенно показываем то, что уже известно из списка чатов,
@@ -20030,40 +19978,6 @@ vgResolveBadgeSrc();
 
         // Медиа/Файлы берём из открытого чата — тот же механизм, что у контакта
         if (typeof renderProfileMediaSections === 'function') renderProfileMediaSections(null);
-
-        // Пока идёт /get_group_info — сразу показываем участников из кэша
-        // списка чатов (chat.participants), чтобы раздел не был пустым.
-        const cachedParts = (cached && Array.isArray(cached.participants)) ? cached.participants : [];
-        try {
-        if (cachedParts.length) {
-            const meRow = {
-                platform_user_id: userData.platform_user_id,
-                nickname: userData.nickname || 'Вы',
-                avatar_background: userData.avatar_background || '#0088cc',
-                has_avatar_photo: !!userData.avatar_url,
-                is_verified: !!userData.is_verified,
-                role: String(userData.platform_user_id) === String(cached.group_creator_id) ? 'owner' : 'member',
-                is_online: true, last_online: null, is_me: true
-            };
-            const hasMe = cachedParts.some(p => String(p.platform_user_id) === String(userData.platform_user_id));
-            const preview = {
-                is_admin: String(cached.group_creator_id) === String(userData.platform_user_id),
-                participants: (hasMe ? [] : [meRow]).concat(cachedParts.map(p => ({
-                    platform_user_id: p.platform_user_id,
-                    nickname: p.nickname || 'Unknown User',
-                    avatar_background: p.avatar_background || '#0088cc',
-                    has_avatar_photo: !!p.avatar_url,
-                    is_verified: !!p.is_verified,
-                    role: String(p.platform_user_id) === String(cached.group_creator_id) ? 'owner' : 'member',
-                    is_online: false,
-                    last_online: null,
-                    is_me: String(p.platform_user_id) === String(userData.platform_user_id)
-                })))
-            };
-            ['desktop', 'mobile'].forEach(sfx => renderMembers(sfx, preview));
-        }
-        } catch (e) { console.error('[GROUP PROFILE preview]', e); }
-        setContactBlocksHidden(true);
 
         if (sfx === 'desktop') {
             updateDesktopVisibility(false, true);
@@ -20085,9 +19999,7 @@ vgResolveBadgeSrc();
     function closeGroupProfile() {
         window.__vgGroupProfileChatId = null;
         groupData = null;
-        if (enforceTimer) { clearInterval(enforceTimer); enforceTimer = null; }
         setContactBlocksHidden(false);
-        document.body.classList.remove('vg-group-mode');
     }
 
     // Профиль закрыли штатной кнопкой "назад"/оверлеем — вернуть карточку
@@ -20135,6 +20047,22 @@ vgResolveBadgeSrc();
             e.preventDefault();
             const chatId = window.__vgGroupProfileChatId;
             closeGroupProfile();
+            // closeGroupProfile() снова показывает "контактные" блоки профиля
+            // (в т.ч. "О себе") — они относятся к карточке профиля, которая
+            // ещё видна на экране. На десктопе openChat() сразу прячет
+            // profileModalDesktop, а вот на мобильном ничего не закрывает
+            // profileModalMobile — из-за этого на миг (или до следующего
+            // тапа) поверх/под открывающимся чатом мелькала рамка "О себе"
+            // с данными группы. Прячем модалку профиля явно, ещё до openChat().
+            if (suffixNow() === 'desktop') {
+                const pm = document.getElementById('profileModalDesktop');
+                if (pm) pm.classList.remove('visible');
+            } else {
+                const pm = document.getElementById('profileModalMobile');
+                if (pm) pm.classList.remove('active');
+                const overlay = document.getElementById('modalOverlay');
+                if (overlay) overlay.classList.remove('active');
+            }
             if (typeof openChat === 'function') openChat(chatId);
         }, true);
     });
