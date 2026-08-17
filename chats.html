@@ -8978,9 +8978,13 @@ function getActiveElements() {
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
-            let imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+            // f.size > 0 обязателен: Safari на iPhone иногда отдаёт HEIC
+            // нулевого размера — такой файл уходит в FormData пустым, и сервер
+            // отвечает "chat_id, sender_id and image are required".
+            let imageFiles = Array.from(files).filter(f => f.type.startsWith('image/') && f.size > 0);
             if (imageFiles.length === 0) {
                 event.target.value = '';
+                showMessage('Не удалось прочитать файл, выберите другое фото', 'error');
                 return;
             }
             if (imageFiles.length > 3) {
@@ -16865,13 +16869,50 @@ function stopProfileDataPolling() {
                 });
             }
 
+            // Файл фотографии новой группы. Раньше выбранный файл нигде не
+            // сохранялся — он только рисовался в кружке, а в /create_group
+            // уходил window.__vgPendingGroupPhotoUrl, которому никто никогда
+            // не присваивал значение. Из-за этого группа ВСЕГДА создавалась
+            // без фото. Теперь держим сам File и грузим его перед созданием.
+            let pendingGroupPhotoFile = null;
+            let pendingGroupPhotoPreviewUrl = null;
+
+            function resetPendingGroupPhoto() {
+                pendingGroupPhotoFile = null;
+                if (pendingGroupPhotoPreviewUrl) {
+                    URL.revokeObjectURL(pendingGroupPhotoPreviewUrl);
+                    pendingGroupPhotoPreviewUrl = null;
+                }
+                if (groupPhotoButton) {
+                    groupPhotoButton.style.backgroundImage = '';
+                    groupPhotoButton.classList.remove('has-photo');
+                }
+            }
+
             if (groupPhotoButton && groupPhotoInput) {
                 groupPhotoButton.addEventListener('click', () => groupPhotoInput.click());
                 groupPhotoInput.addEventListener('change', () => {
                     const file = groupPhotoInput.files && groupPhotoInput.files[0];
+                    // Сбрасываем value сразу: иначе повторный выбор того же
+                    // файла не вызовет change.
+                    groupPhotoInput.value = '';
                     if (!file) return;
-                    const url = URL.createObjectURL(file);
-                    groupPhotoButton.style.backgroundImage = `url("${url}")`;
+                    if (!/^image\//.test(file.type)) {
+                        showMessage('Нужен файл изображения', 'error');
+                        return;
+                    }
+                    if (!file.size) {
+                        showMessage('Файл пустой, выберите другое фото', 'error');
+                        return;
+                    }
+                    if (file.size > 10 * 1024 * 1024) {
+                        showMessage('Файл больше 10 МБ', 'error');
+                        return;
+                    }
+                    if (pendingGroupPhotoPreviewUrl) URL.revokeObjectURL(pendingGroupPhotoPreviewUrl);
+                    pendingGroupPhotoFile = file;
+                    pendingGroupPhotoPreviewUrl = URL.createObjectURL(file);
+                    groupPhotoButton.style.backgroundImage = `url("${pendingGroupPhotoPreviewUrl}")`;
                     groupPhotoButton.classList.add('has-photo');
                 });
             }
@@ -16887,6 +16928,28 @@ function stopProfileDataPolling() {
 
                     groupCreateSubmitBtn.disabled = true;
                     try {
+                        // Фото сначала уходит в Cloudinary отдельным запросом,
+                        // в /create_group передаём уже готовый URL. chat_id не
+                        // передаём — группы ещё не существует.
+                        let photoUrl = null;
+                        if (pendingGroupPhotoFile) {
+                            const fd = new FormData();
+                            fd.append('platform_user_id', userData.platform_user_id);
+                            fd.append('photo', pendingGroupPhotoFile);
+                            const up = await fetch(`${SERVER_URL}/upload_group_photo`, {
+                                method: 'POST',
+                                body: fd,
+                                credentials: 'include'
+                            });
+                            const upData = await up.json().catch(() => ({}));
+                            if (!up.ok || upData.status !== 'success') {
+                                showMessage(upData.error || 'Не удалось загрузить фото группы');
+                                groupCreateSubmitBtn.disabled = false;
+                                return;
+                            }
+                            photoUrl = upData.photo_url;
+                        }
+
                         const res = await fetch(`${SERVER_URL}/create_group`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -16894,8 +16957,9 @@ function stopProfileDataPolling() {
                                 platform_user_id: userData.platform_user_id,
                                 name: name,
                                 member_ids: memberIds,
-                                photo_url: window.__vgPendingGroupPhotoUrl || null
-                            })
+                                photo_url: photoUrl
+                            }),
+                            credentials: 'include'
                         });
                         const data = await res.json();
                         if (!res.ok || data.status !== 'success') {
@@ -16903,7 +16967,7 @@ function stopProfileDataPolling() {
                             groupCreateSubmitBtn.disabled = false;
                             return;
                         }
-                        window.__vgPendingGroupPhotoUrl = null;
+                        resetPendingGroupPhoto();
                         groupSelected.clear();
                         closeGroupCreateModal();
                         await loadChats();
@@ -22299,7 +22363,11 @@ vgResolveBadgeSrc();
         fd.append('chat_id', chatId);
         fd.append('platform_user_id', meId());
         fd.append('photo', file);
-        var res = await fetch(SERVER + '/upload_group_photo', { method: 'POST', body: fd });
+        var res = await fetch(SERVER + '/upload_group_photo', {
+            method: 'POST',
+            body: fd,
+            credentials: 'include'
+        });
         var data = await res.json().catch(function () { return {}; });
         if (!res.ok || data.status !== 'success') {
             throw new Error(data.error || 'Не удалось загрузить фотографию');
