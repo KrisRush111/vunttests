@@ -1384,7 +1384,11 @@
    пузыря, ровно как в Telegram), имя — один раз над первым сообщением
    пачки. Свои (исходящие) сообщения этот класс никогда не получают. */
 .message.vg-group-msg {
-    margin-left: 44px;
+    /* Вся связка "аватар + пузырь" сдвинута ближе к левому краю экрана:
+       отступ пузыря меньше ширины выноса аватара (--vg-msg-avatar-gap),
+       поэтому аватар заходит в padding контейнера, а пузырь смещается
+       влево ровно на ту же величину. */
+    margin-left: 34px;
 }
 .vg-msg-avatar {
     position: absolute;
@@ -8009,6 +8013,8 @@
             
             if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
                 if (window.vgGuardBotStatus && window.vgGuardBotStatus()) return;
+                // Группа: под названием только число участников — сеть не опрашиваем
+                if (window.vgGuardGroupStatus && window.vgGuardGroupStatus()) return;
                 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 // Системный бот: статус фиксированный — «бот», сеть не опрашиваем
                 if (otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id)))) {
@@ -12291,6 +12297,21 @@ function getActiveElements() {
 
         function applyChatItemOnlineStatus(chatItem, userActivity) {
             if (!chatItem) return;
+            // ГРУППА: под названием всегда только "N участников", зелёной точки
+            // "в сети" на аватаре быть не должно. Раньше фоновое обновление
+            // статусов брало первого участника группы и затирало число
+            // участников на "был(а) ..." + зажигало точку онлайна.
+            if (chatItem.dataset && chatItem.dataset.group === '1') {
+                const grAvatar = chatItem.querySelector('.chat-avatar');
+                if (grAvatar) grAvatar.classList.remove('is-online');
+                const grStatus = chatItem.querySelector('.chat-status');
+                if (grStatus) {
+                    grStatus.classList.remove('online');
+                    const grText = grStatus.dataset ? grStatus.dataset.groupMembers : '';
+                    if (grText && grStatus.textContent !== grText) grStatus.textContent = grText;
+                }
+                return;
+            }
             // У системного бота статус фиксированный — «бот»
             if (chatItem.dataset && chatItem.dataset.bot === '1') {
                 const botStatus = chatItem.querySelector('.chat-status');
@@ -12380,7 +12401,11 @@ function getActiveElements() {
                 }
 
                 const otherParticipant = chat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
-                if (otherParticipant) chatItem.setAttribute('data-participant-id', otherParticipant.platform_user_id);
+                // У ГРУППЫ собеседника нет: otherParticipant — просто первый
+                // участник. Если повесить его id на строку чата, опрос статусов
+                // (updateChatStatuses / refreshChatStatusesInBackground) начнёт
+                // писать в группу его "был(а) ..." и зелёный кружок.
+                if (otherParticipant && !isGroupChat) chatItem.setAttribute('data-participant-id', otherParticipant.platform_user_id);
                 // Тот же id дублируем на обёртку свайпа: по нему кнопка "Звук" и
                 // значок "без звука" находят состояние мьюта этого собеседника.
                 // У группы собеседника нет: otherParticipant — просто первый
@@ -12440,7 +12465,7 @@ function getActiveElements() {
                             <i class="fa-solid fa-volume-xmark chat-muted-icon" data-mute-icon="1" title="Без звука" style="display:none;"></i>
                         </div>
                         <div class="last-message">${lastMessageText}</div>
-                        <div class="chat-status user-status ${(!isBotChat && isOnline) ? 'online' : ''}">${(!isBotChat && isOnline) ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
+                        <div class="chat-status user-status ${(!isBotChat && isOnline) ? 'online' : ''}"${isGroupChat ? ` data-group-members="${statusText}"` : ''}>${(!isBotChat && isOnline) ? '<span class="status-indicator"></span><span class="status-text">В сети</span>' : statusText}</div>
                     </div>
                     <div class="chat-right-col">
                         <div class="chat-time-wrap">
@@ -13728,6 +13753,7 @@ function getActiveElements() {
             const tempOther = tempChat.participants && tempChat.participants[0];
             const tempIsBot = !!(tempOther && (tempOther.is_bot === true || (window.vgIsBotId && window.vgIsBotId(tempOther.platform_user_id))));
             if (window.vgApplyBotChatUI) window.vgApplyBotChatUI(tempIsBot);
+            if (window.vgApplyGroupChatUI) window.vgApplyGroupChatUI(!!tempChat.is_group);
             if (chatStatus) {
                 chatStatus.textContent = tempIsBot ? 'бот' : 'был(а) недавно';
                 chatStatus.classList.remove('online');
@@ -14421,11 +14447,16 @@ async function openChat(chatId) {
                 chatAvatar.textContent = initials;
             }
             const membersCount = cachedChat.members_count || ((cachedChat.participants ? cachedChat.participants.length : 0) + 1);
-            chatStatus.textContent = `${membersCount} ${window.vgPluralMembers ? window.vgPluralMembers(membersCount) : 'участников'}`;
+            const membersText = `${membersCount} ${window.vgPluralMembers ? window.vgPluralMembers(membersCount) : 'участников'}`;
+            chatStatus.textContent = membersText;
             chatStatus.classList.remove('online');
+            // Держим этот текст принудительно: любой поздний ответ опроса
+            // статусов больше не подменит его на "был(а) 17.07.2026".
+            if (window.vgApplyGroupChatUI) window.vgApplyGroupChatUI(true, membersText);
             // statusFetchParticipantId остаётся null — у группы нет "собеседника",
             // сетевой статус запрашивать не нужно.
         } else {
+            if (window.vgApplyGroupChatUI) window.vgApplyGroupChatUI(false);
             const initials = cachedChat.name ? cachedChat.name.split(' ').map(n => n[0]).join('') : '?';
             if (otherParticipant) {
                 loadChatAvatar(chatAvatar, otherParticipant.platform_user_id, initials, bgColor,
@@ -15127,6 +15158,10 @@ function stopProfileDataPolling() {
             const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
             if (!chatModal) return;
+
+            // Снимаем режим группы, иначе гвард статуса продолжит держать
+            // "N участников" в хедере уже следующего открытого чата.
+            if (window.vgApplyGroupChatUI) window.vgApplyGroupChatUI(false);
 
             stopMessagePolling();
 
@@ -16230,6 +16265,8 @@ function stopProfileDataPolling() {
                     if (currentChat && (chatModal.classList.contains('active') || chatModal.style.display === 'flex')) {
                         // У бота статус фиксированный — «бот», сеть не опрашиваем
                         if (window.vgGuardBotStatus && window.vgGuardBotStatus()) return;
+                        // У группы — «N участников», сеть не опрашиваем
+                        if (window.vgGuardGroupStatus && window.vgGuardGroupStatus()) return;
                         const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                         if (otherParticipant) {
                             const activityData = await getCachedActivityStatus([otherParticipant.platform_user_id]);
@@ -16272,7 +16309,8 @@ function stopProfileDataPolling() {
                     updateUserActivity(true);
                     if (typeof pollUnreadOnce === 'function') pollUnreadOnce();
                     
-                    if (currentChat && !(window.vgGuardBotStatus && window.vgGuardBotStatus())) {
+                    if (currentChat && !(window.vgGuardBotStatus && window.vgGuardBotStatus())
+                        && !(window.vgGuardGroupStatus && window.vgGuardGroupStatus())) {
                         const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                         if (otherParticipant) {
                             getCachedActivityStatus([otherParticipant.platform_user_id]).then(activityData => {
@@ -19178,6 +19216,55 @@ function vgStopBotStatusWatch() {
     if (vgBotStatusObserver) { vgBotStatusObserver.disconnect(); vgBotStatusObserver = null; }
 }
 
+/* ===== Статус ГРУППЫ в хедере =====
+   В группе под названием должно быть только "N участников" — никакого
+   "В сети" / "был(а) 17.07.2026". Работает так же, как гвард бота:
+   принудительно возвращает нужный текст и следит за элементом. */
+window.VG_CURRENT_CHAT_IS_GROUP = false;
+window.VG_CURRENT_GROUP_MEMBERS_TEXT = '';
+
+window.vgGuardGroupStatus = function () {
+    if (!window.VG_CURRENT_CHAT_IS_GROUP) return false;
+    const text = window.VG_CURRENT_GROUP_MEMBERS_TEXT || '';
+    vgBotStatusEls().forEach(el => {
+        if (text && el.textContent !== text) el.textContent = text;
+        el.classList.remove('online', 'offline');
+    });
+    return true;
+};
+
+let vgGroupStatusObserver = null;
+function vgStartGroupStatusWatch() {
+    vgStopGroupStatusWatch();
+    if (typeof MutationObserver === 'undefined') return;
+    vgGroupStatusObserver = new MutationObserver(() => {
+        if (!window.VG_CURRENT_CHAT_IS_GROUP) return;
+        vgGroupStatusObserver.disconnect();
+        window.vgGuardGroupStatus();
+        vgBotStatusEls().forEach(el => {
+            vgGroupStatusObserver.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        });
+    });
+    vgBotStatusEls().forEach(el => {
+        vgGroupStatusObserver.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    });
+}
+function vgStopGroupStatusWatch() {
+    if (vgGroupStatusObserver) { vgGroupStatusObserver.disconnect(); vgGroupStatusObserver = null; }
+}
+
+window.vgApplyGroupChatUI = function (isGroup, membersText) {
+    window.VG_CURRENT_CHAT_IS_GROUP = !!isGroup;
+    if (isGroup) {
+        if (membersText) window.VG_CURRENT_GROUP_MEMBERS_TEXT = membersText;
+        window.vgGuardGroupStatus();
+        vgStartGroupStatusWatch();
+    } else {
+        window.VG_CURRENT_GROUP_MEMBERS_TEXT = '';
+        vgStopGroupStatusWatch();
+    }
+};
+
 window.vgApplyBotChatUI = function (isBot) {
     ['chatModalDesktop', 'chatModalMobile'].forEach(id => {
         const modal = document.getElementById(id);
@@ -21663,7 +21750,10 @@ vgResolveBadgeSrc();
                 e.preventDefault();
                 e.stopPropagation();
                 if (!isGroupMode()) return;
-                renameGroup();
+                // Полноэкранное окно редактирования (фото + название + описание).
+                // renameGroup() остаётся запасным путём, если блок не загрузился.
+                if (typeof window.vgOpenGroupEdit === 'function') window.vgOpenGroupEdit(groupData);
+                else renameGroup();
             });
             header.appendChild(btn);
         }
@@ -21805,6 +21895,478 @@ vgResolveBadgeSrc();
             return res;
         };
     }
+})();
+</script>
+
+<!-- ==========================================================================
+     ПОЛНОЭКРАННОЕ РЕДАКТИРОВАНИЕ ГРУППЫ
+     Кнопка "Изм." в профиле группы (только владелец) открывает экран
+     в стиле iOS: "Отмена" / "Готово" в шапке, круглый аватар, ссылка
+     "Изменить фотографию" (сменить / удалить) и карточка с полями
+     "Название" и "Описание".
+     ВАЖНО: описание пока ТОЛЬКО визуальное — на сервер не уходит,
+     значение хранится локально (localStorage), чтобы поле не сбрасывалось.
+     ========================================================================== -->
+<style id="vg-group-edit-screen">
+.vg-ge-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    flex-direction: column;
+    background: #f2f2f7;
+    -webkit-user-select: none;
+    user-select: none;
+    opacity: 0;
+    transition: opacity .2s ease;
+}
+.vg-ge-screen.active { display: flex; opacity: 1; }
+@media (prefers-color-scheme: dark) {
+    .vg-ge-screen { background: #000; }
+}
+
+.vg-ge-top {
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 8px;
+}
+.vg-ge-pill {
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 16px;
+    line-height: 1.2;
+    padding: 11px 20px;
+    border-radius: 999px;
+    background: #fff;
+    color: #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    transition: transform .15s ease, opacity .15s ease;
+}
+.vg-ge-pill:active { transform: scale(.96); }
+.vg-ge-pill.vg-ge-done { font-weight: 600; }
+.vg-ge-pill[disabled] { opacity: .5; cursor: default; }
+@media (prefers-color-scheme: dark) {
+    .vg-ge-pill { background: #1c1c1e; color: #fff; box-shadow: none; }
+}
+
+.vg-ge-body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.vg-ge-avatar-wrap { margin-top: 4px; position: relative; }
+.vg-ge-avatar {
+    width: 108px;
+    height: 108px;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 38px;
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+    overflow: hidden;
+}
+.vg-ge-avatar-wrap.busy::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(0,0,0,.35) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 50 50'><path fill='%23fff' d='M25 5a20 20 0 1 0 20 20h-5A15 15 0 1 1 25 10z'><animateTransform attributeName='transform' type='rotate' from='0 25 25' to='360 25 25' dur='.8s' repeatCount='indefinite'/></path></svg>") center / 28px 28px no-repeat;
+}
+
+.vg-ge-photo-link {
+    margin-top: 14px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 17px;
+    color: #007aff;
+    padding: 6px 8px;
+}
+.vg-ge-photo-link:active { opacity: .6; }
+
+.vg-ge-card {
+    width: 100%;
+    max-width: 560px;
+    margin-top: 22px;
+    background: #fff;
+    border-radius: 18px;
+    overflow: hidden;
+}
+@media (prefers-color-scheme: dark) {
+    .vg-ge-card { background: #1c1c1e; }
+}
+.vg-ge-field {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 17px;
+    line-height: 1.35;
+    color: #000;
+    padding: 15px 16px;
+    resize: none;
+}
+.vg-ge-field::placeholder { color: #b0b0b5; }
+@media (prefers-color-scheme: dark) {
+    .vg-ge-field { color: #fff; }
+    .vg-ge-field::placeholder { color: #6b6b70; }
+}
+.vg-ge-sep {
+    height: 1px;
+    margin-left: 16px;
+    background: rgba(60,60,67,.14);
+}
+@media (prefers-color-scheme: dark) {
+    .vg-ge-sep { background: rgba(255,255,255,.12); }
+}
+.vg-ge-hint {
+    width: 100%;
+    max-width: 560px;
+    margin: 8px 4px 0;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #8a8a8e;
+}
+
+/* Меню выбора действия с фото */
+.vg-ge-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 100001;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    background: rgba(0,0,0,.35);
+    padding: 10px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+}
+.vg-ge-sheet.active { display: flex; }
+.vg-ge-sheet-box {
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: vgGeSheetIn .2s ease;
+}
+@keyframes vgGeSheetIn { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+.vg-ge-sheet-group {
+    background: rgba(255,255,255,.96);
+    border-radius: 14px;
+    overflow: hidden;
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+}
+.vg-ge-sheet-btn {
+    display: block;
+    width: 100%;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 18px;
+    color: #007aff;
+    padding: 16px 12px;
+    cursor: pointer;
+}
+.vg-ge-sheet-btn + .vg-ge-sheet-btn { border-top: 1px solid rgba(60,60,67,.14); }
+.vg-ge-sheet-btn.danger { color: #ff3b30; }
+.vg-ge-sheet-btn.cancel { font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+    .vg-ge-sheet-group { background: rgba(40,40,42,.96); }
+    .vg-ge-sheet-btn + .vg-ge-sheet-btn { border-top-color: rgba(255,255,255,.12); }
+}
+</style>
+
+<script>
+(function () {
+    var SERVER = (typeof SERVER_URL !== 'undefined') ? SERVER_URL : 'https://vuntserverrr.site';
+
+    function toast(text, type) {
+        if (typeof showMessage === 'function') showMessage(text, type || 'error');
+    }
+    function meId() {
+        try { return userData.platform_user_id; } catch (e) { return null; }
+    }
+    function descKey(chatId) { return 'vg_group_desc_' + chatId; }
+
+    var state = {
+        chatId: null,
+        photoUrl: null,      // что показано сейчас
+        pendingFile: null,   // выбранный, но ещё не загруженный файл
+        removePhoto: false,  // отмечено удаление фото
+        origName: '',
+        origDesc: ''
+    };
+
+    var els = null;
+
+    function build() {
+        if (els) return els;
+
+        var screen = document.createElement('div');
+        screen.className = 'vg-ge-screen';
+        screen.id = 'vgGroupEditScreen';
+        screen.innerHTML =
+            '<div class="vg-ge-top">' +
+                '<button type="button" class="vg-ge-pill vg-ge-cancel">Отмена</button>' +
+                '<button type="button" class="vg-ge-pill vg-ge-done">Готово</button>' +
+            '</div>' +
+            '<div class="vg-ge-body">' +
+                '<div class="vg-ge-avatar-wrap"><div class="vg-ge-avatar"></div></div>' +
+                '<button type="button" class="vg-ge-photo-link">Изменить фотографию</button>' +
+                '<div class="vg-ge-card">' +
+                    '<input type="text" class="vg-ge-field vg-ge-name" maxlength="100" placeholder="Название группы" autocomplete="off">' +
+                    '<div class="vg-ge-sep"></div>' +
+                    '<textarea class="vg-ge-field vg-ge-desc" rows="3" maxlength="255" placeholder="Описание"></textarea>' +
+                '</div>' +
+                '<div class="vg-ge-hint">Описание видят все участники группы.</div>' +
+                '<input type="file" accept="image/*" class="vg-ge-file" style="display:none">' +
+            '</div>';
+
+        var sheet = document.createElement('div');
+        sheet.className = 'vg-ge-sheet';
+        sheet.innerHTML =
+            '<div class="vg-ge-sheet-box">' +
+                '<div class="vg-ge-sheet-group">' +
+                    '<button type="button" class="vg-ge-sheet-btn vg-ge-pick">Выбрать фотографию</button>' +
+                    '<button type="button" class="vg-ge-sheet-btn danger vg-ge-drop">Удалить фотографию</button>' +
+                '</div>' +
+                '<div class="vg-ge-sheet-group">' +
+                    '<button type="button" class="vg-ge-sheet-btn cancel vg-ge-sheet-cancel">Отмена</button>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(screen);
+        document.body.appendChild(sheet);
+
+        els = {
+            screen: screen,
+            sheet: sheet,
+            avatarWrap: screen.querySelector('.vg-ge-avatar-wrap'),
+            avatar: screen.querySelector('.vg-ge-avatar'),
+            name: screen.querySelector('.vg-ge-name'),
+            desc: screen.querySelector('.vg-ge-desc'),
+            file: screen.querySelector('.vg-ge-file'),
+            done: screen.querySelector('.vg-ge-done'),
+            cancel: screen.querySelector('.vg-ge-cancel'),
+            photoLink: screen.querySelector('.vg-ge-photo-link'),
+            drop: sheet.querySelector('.vg-ge-drop')
+        };
+
+        els.cancel.addEventListener('click', close);
+        els.done.addEventListener('click', save);
+        els.photoLink.addEventListener('click', openSheet);
+        els.avatar.addEventListener('click', openSheet);
+        sheet.querySelector('.vg-ge-pick').addEventListener('click', function () {
+            closeSheet();
+            els.file.click();
+        });
+        els.drop.addEventListener('click', function () {
+            closeSheet();
+            state.pendingFile = null;
+            state.removePhoto = true;
+            state.photoUrl = null;
+            paintAvatar();
+        });
+        sheet.querySelector('.vg-ge-sheet-cancel').addEventListener('click', closeSheet);
+        sheet.addEventListener('click', function (e) { if (e.target === sheet) closeSheet(); });
+
+        els.file.addEventListener('change', function () {
+            var f = els.file.files && els.file.files[0];
+            els.file.value = '';
+            if (!f) return;
+            if (!/^image\//.test(f.type)) { toast('Нужен файл изображения'); return; }
+            if (f.size > 10 * 1024 * 1024) { toast('Файл больше 10 МБ'); return; }
+            state.pendingFile = f;
+            state.removePhoto = false;
+            state.photoUrl = URL.createObjectURL(f);
+            paintAvatar();
+        });
+
+        // Enter в названии = "Готово"
+        els.name.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+        });
+
+        // Аппаратная кнопка "назад" / Esc закрывают экран
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && screen.classList.contains('active')) close();
+        });
+
+        return els;
+    }
+
+    function paintAvatar() {
+        var name = (els.name.value || '').trim();
+        var initials = name.split(' ').slice(0, 2).map(function (w) { return w[0] || ''; })
+            .join('').toUpperCase() || 'ГР';
+        if (state.photoUrl) {
+            els.avatar.textContent = '';
+            els.avatar.style.backgroundImage = 'url("' + state.photoUrl + '")';
+            els.avatar.style.background = 'url("' + state.photoUrl + '") center / cover no-repeat';
+        } else {
+            els.avatar.style.backgroundImage = 'none';
+            els.avatar.style.background = 'linear-gradient(135deg, #0088cc, #40a7e3)';
+            els.avatar.textContent = initials;
+        }
+        els.drop.style.display = state.photoUrl ? '' : 'none';
+    }
+
+    function openSheet() { els.sheet.classList.add('active'); }
+    function closeSheet() { els.sheet.classList.remove('active'); }
+
+    function open(groupData) {
+        build();
+        var chatId = window.__vgGroupProfileChatId;
+        if (chatId == null) return;
+
+        var cached = null;
+        try {
+            cached = (typeof currentChatsList !== 'undefined' ? currentChatsList : [])
+                .find(function (c) { return String(c.id) === String(chatId); });
+        } catch (e) {}
+
+        state.chatId = chatId;
+        state.pendingFile = null;
+        state.removePhoto = false;
+        state.photoUrl = (groupData && groupData.photo_url) || (cached && cached.group_photo_url) || null;
+        state.origName = (groupData && groupData.name) || (cached && cached.name) || '';
+
+        var savedDesc = '';
+        try { savedDesc = localStorage.getItem(descKey(chatId)) || ''; } catch (e) {}
+        state.origDesc = (groupData && groupData.description) || savedDesc;
+
+        els.name.value = state.origName;
+        els.desc.value = state.origDesc;
+        els.name.oninput = paintAvatar;
+        paintAvatar();
+
+        els.done.disabled = false;
+        els.screen.classList.add('active');
+        document.body.classList.add('modal-open');
+    }
+
+    function close() {
+        if (!els) return;
+        closeSheet();
+        els.screen.classList.remove('active');
+        // modal-open снимаем, только если под нами нет открытого мобильного модала
+        var mobileProfile = document.getElementById('profileModalMobile');
+        var chatMobile = document.getElementById('chatModalMobile');
+        var stillOpen = (mobileProfile && mobileProfile.classList.contains('active')) ||
+                        (chatMobile && chatMobile.classList.contains('active'));
+        if (!stillOpen) document.body.classList.remove('modal-open');
+        state.pendingFile = null;
+        state.removePhoto = false;
+    }
+
+    async function uploadPhoto(chatId, file) {
+        var fd = new FormData();
+        fd.append('chat_id', chatId);
+        fd.append('platform_user_id', meId());
+        fd.append('photo', file);
+        var res = await fetch(SERVER + '/upload_group_photo', { method: 'POST', body: fd });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok || data.status !== 'success') {
+            throw new Error(data.error || 'Не удалось загрузить фотографию');
+        }
+        return data.photo_url;
+    }
+
+    async function updateGroup(chatId, payload) {
+        var res = await fetch(SERVER + '/update_group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.assign({ chat_id: chatId, platform_user_id: meId() }, payload))
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok || data.status !== 'success') {
+            throw new Error(data.error || 'Не удалось сохранить изменения');
+        }
+        return data;
+    }
+
+    async function save() {
+        var chatId = state.chatId;
+        if (chatId == null) return close();
+
+        var name = (els.name.value || '').trim().slice(0, 100);
+        var desc = (els.desc.value || '').trim().slice(0, 255);
+        if (!name) { toast('Введите название группы'); els.name.focus(); return; }
+
+        // Описание пока только визуальное — храним локально.
+        try {
+            if (desc) localStorage.setItem(descKey(chatId), desc);
+            else localStorage.removeItem(descKey(chatId));
+        } catch (e) {}
+
+        var nameChanged = name !== state.origName;
+        var photoChanged = !!state.pendingFile || state.removePhoto;
+        if (!nameChanged && !photoChanged) return close();
+
+        els.done.disabled = true;
+        els.avatarWrap.classList.toggle('busy', photoChanged);
+        try {
+            var newPhotoUrl;
+            if (state.pendingFile) {
+                newPhotoUrl = await uploadPhoto(chatId, state.pendingFile);
+            }
+            var payload = {};
+            if (nameChanged) payload.name = name;
+            if (state.removePhoto) payload.photo_url = null;
+            if (Object.keys(payload).length) await updateGroup(chatId, payload);
+
+            // Локально обновляем список чатов и открытый чат, чтобы новое
+            // название/фото появились сразу, не дожидаясь перезагрузки.
+            try {
+                var cached = (typeof currentChatsList !== 'undefined' ? currentChatsList : [])
+                    .find(function (c) { return String(c.id) === String(chatId); });
+                if (cached) {
+                    if (nameChanged) cached.name = name;
+                    if (state.pendingFile) cached.group_photo_url = newPhotoUrl;
+                    if (state.removePhoto) cached.group_photo_url = null;
+                }
+            } catch (e) {}
+
+            close();
+            toast('Изменения сохранены', 'success');
+            if (typeof window.vgRefreshGroupProfile === 'function') window.vgRefreshGroupProfile();
+            if (typeof loadChats === 'function') loadChats();
+        } catch (err) {
+            console.error('[GROUP EDIT]', err);
+            toast((err && err.message) || 'Не удалось сохранить изменения');
+            els.done.disabled = false;
+        } finally {
+            els.avatarWrap.classList.remove('busy');
+        }
+    }
+
+    window.vgOpenGroupEdit = open;
+    window.vgCloseGroupEdit = close;
+    // Описание для остальных экранов (пока читается только локально)
+    window.vgGroupDescription = function (chatId) {
+        try { return localStorage.getItem(descKey(chatId)) || ''; } catch (e) { return ''; }
+    };
 })();
 </script>
 
