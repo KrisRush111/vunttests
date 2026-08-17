@@ -14487,6 +14487,7 @@ async function openChat(chatId) {
         if (isStale()) return;
 
         if (chatData.status === 'success' && chatData.chat) {
+            const hadGroupFlagBefore = vgIsCurrentChatGroup();
             currentChat = chatData.chat;
             // точные participants пришли — обновляем значок "без звука" в хедере
             if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
@@ -14506,10 +14507,16 @@ async function openChat(chatId) {
 
             // Если чата не было в локальном кэше списка (cachedChat выше не
             // нашёлся) — хедер (имя/аватар/статус) не заполнялся вообще и
-            // оставался пустым. Подстраховываемся и заполняем его сейчас уже
-            // точными данными, полученными с сервера.
-            if (!cachedChat) {
-                const freshIsGroupChat = !!currentChat.is_group;
+            // оставался пустым. То же самое, если кэш НАШЁЛСЯ, но его
+            // is_group разошёлся со свежими данными с сервера (устаревшая
+            // запись в чатах — например group_created пришёл после того, как
+            // список чатов уже закэшировался как личный чат) — раньше в этом
+            // случае хедер так и оставался в "личном" виде (статус "в сети"/
+            // "был(а) недавно" вместо числа участников) до перезагрузки
+            // страницы. Подстраховываемся и в обоих случаях перерисовываем
+            // хедер уже точными данными, полученными с сервера.
+            const freshIsGroupChat = !!currentChat.is_group;
+            if (!cachedChat || !!cachedChat.is_group !== freshIsGroupChat) {
                 const otherParticipant = currentChat.participants?.find(p => p.platform_user_id !== userData.platform_user_id);
                 const freshIsBot = !freshIsGroupChat && !!(otherParticipant && (otherParticipant.is_bot === true || (window.vgIsBotId && window.vgIsBotId(otherParticipant.platform_user_id))));
                 const freshIsVerified = !freshIsGroupChat && (freshIsBot || !!(window.vgIsVerified && window.vgIsVerified(otherParticipant)));
@@ -14582,6 +14589,15 @@ async function openChat(chatId) {
                     chatAvatar.textContent = initials;
                 }
                 }
+            }
+
+            // Сообщения уже могли отрисоваться раньше (из локального кэша,
+            // ДО того как currentChat.is_group стал известен точно) — если
+            // групповой статус чата только что подтвердился/изменился,
+            // перерисовываем список сообщений, чтобы у входящих сообщений
+            // появились имя отправителя и аватар (см. vgApplyGroupSenderUi).
+            if (freshIsGroupChat !== hadGroupFlagBefore && currentMessages.length) {
+                renderMessages(currentMessages);
             }
         }
 
