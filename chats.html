@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">  
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Чаты - TheVuntgram</title>
     <link rel="stylesheet" href="assets/animate/animate.min.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
@@ -21949,7 +21949,11 @@ vgResolveBadgeSrc();
 }
 .vg-ge-pill:active { transform: scale(.96); }
 .vg-ge-pill.vg-ge-done { font-weight: 600; }
-.vg-ge-pill[disabled] { opacity: .5; cursor: default; }
+.vg-ge-pill[disabled] {
+    opacity: .4;
+    cursor: default;
+    pointer-events: none;
+}
 @media (prefers-color-scheme: dark) {
     .vg-ge-pill { background: #1c1c1e; color: #fff; box-shadow: none; }
 }
@@ -22205,7 +22209,9 @@ vgResolveBadgeSrc();
 
         // Enter в названии = "Готово"
         els.name.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (syncDoneEnabled()) save();
         });
 
         // Аппаратная кнопка "назад" / Esc закрывают экран
@@ -22214,6 +22220,15 @@ vgResolveBadgeSrc();
         });
 
         return els;
+    }
+
+    // "Готово" активна только когда в названии есть хотя бы один непробельный
+    // символ — пустое/из одних пробелов имя сохранить нельзя.
+    function syncDoneEnabled() {
+        if (!els) return false;
+        var ok = (els.name.value || '').trim().length > 0;
+        els.done.disabled = !ok;
+        return ok;
     }
 
     function paintAvatar() {
@@ -22258,10 +22273,9 @@ vgResolveBadgeSrc();
 
         els.name.value = state.origName;
         els.desc.value = state.origDesc;
-        els.name.oninput = paintAvatar;
+        els.name.oninput = function () { paintAvatar(); syncDoneEnabled(); };
         paintAvatar();
-
-        els.done.disabled = false;
+        syncDoneEnabled();
         els.screen.classList.add('active');
         document.body.classList.add('modal-open');
     }
@@ -22312,7 +22326,9 @@ vgResolveBadgeSrc();
 
         var name = (els.name.value || '').trim().slice(0, 100);
         var desc = (els.desc.value || '').trim().slice(0, 255);
-        if (!name) { toast('Введите название группы'); els.name.focus(); return; }
+        // Страховка: сюда не должны попасть с пустым именем (кнопка выключена),
+        // но save() вызывается ещё и по Enter — проверяем повторно.
+        if (!name) { syncDoneEnabled(); els.name.focus(); return; }
 
         // Описание пока только визуальное — храним локально.
         try {
@@ -22355,7 +22371,7 @@ vgResolveBadgeSrc();
         } catch (err) {
             console.error('[GROUP EDIT]', err);
             toast((err && err.message) || 'Не удалось сохранить изменения');
-            els.done.disabled = false;
+            syncDoneEnabled();
         } finally {
             els.avatarWrap.classList.remove('busy');
         }
