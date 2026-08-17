@@ -8146,40 +8146,94 @@ function openProfileModal(userId) {
 }
 
 
-// Заполняет разделы "Фото" и "Файлы" в профиле контакта на основе сообщений
-// текущего открытого чата. Если фото нет — оба раздела скрываются.
+// ===================== МЕДИА В ПРОФИЛЕ (Медиа | Файлы) =====================
+// Раздел "Медиа" всегда показывает фото ИМЕННО того личного чата, чей профиль
+// открыт — независимо от того, откуда профиль открыли (из чата, из списка
+// участников группы, из поиска, из контактов).
+//
+// Что было сломано раньше:
+//   • собеседник вычислялся из currentChat БЕЗ проверки is_group. Когда профиль
+//     открывали из группы, currentChat — это группа, и её participants[0]
+//     случайно совпадал с ПЕРВЫМ участником списка: у него в "Медиа" показывались
+//     фото ГРУППЫ (а не личной переписки), а у всех остальных участников
+//     сравнение не совпадало и раздел просто оставался скрытым;
+//   • поздний ответ сети мог прийти в уже закрытый/другой профиль, поэтому
+//     результат отбрасывался по window.__reportTargetUserId — а его успевали
+//     обнулить (закрытие профиля, открытие профиля группы), и медиа пропадали.
+// Теперь у загрузки есть явная "цель" (_profileMediaTarget): 'u:<user_id>' или
+// 'c:<chat_id>'. Рисуем только то, что пришло для текущей цели.
+
+let _profileMediaTarget = null;   // 'u:123' (личный чат с юзером) | 'c:45' (конкретный чат)
+let _profileMediaFetchToken = null;
+
+function _profileMediaMe() {
+    return (typeof userData !== 'undefined' && userData) ? String(userData.platform_user_id) : null;
+}
+
+// Собеседник открытого ЛИЧНОГО чата (для группы всегда null)
+function _profileMediaOpenPartnerId() {
+    if (typeof currentChat === 'undefined' || !currentChat) return null;
+    if (currentChat.is_group) return null;
+    const parts = currentChat.participants || [];
+    const me = _profileMediaMe();
+    const other = parts.find(p => String(p.platform_user_id) !== String(me)) || parts[0];
+    return other ? String(other.platform_user_id) : null;
+}
+
+function _profileMediaFilter(list) {
+    return (list || []).filter(msg => msg && (msg.is_image || (msg.content && isImageUrl(msg.content))));
+}
+
+// Точка входа: профиль контакта. profileUserId === null → берём открытый личный чат.
 function renderProfileMediaSections(profileUserId) {
     const activeElements = getActiveElements();
     if (!activeElements.modalPhotosGrid || !activeElements.modalPhotosSection || !activeElements.modalFilesSection) return;
 
-    // Медиа показываем только для переписки с ЭТИМ же человеком. Если чат не открыт
-    // или профиль принадлежит другому пользователю — никаких медиа/файлов быть не
-    // должно (иначе в профиль утекали бы фото из предыдущего открытого чата).
-    // Собеседник — участник, отличный от меня (participants[0] может быть я сам,
-    // например в чате с системным ботом), с откатом на participants[0].
-    const _parts = (currentChat && currentChat.participants) || [];
-    const _other = _parts.find(p => String(p.platform_user_id) !== String(userData.platform_user_id)) || _parts[0];
-    const partnerId = _other ? String(_other.platform_user_id) : null;
-    const sameUser = profileUserId == null ? !!currentChat : (partnerId && String(profileUserId) === partnerId);
-    if (!currentChat || !sameUser) {
-        ['desktop', 'mobile'].forEach(sfx => {
-            const grid = document.getElementById(`modal-photos-grid-${sfx}`);
-            if (grid) grid.innerHTML = '';
-            hideProfileMediaBlock(sfx);
-        });
-        // Профиль открыт не из личной переписки (например, из списка участников
-        // группы) — медиа личного чата подтягиваем с сервера.
-        if (profileUserId != null) loadProfileMediaFromPrivateChat(profileUserId);
+    const partnerId = _profileMediaOpenPartnerId();
+
+    if (profileUserId == null) {
+        // Профиль открыт "из чата" без явного id — только если это личный чат
+        if (partnerId) {
+            _profileMediaTarget = 'u:' + partnerId;
+            _profileMediaFetchToken = null;
+            paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), _profileMediaTarget);
+        } else {
+            _profileMediaTarget = null;
+            _profileMediaFetchToken = null;
+            clearProfileMediaUi();
+        }
         return;
     }
 
-    _profileMediaFetchToken = null; // отменяем возможную фоновую подгрузку
-    const photoMessages = (currentMessages || []).filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
-    paintProfileMediaSections(photoMessages);
+    _profileMediaTarget = 'u:' + String(profileUserId);
+
+    // Открытый чат — это личная переписка ровно с этим человеком: данные уже есть
+    if (partnerId && String(profileUserId) === partnerId) {
+        _profileMediaFetchToken = null;
+        paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), _profileMediaTarget);
+        return;
+    }
+
+    // Иначе (профиль из группы, из контактов, из поиска) — тянем личный чат с сервера
+    clearProfileMediaUi();
+    loadProfileMediaFromPrivateChat(profileUserId);
+}
+
+// Прячет блок медиа/файлов и вычищает сетку в обеих версиях интерфейса
+function clearProfileMediaUi() {
+    ['desktop', 'mobile'].forEach(sfx => {
+        const grid = document.getElementById(`modal-photos-grid-${sfx}`);
+        if (grid) grid.innerHTML = '';
+        hideProfileMediaBlock(sfx);
+    });
 }
 
 // Рисует переданные фото-сообщения в разделе «Медиа» профиля.
-function paintProfileMediaSections(photoMessages) {
+// target — цель, для которой данные загружались; если профиль уже переключили,
+// поздний ответ игнорируется.
+function paintProfileMediaSections(photoMessages, target) {
+    if (target != null && target !== _profileMediaTarget) return;
+
     const activeElements = getActiveElements();
     if (!activeElements.modalPhotosGrid) return;
 
@@ -8203,20 +8257,26 @@ function paintProfileMediaSections(photoMessages) {
         if (emptyEl) emptyEl.style.display = 'block';
     }
 
+    // В режиме профиля ГРУППЫ разделами управляет сегмент-контрол
+    // «Участники | Медиа | Файлы», поэтому свой переключатель не включаем —
+    // иначе медиа "выпрыгнули" бы поверх списка участников.
+    if (window.__vgGroupProfileChatId != null) {
+        if (typeof window.vgSyncGroupTab === 'function') window.vgSyncGroupTab();
+        return;
+    }
+
     applyProfileMediaTabsVisibility(suffix, hasMedia, hasFiles);
 }
 
-// Медиа для профиля, открытого НЕ из личного чата (участник группы, поиск и т.п.).
-// Находим личный чат с этим человеком (сначала в уже загруженном списке чатов,
-// иначе спрашиваем сервер — /get_or_create_chat ничего не создаёт, а для нового
-// чата возвращает отрицательный временный id) и берём из него фото.
-let _profileMediaFetchToken = null;
-
+// Медиа личного чата с конкретным человеком. Личный чат ищем сначала в уже
+// загруженном списке чатов, иначе спрашиваем сервер (/get_or_create_chat ничего
+// не создаёт, а для несуществующей переписки возвращает is_new = true).
 async function loadProfileMediaFromPrivateChat(profileUserId) {
     const token = Symbol();
     _profileMediaFetchToken = token;
+    const target = 'u:' + String(profileUserId);
 
-    if (!profileUserId || !userData || !userData.platform_user_id) return;
+    if (!profileUserId || typeof userData === 'undefined' || !userData || !userData.platform_user_id) return;
     if (String(profileUserId) === String(userData.platform_user_id)) return;
 
     try {
@@ -8225,7 +8285,7 @@ async function loadProfileMediaFromPrivateChat(profileUserId) {
         const list = (typeof currentChatsList !== 'undefined' && currentChatsList) ? currentChatsList : [];
         const localChat = list.find(c => c && !c.is_group &&
             (c.participants || []).some(p => String(p.platform_user_id) === String(profileUserId)));
-        if (localChat && localChat.id != null && !String(localChat.id).startsWith('temp_')) {
+        if (localChat && localChat.id != null && !String(localChat.id).startsWith('temp_') && Number(localChat.id) > 0) {
             chatId = localChat.id;
         }
 
@@ -8248,6 +8308,18 @@ async function loadProfileMediaFromPrivateChat(profileUserId) {
 
         if (chatId == null || Number(chatId) <= 0) return;
 
+        const photos = await fetchChatPhotos(chatId);
+        if (_profileMediaFetchToken !== token) return;   // успели открыть другой профиль
+        if (photos == null) return;
+        paintProfileMediaSections(photos, target);
+    } catch (e) {
+        console.warn('[PROFILE MEDIA] не удалось загрузить медиа личного чата:', e);
+    }
+}
+
+// Фото конкретного чата (личного или группового) с сервера. null — если не вышло.
+async function fetchChatPhotos(chatId) {
+    try {
         const res = await fetch(`${SERVER_URL}/get_messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -8259,18 +8331,36 @@ async function loadProfileMediaFromPrivateChat(profileUserId) {
             credentials: 'include'
         });
         const data = await res.json();
-        if (_profileMediaFetchToken !== token) return;   // успели открыть другой профиль
-        if (data.status !== 'success') return;
-
-        // Профиль мог уже закрыться/смениться, пока шёл запрос
-        if (String(window.__reportTargetUserId) !== String(profileUserId)) return;
-
-        const photos = (data.messages || []).filter(m => m.is_image || (m.content && isImageUrl(m.content)));
-        paintProfileMediaSections(photos);
+        if (data.status !== 'success') return null;
+        return _profileMediaFilter(data.messages);
     } catch (e) {
-        console.warn('[PROFILE MEDIA] не удалось загрузить медиа личного чата:', e);
+        console.warn('[PROFILE MEDIA] get_messages:', e);
+        return null;
     }
 }
+
+// Медиа для профиля ГРУППЫ: всегда по chat_id самой группы.
+async function loadProfileMediaForChat(chatId) {
+    const token = Symbol();
+    _profileMediaFetchToken = token;
+    _profileMediaTarget = 'c:' + String(chatId);
+    const target = _profileMediaTarget;
+
+    // Если эта же группа открыта в чате — рисуем сразу, не дожидаясь сети
+    if (typeof currentChat !== 'undefined' && currentChat && String(currentChat.id) === String(chatId)) {
+        paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), target);
+    } else {
+        clearProfileMediaUi();
+    }
+
+    if (chatId == null || Number(chatId) <= 0) return;
+    const photos = await fetchChatPhotos(chatId);
+    if (_profileMediaFetchToken !== token || target !== _profileMediaTarget) return;
+    if (photos == null) return;
+    paintProfileMediaSections(photos, target);
+}
+
+window.loadProfileMediaForChat = loadProfileMediaForChat;
 
 // Переключатель "Медиа | Файлы" показывается всегда, когда открыт чат с этим
 // человеком: раньше пилюля появлялась только при hasMedia && hasFiles, а файлов
@@ -20401,6 +20491,7 @@ vgResolveBadgeSrc();
             }
         });
         if (hidden) setGroupTab('members');
+        if (typeof paintEditButton === 'function') paintEditButton();
     }
 
     function renderHero(suffix, data) {
@@ -20955,6 +21046,7 @@ vgResolveBadgeSrc();
             const sfx = suffixNow();
             renderHero(sfx, groupData);
             renderMembers(sfx, groupData);
+            paintEditButton();
         } catch (err) {
             console.error('[GROUP PROFILE]', err);
             // Раньше при ошибке (сеть/сервер) список участников молча оставался
@@ -21002,12 +21094,11 @@ vgResolveBadgeSrc();
             is_admin: false
         });
 
-        // Медиа/Файлы берём из открытого чата — тот же механизм, что у контакта
-        if (typeof renderProfileMediaSections === 'function') renderProfileMediaSections(null);
-        // renderProfileMediaSections() снова показывает свой переключатель
-        // «Медиа | Файлы» и активирует секцию медиа — в режиме группы разделами
-        // управляет наш сегмент-контрол, поэтому возвращаем состояние обратно.
+        // Медиа/Файлы группы — строго по chat_id самой группы (раньше брались
+        // из "открытого чата", из-за чего в профиль группы могли попасть фото
+        // предыдущего личного чата, а из группы — наоборот, в профиль контакта).
         setContactBlocksHidden(true);
+        if (typeof window.loadProfileMediaForChat === 'function') window.loadProfileMediaForChat(chatId);
 
         if (sfx === 'desktop') {
             updateDesktopVisibility(false, true);
@@ -21035,6 +21126,7 @@ vgResolveBadgeSrc();
         window.__vgGroupProfileChatId = null;
         groupData = null;
         setContactBlocksHidden(false);
+        paintEditButton();
         document.dispatchEvent(new Event('vg-group-profile-closed'));
     }
 
@@ -21202,7 +21294,8 @@ vgResolveBadgeSrc();
             { label: 'Пожаловаться', icon: 'fa-flag', act: 'report' },
         ];
         if (isAdmin) {
-            items.push({ label: 'Переименовать', icon: 'fa-pen', act: 'rename' });
+            // "Переименовать" больше не в меню "ещё" — переименование теперь
+            // делается кнопкой "Изм." в шапке профиля группы.
             items.push({ label: 'Удалить группу', icon: 'fa-trash-can', act: 'delete', danger: true });
         } else {
             items.push({ label: 'Покинуть группу', icon: 'fa-arrow-right-from-bracket', act: 'leave', danger: true });
@@ -21230,11 +21323,6 @@ vgResolveBadgeSrc();
                 closeMenu();
                 if (act === 'report') {
                     showMessage('Жалоба на группу отправлена', 'success');
-                } else if (act === 'rename') {
-                    const name = prompt('Новое название группы', groupData ? groupData.name : '');
-                    if (!name || !name.trim()) return;
-                    const ok = await groupAction('/update_group', { name: name.trim().slice(0, 100) }, 'Название изменено');
-                    if (ok) { refresh(); if (typeof loadChats === 'function') loadChats(); }
                 } else if (act === 'leave') {
                     if (!confirm('Покинуть группу?')) return;
                     const chatId = window.__vgGroupProfileChatId;
@@ -21288,6 +21376,55 @@ vgResolveBadgeSrc();
         if (ok) refresh();
     });
 
+    // ---------- Переименование группы (кнопка "Изм." в шапке) ----------
+    async function renameGroup() {
+        const name = prompt('Новое название группы', groupData ? groupData.name : '');
+        if (!name || !name.trim()) return;
+        const ok = await groupAction('/update_group', { name: name.trim().slice(0, 100) }, 'Название изменено');
+        if (ok) { refresh(); if (typeof loadChats === 'function') loadChats(); }
+    }
+
+    // Кнопка "Изм." — тот же вид и место, что у кнопки "Изменить" в profile.html
+    // (правый верхний угол шапки). Видна только админу группы.
+    function ensureEditButton(sfx) {
+        const modal = modalOf(sfx);
+        if (!modal) return null;
+        const header = modal.querySelector('.profile-header');
+        if (!header) return null;
+        let btn = header.querySelector('.vg-gm-edit');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'edit-button vg-gm-edit';
+            btn.textContent = 'Изм.';
+            btn.style.display = 'none';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!isGroupMode()) return;
+                renameGroup();
+            });
+            header.appendChild(btn);
+        }
+        return btn;
+    }
+
+    function paintEditButton() {
+        const show = isGroupMode() && !!(groupData && groupData.is_admin);
+        ['desktop', 'mobile'].forEach(sfx => {
+            const btn = ensureEditButton(sfx);
+            if (btn) btn.style.display = show ? '' : 'none';
+        });
+    }
+
+    // Профиль группы: медиа приходят асинхронно, поэтому раскладку разделов
+    // (Участники | Медиа | Файлы) нужно вернуть после каждой отрисовки медиа.
+    window.vgSyncGroupTab = function () {
+        if (window.__vgGroupProfileChatId == null) return;
+        setGroupTab(groupTab);
+    };
+    window.vgPaintGroupEditButton = paintEditButton;
+
     window.openGroupProfileModal = openGroupProfileModal;
     window.vgCloseGroupProfile = closeGroupProfile;
     window.vgRefreshGroupProfile = refresh;
@@ -21308,6 +21445,42 @@ vgResolveBadgeSrc();
           всё равно оставалась в разметке.
      Ниже: строки всегда видимы, а пустая карточка «О себе» прячется целиком.
      ========================================================================== -->
+<style id="vg-group-edit-button">
+/* Кнопка "Изм." в шапке профиля группы — тот же вид, что кнопка "Изменить"
+   в profile.html (правый верхний угол шапки; крестик закрытия слева). */
+.profile-header .edit-button.vg-gm-edit {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    z-index: 6;
+    color: var(--telegram-blue, #2481cc);
+    font-size: 14px;
+    font-weight: 600;
+    background: rgba(36, 129, 204, .1);
+    border: none;
+    cursor: pointer;
+    padding: 6px 12px;
+    text-decoration: none;
+    border-radius: 20px;
+    letter-spacing: .01em;
+    transition: all .2s ease;
+    font-family: inherit;
+    line-height: 1.2;
+}
+.profile-header .edit-button.vg-gm-edit:hover {
+    background: rgba(36, 129, 204, .18);
+    transform: translateY(-1px);
+}
+.profile-header .edit-button.vg-gm-edit:active { transform: scale(.96); }
+/* когда аватар развёрнут в фото — кнопка читается поверх снимка */
+.hero-expanded .profile-header .edit-button.vg-gm-edit {
+    background: rgba(255, 255, 255, .20);
+    color: #fff;
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+}
+</style>
+
 <style id="vg-about-card-fix">
     /* Строки «О себе» больше не зависят от того, проиграется ли анимация:
        скрытые поля по-прежнему прячутся инлайновым display:none из JS. */
