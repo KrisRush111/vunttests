@@ -1,7 +1,7 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.2.7';
+const CACHE_NAME = 'vuntgram-v2.2.8';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
@@ -98,6 +98,17 @@ self.addEventListener('fetch', (event) => {
   // Range-запросы (видео/аудио, докачка) НЕЛЬЗЯ проксировать и кэшировать —
   // ответ 206 ломает cache.put и рвёт воспроизведение. Отдаём браузеру.
   if (event.request.headers.has('range')) {
+    return;
+  }
+
+  // POST/PUT/DELETE НИКОГДА не проксируем через service worker.
+  // Причина: handleApiRequest делает fetch(request) с УЖЕ созданным Request,
+  // у которого тело — поток. Для multipart/form-data (отправка фото) это тело
+  // теряется в iOS Safari и на любом редиректе (http→https, www, слэш в конце),
+  // до Flask долетает пустой запрос, и сервер отвечает
+  // "chat_id, sender_id and image are required". Пользы от перехвата POST нет:
+  // handleApiRequest всё равно делает тот же самый fetch. Отдаём браузеру.
+  if (event.request.method !== 'GET') {
     return;
   }
 
