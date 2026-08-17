@@ -1379,6 +1379,58 @@
     color: rgba(0, 0, 0, 0.45) !important;
 }
 
+/* --- Аватар и имя отправителя у входящих сообщений в групповых чатах ---
+   Аватар показывается один раз у последнего сообщения "пачки" (слева от
+   пузыря, ровно как в Telegram), имя — один раз над первым сообщением
+   пачки. Свои (исходящие) сообщения этот класс никогда не получают. */
+.message.vg-group-msg {
+    margin-left: 44px;
+}
+.vg-msg-avatar {
+    position: absolute;
+    left: -44px;
+    bottom: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    user-select: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.vg-msg-sender-name {
+    display: block;
+    width: 100%;
+    flex: 0 0 100%;
+    order: -1;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Имя отправителя над картинкой без подписи — плашка поверх фото (как время) */
+.message.vg-group-msg.message-with-image.no-caption .vg-msg-sender-name {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff !important;
+}
+
 /* Тёмная тема — входящие */
 @media (prefers-color-scheme: dark) {
     .message-incoming {
@@ -8434,6 +8486,17 @@ function closeProfileModal() {
     window.__reportTargetUserId = null;
     stopProfileStatusPolling();
     stopProfileDataPolling();
+
+    // Профиль контакта был открыт кликом по участнику из профиля группы —
+    // возвращаемся не в чат, а обратно в профиль этой группы.
+    const returnGroupChatId = window.__vgReturnToGroupChatId;
+    window.__vgReturnToGroupChatId = null;
+    if (returnGroupChatId != null && typeof window.openGroupProfileModal === 'function') {
+        window.openGroupProfileModal(returnGroupChatId);
+        if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
+        return;
+    }
+
     const isDesktop = window.matchMedia("(min-width: 768px)").matches;
     
     if (isDesktop) {
@@ -9559,7 +9622,79 @@ function getActiveElements() {
             return el;
         }
 
-        function renderMessage(message) {
+        // === Аватар + имя отправителя для входящих сообщений в ГРУППОВЫХ чатах ===
+        // Как в Telegram: имя отправителя показывается один раз над первым
+        // сообщением идущей подряд "пачки" сообщений одного участника, а
+        // аватар — один раз слева от последнего сообщения такой "пачки".
+        // Для собственных (исходящих) сообщений ни имя, ни аватар никогда не
+        // показываются — это относится только к сообщениям от других
+        // участников группы.
+        const VG_SENDER_NAME_COLORS = ['#e17076', '#eda86c', '#a695e7', '#7bc862', '#6ec9cb', '#65aadd', '#ee7aae', '#f2789f'];
+
+        function vgSenderColor(senderId) {
+            const s = String(senderId || '');
+            let hash = 0;
+            for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+            return VG_SENDER_NAME_COLORS[hash % VG_SENDER_NAME_COLORS.length];
+        }
+
+        function vgMessageInitials(name) {
+            return (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
+        }
+
+        function vgIsCurrentChatGroup() {
+            return window.vgHeaderChatIsGroup ? window.vgHeaderChatIsGroup() : !!(currentChat && currentChat.is_group);
+        }
+
+        // "Пачка" сообщений ломается при смене отправителя ИЛИ смене
+        // календарного дня (там и так появляется дата-разделитель).
+        function vgSenderRunKey(message) {
+            return `${message.sender_id}__${formatDateHeader(message.sent_at)}`;
+        }
+
+        function vgSenderNameHtml(message) {
+            const name = message.sender_name || 'Без имени';
+            const color = vgSenderColor(message.sender_id);
+            return `<div class="vg-msg-sender-name" style="color: ${color}">${escapeHtml(name)}</div>`;
+        }
+
+        // Аватар слева от пузыря — переиспользует тот же лоадер/кэш, что и
+        // аватарки в списке участников группы (loadContactAvatar), поэтому
+        // картинка подхватывается из локального кэша мгновенно.
+        function vgAttachMessageAvatar(messageElement, message) {
+            const bg = message.sender_avatar_background || '#0088cc';
+            const initials = vgMessageInitials(message.sender_name);
+            const avatarEl = document.createElement('div');
+            avatarEl.className = 'vg-msg-avatar';
+            avatarEl.style.background = `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
+            avatarEl.textContent = initials;
+            messageElement.appendChild(avatarEl);
+            if (typeof loadContactAvatar === 'function') {
+                loadContactAvatar(avatarEl, message.sender_id, initials, bg);
+            }
+        }
+
+        // Применяет классы/имя/аватар к уже готовому DOM-элементу сообщения.
+        // Вызывается и при первой отрисовке, и при обновлении уже
+        // отрисованного сообщения (когда после него дописались ещё сообщения
+        // того же отправителя и оно перестало быть последним в "пачке").
+        function vgApplyGroupSenderUi(messageElement, message, runInfo) {
+            const showAvatar = !message.is_me && runInfo && runInfo.isLastInRun;
+            const showName = !message.is_me && runInfo && runInfo.isFirstInRun;
+
+            messageElement.classList.toggle('vg-group-msg', !message.is_me && !!runInfo);
+
+            const existingAvatar = messageElement.querySelector('.vg-msg-avatar');
+            if (existingAvatar) existingAvatar.remove();
+            if (showAvatar) vgAttachMessageAvatar(messageElement, message);
+
+            const content = messageElement.querySelector('.message-content');
+            const existingName = messageElement.querySelector('.vg-msg-sender-name');
+            if (existingName) existingName.remove();
+            if (showName && content) content.insertAdjacentHTML('afterbegin', vgSenderNameHtml(message));
+        }
+
+        function renderMessage(message, runInfo) {
             // Плашка вместо пузыря — без времени, статуса, реакций,
             // long-press-меню, свайпа-ответа и выбора.
             if (vgIsGroupSystemMessage(message)) return renderSystemMessage(message);
@@ -9612,6 +9747,7 @@ function getActiveElements() {
 
             renderReactionsOnElement(messageElement, message.reactions);
             attachMessageLongPress(messageElement, message);
+            vgApplyGroupSenderUi(messageElement, message, runInfo);
 
             return messageElement;
         }
@@ -9619,7 +9755,7 @@ function getActiveElements() {
         // Рендерит "альбом" из 2-3 фото одним пузырём сообщения (как в Telegram).
         // Подпись физически хранится только у последнего фото группы в БД, но
         // визуально показывается как общая подпись всего альбома.
-        function renderMessageGroup(groupMessages) {
+        function renderMessageGroup(groupMessages, runInfo) {
             const lastMsg = groupMessages[groupMessages.length - 1];
             const firstMsg = groupMessages[0];
             const groupCaption = groupMessages.map(m => m.caption).find(c => c);
@@ -9667,6 +9803,7 @@ function getActiveElements() {
 
             renderReactionsOnElement(messageElement, lastMsg.reactions);
             attachMessageLongPress(messageElement, lastMsg);
+            vgApplyGroupSenderUi(messageElement, lastMsg, runInfo);
 
             return messageElement;
         }
@@ -15159,6 +15296,32 @@ function stopProfileDataPolling() {
 
             const renderGroups = groupMessagesForRender(messages);
 
+            // Для группового чата размечаем каждую запись флагами "первое/
+            // последнее сообщение подряд идущей пачки одного отправителя" —
+            // используется, чтобы показать имя один раз сверху и аватар один
+            // раз снизу пачки (как в Telegram). Считаем по ПОЛНОМУ списку
+            // каждый раз, поэтому порядок всегда корректен независимо от
+            // того, что уже отрисовано в DOM.
+            const isGroupChatNow = vgIsCurrentChatGroup();
+            const runInfoByKey = new Map();
+            if (isGroupChatNow) {
+                // Ключ пачки для каждой записи (null — своё сообщение, пачки не бывает)
+                const runKeys = renderGroups.map((entry) => {
+                    const repMsg = entry.type === 'group' ? entry.items[entry.items.length - 1] : entry.item;
+                    return repMsg.is_me ? null : vgSenderRunKey(repMsg);
+                });
+                renderGroups.forEach((entry, idx) => {
+                    const key = runKeys[idx];
+                    if (key == null) return;
+                    const prevKey = idx > 0 ? runKeys[idx - 1] : null;
+                    const nextKey = idx < runKeys.length - 1 ? runKeys[idx + 1] : null;
+                    runInfoByKey.set(entry.key, {
+                        isFirstInRun: key !== prevKey,
+                        isLastInRun: key !== nextKey
+                    });
+                });
+            }
+
             // === SMART INCREMENTAL RENDER ===
             // Finds existing messages by data-message-id and only appends new ones
             const existingIds = new Set();
@@ -15209,6 +15372,13 @@ function stopProfileDataPolling() {
                         }
                     }
 
+                    // Пачка отправителя могла измениться (дописалось ещё одно
+                    // сообщение того же автора следом) — перекрашиваем имя/аватар
+                    // уже отрисованного элемента, не трогая остальную разметку.
+                    if (el && !el.classList.contains('vg-system-message')) {
+                        vgApplyGroupSenderUi(el, representativeMessage, runInfoByKey.get(msgId) || null);
+                    }
+
                     // Обновляем текст и метку "изменено", если сообщение было отредактировано
                     if (el && entry.type === 'single' && !el.classList.contains('vg-system-message')) {
                         const message = entry.item;
@@ -15239,7 +15409,8 @@ function stopProfileDataPolling() {
                     lastDateHeader = currentDateHeader;
                 }
                 
-                const messageElement = entry.type === 'group' ? renderMessageGroup(entry.items) : renderMessage(entry.item);
+                const runInfo = runInfoByKey.get(msgId) || null;
+                const messageElement = entry.type === 'group' ? renderMessageGroup(entry.items, runInfo) : renderMessage(entry.item, runInfo);
                 fragment.appendChild(messageElement);
                 addedAny = true;
             });
@@ -20369,6 +20540,11 @@ vgResolveBadgeSrc();
     // означает "сейчас открыт профиль группы" — по нему кнопки Чат/Звук/ещё
     // понимают, что работать надо с группой, а не с контактом.
     window.__vgGroupProfileChatId = null;
+    // Если профиль контакта открыт КЛИКОМ ПО УЧАСТНИКУ внутри профиля группы —
+    // сюда кладётся id этой группы. closeProfileModal() читает это значение,
+    // чтобы при закрытии карточки контакта вернуть пользователя обратно в
+    // профиль группы, а не в чат (см. createMemberRow и closeProfileModal).
+    window.__vgReturnToGroupChatId = null;
     let groupData = null;
 
     function suffixNow() {
@@ -20614,8 +20790,13 @@ vgResolveBadgeSrc();
         item.addEventListener('click', () => {
             const cur = item.__p;
             if (!cur || cur.is_me) return;
+            // Запоминаем группу, из которой открыли участника, ДО того как
+            // closeGroupProfile() обнулит window.__vgGroupProfileChatId.
+            const returnChatId = window.__vgGroupProfileChatId;
             closeGroupProfile();
-            if (typeof openProfileModal === 'function') openProfileModal(cur.platform_user_id);
+            if (typeof openProfileModal === 'function') {
+                openProfileModal(cur.platform_user_id, { returnToGroupChatId: returnChatId });
+            }
         });
 
         updateMemberRow(item, p, data);
@@ -21150,9 +21331,17 @@ vgResolveBadgeSrc();
     // "О себе" оставался display:none до перезагрузки страницы.
     const _vgOrigOpenProfileModal = window.openProfileModal;
     if (typeof _vgOrigOpenProfileModal === 'function') {
-        window.openProfileModal = function () {
+        window.openProfileModal = function (userId, opts) {
             if (window.__vgGroupProfileChatId != null) closeGroupProfile();
             else setContactBlocksHidden(false);
+            // "Куда вернуться" при закрытии карточки контакта: если этот вызов
+            // пришёл из клика по участнику группы (createMemberRow передаёт
+            // opts.returnToGroupChatId) — запоминаем группу. Любой другой путь
+            // открытия профиля контакта (хедер чата, поиск и т.д.) не передаёт
+            // opts — тогда сбрасываем, чтобы не вернуть по ошибке в чужую группу.
+            window.__vgReturnToGroupChatId = (opts && opts.returnToGroupChatId != null)
+                ? opts.returnToGroupChatId
+                : null;
             return _vgOrigOpenProfileModal.apply(this, arguments);
         };
     }
