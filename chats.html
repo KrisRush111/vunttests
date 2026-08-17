@@ -1408,9 +1408,7 @@
 }
 .vg-msg-sender-name {
     display: block;
-    width: 100%;
-    flex: 0 0 100%;
-    order: -1;
+    max-width: 100%;
     font-size: 13px;
     font-weight: 600;
     line-height: 1.3;
@@ -1418,6 +1416,27 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+/* Пузырь с именем отправителя раскладывается КОЛОНКОЙ: имя отдельной
+   строкой сверху, под ним обычное содержимое.
+   Раньше имя вставлялось ВНУТРЬ .message-content (inline-flex, wrap) как
+   элемент с flex: 0 0 100%. В Safari/iOS процентный flex-basis внутри
+   shrink-to-fit контейнера ломает расчёт внутренней ширины: пузырь
+   раздувался в пустой квадрат, а текст выдавливался за его пределы и
+   переносился по одной букве — ровно то, что было видно на скриншоте. */
+.message.vg-has-sender-name {
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    align-items: stretch !important;
+}
+.message.vg-has-sender-name > .message-content {
+    width: auto;
+}
+/* Фото без подписи — имя рисуется плашкой ПОВЕРХ фото (position: absolute),
+   поэтому колонка тут не нужна и только сломала бы раскладку. */
+.message.vg-has-sender-name.message-with-image.no-caption {
+    flex-direction: row !important;
+    align-items: flex-end !important;
 }
 /* Имя отправителя над картинкой без подписи — плашка поверх фото (как время) */
 .message.vg-group-msg.message-with-image.no-caption .vg-msg-sender-name {
@@ -9380,13 +9399,16 @@ function getActiveElements() {
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
                 if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image' });
+                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image', last_message_is_me: true, last_message_is_read: false });
                     
                     const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
                     if (chatIndex !== -1) {
                         currentChatsList[chatIndex].last_message = lastMessagePreview;
                         currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
                         currentChatsList[chatIndex].last_message_type = 'image';
+                        currentChatsList[chatIndex].last_message_is_me = true;
+                        currentChatsList[chatIndex].last_message_sender_id = userData.platform_user_id;
+                        currentChatsList[chatIndex].last_message_sender_nickname = null;
                         currentChatsList[chatIndex].unread_count = 0;
                         
                         const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
@@ -9560,13 +9582,16 @@ function getActiveElements() {
 
                 const lastMessagePreview = caption ? `📷 ${caption}` : `📷 ${files.length} фото`;
                 if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessages[newMessages.length - 1].sent_at, unread_count: 0, last_message_type: 'image' });
+                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessages[newMessages.length - 1].sent_at, unread_count: 0, last_message_type: 'image', last_message_is_me: true, last_message_is_read: false });
 
                     const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
                     if (chatIndex !== -1) {
                         currentChatsList[chatIndex].last_message = lastMessagePreview;
                         currentChatsList[chatIndex].last_message_time = newMessages[newMessages.length - 1].sent_at;
                         currentChatsList[chatIndex].last_message_type = 'image';
+                        currentChatsList[chatIndex].last_message_is_me = true;
+                        currentChatsList[chatIndex].last_message_sender_id = userData.platform_user_id;
+                        currentChatsList[chatIndex].last_message_sender_nickname = null;
                         currentChatsList[chatIndex].unread_count = 0;
 
                         const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
@@ -9688,10 +9713,14 @@ function getActiveElements() {
             if (existingAvatar) existingAvatar.remove();
             if (showAvatar) vgAttachMessageAvatar(messageElement, message);
 
-            const content = messageElement.querySelector('.message-content');
             const existingName = messageElement.querySelector('.vg-msg-sender-name');
             if (existingName) existingName.remove();
-            if (showName && content) content.insertAdjacentHTML('afterbegin', vgSenderNameHtml(message));
+            // Имя вставляем первым потомком САМОГО пузыря (.message), а не
+            // внутрь .message-content — см. комментарий у .vg-has-sender-name
+            // в CSS: внутри inline-flex контейнера полноширинный элемент ломал
+            // ширину пузыря в Safari/iOS.
+            messageElement.classList.toggle('vg-has-sender-name', !!showName);
+            if (showName) messageElement.insertAdjacentHTML('afterbegin', vgSenderNameHtml(message));
         }
 
         function renderMessage(message, runInfo) {
@@ -11020,6 +11049,8 @@ function getActiveElements() {
             chat.last_message_type = previewType;
             chat.last_message_is_me = lastMsg ? !!lastMsg.is_me : false;
             chat.last_message_is_read = lastMsg ? !!lastMsg.is_read : false;
+            chat.last_message_sender_id = lastMsg ? lastMsg.sender_id : null;
+            chat.last_message_sender_nickname = (lastMsg && !lastMsg.is_me) ? (lastMsg.sender_name || null) : null;
 
             updateChatItemInDOM(chatId, {
                 last_message: previewText,
@@ -12396,13 +12427,7 @@ function getActiveElements() {
                 // В группе показываем, кто написал. Своё сообщение — "Вы:",
                 // чужое — ник отправителя, если сервер его прислал
                 // (last_message_sender_nickname); иначе просто текст.
-                if (isGroupChat && lastMessageText) {
-                    if (chat.last_message_is_me) {
-                        lastMessageText = `Вы: ${lastMessageText}`;
-                    } else if (chat.last_message_sender_nickname) {
-                        lastMessageText = `${chat.last_message_sender_nickname}: ${lastMessageText}`;
-                    }
-                }
+                lastMessageText = vgApplyChatPreviewPrefix(chat, lastMessageText);
 
                 const timeLabel = formatChatListDate(chat.last_message_time);
                 const readStatusIcon = getChatReadStatusIcon(chat);
@@ -14124,6 +14149,8 @@ function getActiveElements() {
                             currentChatsList[chatIndex].last_message_time = new Date().toISOString();
                             currentChatsList[chatIndex].last_message_is_me = true;
                             currentChatsList[chatIndex].last_message_is_read = false;
+                            currentChatsList[chatIndex].last_message_sender_id = userData.platform_user_id;
+                            currentChatsList[chatIndex].last_message_sender_nickname = null;
                             currentChatsList[chatIndex].unread_count = 0;
                             
                             const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
@@ -15203,6 +15230,27 @@ function stopProfileDataPolling() {
             });
         }
 
+        // Имя автора последнего сообщения для превью в списке чатов.
+        // Сервер должен присылать last_message_sender_nickname; если он его не
+        // прислал (старая версия /get_chats или /get_chat_info), резолвим ник
+        // локально по last_message_sender_id из участников чата.
+        function vgLastMessageSenderName(chat) {
+            if (!chat) return '';
+            if (chat.last_message_sender_nickname) return chat.last_message_sender_nickname;
+            const senderId = chat.last_message_sender_id;
+            if (senderId == null) return '';
+            const p = (chat.participants || []).find(x => String(x.platform_user_id) === String(senderId));
+            return (p && (p.nickname || p.name)) || '';
+        }
+
+        // "Вы: текст" / "Ник: текст" — только в групповых чатах.
+        function vgApplyChatPreviewPrefix(chat, text) {
+            if (!chat || !chat.is_group || !text) return text;
+            if (chat.last_message_is_me) return `Вы: ${text}`;
+            const name = vgLastMessageSenderName(chat);
+            return name ? `${name}: ${text}` : text;
+        }
+
         function updateChatItemInDOM(chatId, chatData) {
             [chatsListDesktop, chatsListMobile].forEach(list => {
                 if (!list) return;
@@ -15214,6 +15262,14 @@ function stopProfileDataPolling() {
                     if (lastMessageEl && chatData.last_message !== undefined) {
                         let lastMessageText = chatData.last_message || 'Нет сообщений';
                         if (chatData.last_message && (isImageUrl(lastMessageText) || chatData.last_message_type === 'image')) lastMessageText = '📷 Фото';
+                        // Раньше точечное обновление писало голый текст без
+                        // "Вы:"/"Ник:" — префикс появлялся только после полной
+                        // перерисовки списка. chatData часто частичный, поэтому
+                        // недостающие поля берём из currentChatsList.
+                        if (chatData.last_message) {
+                            const cachedChat = currentChatsList.find(c => String(c.id) === String(chatId)) || {};
+                            lastMessageText = vgApplyChatPreviewPrefix(Object.assign({}, cachedChat, chatData), lastMessageText);
+                        }
                         lastMessageEl.textContent = lastMessageText;
                     }
 
