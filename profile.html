@@ -5006,26 +5006,44 @@ const VERIFIED_BADGE_CANDIDATES = [
 ];
 let VG_BADGE_RESOLVED_SRC = null; // сюда попадёт рабочий путь
 
+/* Галочка НЕ рисуется тегом <img>: любую <img> на телефоне можно удержать
+   пальцем и сохранить в галерею ("Добавить в фото"), а на десктопе — вызвать
+   "Сохранить картинку как..." или просто перетащить мышью.
+   Поэтому картинка подкладывается CSS-фоном (background-image) внутрь <span>:
+   у фона нет контекстного меню сохранения и его нельзя перетащить.
+   Путь по-прежнему определяем перебором кандидатов — грузим через Image()
+   только для проверки, в DOM этот объект не попадает. */
 function vgApplyBadgeImage(badge) {
-    const img = document.createElement('img');
-    img.alt = 'Подтверждён';
-    img.decoding = 'async';
+    const layer = document.createElement('span');
+    layer.className = 'vg-badge-img';
+    layer.setAttribute('aria-hidden', 'true');
+    badge.appendChild(layer);
 
+    const setBg = (src) => {
+        layer.style.backgroundImage = `url("${src}")`;
+    };
+
+    if (VG_BADGE_RESOLVED_SRC) { setBg(VG_BADGE_RESOLVED_SRC); return; }
+
+    const probe = new Image();
+    probe.decoding = 'async';
     let i = 0;
     const tryNext = () => {
-        if (VG_BADGE_RESOLVED_SRC) { img.src = VG_BADGE_RESOLVED_SRC; return; }
         if (i >= VERIFIED_BADGE_CANDIDATES.length) {
             console.warn('[verified badge] gal.webp не найден ни по одному пути:',
                 VERIFIED_BADGE_CANDIDATES, '— показываю встроенный SVG');
+            layer.remove();
             badge.innerHTML = VERIFIED_BADGE_SVG;
             return;
         }
-        img.src = VERIFIED_BADGE_CANDIDATES[i++];
+        probe.src = VERIFIED_BADGE_CANDIDATES[i++];
     };
-    img.onerror = tryNext;
-    img.onload = () => { VG_BADGE_RESOLVED_SRC = img.getAttribute('src'); };
+    probe.onerror = tryNext;
+    probe.onload = () => {
+        VG_BADGE_RESOLVED_SRC = probe.getAttribute('src');
+        setBg(VG_BADGE_RESOLVED_SRC);
+    };
     tryNext();
-    badge.appendChild(img);
 }
 const VERIFIED_BADGE_SVG = `
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -5050,6 +5068,9 @@ function setNicknameWithBadge(el, nickname, verified) {
         const badge = document.createElement('span');
         badge.className = 'vg-verified-badge';
         badge.title = 'Подтверждённый аккаунт';
+        // Запрет перетаскивания и долгого удержания (см. блок vg-badge-noSave)
+        badge.setAttribute('draggable', 'false');
+        badge.setAttribute('unselectable', 'on');
         if (VERIFIED_BADGE_SRC) {
             vgApplyBadgeImage(badge);
         } else {
@@ -7622,9 +7643,48 @@ body.photo-viewer-open .bottom-nav { display: none !important; }
 
 /* Картинка gal.webp по краям имеет прозрачные поля, из-за которых видимая
    галочка кажется меньше и «сидит» не по центру строки. Компенсируем
-   лёгким масштабом внутри бокса — сам бокс остаётся ровным. */
+   лёгким масштабом внутри бокса — сам бокс остаётся ровным.
+   Раньше это был transform: scale(1.12) на <img>; теперь картинка — фон,
+   поэтому тот же эффект даёт background-size: 112%. */
 .vg-verified-badge img {
     transform: scale(1.12);
+}
+
+.vg-verified-badge .vg-badge-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: 112% 112%;
+    /* фон нельзя ни выделить, ни перетащить, ни сохранить долгим нажатием */
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   ЗАЩИТА ГАЛОЧКИ ОТ СОХРАНЕНИЯ (долгое удержание / контекстное меню / drag)
+   ========================================================================== */
+.vg-verified-badge,
+.vg-verified-badge *,
+.vg-verified-badge img,
+.vg-verified-badge svg,
+.vg-verified-badge .vg-badge-img {
+    -webkit-touch-callout: none !important; /* iOS: убирает меню "Сохранить фото" */
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+    -webkit-user-drag: none !important;
+    -khtml-user-drag: none !important;
+    -moz-user-drag: none !important;
+    user-drag: none !important;
+}
+/* Внутренности бейджа не принимают события — долгое нажатие/правый клик
+   всегда попадают в сам <span>, где мы их и отменяем. */
+.vg-verified-badge img,
+.vg-verified-badge svg,
+.vg-verified-badge .vg-badge-img {
+    pointer-events: none !important;
 }
 
 /* ==========================================================================
@@ -7834,6 +7894,63 @@ html[data-theme="dark"] .vg-verified-tooltip {
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') hide();
     });
+})();
+</script>
+
+<script id="vg-badge-noSave">
+/* ==========================================================================
+   ГАЛОЧКУ ВЕРИФИКАЦИИ НЕЛЬЗЯ СОХРАНИТЬ
+
+   Картинка теперь подложена CSS-фоном, но на всякий случай (и для встроенного
+   SVG-фолбэка) глушим все жесты, которыми браузер предлагает сохранить или
+   вытащить изображение:
+     • contextmenu  — правый клик "Сохранить изображение как..." на десктопе;
+     • dragstart    — перетаскивание картинки мышью в папку/другую вкладку;
+     • selectstart / copy — выделение и копирование бейджа вместе с ником;
+     • долгое удержание на touch — Android Chrome иногда всё равно поднимает
+       контекстное меню, поэтому дополнительно отменяем его после 350 мс
+       удержания без движения пальца.
+   Делегирование на document — работает и для бейджей, созданных позже.
+   ========================================================================== */
+(function () {
+    const onBadge = (e) => (e.target && e.target.closest)
+        ? e.target.closest('.vg-verified-badge')
+        : null;
+
+    function block(e) {
+        if (!onBadge(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+    }
+
+    document.addEventListener('contextmenu', block, true);
+    document.addEventListener('dragstart', block, true);
+    document.addEventListener('drag', block, true);
+    document.addEventListener('selectstart', block, true);
+
+    // Android Chrome: подавляем контекстное меню от долгого нажатия
+    let holdTimer = null;
+    let suppressUntil = 0;
+
+    document.addEventListener('touchstart', function (e) {
+        if (!onBadge(e)) return;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(() => { suppressUntil = Date.now() + 1200; }, 350);
+    }, { capture: true, passive: true });
+
+    ['touchend', 'touchcancel', 'touchmove'].forEach((type) => {
+        document.addEventListener(type, function () {
+            clearTimeout(holdTimer);
+        }, { capture: true, passive: true });
+    });
+
+    document.addEventListener('contextmenu', function (e) {
+        if (Date.now() < suppressUntil) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, true);
 })();
 </script>
 
