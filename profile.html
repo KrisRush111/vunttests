@@ -4910,10 +4910,69 @@ window.addEventListener("beforeunload", () => {
 
      
 // Функция для проверки, является ли значение "не указано" (с учётом вариантов)
+/* Приводим значение к чистой строке: убираем неразрывные/невидимые пробелы,
+   переводы строк и пробелы по краям. Значения вида " " (один пробел) раньше
+   считались "заполненными" — из-за этого в "О себе" появлялись пустые строки
+   (Класс, Доп. школа, Направление, Курс). */
+function cleanValue(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/[\ \​\‎\‏\﻿]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function isNotSpecified(value) {
-    if (!value || typeof value !== 'string') return true; // Пустое или не строка — считаем не указано
-    const lower = value.toLowerCase().trim();
-    return lower === 'не указано' || lower === 'не указан' || lower === 'не ук' || lower === 'не укне ук' || lower === 'NULL';
+    const clean = cleanValue(value);
+    if (!clean) return true; // пусто, пробелы, null, undefined
+    const lower = clean.toLowerCase();
+    const junk = [
+        'не указано', 'не указан', 'не указана', 'не указаны', 'не ук', 'не укне ук',
+        'не задано', 'не заполнено', 'неизвестно', 'нет', 'нету', 'отсутствует',
+        'null', 'none', 'undefined', 'nan', 'n/a', 'na', 'empty', 'пусто',
+        '0', '?', '-', '--', '—', '–', '.', '..', '...'
+    ];
+    if (junk.indexOf(lower) !== -1) return true;
+    if (/^не\s*ук/.test(lower)) return true;          // "не ук", "не указ..." в любом виде
+    if (/^[-\–\—_.\s?]+$/.test(lower)) return true; // только тире/точки/подчёркивания
+    return false;
+}
+
+/* Единая отрисовка строки в "О себе": либо строка с чистым значением,
+   либо строка полностью скрыта. Пустых строк больше не бывает. */
+function applyDetail(containerEl, valueEl, rawValue) {
+    const container = containerEl || (valueEl && valueEl.parentElement);
+    if (!container || !valueEl) return false;
+    if (isNotSpecified(rawValue)) {
+        valueEl.textContent = '';
+        container.style.display = 'none';
+        return false;
+    }
+    valueEl.textContent = cleanValue(rawValue);
+    container.style.display = 'flex';
+    return true;
+}
+
+/* Страховка на случай, если строку отрисовал другой участок кода:
+   прячем любую строку без значения, а если пустая вся карточка — скрываем
+   и сам блок "О себе". */
+function pruneEmptyDetails() {
+    document.querySelectorAll('.profile-details').forEach(function (card) {
+        let visible = 0;
+        card.querySelectorAll('.detail-item').forEach(function (item) {
+            const valueEl = item.querySelector('.detail-value');
+            const text = valueEl ? cleanValue(valueEl.textContent) : '';
+            if (!text || isNotSpecified(text)) {
+                item.style.display = 'none';
+            } else {
+                if (valueEl.textContent !== text) valueEl.textContent = text;
+                visible++;
+            }
+        });
+        const title = card.querySelector('.profile-details-title');
+        if (title) title.style.display = visible ? '' : 'none';
+        card.style.display = visible ? '' : 'none';
+    });
 }
 
 /* ==========================================================================
@@ -5021,64 +5080,25 @@ function updateProfileUI() {
     }
     const subjectText = subjects.join(', ');
 
+    // Класс: собираем из номера и буквы уже ОЧИЩЕННЫМИ значениями.
+    // Раньше class_number = " " и class_letter = " " давали строку "  ",
+    // которая считалась заполненной и рисовала пустую строку "Класс".
+    const classNumberClean = isNotSpecified(userData.class_number) ? '' : cleanValue(userData.class_number);
+    const classLetterClean = isNotSpecified(userData.class_letter) ? '' : cleanValue(userData.class_letter);
+    const classValue = (classNumberClean && classLetterClean) ? `${classNumberClean}${classLetterClean}` : '';
+
     // Update mobile profile elements (used in profileModalMobile)
     AvatarCache.render(SERVER_URL, profileAvatarMobile, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
     setNicknameWithBadge(profileNicknameMobile, nickname, isUserVerified());
     profileIdMobile.textContent = `ID: ${platformId}`;
     
     // Проверка и отображение полей в "О себе" для мобильной версии
-    // Школа
-    if (isNotSpecified(userData.main_school_name)) {
-        mainSchoolMobile.parentElement.style.display = 'none';
-    } else {
-        mainSchoolMobile.parentElement.style.display = 'flex';
-        mainSchoolMobile.textContent = userData.main_school_name;
-    }
-    
-    // Класс (проверяем комбинацию class_number и class_letter)
-    const classValue = (userData.class_number && userData.class_letter && !isNotSpecified(userData.class_number) && !isNotSpecified(userData.class_letter))
-        ? `${userData.class_number}${userData.class_letter}`
-        : null;
-    if (!classValue) {
-        userClassMobile.parentElement.style.display = 'none';
-    } else {
-        userClassMobile.parentElement.style.display = 'flex';
-        userClassMobile.textContent = classValue;
-    }
-    
-    // Роль
-    if (isNotSpecified(userData.identity)) {
-        userRoleMobile.parentElement.style.display = 'none';
-    } else {
-        userRoleMobile.parentElement.style.display = 'flex';
-        userRoleMobile.textContent = userData.identity;
-    }
-    
-    // Доп. школа
-    const additionalSchoolValueMobile = userData.additional_school_name;
-    const hasAdditionalSchoolMobile = additionalSchoolValueMobile && !isNotSpecified(additionalSchoolValueMobile);
-    if (!hasAdditionalSchoolMobile) {
-        additionalSchoolContainerMobile.style.display = 'none';
-    } else {
-        additionalSchoolContainerMobile.style.display = 'flex';
-        additionalSchoolMobile.textContent = additionalSchoolValueMobile;
-    }
-    
-    // Направление (независимо от Доп. школы)
-    if (isNotSpecified(userData.specialization)) {
-        specializationContainerMobile.style.display = 'none';
-    } else {
-        specializationContainerMobile.style.display = 'flex';
-        userSpecializationMobile.textContent = userData.specialization;
-    }
-    
-    // Курс (независимо от Доп. школы)
-    if (isNotSpecified(userData.course)) {
-        courseContainerMobile.style.display = 'none';
-    } else {
-        courseContainerMobile.style.display = 'flex';
-        userCourseMobile.textContent = userData.course;
-    }
+    applyDetail(null, mainSchoolMobile, userData.main_school_name);
+    applyDetail(null, userClassMobile, classValue);
+    applyDetail(null, userRoleMobile, userData.identity);
+    applyDetail(additionalSchoolContainerMobile, additionalSchoolMobile, userData.additional_school_name);
+    applyDetail(specializationContainerMobile, userSpecializationMobile, userData.specialization);
+    applyDetail(courseContainerMobile, userCourseMobile, userData.course);
 
     // Предметы (только для учителей)
     if (isTeacher && subjectText) {
@@ -5100,7 +5120,7 @@ function updateProfileUI() {
             userSubjectMobile = document.getElementById('user-subject');
         }
         
-        userSubjectMobile.textContent = subjectText;
+        userSubjectMobile.textContent = cleanValue(subjectText);
         subjectContainerMobile.style.display = 'flex';
     } else {
         // Скрываем блок с предметами для не-учителей или если нет предметов
@@ -5126,58 +5146,12 @@ function updateProfileUI() {
     desktopProfileId.textContent = `ID: ${platformId}`;
     
     // Проверка и отображение полей в "О себе" для десктопной версии
-    // Школа
-    if (isNotSpecified(userData.main_school_name)) {
-        desktopMainSchool.parentElement.style.display = 'none';
-    } else {
-        desktopMainSchool.parentElement.style.display = 'flex';
-        desktopMainSchool.textContent = userData.main_school_name;
-    }
-    
-    // Класс
-    const desktopClassValue = (userData.class_number && userData.class_letter && !isNotSpecified(userData.class_number) && !isNotSpecified(userData.class_letter))
-        ? `${userData.class_number}${userData.class_letter}`
-        : null;
-    if (!desktopClassValue) {
-        desktopUserClass.parentElement.style.display = 'none';
-    } else {
-        desktopUserClass.parentElement.style.display = 'flex';
-        desktopUserClass.textContent = desktopClassValue;
-    }
-    
-    // Роль
-    if (isNotSpecified(userData.identity)) {
-        desktopUserRole.parentElement.style.display = 'none';
-    } else {
-        desktopUserRole.parentElement.style.display = 'flex';
-        desktopUserRole.textContent = userData.identity;
-    }
-    
-    // Доп. школа
-    const additionalSchoolValueDesktop = userData.additional_school_name;
-    const hasAdditionalSchoolDesktop = additionalSchoolValueDesktop && !isNotSpecified(additionalSchoolValueDesktop);
-    if (!hasAdditionalSchoolDesktop) {
-        desktopAdditionalSchoolContainer.style.display = 'none';
-    } else {
-        desktopAdditionalSchoolContainer.style.display = 'flex';
-        desktopAdditionalSchool.textContent = additionalSchoolValueDesktop;
-    }
-    
-    // Направление (независимо от Доп. школы)
-    if (isNotSpecified(userData.specialization)) {
-        desktopSpecializationContainer.style.display = 'none';
-    } else {
-        desktopSpecializationContainer.style.display = 'flex';
-        desktopUserSpecialization.textContent = userData.specialization;
-    }
-    
-    // Курс (независимо от Доп. школы)
-    if (isNotSpecified(userData.course)) {
-        desktopCourseContainer.style.display = 'none';
-    } else {
-        desktopCourseContainer.style.display = 'flex';
-        desktopUserCourse.textContent = userData.course;
-    }
+    applyDetail(null, desktopMainSchool, userData.main_school_name);
+    applyDetail(null, desktopUserClass, classValue);
+    applyDetail(null, desktopUserRole, userData.identity);
+    applyDetail(desktopAdditionalSchoolContainer, desktopAdditionalSchool, userData.additional_school_name);
+    applyDetail(desktopSpecializationContainer, desktopUserSpecialization, userData.specialization);
+    applyDetail(desktopCourseContainer, desktopUserCourse, userData.course);
 
     // Предметы для десктопной версии (только для учителей)
     if (isTeacher && subjectText) {
@@ -5199,7 +5173,7 @@ function updateProfileUI() {
             desktopUserSubject = document.getElementById('desktop-user-subject');
         }
         
-        desktopUserSubject.textContent = subjectText;
+        desktopUserSubject.textContent = cleanValue(subjectText);
         desktopSubjectContainer.style.display = 'flex';
     } else {
         // Скрываем блок с предметами для не-учителей или если нет предметов
@@ -5208,6 +5182,9 @@ function updateProfileUI() {
             desktopSubjectContainer.style.display = 'none';
         }
     }
+
+    // Финальная страховка от пустых строк в "О себе"
+    pruneEmptyDetails();
 }
 
    
