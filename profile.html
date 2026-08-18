@@ -8245,5 +8245,112 @@ html[data-theme="dark"] .vg-verified-tooltip {
 })();
 </script>
 
+
+<style id="vg-mobile-modal-scroll-fix">
+@media (max-width: 767px) {
+    .profile-modal {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y;
+    }
+
+    .profile-modal.visible {
+        display: block !important;
+    }
+
+    .profile-modal > .profile-modal-content {
+        flex: 0 0 auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+    }
+
+    #profileModalMobile > .profile-modal-content {
+        padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    #privacyModuleMobile > .profile-modal-content,
+    #notificationsModuleMobile > .profile-modal-content,
+    #appearanceModuleMobile > .profile-modal-content {
+        margin-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+}
+</style>
+
+<script id="vg-mobile-modal-scroll-fix-js">
+(function () {
+    var isMobile = function () { return window.matchMedia('(max-width: 767px)').matches; };
+
+    var busy = false;
+
+    function nudge(el) {
+        if (!el || busy || !isMobile()) return;
+        busy = true;
+        el.style.overflowY = 'hidden';
+        void el.offsetHeight;
+        el.style.overflowY = 'auto';
+        busy = false;
+    }
+
+    function nudgeVisible() {
+        document.querySelectorAll('.profile-modal.visible').forEach(nudge);
+    }
+
+    function watch() {
+        var modals = document.querySelectorAll('.profile-modal');
+        if (!modals.length) return;
+
+        var mo = new MutationObserver(function (records) {
+            records.forEach(function (r) {
+                var el = r.target;
+                if (el.classList && el.classList.contains('visible')) {
+                    requestAnimationFrame(function () {
+                        nudge(el);
+                        setTimeout(function () { nudge(el); }, 120);
+                        setTimeout(function () { nudge(el); }, 400);
+                    });
+                }
+            });
+        });
+
+        modals.forEach(function (m) {
+            mo.observe(m, { attributes: true, attributeFilter: ['class'] });
+            var content = m.querySelector('.profile-modal-content');
+            if (content) {
+                new MutationObserver(function () {
+                    if (m.classList.contains('visible')) nudge(m);
+                }).observe(content, { childList: true, subtree: true });
+            }
+            m.addEventListener('transitionend', function (e) {
+                if (e.propertyName === 'height' || e.propertyName === 'margin-bottom') nudge(m);
+            }, true);
+        });
+
+        window.addEventListener('resize', nudgeVisible);
+        window.addEventListener('orientationchange', function () { setTimeout(nudgeVisible, 250); });
+        window.addEventListener('load', nudgeVisible);
+        document.addEventListener('load', function (e) {
+            if (e.target && e.target.tagName === 'IMG') nudgeVisible();
+        }, true);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', watch);
+    } else {
+        watch();
+    }
+})();
+</script>
+
 </body>
 </html>
