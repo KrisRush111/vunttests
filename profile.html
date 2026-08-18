@@ -4945,11 +4945,17 @@ function applyDetail(containerEl, valueEl, rawValue) {
     if (!container || !valueEl) return false;
     if (isNotSpecified(rawValue)) {
         valueEl.textContent = '';
+        // ВАЖНО: только inline-стиля не хватает — правило
+        // `#profileModalDesktop .detail-item { display: flex !important }`
+        // перебивало его, поэтому на десктопе пустые строки оставались
+        // видимыми. Класс vg-detail-hidden объявлен с !important.
+        container.classList.add('vg-detail-hidden');
         container.style.display = 'none';
         return false;
     }
     valueEl.textContent = cleanValue(rawValue);
-    container.style.display = 'flex';
+    container.classList.remove('vg-detail-hidden');
+    container.style.display = '';
     return true;
 }
 
@@ -4963,14 +4969,17 @@ function pruneEmptyDetails() {
             const valueEl = item.querySelector('.detail-value');
             const text = valueEl ? cleanValue(valueEl.textContent) : '';
             if (!text || isNotSpecified(text)) {
+                item.classList.add('vg-detail-hidden');
                 item.style.display = 'none';
             } else {
                 if (valueEl.textContent !== text) valueEl.textContent = text;
+                item.classList.remove('vg-detail-hidden');
                 visible++;
             }
         });
         const title = card.querySelector('.profile-details-title');
         if (title) title.style.display = visible ? '' : 'none';
+        card.classList.toggle('vg-detail-hidden', !visible);
         card.style.display = visible ? '' : 'none';
     });
 }
@@ -5237,11 +5246,15 @@ function updateProfileUI() {
         function openDesktopProfile() {
             showDesktopModule(profileModalDesktop);
             // updateProfileUI() не вызываем — данные уже загружены при инициализации
+            // но пустые строки перепроверяем: карточка могла быть отрисована
+            // до того, как применились десктопные стили
+            pruneEmptyDetails();
         }
 
         function openMobileProfile() {
             showMobileModal(profileModalMobile);
             // updateProfileUI() не вызываем — данные уже загружены при инициализации
+            pruneEmptyDetails();
         }
 
        
@@ -6736,6 +6749,19 @@ window.addEventListener('DOMContentLoaded', () => {
     @media (prefers-color-scheme: dark) {
         #profileModalDesktop .detail-item:hover { background-color: rgba(255,255,255,.04); }
     }
+}
+
+/* ====== СКРЫТИЕ ПУСТЫХ СТРОК «О СЕБЕ» (важно: идёт ПОСЛЕ всех правил) ======
+   `#profileModalDesktop .detail-item` объявлен с `display: flex !important`,
+   поэтому inline `style="display:none"` из JS на десктопе не срабатывал и
+   в карточке «О СЕБЕ» висели пустые строки. Этот селектор специфичнее и
+   тоже !important — он всегда побеждает. */
+#profileModalDesktop .detail-item.vg-detail-hidden,
+#profileModalMobile .detail-item.vg-detail-hidden,
+.profile-details .detail-item.vg-detail-hidden,
+.detail-item.vg-detail-hidden,
+.profile-details.vg-detail-hidden {
+    display: none !important;
 }
 </style>
 
