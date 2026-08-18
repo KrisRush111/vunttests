@@ -1435,6 +1435,16 @@
             background: linear-gradient(135deg, #29b6ff, #0088ff);
             box-shadow: 0 4px 12px rgba(0, 136, 255, 0.4);
         }
+        /* Голубой Telegram — иконка раздела «Канал в Telegram» */
+        .settings-item-icon.telegram {
+            background: linear-gradient(135deg, #37bbfe, #007dbb);
+            box-shadow: 0 4px 12px rgba(42, 171, 238, 0.45);
+        }
+        /* Салатовый — иконка раздела «Поддержка» */
+        .settings-item-icon.lime {
+            background: linear-gradient(135deg, #baff45, #7ed321);
+            box-shadow: 0 4px 12px rgba(150, 220, 40, 0.45);
+        }
 
         /* ===== Раздел "Уведомления" ===== */
         .notifications-container {
@@ -3097,9 +3107,19 @@ input:checked + .toggle-slider:before {
             </div>
 
             <div class="vg-group">
+                <div id="tgChannelBtn" class="settings-item">
+                    <div class="settings-item-icon telegram"><i class="fab fa-telegram-plane"></i></div>
+                    <div class="settings-item-label">Канал в Telegram</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
                 <div id="faqBtn" class="settings-item">
                     <div class="settings-item-icon purple"><i class="fas fa-question"></i></div>
                     <div class="settings-item-label">Vuntgram FAQ</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
+                <div id="supportBtn" class="settings-item">
+                    <div class="settings-item-icon lime"><i class="fas fa-headset"></i></div>
+                    <div class="settings-item-label">Поддержка</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
             </div>
@@ -3308,11 +3328,21 @@ input:checked + .toggle-slider:before {
                 </div>
             </div>
 
-            <!-- 3. Vuntgram FAQ -->
+            <!-- 3. Канал в Telegram + Vuntgram FAQ + Поддержка -->
             <div class="vg-group">
+                <div id="tgChannelBtnMobile" class="settings-item">
+                    <div class="settings-item-icon telegram"><i class="fab fa-telegram-plane"></i></div>
+                    <div class="settings-item-label">Канал в Telegram</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
                 <div id="faqBtnMobile" class="settings-item">
                     <div class="settings-item-icon purple"><i class="fas fa-question"></i></div>
                     <div class="settings-item-label">Vuntgram FAQ</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
+                <div id="supportBtnMobile" class="settings-item">
+                    <div class="settings-item-icon lime"><i class="fas fa-headset"></i></div>
+                    <div class="settings-item-label">Поддержка</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
             </div>
@@ -3746,12 +3776,16 @@ input:checked + .toggle-slider:before {
         const notificationsBtn = document.getElementById('notificationsBtn'); // Desktop
         const appearanceBtn = document.getElementById('appearanceBtn'); // Desktop
         const faqBtn = document.getElementById('faqBtn'); // Desktop
+        const supportBtn = document.getElementById('supportBtn'); // Desktop
+        const tgChannelBtn = document.getElementById('tgChannelBtn'); // Desktop
 
         const myProfileBtnMobile = document.getElementById('myProfileBtnMobile'); // Mobile
         const privacyBtnMobile = document.getElementById('privacyBtnMobile'); // Mobile
         const notificationsBtnMobile = document.getElementById('notificationsBtnMobile'); // Mobile
         const appearanceBtnMobile = document.getElementById('appearanceBtnMobile'); // Mobile
         const faqBtnMobile = document.getElementById('faqBtnMobile'); // Mobile
+        const supportBtnMobile = document.getElementById('supportBtnMobile'); // Mobile
+        const tgChannelBtnMobile = document.getElementById('tgChannelBtnMobile'); // Mobile
 
         const profileModalMobileBackBtn = document.getElementById('profileModalMobileBackBtn');
         const privacyModuleMobileBackBtn = document.getElementById('privacyModuleMobileBackBtn');
@@ -5249,12 +5283,48 @@ function updateProfileUI() {
                 return;
             }
 
-            // Ровно как в contacts.html: локальная копия из AvatarCache, иначе
-            // серверный URL, и всё показывает полноэкранный photo viewer
-            // (object-fit: contain, без кропа и смещения).
-            const local = await AvatarCache.getLocal(userData.platform_user_id);
-            const src = local?.dataUrl || `${SERVER_URL}/avatar/${userData.platform_user_id}`;
-            openPhotoViewer(src, userData.nickname || '');
+            // Просмотрщик открываем ровно как в chats.html — фото на весь экран.
+            // ВАЖНО: раньше сюда всегда попадала миниатюра из AvatarCache
+            // (маленький квадрат под кружок аватарки), поэтому на десктопе фото
+            // открывалось крошечным. Теперь выбираем самый крупный доступный
+            // кадр: локальная полноразмерная копия -> /avatar_full -> /avatar,
+            // и только в самом конце — миниатюра из кэша.
+            const uid = userData.platform_user_id;
+
+            function probe(url) {
+                return new Promise((resolve) => {
+                    if (!url) return resolve(null);
+                    const im = new Image();
+                    im.onload = () => resolve({ url, w: im.naturalWidth || 0 });
+                    im.onerror = () => resolve(null);
+                    im.src = url;
+                });
+            }
+
+            const fullLocal = getFullAvatarLocal(uid);
+            if (fullLocal) {
+                openPhotoViewer(fullLocal, userData.nickname || '');
+                return;
+            }
+
+            const cached = await AvatarCache.getLocal(uid);
+            // мгновенно показываем то, что уже есть (без пустого чёрного экрана),
+            // затем подменяем на крупный кадр, когда он загрузится
+            const placeholder = cached?.dataUrl || `${SERVER_URL}/avatar/${uid}`;
+            openPhotoViewer(placeholder, userData.nickname || '');
+
+            const results = (await Promise.all([
+                probe(`${SERVER_URL}/avatar_full/${uid}`),
+                probe(`${SERVER_URL}/avatar/${uid}`)
+            ])).filter(Boolean);
+
+            if (results.length) {
+                const best = results.sort((a, b) => b.w - a.w)[0];
+                const viewerImg = document.getElementById('photoViewerImg');
+                if (viewerImg && best.url && viewerImg.src !== best.url) {
+                    viewerImg.src = best.url;
+                }
+            }
         }
 
         function closeAvatarModal() {
@@ -5425,9 +5495,21 @@ function updateProfileUI() {
             refreshNotificationsSection();
         });
         appearanceBtn.addEventListener('click', () => showDesktopModule(appearanceModule));
+        // Канал в Telegram
+        if (tgChannelBtn) {
+            tgChannelBtn.addEventListener('click', () => {
+                window.open('https://t.me/vuntgram', '_blank', 'noopener');
+            });
+        }
         faqBtn.addEventListener('click', () => {
             window.open('https://thevuntgram.vercel.app', '_blank'); 
         });
+        // Поддержка — Telegram-бот
+        if (supportBtn) {
+            supportBtn.addEventListener('click', () => {
+                window.open('https://t.me/VuntgramSupport_bot', '_blank', 'noopener');
+            });
+        }
         desktopSidebarHeader.addEventListener('click', openDesktopProfile); // Click on header to open profile
 
         // Mobile Navigation
@@ -5438,9 +5520,21 @@ function updateProfileUI() {
             refreshNotificationsSection();
         });
         appearanceBtnMobile.addEventListener('click', () => showMobileModal(appearanceModuleMobile));
+        // Канал в Telegram
+        if (tgChannelBtnMobile) {
+            tgChannelBtnMobile.addEventListener('click', () => {
+                window.open('https://t.me/vuntgram', '_blank', 'noopener');
+            });
+        }
         faqBtnMobile.addEventListener('click', () => {
             window.open('https://thevuntgram.vercel.app', '_blank'); 
         });
+        // Поддержка — Telegram-бот
+        if (supportBtnMobile) {
+            supportBtnMobile.addEventListener('click', () => {
+                window.open('https://t.me/VuntgramSupport_bot', '_blank', 'noopener');
+            });
+        }
         mobileSidebarHeader.addEventListener('click', openMobileProfile); // Click on header to open profile
 
         // Mobile Back Buttons
@@ -7165,12 +7259,28 @@ window.addEventListener('DOMContentLoaded', () => {
 }
 
 .photo-viewer-img {
+    /* Фото всегда разворачивается на весь просмотрщик, как в chats.html.
+       Раньше стояло только max-width/max-height, поэтому маленькая
+       миниатюра аватарки показывалась крошечной в центре чёрного экрана.
+       object-fit: contain сохраняет пропорции и не режет кадр. */
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     user-select: none;
     -webkit-user-drag: none;
     cursor: default;
+}
+
+/* На десктопе оставляем воздух по краям — как в chats.html */
+@media (min-width: 768px) {
+    .photo-viewer-img {
+        width: 92vw;
+        height: 86vh;
+        max-width: 92vw;
+        max-height: 86vh;
+    }
 }
 
 .photo-viewer-footer {
