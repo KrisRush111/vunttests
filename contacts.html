@@ -8775,6 +8775,33 @@ function setupSearchHandlers() {
    как в chats.html. */
 
 /* ==========================================================================
+   ЗАЩИТА ГАЛОЧКИ ОТ СОХРАНЕНИЯ (долгое удержание / контекстное меню / drag)
+   Точь-в-точь как в profile.html.
+   ========================================================================== */
+.vg-verified-badge,
+.vg-verified-badge *,
+.vg-verified-badge img,
+.vg-verified-badge svg,
+.vg-verified-badge .vg-badge-img {
+    -webkit-touch-callout: none !important; /* iOS: убирает меню "Сохранить фото" */
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+    -webkit-user-drag: none !important;
+    -khtml-user-drag: none !important;
+    -moz-user-drag: none !important;
+    user-drag: none !important;
+}
+/* Внутренности бейджа не принимают события — долгое нажатие/правый клик
+   всегда попадают в сам <span>, где мы их и отменяем. */
+.vg-verified-badge img,
+.vg-verified-badge svg,
+.vg-verified-badge .vg-badge-img {
+    pointer-events: none !important;
+}
+
+/* ==========================================================================
    ПОДСКАЗКА «Верифицирован Vuntgram» — по нажатию на галочку
    ========================================================================== */
 .vg-verified-tooltip {
@@ -9720,5 +9747,63 @@ vgResolveBadgeSrc();
 })();
 </script>
 
+
+<script id="vg-badge-noSave">
+/* ==========================================================================
+   ГАЛОЧКУ ВЕРИФИКАЦИИ НЕЛЬЗЯ СОХРАНИТЬ (как в profile.html)
+
+   Глушим все жесты, которыми браузер предлагает сохранить или вытащить
+   изображение бейджа:
+     • contextmenu  — правый клик "Сохранить изображение как..." на десктопе;
+     • dragstart    — перетаскивание картинки мышью в папку/другую вкладку;
+     • selectstart / copy — выделение и копирование бейджа вместе с ником;
+     • долгое удержание на touch — Android Chrome иногда всё равно поднимает
+       контекстное меню, поэтому дополнительно отменяем его после 350 мс
+       удержания без движения пальца.
+   Делегирование на document — работает и для бейджей, созданных позже
+   (список контактов и рекомендации дорисовываются динамически).
+   ========================================================================== */
+(function () {
+    const onBadge = (e) => (e.target && e.target.closest)
+        ? e.target.closest('.vg-verified-badge')
+        : null;
+
+    function block(e) {
+        if (!onBadge(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+    }
+
+    document.addEventListener('contextmenu', block, true);
+    document.addEventListener('dragstart', block, true);
+    document.addEventListener('drag', block, true);
+    document.addEventListener('selectstart', block, true);
+    document.addEventListener('copy', block, true);
+
+    // Android Chrome: подавляем контекстное меню от долгого нажатия
+    let holdTimer = null;
+    let suppressUntil = 0;
+
+    document.addEventListener('touchstart', function (e) {
+        if (!onBadge(e)) return;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(() => { suppressUntil = Date.now() + 1200; }, 350);
+    }, { capture: true, passive: true });
+
+    ['touchend', 'touchcancel', 'touchmove'].forEach((type) => {
+        document.addEventListener(type, function () {
+            clearTimeout(holdTimer);
+        }, { capture: true, passive: true });
+    });
+
+    document.addEventListener('contextmenu', function (e) {
+        if (Date.now() < suppressUntil) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, true);
+})();
+</script>
 </body>
 </html>
