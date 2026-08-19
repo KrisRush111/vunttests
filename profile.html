@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Профиль - TheVuntgram</title>
 
     <!--
@@ -8337,6 +8337,122 @@ html[data-theme="dark"] .vg-verified-tooltip {
         if (!document.hidden) schedule();
     });
     window.addEventListener('load', function () { setTimeout(apply, 60); });
+})();
+</script>
+
+
+<!-- ==========================================================================
+     ЗАПРЕТ КОПИРОВАНИЯ И МАСШТАБИРОВАНИЯ СТРАНИЦЫ
+
+     Что блокируется:
+       • выделение текста, копирование / вырезание, drag'n'drop контента;
+       • контекстное меню (правый клик и долгое удержание на touch);
+       • pinch-to-zoom и двойной тап (iOS Safari — через gesture* + ручной
+         double-tap detector, т.к. Safari игнорирует user-scalable=no);
+       • Ctrl/⌘ + колесо мыши и Ctrl/⌘ + "+/-/0" на десктопе.
+
+     Что НЕ ломается: поля ввода (input, textarea, contenteditable) остаются
+     полностью рабочими — там текст выделяется, копируется и вставляется.
+     ========================================================================== -->
+<style id="vg-no-copy-no-zoom-css">
+    html, body {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none !important;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: pan-x pan-y;          /* скролл есть, pinch-zoom нет */
+        text-size-adjust: 100%;
+        -webkit-text-size-adjust: 100%;
+    }
+
+    /* Ввод текста должен работать полностью */
+    input, textarea, select, [contenteditable="true"], [contenteditable=""] {
+        -webkit-user-select: text !important;
+        -moz-user-select: text !important;
+        -ms-user-select: text !important;
+        user-select: text !important;
+        -webkit-touch-callout: default !important;
+    }
+
+    img, video, canvas, svg {
+        -webkit-user-drag: none;
+        user-drag: none;
+        -webkit-touch-callout: none;
+    }
+</style>
+
+<script id="vg-no-copy-no-zoom-js">
+(function () {
+    const EDITABLE = 'input, textarea, select, [contenteditable="true"], [contenteditable=""]';
+
+    function inEditable(el) {
+        return !!(el && el.closest && el.closest(EDITABLE));
+    }
+
+    function kill(e) {
+        if (inEditable(e.target)) return;      // в полях ввода не мешаем
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+    }
+
+    // --- копирование / выделение / drag ---------------------------------
+    ['copy', 'cut', 'selectstart', 'dragstart', 'drag', 'drop'].forEach(function (type) {
+        document.addEventListener(type, kill, true);
+    });
+
+    // контекстное меню (правый клик + long-press на Android)
+    document.addEventListener('contextmenu', kill, true);
+
+    // --- десктопный зум --------------------------------------------------
+    // Ctrl/⌘ + колесо
+    window.addEventListener('wheel', function (e) {
+        if (e.ctrlKey || e.metaKey) e.preventDefault();
+    }, { passive: false, capture: true });
+
+    // Ctrl/⌘ + "+", "-", "0" (зум) и Ctrl/⌘ + C/X/A вне полей ввода
+    window.addEventListener('keydown', function (e) {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const key = (e.key || '').toLowerCase();
+
+        if (['+', '=', '-', '_', '0'].indexOf(key) !== -1) {
+            e.preventDefault();
+            return;
+        }
+        if (['c', 'x', 'a'].indexOf(key) !== -1 && !inEditable(e.target)) {
+            e.preventDefault();
+        }
+    }, true);
+
+    // --- iOS Safari: pinch-zoom ------------------------------------------
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (type) {
+        document.addEventListener(type, function (e) { e.preventDefault(); },
+                                  { passive: false, capture: true });
+    });
+
+    // два и более пальца = попытка pinch
+    document.addEventListener('touchmove', function (e) {
+        if (e.touches && e.touches.length > 1) e.preventDefault();
+    }, { passive: false, capture: true });
+
+    // --- double-tap zoom --------------------------------------------------
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function (e) {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300 && !inEditable(e.target)) e.preventDefault();
+        lastTouchEnd = now;
+    }, { passive: false, capture: true });
+
+    // чистим случайно возникшее выделение (например, после long-press)
+    document.addEventListener('selectionchange', function () {
+        const sel = window.getSelection && window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        if (inEditable(document.activeElement)) return;
+        if (inEditable(sel.anchorNode && sel.anchorNode.parentElement)) return;
+        sel.removeAllRanges();
+    });
 })();
 </script>
 </body>
