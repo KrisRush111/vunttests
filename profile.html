@@ -164,6 +164,24 @@
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
+        /* --------------------------------------------------------------------
+           ВЫСОТА ЭКРАНА НА ТЕЛЕФОНАХ (--app-h)
+           Раньше высота body задавалась через 100vh/100dvh. На мобильных это
+           ломало прокрутку: 100vh включает адресную строку браузера, поэтому
+           контейнер со скроллом оказывался ВЫШЕ реально видимой области —
+           браузер считал, что переполнения нет, палец ничего не прокручивал,
+           а нижние пункты уходили под адресную строку и футер.
+           Теперь высоту даёт переменная --app-h (dvh там, где поддерживается),
+           а скрипт в конце страницы уточняет её по window.visualViewport —
+           работает в любом браузере и в PWA.
+           -------------------------------------------------------------------- */
+        :root {
+            --app-h: 100vh;
+        }
+        @supports (height: 100dvh) {
+            :root { --app-h: 100dvh; }
+        }
+
         html {
             height: 100%;
             /* Отключаем "резиновый" оверскролл документа, чтобы фиксированный футер
@@ -175,7 +193,8 @@
             background-color: var(--telegram-secondary-bg);
             color: var(--telegram-text);
             height: 100vh;
-            height: 100dvh; /* учитывает появление/скрытие адресной строки на мобильных */
+            height: 100dvh;
+            height: var(--app-h); /* учитывает появление/скрытие адресной строки на мобильных */
             overflow: hidden; /* сам body больше никогда не скроллится */
             overscroll-behavior: none;
             display: flex;
@@ -246,6 +265,11 @@
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior-y: contain;
+            /* Явно разрешаем вертикальный свайп: иначе на части Android-браузеров
+               жест перехватывался родителем и скролл "залипал" */
+            touch-action: pan-y;
+            /* Не даём флекс-раскладке растянуть контейнер выше экрана */
+            max-height: 100%;
         }
 
         /* Profile Modal for Mobile (for My Profile, Privacy, Appearance) */
@@ -2501,6 +2525,17 @@ input:checked + .toggle-slider:before {
 
 
 
+/* ---------------------------------------------------------------------------
+   Невидимый отступ в конце прокручиваемого списка: место под плавающий футер
+   и safe-area у iPhone. Работает во всех браузерах, в отличие от
+   padding-bottom у flex-контейнера со скроллом.
+   --------------------------------------------------------------------------- */
+.vg-scroll-spacer {
+    flex: 0 0 auto;
+    width: 100%;
+    height: calc(112px + env(safe-area-inset-bottom, 0px));
+    pointer-events: none;
+}
     </style>
 </head>
 <body>
@@ -3356,6 +3391,9 @@ input:checked + .toggle-slider:before {
                 </div>
             </div>
         </div>
+
+        <!-- Отступ под плавающий футер: гарантирует, что «Выйти» можно доскроллить -->
+        <div class="vg-scroll-spacer" aria-hidden="true"></div>
     </div>
 </div>
 
@@ -6199,7 +6237,11 @@ window.addEventListener('DOMContentLoaded', () => {
         background: transparent !important;
         border-radius: 0 !important;
         box-shadow: none !important;
-        padding: 0 0 96px !important;
+        /* padding-bottom убран специально: в Safari/iOS нижний padding у
+           flex-column контейнера со скроллом не входит в scrollHeight, из-за
+           чего последний пункт нельзя было доскроллить из-под футера.
+           Вместо него в конце списка стоит .vg-scroll-spacer. */
+        padding: 0 !important;
     }
     .mobile-settings-inner-content .settings-title { display: none !important; }
     .mobile-settings-inner-content .search-container { display: none !important; }
@@ -8246,111 +8288,56 @@ html[data-theme="dark"] .vg-verified-tooltip {
 </script>
 
 
-<style id="vg-mobile-modal-scroll-fix">
-@media (max-width: 767px) {
-    .profile-modal {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        height: 100vh !important;
-        height: 100dvh !important;
-        max-height: 100dvh !important;
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior-y: contain;
-        touch-action: pan-y;
-    }
+<!-- ==========================================================================
+     РЕАЛЬНАЯ ВЫСОТА ЭКРАНА ДЛЯ ПРОКРУТКИ НА ТЕЛЕФОНАХ
+     --------------------------------------------------------------------------
+     Проблема: body получал высоту 100vh/100dvh. 100vh на мобильных считается
+     БЕЗ учёта адресной строки, а dvh поддерживается не везде (старый Chrome в
+     Android WebView / некоторые PWA-оболочки). В результате внутренний
+     контейнер со скроллом (.mobile-settings-inner-content) был выше видимой
+     области: браузер считал, что прокручивать нечего, свайп пальцем ничего не
+     делал, а нижние разделы прятались под футером.
 
-    .profile-modal.visible {
-        display: block !important;
-    }
-
-    .profile-modal > .profile-modal-content {
-        flex: 0 0 auto !important;
-        height: auto !important;
-        min-height: 0 !important;
-    }
-
-    #profileModalMobile > .profile-modal-content {
-        padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
-    }
-
-    #privacyModuleMobile > .profile-modal-content,
-    #notificationsModuleMobile > .profile-modal-content,
-    #appearanceModuleMobile > .profile-modal-content {
-        margin-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important;
-    }
-}
-</style>
-
-<script id="vg-mobile-modal-scroll-fix-js">
+     Решение: единственный источник правды — window.visualViewport.height (то,
+     что пользователь реально видит). Пишем его в CSS-переменную --app-h и
+     обновляем при resize / scroll / повороте / показе-скрытии клавиатуры.
+     Фолбэк — window.innerHeight.
+     ========================================================================== -->
+<script>
 (function () {
-    var isMobile = function () { return window.matchMedia('(max-width: 767px)').matches; };
+    var root = document.documentElement;
+    var vv = window.visualViewport || null;
+    var raf = null;
 
-    var busy = false;
-
-    function nudge(el) {
-        if (!el || busy || !isMobile()) return;
-        busy = true;
-        el.style.overflowY = 'hidden';
-        void el.offsetHeight;
-        el.style.overflowY = 'auto';
-        busy = false;
+    function apply() {
+        raf = null;
+        // visualViewport.height не включает адресную строку и учитывает клавиатуру
+        var h = vv ? vv.height : window.innerHeight;
+        if (!h) return;
+        root.style.setProperty('--app-h', Math.round(h) + 'px');
     }
 
-    function nudgeVisible() {
-        document.querySelectorAll('.profile-modal.visible').forEach(nudge);
+    function schedule() {
+        if (raf) return;
+        raf = requestAnimationFrame(apply);
     }
 
-    function watch() {
-        var modals = document.querySelectorAll('.profile-modal');
-        if (!modals.length) return;
-
-        var mo = new MutationObserver(function (records) {
-            records.forEach(function (r) {
-                var el = r.target;
-                if (el.classList && el.classList.contains('visible')) {
-                    requestAnimationFrame(function () {
-                        nudge(el);
-                        setTimeout(function () { nudge(el); }, 120);
-                        setTimeout(function () { nudge(el); }, 400);
-                    });
-                }
-            });
-        });
-
-        modals.forEach(function (m) {
-            mo.observe(m, { attributes: true, attributeFilter: ['class'] });
-            var content = m.querySelector('.profile-modal-content');
-            if (content) {
-                new MutationObserver(function () {
-                    if (m.classList.contains('visible')) nudge(m);
-                }).observe(content, { childList: true, subtree: true });
-            }
-            m.addEventListener('transitionend', function (e) {
-                if (e.propertyName === 'height' || e.propertyName === 'margin-bottom') nudge(m);
-            }, true);
-        });
-
-        window.addEventListener('resize', nudgeVisible);
-        window.addEventListener('orientationchange', function () { setTimeout(nudgeVisible, 250); });
-        window.addEventListener('load', nudgeVisible);
-        document.addEventListener('load', function (e) {
-            if (e.target && e.target.tagName === 'IMG') nudgeVisible();
-        }, true);
+    apply();
+    window.addEventListener('resize', schedule);
+    window.addEventListener('orientationchange', function () {
+        // после поворота размеры приходят с задержкой
+        setTimeout(apply, 120);
+        setTimeout(apply, 400);
+    });
+    if (vv) {
+        vv.addEventListener('resize', schedule);
+        vv.addEventListener('scroll', schedule);
     }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', watch);
-    } else {
-        watch();
-    }
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) schedule();
+    });
+    window.addEventListener('load', function () { setTimeout(apply, 60); });
 })();
 </script>
-
 </body>
 </html>
