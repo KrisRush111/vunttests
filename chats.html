@@ -20925,6 +20925,36 @@ vgResolveBadgeSrc();
                 const bg = '#0088cc';
                 avatarEl.style.background = `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
             }
+
+            /* ВАЖНО: аватарка в карточке профиля — ОДИН И ТОТ ЖЕ DOM-элемент
+               для контакта и для группы. updateProfileModalUI() вешает на неё
+               onclick с замыканием на КОНТАКТА. Если его здесь не перебить, в
+               профиле группы первый тап ничего не раскрывает, а второй
+               открывает фото последнего просмотренного участника вместо фото
+               группы. Поэтому всегда ставим (или снимаем) свой обработчик. */
+            const heroHeader = avatarEl.closest('.profile-header');
+            if (data.photo_url) {
+                const groupPhoto = data.photo_url;
+                const groupName = data.name || 'Группа';
+                avatarEl.style.cursor = 'pointer';
+                avatarEl.onclick = (e) => {
+                    if (e) e.stopPropagation();
+                    // 1-й тап (мобильные) — раскрываем шапку в фото, как у контакта
+                    const canExpand = window.ProfileHero && window.ProfileHero.allowed
+                        ? window.ProfileHero.allowed() : false;
+                    if (canExpand && heroHeader && !window.ProfileHero.isExpanded(heroHeader)) {
+                        window.ProfileHero.expand(heroHeader);
+                        return;
+                    }
+                    // 2-й тап (и десктоп) — полноэкранный просмотрщик с фото ГРУППЫ
+                    if (typeof openPhotoViewer === 'function') openPhotoViewer(groupPhoto, groupName);
+                };
+            } else {
+                // Фото нет — раскрывать нечего, чужой обработчик обязательно снимаем
+                avatarEl.onclick = null;
+                avatarEl.style.cursor = 'default';
+                if (window.ProfileHero && heroHeader) window.ProfileHero.reset(heroHeader);
+            }
         }
     }
 
@@ -21976,15 +22006,82 @@ vgResolveBadgeSrc();
     position: fixed;
     inset: 0;
     z-index: 100000;
-    display: none;
+    /* Раньше было display:none -> display:flex, из-за чего переход по opacity
+       на открытии просто не запускался (браузер не анимирует смену display),
+       и окно появлялось рывком. Теперь элемент всегда в потоке, а прячется
+       через visibility/opacity — анимация играет и на открытии, и на закрытии. */
+    display: flex;
     flex-direction: column;
     background: #f2f2f7;
     -webkit-user-select: none;
     user-select: none;
+    visibility: hidden;
+    pointer-events: none;
     opacity: 0;
-    transition: opacity .2s ease;
+    transform: translateY(14px) scale(.985);
+    transform-origin: 50% 60%;
+    will-change: opacity, transform;
+    transition: opacity .22s cubic-bezier(.4, 0, 1, 1),
+                transform .28s cubic-bezier(.4, 0, 1, 1),
+                visibility 0s linear .28s;
 }
-.vg-ge-screen.active { display: flex; opacity: 1; }
+.vg-ge-screen.active {
+    visibility: visible;
+    pointer-events: auto;
+    opacity: 1;
+    transform: none;
+    /* мягкий "выезд" с лёгким доводом — как системные экраны iOS */
+    transition: opacity .26s cubic-bezier(.32, .72, 0, 1),
+                transform .42s cubic-bezier(.32, .72, 0, 1),
+                visibility 0s linear 0s;
+}
+
+/* Содержимое подтягивается следом за окном, с небольшой лесенкой задержек —
+   именно это убирает ощущение "мгновенно подставленного" экрана. */
+.vg-ge-screen .vg-ge-top,
+.vg-ge-screen .vg-ge-avatar-wrap,
+.vg-ge-screen .vg-ge-photo-link,
+.vg-ge-screen .vg-ge-card,
+.vg-ge-screen .vg-ge-hint {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .3s cubic-bezier(.32, .72, 0, 1),
+                transform .38s cubic-bezier(.32, .72, 0, 1);
+}
+.vg-ge-screen.active .vg-ge-top,
+.vg-ge-screen.active .vg-ge-avatar-wrap,
+.vg-ge-screen.active .vg-ge-photo-link,
+.vg-ge-screen.active .vg-ge-card,
+.vg-ge-screen.active .vg-ge-hint {
+    opacity: 1;
+    transform: none;
+}
+.vg-ge-screen.active .vg-ge-top { transition-delay: .04s; }
+.vg-ge-screen.active .vg-ge-avatar-wrap { transition-delay: .08s; }
+.vg-ge-screen.active .vg-ge-photo-link { transition-delay: .11s; }
+.vg-ge-screen.active .vg-ge-card { transition-delay: .14s; }
+.vg-ge-screen.active .vg-ge-hint { transition-delay: .17s; }
+/* На закрытии лесенка не нужна — всё уезжает вместе с окном */
+.vg-ge-screen:not(.active) .vg-ge-top,
+.vg-ge-screen:not(.active) .vg-ge-avatar-wrap,
+.vg-ge-screen:not(.active) .vg-ge-photo-link,
+.vg-ge-screen:not(.active) .vg-ge-card,
+.vg-ge-screen:not(.active) .vg-ge-hint {
+    transition-duration: .16s;
+    transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vg-ge-screen,
+    .vg-ge-screen .vg-ge-top,
+    .vg-ge-screen .vg-ge-avatar-wrap,
+    .vg-ge-screen .vg-ge-photo-link,
+    .vg-ge-screen .vg-ge-card,
+    .vg-ge-screen .vg-ge-hint {
+        transition-duration: .01s !important;
+        transform: none !important;
+    }
+}
 @media (prefers-color-scheme: dark) {
     .vg-ge-screen { background: #000; }
 }
@@ -22128,16 +22225,17 @@ vgResolveBadgeSrc();
     padding: 10px;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
 }
-.vg-ge-sheet.active { display: flex; }
+.vg-ge-sheet.active { display: flex; animation: vgGeSheetFade .18s ease; }
+@keyframes vgGeSheetFade { from { opacity: 0; } to { opacity: 1; } }
 .vg-ge-sheet-box {
     width: 100%;
     max-width: 460px;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    animation: vgGeSheetIn .2s ease;
+    animation: vgGeSheetIn .32s cubic-bezier(.32, .72, 0, 1);
 }
-@keyframes vgGeSheetIn { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes vgGeSheetIn { from { transform: translateY(28px); opacity: 0; } to { transform: none; opacity: 1; } }
 .vg-ge-sheet-group {
     background: rgba(255,255,255,.96);
     border-radius: 14px;
