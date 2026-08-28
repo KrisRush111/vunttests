@@ -3112,6 +3112,18 @@ input:checked + .toggle-slider:before {
                 String(payload.user_id) !== uid) return;
             hide();
         });
+
+        // Список устройств аккаунта изменился (новый вход или завершение
+        // сеанса). Сокет тут уже есть и подписан на комнату user:<id>, так что
+        // отдельное соединение под устройства не поднимаем — просто
+        // пробрасываем событие странице обычным window-эвентом.
+        socket.on('devices_changed', function (payload) {
+            try {
+                window.dispatchEvent(new CustomEvent('vg-devices-changed', {
+                    detail: payload || {}
+                }));
+            } catch (e) {}
+        });
     }
 
     // Если страница сама Socket.IO не поднимает (например profile.html), поднимем
@@ -4858,6 +4870,7 @@ window.addEventListener("beforeunload", () => {
                 if (resp.status === 401) { window.location.href = '/login.html'; return; }
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
+                if (data.current_device_id) myDeviceId = data.current_device_id;
                 renderDevices(data.devices || [], scope);
                 devicesTargets(scope).forEach(box => { if (box) box.dataset.loadedOnce = '1'; });
             } catch (err) {
@@ -4903,7 +4916,47 @@ window.addEventListener("beforeunload", () => {
             }
         }
 
-        // Обновляем открытый раздел раз в 60 секунд
+        /* --- Real-time через Redis -> socket_server.py -> WebSocket ---
+           Сервер публикует devices_changed в канал user:<platform_user_id>,
+           socket_server.py раздаёт его в одноимённую комнату, BanGuard
+           пробрасывает сюда как window-эвент 'vg-devices-changed'.
+           Опрос раз в 60 секунд остаётся страховкой на случай, если
+           WebSocket не поднялся. */
+        let myDeviceId = null;
+
+        async function ensureMyDeviceId() {
+            if (myDeviceId) return myDeviceId;
+            try {
+                const resp = await fetch('/api/devices/self', { credentials: 'include' });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                myDeviceId = data.device_id || null;
+            } catch (e) { /* не критично */ }
+            return myDeviceId;
+        }
+
+        ensureMyDeviceId();
+
+        window.addEventListener('vg-devices-changed', async (e) => {
+            const payload = (e && e.detail) || {};
+            const terminated = payload.terminated || [];
+
+            // Завершили именно этот сеанс — уходим на логин, не дожидаясь,
+            // пока before_request на сервере убьёт сессию на следующем запросе.
+            const mine = await ensureMyDeviceId();
+            if (mine && terminated.indexOf(mine) !== -1) {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            // Раздел открыт — перерисовываем список сразу.
+            const dm = document.getElementById('devicesModule');
+            const dmm = document.getElementById('devicesModuleMobile');
+            if (dm && dm.classList.contains('visible')) loadDevices('desktop');
+            else if (dmm && dmm.classList.contains('visible')) loadDevices('mobile');
+        });
+
+        // Страховка: обновляем открытый раздел раз в 60 секунд
         setInterval(() => {
             const dm = document.getElementById('devicesModule');
             const dmm = document.getElementById('devicesModuleMobile');
