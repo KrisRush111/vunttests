@@ -4866,17 +4866,26 @@ window.addEventListener("beforeunload", () => {
                 }
             });
             try {
-                const resp = await fetch('/api/devices', { credentials: 'include' });
-                if (resp.status === 401) { window.location.href = '/login.html'; return; }
+                // Абсолютный URL обязателен: profile.html раздаётся с Vercel,
+                // а API живёт на vuntserverrr.site — относительный путь ушёл бы
+                // на Vercel и вернул 404.
+                const resp = await fetch(`${SERVER_URL}/api/devices`, { credentials: 'include' });
+                if (resp.status === 401) { window.location.href = 'login.html'; return; }
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
                 if (data.current_device_id) myDeviceId = data.current_device_id;
                 renderDevices(data.devices || [], scope);
                 devicesTargets(scope).forEach(box => { if (box) box.dataset.loadedOnce = '1'; });
             } catch (err) {
-                console.error('[DEVICES]', err);
+                console.error('[DEVICES] load failed:', err);
+                const reason = (err && err.message) ? devicesEscape(err.message) : 'нет связи с сервером';
                 devicesTargets(scope).forEach(box => {
-                    if (box) box.innerHTML = '<div class="devices-empty">Не удалось загрузить список устройств.<br>Попробуйте позже.</div>';
+                    if (box) box.innerHTML =
+                        '<div class="devices-empty">Не удалось загрузить список устройств.<br>'
+                        + '<span style="font-size:12px;opacity:.75;">' + reason + '</span><br><br>'
+                        + '<button class="devices-terminate-all" style="color:#0088ff;max-width:240px;margin:0 auto;" data-devices-retry="1">Повторить</button></div>';
+                    const retry = box && box.querySelector('[data-devices-retry]');
+                    if (retry) retry.addEventListener('click', () => loadDevices(scope));
                 });
             }
         }
@@ -4885,7 +4894,7 @@ window.addEventListener("beforeunload", () => {
             if (!deviceId) return;
             if (!confirm('Завершить сеанс на этом устройстве?')) return;
             try {
-                const resp = await fetch('/api/devices/terminate', {
+                const resp = await fetch(`${SERVER_URL}/api/devices/terminate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
@@ -4893,7 +4902,7 @@ window.addEventListener("beforeunload", () => {
                 });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.error || 'Ошибка');
-                if (data.self) { window.location.href = '/login.html'; return; }
+                if (data.self) { window.location.href = 'login.html'; return; }
                 loadDevices(scope);
             } catch (err) {
                 console.error('[DEVICES] terminate', err);
@@ -4904,7 +4913,7 @@ window.addEventListener("beforeunload", () => {
         async function terminateOtherDevices(scope) {
             if (!confirm('Завершить все сеансы, кроме текущего?')) return;
             try {
-                const resp = await fetch('/api/devices/terminate_others', {
+                const resp = await fetch(`${SERVER_URL}/api/devices/terminate_others`, {
                     method: 'POST', credentials: 'include'
                 });
                 const data = await resp.json();
@@ -4927,7 +4936,7 @@ window.addEventListener("beforeunload", () => {
         async function ensureMyDeviceId() {
             if (myDeviceId) return myDeviceId;
             try {
-                const resp = await fetch('/api/devices/self', { credentials: 'include' });
+                const resp = await fetch(`${SERVER_URL}/api/devices/self`, { credentials: 'include' });
                 if (!resp.ok) return null;
                 const data = await resp.json();
                 myDeviceId = data.device_id || null;
@@ -4945,7 +4954,7 @@ window.addEventListener("beforeunload", () => {
             // пока before_request на сервере убьёт сессию на следующем запросе.
             const mine = await ensureMyDeviceId();
             if (mine && terminated.indexOf(mine) !== -1) {
-                window.location.href = '/login.html';
+                window.location.href = 'login.html';
                 return;
             }
 
