@@ -3840,6 +3840,90 @@ input:checked + .toggle-slider:before {
  <script>
      
         const SERVER_URL = 'https://vuntserverrr.site';
+
+        /* ═══════════════════════════════════════════════════════════
+           VGAuth — токен устройства (раздел "Устройства", активные сеансы)
+
+           Токен сеанса хранится в localStorage этого origin'а и уезжает на
+           сервер заголовком X-Device-Token. localStorage браузер не режет
+           никогда — в отличие от cross-site cookie между vercel.app и
+           vuntserverrr.site, поэтому раздел работает независимо от cookie.
+           Ниже один раз патчится глобальный fetch: заголовок автоматически
+           добавляется ко всем запросам к API, а 401 session_terminated
+           (сеанс завершили с другого устройства) обрабатывается сразу.
+           ═══════════════════════════════════════════════════════════ */
+        (function () {
+            var KEY = 'vg_device_token';
+            var ID_KEY = 'vg_device_id';
+
+            var Auth = window.VGAuth = {
+                token: function () {
+                    try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
+                },
+                deviceId: function () {
+                    try { return localStorage.getItem(ID_KEY) || ''; } catch (e) { return ''; }
+                },
+                save: function (token, deviceId) {
+                    try {
+                        if (token) localStorage.setItem(KEY, token);
+                        if (deviceId) localStorage.setItem(ID_KEY, deviceId);
+                    } catch (e) {}
+                },
+                clear: function () {
+                    try {
+                        localStorage.removeItem(KEY);
+                        localStorage.removeItem(ID_KEY);
+                    } catch (e) {}
+                },
+                headers: function (extra) {
+                    var h = Object.assign({}, extra || {});
+                    var t = Auth.token();
+                    if (t) h['X-Device-Token'] = t;
+                    return h;
+                },
+                /* Выход: сервер отзывает сеанс этого устройства, клиент стирает токен. */
+                logout: function () {
+                    return fetch(SERVER_URL + '/api/devices/logout', {
+                        method: 'POST', credentials: 'include'
+                    }).catch(function () {}).then(function () { Auth.clear(); });
+                },
+                /* Сеанс завершили с другого устройства / токен протух. */
+                kick: function () {
+                    Auth.clear();
+                    window.location.href = 'index.html';
+                }
+            };
+
+            var origFetch = window.fetch.bind(window);
+            var API_HOST = 'vuntserverrr.site';
+
+            window.fetch = function (input, init) {
+                init = init || {};
+                var url = (typeof input === 'string') ? input : (input && input.url) || '';
+                if (url.indexOf(API_HOST) !== -1 || url.charAt(0) === '/') {
+                    var t = Auth.token();
+                    if (t) {
+                        var hdrs = new Headers(
+                            init.headers
+                            || (typeof input !== 'string' && input && input.headers)
+                            || {}
+                        );
+                        if (!hdrs.has('X-Device-Token')) hdrs.set('X-Device-Token', t);
+                        init = Object.assign({}, init, { headers: hdrs });
+                    }
+                    if (!init.credentials) init.credentials = 'include';
+                }
+                return origFetch(input, init).then(function (resp) {
+                    if (resp.status === 401) {
+                        /* Клонируем — тело нужно ещё вызывающему коду. */
+                        resp.clone().json().then(function (d) {
+                            if (d && d.error === 'session_terminated') Auth.kick();
+                        }).catch(function () {});
+                    }
+                    return resp;
+                });
+            };
+        })();
         
         let userData = null; // Initialize userData as null
 
@@ -4770,7 +4854,13 @@ window.addEventListener("beforeunload", () => {
             document.body.style.overflow = '';
         }
 
-        function performLogout() {
+        async function performLogout() {
+            // Сначала отзываем сеанс ЭТОГО устройства на сервере (иначе он
+            // остался бы в списке "Устройства" у остальных сеансов), и только
+            // потом чистим локальные данные. VGAuth.logout сам стирает токен
+            // и никогда не бросает исключение — выход не должен зависеть от сети.
+            await VGAuth.logout();
+
             // Очищаем ВСЕ данные авторизации
             const idBeingLoggedOut = userData && userData.platform_user_id;
             sessionStorage.removeItem('userData');
@@ -4911,10 +5001,12 @@ window.addEventListener("beforeunload", () => {
            "АКТИВНЫЕ СЕАНСЫ" карточками, режим "Изм." для быстрого
            завершения сеансов и нижний лист с деталями устройства.
 
-           Данные приходят из /api/devices — сервер хранит их в Redis
-           (фолбэк: память воркера), база данных не используется.        */
+           Данные приходят из /api/devices — сервер хранит сеансы в таблице
+           user_devices (Postgres, база пользователей). Авторизация раздела —
+           токен устройства из localStorage в заголовке X-Device-Token
+           (см. VGAuth выше), cookie не используется.                    */
 
-        let myDeviceId = null;
+        let myDeviceId = VGAuth.deviceId() || null;
         let devicesEditMode = false;
         let devicesLastData = { devices: [], scope: null };
 
@@ -5169,30 +5261,59 @@ window.addEventListener("beforeunload", () => {
         }
 
         /* ---------- Данные ---------- */
+
+        /* Токена нет (вошли до обновления клиента или он потерялся), но
+           cookie-сессия ещё жива — просим сервер выдать токен для текущей
+           сессии. Один запрос, дальше всё работает уже на токене. */
+        async function ensureDeviceToken() {
+            if (VGAuth.token()) return true;
+            try {
+                const resp = await fetch(`${SERVER_URL}/api/devices/session`, {
+                    method: 'POST', credentials: 'include'
+                });
+                if (!resp.ok) return false;
+                const data = await resp.json();
+                if (data.device_token) {
+                    VGAuth.save(data.device_token, data.device_id);
+                    myDeviceId = data.device_id;
+                    return true;
+                }
+            } catch (e) { /* нет сети — попробуем при следующем открытии */ }
+            return false;
+        }
+
         async function loadDevices(scope) {
             devicesTargets(scope).forEach(box => {
                 if (box && !box.dataset.loadedOnce) {
                     box.innerHTML = '<div class="devices-loading"><div class="devices-spinner"></div>Загружаем устройства…</div>';
                 }
             });
+
+            await ensureDeviceToken();
+
             try {
                 // Абсолютный URL обязателен: profile.html раздаётся с Vercel,
                 // а API живёт на vuntserverrr.site — относительный путь ушёл бы
-                // на Vercel и вернул 404.
-                const resp = await fetch(`${SERVER_URL}/api/devices`, { credentials: 'include' });
+                // на Vercel и вернул 404. Заголовок X-Device-Token добавляет
+                // патч fetch из VGAuth.
+                const resp = await fetch(`${SERVER_URL}/api/devices`, { cache: 'no-store' });
+                const data = await resp.json().catch(() => ({}));
+
                 if (resp.status === 401) {
-                    // ВРЕМЕННО для диагностики: alert блокирует выполнение, поэтому
-                    // редирект физически не может случиться, пока не прочитаешь текст
-                    // и не нажмёшь ОК. Убрать после того, как разберёмся с 401.
-                    let bodyText = '(не удалось прочитать тело ответа)';
-                    try { bodyText = await resp.clone().text(); } catch (e) {}
-                    alert('[DEBUG] /api/devices вернул 401:\n' + bodyText);
-                    window.location.href = 'index.html';
+                    // session_terminated уже обработан перехватчиком VGAuth;
+                    // здесь остаётся случай "вообще не авторизован".
+                    if (data.error !== 'session_terminated') {
+                        VGAuth.clear();
+                        window.location.href = 'index.html';
+                    }
                     return;
                 }
-                const data = await resp.json();
-                if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
-                if (data.current_device_id) myDeviceId = data.current_device_id;
+                if (!resp.ok) throw new Error(data.message || data.error || 'Ошибка запроса');
+
+                if (data.current_device_id) {
+                    myDeviceId = data.current_device_id;
+                    VGAuth.save(null, myDeviceId);
+                }
                 renderDevices(data.devices || [], scope);
                 devicesTargets(scope).forEach(box => { if (box) box.dataset.loadedOnce = '1'; });
             } catch (err) {
@@ -5218,12 +5339,11 @@ window.addEventListener("beforeunload", () => {
                 const resp = await fetch(`${SERVER_URL}/api/devices/terminate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
                     body: JSON.stringify({ device_id: deviceId })
                 });
-                const data = await resp.json();
+                const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) throw new Error(data.error || 'Ошибка');
-                if (data.self) { window.location.href = 'index.html'; return; }
+                if (data.self) { VGAuth.clear(); window.location.href = 'index.html'; return; }
                 loadDevices(scope);
             } catch (err) {
                 console.error('[DEVICES] terminate', err);
@@ -5235,9 +5355,9 @@ window.addEventListener("beforeunload", () => {
             if (!confirm('Завершить все сеансы, кроме текущего?')) return;
             try {
                 const resp = await fetch(`${SERVER_URL}/api/devices/terminate_others`, {
-                    method: 'POST', credentials: 'include'
+                    method: 'POST'
                 });
-                const data = await resp.json();
+                const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) throw new Error(data.error || 'Ошибка');
                 devicesEditMode = false;
                 loadDevices(scope);
@@ -5278,17 +5398,13 @@ window.addEventListener("beforeunload", () => {
            WebSocket не поднялся. */
         async function ensureMyDeviceId() {
             if (myDeviceId) return myDeviceId;
+            await ensureDeviceToken();
             try {
-                const resp = await fetch(`${SERVER_URL}/api/devices/self`, { credentials: 'include' });
-                if (!resp.ok) {
-                    // ВРЕМЕННО для диагностики — см. комментарий в loadDevices() выше.
-                    let bodyText = '(не удалось прочитать тело ответа)';
-                    try { bodyText = await resp.clone().text(); } catch (e) {}
-                    console.error('[DEBUG] /api/devices/self вернул ' + resp.status + ':', bodyText);
-                    return null;
-                }
+                const resp = await fetch(`${SERVER_URL}/api/devices/self`);
+                if (!resp.ok) return null;
                 const data = await resp.json();
                 myDeviceId = data.device_id || null;
+                if (myDeviceId) VGAuth.save(null, myDeviceId);
             } catch (e) { /* не критично */ }
             return myDeviceId;
         }
@@ -5303,7 +5419,7 @@ window.addEventListener("beforeunload", () => {
             // пока before_request на сервере убьёт сессию на следующем запросе.
             const mine = await ensureMyDeviceId();
             if (mine && terminated.indexOf(mine) !== -1) {
-                window.location.href = 'index.html';
+                VGAuth.kick();     // стираем токен и уходим на логин
                 return;
             }
 
