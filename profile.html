@@ -5180,7 +5180,16 @@ window.addEventListener("beforeunload", () => {
                 // а API живёт на vuntserverrr.site — относительный путь ушёл бы
                 // на Vercel и вернул 404.
                 const resp = await fetch(`${SERVER_URL}/api/devices`, { credentials: 'include' });
-                if (resp.status === 401) { window.location.href = 'index.html'; return; }
+                if (resp.status === 401) {
+                    // ВРЕМЕННО для диагностики: alert блокирует выполнение, поэтому
+                    // редирект физически не может случиться, пока не прочитаешь текст
+                    // и не нажмёшь ОК. Убрать после того, как разберёмся с 401.
+                    let bodyText = '(не удалось прочитать тело ответа)';
+                    try { bodyText = await resp.clone().text(); } catch (e) {}
+                    alert('[DEBUG] /api/devices вернул 401:\n' + bodyText);
+                    window.location.href = 'index.html';
+                    return;
+                }
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
                 if (data.current_device_id) myDeviceId = data.current_device_id;
@@ -5271,7 +5280,13 @@ window.addEventListener("beforeunload", () => {
             if (myDeviceId) return myDeviceId;
             try {
                 const resp = await fetch(`${SERVER_URL}/api/devices/self`, { credentials: 'include' });
-                if (!resp.ok) return null;
+                if (!resp.ok) {
+                    // ВРЕМЕННО для диагностики — см. комментарий в loadDevices() выше.
+                    let bodyText = '(не удалось прочитать тело ответа)';
+                    try { bodyText = await resp.clone().text(); } catch (e) {}
+                    console.error('[DEBUG] /api/devices/self вернул ' + resp.status + ':', bodyText);
+                    return null;
+                }
                 const data = await resp.json();
                 myDeviceId = data.device_id || null;
             } catch (e) { /* не критично */ }
