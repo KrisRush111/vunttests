@@ -3863,6 +3863,41 @@ input:checked + .toggle-slider:before {
                 deviceId: function () {
                     try { return localStorage.getItem(ID_KEY) || ''; } catch (e) { return ''; }
                 },
+                /* Кто мы — по данным localStorage. Единственный источник
+                   идентификации, который НЕ зависит от cross-site cookie:
+                   именно на нём держится bootstrap раздела "Устройства" у
+                   тех, кто вошёл ДО его появления. */
+                platformUserId: function () {
+                    try {
+                        var id = localStorage.getItem('vg_last_user_id');
+                        if (id) return String(id);
+                        var raw = sessionStorage.getItem('userData')
+                               || localStorage.getItem('rememberedUser');
+                        if (!raw) return '';
+                        var u = JSON.parse(raw);
+                        return (u && u.platform_user_id) ? String(u.platform_user_id) : '';
+                    } catch (e) { return ''; }
+                },
+                /* Зарегистрировать это устройство и получить токен.
+                   Работает и без cookie: сервер опознаёт аккаунт по
+                   platform_user_id. Идемпотентно — сеансы не плодит. */
+                bootstrap: function () {
+                    if (Auth.token() && Auth.deviceId()) return Promise.resolve(true);
+                    var pid = Auth.platformUserId();
+                    return fetch(SERVER_URL + '/api/devices/bootstrap', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ platform_user_id: pid })
+                    }).then(function (r) {
+                        return r.ok ? r.json() : null;
+                    }).then(function (d) {
+                        if (!d) return false;
+                        if (d.device_token) Auth.save(d.device_token, d.device_id);
+                        else if (d.device_id) Auth.save(null, d.device_id);
+                        return !!(d.device_token || d.device_id);
+                    }).catch(function () { return false; });
+                },
                 save: function (token, deviceId) {
                     try {
                         if (token) localStorage.setItem(KEY, token);
@@ -3902,20 +3937,31 @@ input:checked + .toggle-slider:before {
                 var url = (typeof input === 'string') ? input : (input && input.url) || '';
                 if (url.indexOf(API_HOST) !== -1 || url.charAt(0) === '/') {
                     var t = Auth.token();
-                    if (t) {
+                    var pid = Auth.platformUserId();
+                    if (t || pid) {
                         var hdrs = new Headers(
                             init.headers
                             || (typeof input !== 'string' && input && input.headers)
                             || {}
                         );
-                        if (!hdrs.has('X-Device-Token')) hdrs.set('X-Device-Token', t);
+                        if (t && !hdrs.has('X-Device-Token')) hdrs.set('X-Device-Token', t);
+                        /* Резервная идентификация, когда cookie зарезана как
+                           cross-site, а токена ещё нет (вход был до раздела
+                           "Устройства"). Сервер принимает её только в
+                           /api/devices/* — прав не добавляет. */
+                        if (pid && !hdrs.has('X-Platform-User-Id')) hdrs.set('X-Platform-User-Id', pid);
                         init = Object.assign({}, init, { headers: hdrs });
                     }
                     if (!init.credentials) init.credentials = 'include';
                 }
                 return origFetch(input, init).then(function (resp) {
-                    if (resp.status === 401) {
-                        /* Клонируем — тело нужно ещё вызывающему коду. */
+                    /* Выкидываем на логин ТОЛЬКО если токен реально был:
+                       иначе случайный 401 (или мусорный токен из старой
+                       версии клиента) выбрасывал живого пользователя из
+                       приложения — bootstrap раздела до этого не доживал. */
+                    if (resp.status === 401 && Auth.token()
+                        && url.indexOf('/api/devices/bootstrap') === -1
+                        && url.indexOf('/api/devices/session') === -1) {
                         resp.clone().json().then(function (d) {
                             if (d && d.error === 'session_terminated') Auth.kick();
                         }).catch(function () {});
@@ -5120,7 +5166,12 @@ window.addEventListener("beforeunload", () => {
             if (current) {
                 html += deviceRowHtml(current, { removable: false });
             } else {
-                html += '<div class="devices-empty">Текущее устройство не определено</div>';
+                html += '<div class="devices-empty"><div class="devices-spinner"></div>'
+                     +  'Определяем это устройство…</div>';
+                setTimeout(async () => {
+                    VGAuth.clear();
+                    if (await VGAuth.bootstrap()) loadDevices(scope, true);
+                }, 0);
             }
             if (others.length) {
                 html += '<div class="dev-row dev-row-action" data-terminate-others="1">'
@@ -5267,22 +5318,23 @@ window.addEventListener("beforeunload", () => {
            сессии. Один запрос, дальше всё работает уже на токене. */
         async function ensureDeviceToken() {
             if (VGAuth.token()) return true;
-            try {
-                const resp = await fetch(`${SERVER_URL}/api/devices/session`, {
-                    method: 'POST', credentials: 'include'
-                });
-                if (!resp.ok) return false;
-                const data = await resp.json();
-                if (data.device_token) {
-                    VGAuth.save(data.device_token, data.device_id);
-                    myDeviceId = data.device_id;
-                    return true;
-                }
-            } catch (e) { /* нет сети — попробуем при следующем открытии */ }
-            return false;
+            const ok = await VGAuth.bootstrap();
+            if (ok) myDeviceId = VGAuth.deviceId() || myDeviceId;
+            return ok;
         }
 
-        async function loadDevices(scope) {
+        /* Регистрируем устройство СРАЗУ при открытии приложения, а не только
+           когда пользователь зайдёт в раздел: иначе у тех, кто вошёл до
+           появления раздела, в user_devices не было ни строки — список был
+           пустым, а текущее устройство "не определено". */
+        (async function devicesSelfRegisterOnStart() {
+            try {
+                if (!VGAuth.platformUserId()) return;   // не авторизован
+                await ensureDeviceToken();
+            } catch (e) { /* не критично: повторим при открытии раздела */ }
+        })();
+
+        async function loadDevices(scope, _retry) {
             devicesTargets(scope).forEach(box => {
                 if (box && !box.dataset.loadedOnce) {
                     box.innerHTML = '<div class="devices-loading"><div class="devices-spinner"></div>Загружаем устройства…</div>';
@@ -5300,13 +5352,17 @@ window.addEventListener("beforeunload", () => {
                 const data = await resp.json().catch(() => ({}));
 
                 if (resp.status === 401) {
-                    // session_terminated уже обработан перехватчиком VGAuth;
-                    // здесь остаётся случай "вообще не авторизован".
-                    if (data.error !== 'session_terminated') {
+                    // Раньше здесь был безусловный редирект на index.html —
+                    // из-за него раздел просто выкидывал пользователя, если
+                    // cookie зарезана, а токена ещё нет. Теперь сначала
+                    // пробуем зарегистрировать устройство и повторить.
+                    if (data.error === 'session_terminated') return;
+                    if (!_retry) {
                         VGAuth.clear();
-                        window.location.href = 'index.html';
+                        const ok = await VGAuth.bootstrap();
+                        if (ok) return loadDevices(scope, true);
                     }
-                    return;
+                    throw new Error('Сеанс не подтверждён. Войдите в аккаунт заново.');
                 }
                 if (!resp.ok) throw new Error(data.message || data.error || 'Ошибка запроса');
 
@@ -5314,6 +5370,9 @@ window.addEventListener("beforeunload", () => {
                     myDeviceId = data.current_device_id;
                     VGAuth.save(null, myDeviceId);
                 }
+                // Сервер сам зарегистрировал это устройство (вход был до
+                // появления раздела) и вернул токен — сохраняем.
+                if (data.device_token) VGAuth.save(data.device_token, data.current_device_id);
                 renderDevices(data.devices || [], scope);
                 devicesTargets(scope).forEach(box => { if (box) box.dataset.loadedOnce = '1'; });
             } catch (err) {
@@ -5398,7 +5457,7 @@ window.addEventListener("beforeunload", () => {
            WebSocket не поднялся. */
         async function ensureMyDeviceId() {
             if (myDeviceId) return myDeviceId;
-            await ensureDeviceToken();
+            if (!(await ensureDeviceToken())) return null;
             try {
                 const resp = await fetch(`${SERVER_URL}/api/devices/self`);
                 if (!resp.ok) return null;
