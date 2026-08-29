@@ -5340,11 +5340,25 @@ window.addEventListener("beforeunload", () => {
         /* Токена нет (вошли до обновления клиента или он потерялся), но
            cookie-сессия ещё жива — просим сервер выдать токен для текущей
            сессии. Один запрос, дальше всё работает уже на токене. */
+        let _ensureDeviceTokenPromise = null;
         async function ensureDeviceToken() {
             if (VGAuth.token()) return true;
-            const ok = await VGAuth.bootstrap();
-            if (ok) myDeviceId = VGAuth.deviceId() || myDeviceId;
-            return ok;
+            // Если запрос на выдачу токена уже летит (например, параллельно
+            // сработали devicesSelfRegisterOnStart() и loadDevices()) —
+            // ждём тот же самый запрос, а не шлём ещё один. Иначе сервер
+            // не успевает узнать про первый и создаёт для одного и того же
+            // устройства две отдельные строки в user_devices.
+            if (_ensureDeviceTokenPromise) return _ensureDeviceTokenPromise;
+            _ensureDeviceTokenPromise = (async () => {
+                const ok = await VGAuth.bootstrap();
+                if (ok) myDeviceId = VGAuth.deviceId() || myDeviceId;
+                return ok;
+            })();
+            try {
+                return await _ensureDeviceTokenPromise;
+            } finally {
+                _ensureDeviceTokenPromise = null;
+            }
         }
 
         /* Регистрируем устройство СРАЗУ при открытии приложения, а не только
