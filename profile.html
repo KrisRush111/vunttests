@@ -4038,9 +4038,20 @@ input:checked + .toggle-slider:before {
                         method: 'POST', credentials: 'include'
                     }).catch(function () {}).then(function () { Auth.clear(); });
                 },
-                /* Сеанс завершили с другого устройства / токен протух. */
+                /* Сеанс завершили с другого устройства / токен протух.
+                   Важно стереть не только токен устройства, но и ВСЕ следы
+                   "запомненного" входа (rememberedUser / sessionStorage.userData /
+                   vg_last_user_id) — иначе index.html/chats.html при загрузке
+                   найдут эти данные локально (без проверки на сервере) и тут же
+                   восстановят сессию и перекинут обратно в chats.html, как будто
+                   выхода и не было. */
                 kick: function () {
                     Auth.clear();
+                    try { sessionStorage.removeItem('userData'); } catch (e) {}
+                    try {
+                        localStorage.removeItem('rememberedUser');
+                        localStorage.removeItem('vg_last_user_id');
+                    } catch (e) {}
                     window.location.href = 'index.html';
                 }
             };
@@ -5575,7 +5586,7 @@ window.addEventListener("beforeunload", () => {
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) throw new Error(data.error || 'Ошибка');
-                if (data.self) { VGAuth.clear(); window.location.href = 'index.html'; return; }
+                if (data.self) { VGAuth.kick(); return; }
                 loadDevices(scope);
             } catch (err) {
                 console.error('[DEVICES] terminate', err);
