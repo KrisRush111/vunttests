@@ -387,9 +387,11 @@
         .mobile-modal-topbar {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 8px;
             padding: 14px 14px 4px;
             flex-shrink: 0;
+            position: relative;
         }
 
         .mobile-modal-topbar .profile-back-button {
@@ -414,6 +416,20 @@
         .mobile-modal-topbar-spacer {
             width: 34px;
             flex-shrink: 0;
+        }
+
+        /* Заголовок "Устройства" на мобильных — зафиксирован строго по
+           центру шапки независимо от ширины кнопки "назад" слева и
+           "Изм."/распорки справа (та ширина у "Изм." может меняться —
+           "Изм." / "Готово" — и раньше слегка сдвигала текст). Достигается
+           тем, что заголовок вынут из общего flex-потока и позиционирован
+           абсолютно на всю ширину шапки, с текстом по центру. */
+        #devicesModuleMobile .mobile-modal-topbar-title {
+            position: absolute;
+            left: 0; right: 0;
+            margin: 0 auto;
+            text-align: center;
+            pointer-events: none;
         }
 
         /* Desktop styles */
@@ -2729,65 +2745,6 @@ input:checked + .toggle-slider:before {
         .devices-container.is-editing .dev-row.dev-terminable { padding-left: 12px; }
         .dev-chevron { color: rgba(120,120,128,.5); font-size: 14px; margin-left: 4px; }
 
-        /* ===== Свайп влево для завершения сеанса (мобильные), визуально
-           как в списке чатов (chats.html): кнопка "Удалить" выезжает
-           из-под ряда и растёт из точки в полный размер по ходу пальца. */
-        .dev-row-swipe {
-            position: relative; overflow: hidden;
-            background: var(--dev-card-bg);
-            --dev-swipe-p: 0;
-        }
-        .dev-row-swipe.swiped { --dev-swipe-p: 1; }
-        .dev-row-swipe .dev-row {
-            position: relative; z-index: 1;
-            will-change: transform;
-            transition: transform .25s cubic-bezier(.22,1,.36,1);
-            touch-action: pan-y;
-        }
-        .dev-row-swipe .dev-row:active { transform: none; }
-        .dev-row-swipe.swiped .dev-row {
-            transform: translateX(calc(-1 * var(--dev-swipe-open-x, 92px)));
-        }
-        /* Разделитель между строками теперь может стоять и между обёртками
-           свайпа — переносим ту же логику на них, иначе линия пропадает. */
-        .dev-row-swipe + .dev-row-swipe::before,
-        .dev-row + .dev-row-swipe::before,
-        .dev-row-swipe + .dev-row::before {
-            content: ''; position: absolute; left: 61px; right: 0; top: 0;
-            height: 1px; background: var(--dev-sep); transform: scaleY(.5); z-index: 2;
-        }
-
-        .dev-swipe-actions {
-            position: absolute; top: 6px; right: 6px; bottom: 6px;
-            display: flex; align-items: stretch; z-index: 0;
-            pointer-events: none;
-        }
-        .dev-row-swipe.swiped .dev-swipe-actions { pointer-events: auto; }
-
-        .dev-swipe-btn {
-            --p: var(--dev-swipe-p);
-            position: relative; width: 80px; flex: 0 0 80px; height: 100%;
-            border: none; margin: 0; padding: 0; background: transparent; color: #fff;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer; -webkit-tap-highlight-color: transparent;
-        }
-        .dev-swipe-circle {
-            width: 100%; height: 100%; border-radius: 22px;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 3px; background: var(--dev-red);
-            box-shadow: 0 2px 10px rgba(255,59,48,.35);
-            transform: scale(var(--p, 0)); transform-origin: center center;
-            will-change: transform;
-            transition: transform .25s cubic-bezier(.22,1,.36,1), background-color .12s ease;
-        }
-        .dev-row-swipe.dragging .dev-swipe-circle { transition: background-color .12s ease; }
-        .dev-swipe-circle > * { opacity: clamp(0, (var(--p, 0) - 0.45) / 0.35, 1); }
-        .dev-swipe-circle i { font-size: 17px; line-height: 1; }
-        .dev-swipe-circle span { font-size: 10.5px; font-weight: 500; line-height: 1; }
-        .dev-swipe-btn:active .dev-swipe-circle {
-            transform: scale(calc(var(--p, 0) * 0.92)); background: #e0352c;
-        }
-
         /* --- Загрузка / пусто / ошибка --- */
         .devices-empty, .devices-loading {
             text-align: center; padding: 22px 16px;
@@ -2851,6 +2808,46 @@ input:checked + .toggle-slider:before {
             .dev-sheet { max-width: 400px; }
             .dev-sheet-overlay.visible .dev-sheet { transform: none; }
         }
+
+        /* --- Диалог подтверждения (иОС-алерт: заголовок/текст + Да/Нет) --- */
+        .dev-confirm-overlay {
+            position: fixed; inset: 0; z-index: 12100;
+            display: flex; align-items: center; justify-content: center; padding: 20px;
+            background: rgba(0,0,0,0); pointer-events: none;
+            transition: background .18s ease;
+        }
+        .dev-confirm-overlay.visible {
+            background: rgba(0,0,0,.4); pointer-events: auto;
+        }
+        .dev-confirm-card {
+            width: 100%; max-width: 270px;
+            background: var(--dev-card-bg); border-radius: 14px;
+            overflow: hidden; text-align: center;
+            opacity: 0; transform: scale(.92);
+            transition: opacity .18s ease, transform .18s ease;
+        }
+        .dev-confirm-overlay.visible .dev-confirm-card {
+            opacity: 1; transform: scale(1);
+        }
+        .dev-confirm-title {
+            font-size: 17px; font-weight: 600; color: var(--telegram-text);
+            padding: 19px 16px 6px;
+        }
+        .dev-confirm-text {
+            font-size: 13px; line-height: 1.35; color: var(--dev-hint);
+            padding: 0 16px 18px;
+        }
+        .dev-confirm-actions {
+            display: flex; border-top: 1px solid var(--dev-sep);
+        }
+        .dev-confirm-btn {
+            flex: 1; border: none; background: transparent; cursor: pointer;
+            padding: 13px 8px; font-size: 17px; color: var(--dev-blue);
+            -webkit-tap-highlight-color: transparent;
+        }
+        .dev-confirm-btn:active { background: rgba(120,120,128,.14); }
+        .dev-confirm-btn + .dev-confirm-btn { border-left: 1px solid var(--dev-sep); }
+        .dev-confirm-btn.danger { color: var(--dev-red); font-weight: 600; }
     </style>
 </head>
 <body>
@@ -5230,8 +5227,7 @@ window.addEventListener("beforeunload", () => {
             opts = opts || {};
             const ic = devicesIcon(d.kind);
             const removable = !!opts.removable;
-            const swipeable = removable && !!opts.swipeable;
-            const row = '<div class="dev-row' + (removable ? ' dev-terminable' : '') + '" data-device-row="' + devicesEscape(d.device_id) + '">'
+            return '<div class="dev-row' + (removable ? ' dev-terminable' : '') + '" data-device-row="' + devicesEscape(d.device_id) + '">'
                 + (removable
                     ? '<button type="button" class="dev-remove-btn" data-terminate="' + devicesEscape(d.device_id) + '" aria-label="Завершить сеанс">&minus;</button>'
                     : '')
@@ -5243,159 +5239,7 @@ window.addEventListener("beforeunload", () => {
                 +   '<div class="dev-meta">' + devicesEscape(devicesPlaceLine(d)) + '</div>'
                 + '</div>'
                 + '</div>';
-
-            if (!swipeable) return row;
-
-            // Свайп влево — как в списке чатов (chats.html). Кнопка "Удалить"
-            // вызывает уже реализованное окно завершения сеанса (terminateDevice).
-            return '<div class="dev-row-swipe" data-device-swipe="' + devicesEscape(d.device_id) + '">'
-                + row
-                + '<div class="dev-swipe-actions">'
-                +   '<button type="button" class="dev-swipe-btn" data-dev-swipe-terminate="' + devicesEscape(d.device_id) + '" aria-label="Завершить сеанс">'
-                +     '<span class="dev-swipe-circle delete"><i class="fa-solid fa-trash-can"></i><span>Удалить</span></span>'
-                +   '</button>'
-                + '</div>'
-                + '</div>';
         }
-
-        // ===== Свайп влево по сеансу для его завершения (мобильные) =====
-        // Реализовано по образцу свайпа в списке чатов (chats.html):
-        // делегирование событий на контейнер, чтобы обработчик не терялся
-        // при перерисовке списка (renderDevices вызывается заново при
-        // каждом обновлении данных).
-        let deviceSwipeState = null;
-
-        function getDeviceSwipeOpenX(wrapper) {
-            const actionsEl = wrapper && wrapper.querySelector('.dev-swipe-actions');
-            const fallback = 92;
-            if (!actionsEl) return fallback;
-            const width = actionsEl.offsetWidth || 80;
-            const openX = Math.round(width + 12); // те же отступы 6px сверху/снизу/справа с обеих сторон
-            wrapper.style.setProperty('--dev-swipe-open-x', openX + 'px');
-            return openX;
-        }
-        const DEV_SWIPE_TRIGGER_RATIO = 0.35;
-
-        function closeDeviceSwipe(wrapper) {
-            if (!wrapper) return;
-            wrapper.classList.remove('swiped');
-            wrapper.classList.remove('dragging');
-            wrapper.style.removeProperty('--dev-swipe-p');
-            const item = wrapper.querySelector('.dev-row');
-            if (item) { item.style.transition = ''; item.style.transform = ''; }
-            const actionsEl = wrapper.querySelector('.dev-swipe-actions');
-            if (actionsEl) {
-                actionsEl.style.transition = '';
-                actionsEl.style.opacity = '';
-                actionsEl.style.transform = '';
-            }
-        }
-
-        function closeAllDeviceSwipes(exceptWrapper) {
-            document.querySelectorAll('.dev-row-swipe.swiped').forEach(w => {
-                if (w !== exceptWrapper) closeDeviceSwipe(w);
-            });
-        }
-
-        function attachDeviceSwipeHandlers(listEl) {
-            if (!listEl || listEl._devSwipeHandlersAttached) return;
-            listEl._devSwipeHandlersAttached = true;
-
-            listEl.addEventListener('pointerdown', (e) => {
-                // Свайп — только тач (мобильные). На десктопе клик по строке
-                // как и раньше сразу открывает окно сведений об устройстве.
-                if (e.pointerType !== 'touch') return;
-                if (e.target.closest('.dev-swipe-actions')) return;
-                const wrapper = e.target.closest('.dev-row-swipe');
-                if (!wrapper || !listEl.contains(wrapper)) return;
-
-                const item = wrapper.querySelector('.dev-row');
-                if (!item) return;
-
-                const actionsEl = wrapper.querySelector('.dev-swipe-actions');
-                const openX = getDeviceSwipeOpenX(wrapper);
-                deviceSwipeState = {
-                    wrapper, item, actionsEl, openX,
-                    pointerId: e.pointerId,
-                    startX: e.clientX,
-                    startY: e.clientY,
-                    baseX: wrapper.classList.contains('swiped') ? -openX : 0,
-                    dragging: false,
-                    decided: false,
-                    lastX: 0,
-                };
-            });
-
-            listEl.addEventListener('pointermove', (e) => {
-                if (!deviceSwipeState || deviceSwipeState.pointerId !== e.pointerId) return;
-                const dx = e.clientX - deviceSwipeState.startX;
-                const dy = e.clientY - deviceSwipeState.startY;
-
-                if (!deviceSwipeState.decided) {
-                    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-                    deviceSwipeState.decided = true;
-                    if (Math.abs(dy) > Math.abs(dx)) {
-                        deviceSwipeState = null;
-                        return;
-                    }
-                    deviceSwipeState.dragging = true;
-                    deviceSwipeState.wrapper.classList.add('dragging');
-                    closeAllDeviceSwipes(deviceSwipeState.wrapper);
-                }
-
-                if (!deviceSwipeState.dragging) return;
-
-                e.preventDefault();
-                let x = deviceSwipeState.baseX + dx;
-                x = Math.max(-deviceSwipeState.openX, Math.min(0, x));
-                deviceSwipeState.item.style.transition = 'none';
-                deviceSwipeState.item.style.transform = `translateX(${x}px)`;
-                deviceSwipeState.lastX = x;
-
-                const progress = Math.min(1, Math.abs(x) / deviceSwipeState.openX);
-                deviceSwipeState.wrapper.style.setProperty('--dev-swipe-p', progress.toFixed(4));
-            }, { passive: false });
-
-            const endDeviceSwipe = (e) => {
-                if (!deviceSwipeState || deviceSwipeState.pointerId !== e.pointerId) return;
-                const { wrapper, item, actionsEl, dragging, lastX, openX } = deviceSwipeState;
-                item.style.transition = '';
-                item.style.transform = '';
-                wrapper.classList.remove('dragging');
-                let opening = false;
-                if (dragging) {
-                    const openThreshold = -openX * DEV_SWIPE_TRIGGER_RATIO;
-                    opening = (lastX || 0) <= openThreshold;
-                    wrapper.classList.toggle('swiped', opening);
-                } else {
-                    opening = wrapper.classList.contains('swiped');
-                }
-                if (actionsEl) {
-                    actionsEl.style.transition = '';
-                    actionsEl.style.opacity = '';
-                    actionsEl.style.transform = '';
-                }
-                void wrapper.offsetWidth;
-                wrapper.style.removeProperty('--dev-swipe-p');
-                deviceSwipeState = null;
-            };
-
-            listEl.addEventListener('pointerup', endDeviceSwipe);
-            listEl.addEventListener('pointercancel', endDeviceSwipe);
-        }
-
-        // Тап "куда-нибудь ещё" закрывает открытый свайп вместо срабатывания
-        // обычного клика по строке (который открыл бы окно сведений) — как
-        // и для чатов, перехватываем клик на этапе capture.
-        document.addEventListener('click', (e) => {
-            const openSwipe = document.querySelector('.dev-row-swipe.swiped');
-            if (!openSwipe) return;
-            if (openSwipe.contains(e.target) && e.target.closest('.dev-swipe-actions')) return;
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            closeAllDeviceSwipes();
-        }, true);
 
         function renderDevices(devices, scope) {
             devicesLastData = { devices: devices || [], scope: scope };
@@ -5444,7 +5288,7 @@ window.addEventListener("beforeunload", () => {
             html += '<div class="dev-section-title">Активные сеансы</div>';
             html += '<div class="dev-card">';
             if (others.length) {
-                others.forEach(d => { html += deviceRowHtml(d, { removable: true, swipeable: scope === 'mobile' }); });
+                others.forEach(d => { html += deviceRowHtml(d, { removable: true }); });
             } else {
                 html += '<div class="devices-empty">Других активных сеансов нет — аккаунт открыт только здесь.</div>';
             }
@@ -5465,13 +5309,6 @@ window.addEventListener("beforeunload", () => {
                         terminateDevice(btn.getAttribute('data-terminate'), scope);
                     });
                 });
-                box.querySelectorAll('[data-dev-swipe-terminate]').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        terminateDevice(btn.getAttribute('data-dev-swipe-terminate'), scope);
-                    });
-                });
                 const allBtn = box.querySelector('[data-terminate-others]');
                 if (allBtn) allBtn.addEventListener('click', () => terminateOtherDevices(scope));
 
@@ -5488,8 +5325,6 @@ window.addEventListener("beforeunload", () => {
                 box.querySelectorAll('[data-dev-soon]').forEach(a => {
                     a.addEventListener('click', openConnectDeviceSheet);
                 });
-
-                attachDeviceSwipeHandlers(box);
             });
 
             /* Кнопка "Изм." нужна только когда есть что завершать */
@@ -5667,9 +5502,48 @@ window.addEventListener("beforeunload", () => {
             }
         }
 
+        /* --- Красивый диалог подтверждения вместо стандартного confirm() --- */
+        function devicesConfirmDialog(opts) {
+            opts = opts || {};
+            return new Promise((resolve) => {
+                let overlay = document.getElementById('devConfirmOverlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'devConfirmOverlay';
+                    overlay.className = 'dev-confirm-overlay';
+                    document.body.appendChild(overlay);
+                }
+                overlay.innerHTML = '<div class="dev-confirm-card">'
+                    + '<div class="dev-confirm-title">' + devicesEscape(opts.title || '') + '</div>'
+                    + (opts.text ? '<div class="dev-confirm-text">' + devicesEscape(opts.text) + '</div>' : '')
+                    + '<div class="dev-confirm-actions">'
+                    +   '<button type="button" class="dev-confirm-btn" data-confirm-no>' + devicesEscape(opts.noLabel || 'Нет') + '</button>'
+                    +   '<button type="button" class="dev-confirm-btn danger" data-confirm-yes>' + devicesEscape(opts.yesLabel || 'Да') + '</button>'
+                    + '</div>'
+                    + '</div>';
+
+                let settled = false;
+                const close = (result) => {
+                    if (settled) return;
+                    settled = true;
+                    overlay.classList.remove('visible');
+                    setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 200);
+                    resolve(result);
+                };
+                overlay.querySelector('[data-confirm-no]').addEventListener('click', () => close(false));
+                overlay.querySelector('[data-confirm-yes]').addEventListener('click', () => close(true));
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+                requestAnimationFrame(() => overlay.classList.add('visible'));
+            });
+        }
+
         async function terminateDevice(deviceId, scope) {
             if (!deviceId) return;
-            if (!confirm('Завершить сеанс на этом устройстве?')) return;
+            const ok = await devicesConfirmDialog({
+                title: 'Завершить сеанс?',
+                text: 'Вы выйдете из аккаунта на этом устройстве.',
+            });
+            if (!ok) return;
             try {
                 const resp = await fetch(`${SERVER_URL}/api/devices/terminate`, {
                     method: 'POST',
@@ -5687,7 +5561,11 @@ window.addEventListener("beforeunload", () => {
         }
 
         async function terminateOtherDevices(scope) {
-            if (!confirm('Завершить все сеансы, кроме текущего?')) return;
+            const ok = await devicesConfirmDialog({
+                title: 'Завершить все сеансы?',
+                text: 'Вы выйдете из аккаунта на всех устройствах, кроме этого.',
+            });
+            if (!ok) return;
             try {
                 const resp = await fetch(`${SERVER_URL}/api/devices/terminate_others`, {
                     method: 'POST'
