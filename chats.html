@@ -6756,6 +6756,18 @@
                 String(payload.user_id) !== uid) return;
             hide();
         });
+
+        // Список устройств аккаунта изменился (новый вход или завершение
+        // сеанса). Сокет тут уже есть и подписан на комнату user:<id>, так что
+        // отдельное соединение под устройства не поднимаем — просто
+        // пробрасываем событие странице обычным window-эвентом.
+        socket.on('devices_changed', function (payload) {
+            try {
+                window.dispatchEvent(new CustomEvent('vg-devices-changed', {
+                    detail: payload || {}
+                }));
+            } catch (e) {}
+        });
     }
 
     // Если страница сама Socket.IO не поднимает (например profile.html), поднимем
@@ -7292,6 +7304,154 @@
         const SERVER_URL = 'https://vuntserverrr.site';
         // WS-сервер (socket_server.py) запускается отдельным процессом, подставьте сюда его реальный адрес (порт 9001 за тем же nginx). Если оставить пустым или неверным -- WS просто не подключится, всё продолжит работать через polling.
         const SOCKET_URL = 'https://vuntserverrr.site';
+
+        /* ═══════════════════════════════════════════════════════════
+           VGAuth — токен устройства (раздел "Устройства", активные сеансы).
+           Копия того же блока из profile.html: без него chats.html не знал
+           о X-Device-Token и не реагировал на завершение сеанса с другого
+           устройства (сообщение приходило в BanGuard, но было некому его
+           обработать — раздел "Устройства" тут не открывается, а
+           отдельного слушателя не было).
+           ═══════════════════════════════════════════════════════════ */
+        (function () {
+            var KEY = 'vg_device_token';
+            var ID_KEY = 'vg_device_id';
+
+            var Auth = window.VGAuth = {
+                token: function () {
+                    try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
+                },
+                deviceId: function () {
+                    try { return localStorage.getItem(ID_KEY) || ''; } catch (e) { return ''; }
+                },
+                platformUserId: function () {
+                    try {
+                        var id = localStorage.getItem('vg_last_user_id');
+                        if (id) return String(id);
+                        var raw = sessionStorage.getItem('userData')
+                               || localStorage.getItem('rememberedUser');
+                        if (!raw) return '';
+                        var u = JSON.parse(raw);
+                        return (u && u.platform_user_id) ? String(u.platform_user_id) : '';
+                    } catch (e) { return ''; }
+                },
+                bootstrap: function () {
+                    if (Auth.token() && Auth.deviceId()) return Promise.resolve(true);
+                    var pid = Auth.platformUserId();
+                    return fetch(SERVER_URL + '/api/devices/bootstrap', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ platform_user_id: pid })
+                    }).then(function (r) {
+                        return r.ok ? r.json() : null;
+                    }).then(function (d) {
+                        if (!d) return false;
+                        if (d.device_token) Auth.save(d.device_token, d.device_id);
+                        else if (d.device_id) Auth.save(null, d.device_id);
+                        return !!(d.device_token || d.device_id);
+                    }).catch(function () { return false; });
+                },
+                save: function (token, deviceId) {
+                    try {
+                        if (token) localStorage.setItem(KEY, token);
+                        if (deviceId) localStorage.setItem(ID_KEY, deviceId);
+                    } catch (e) {}
+                },
+                clear: function () {
+                    try {
+                        localStorage.removeItem(KEY);
+                        localStorage.removeItem(ID_KEY);
+                    } catch (e) {}
+                },
+                headers: function (extra) {
+                    var h = Object.assign({}, extra || {});
+                    var t = Auth.token();
+                    if (t) h['X-Device-Token'] = t;
+                    return h;
+                },
+                logout: function () {
+                    return fetch(SERVER_URL + '/api/devices/logout', {
+                        method: 'POST', credentials: 'include'
+                    }).catch(function () {}).then(function () { Auth.clear(); });
+                },
+                /* Сеанс завершили с другого устройства / токен протух.
+                   Чистим ВСЕ следы "запомненного" входа, а не только токен
+                   устройства — иначе index.html молча залогинит обратно и
+                   перекинет на chats.html. */
+                kick: function () {
+                    Auth.clear();
+                    try { sessionStorage.removeItem('userData'); } catch (e) {}
+                    try {
+                        localStorage.removeItem('rememberedUser');
+                        localStorage.removeItem('vg_last_user_id');
+                    } catch (e) {}
+                    window.location.href = 'index.html';
+                }
+            };
+
+            var origFetch = window.fetch.bind(window);
+            var API_HOST = 'vuntserverrr.site';
+
+            window.fetch = function (input, init) {
+                init = init || {};
+                var url = (typeof input === 'string') ? input : (input && input.url) || '';
+                if (url.indexOf(API_HOST) !== -1 || url.charAt(0) === '/') {
+                    var t = Auth.token();
+                    var pid = Auth.platformUserId();
+                    if (t || pid) {
+                        var hdrs = new Headers(
+                            init.headers
+                            || (typeof input !== 'string' && input && input.headers)
+                            || {}
+                        );
+                        if (t && !hdrs.has('X-Device-Token')) hdrs.set('X-Device-Token', t);
+                        if (pid && !hdrs.has('X-Platform-User-Id')) hdrs.set('X-Platform-User-Id', pid);
+                        init = Object.assign({}, init, { headers: hdrs });
+                    }
+                    if (!init.credentials) init.credentials = 'include';
+                }
+                return origFetch(input, init).then(function (resp) {
+                    if (resp.status === 401 && Auth.token()
+                        && url.indexOf('/api/devices/bootstrap') === -1
+                        && url.indexOf('/api/devices/session') === -1) {
+                        resp.clone().json().then(function (d) {
+                            if (d && d.error === 'session_terminated') Auth.kick();
+                        }).catch(function () {});
+                    }
+                    return resp;
+                });
+            };
+        })();
+
+        // Регистрируем это устройство в фоне (без cookie, по platform_user_id),
+        // чтобы у него появился device_id для сверки в обработчике ниже.
+        if (window.VGAuth) { window.VGAuth.bootstrap(); }
+
+        // Реакция на завершение сеанса с другого устройства/из раздела
+        // "Устройства": событие приходит через сокет BanGuard (см.
+        // attachSocket -> socket.on('devices_changed', ...) выше по файлу)
+        // и пробрасывается сюда как window-эвент 'vg-devices-changed'.
+        window.addEventListener('vg-devices-changed', async function (e) {
+            try {
+                var payload = (e && e.detail) || {};
+                var terminated = payload.terminated || [];
+                var mine = window.VGAuth.deviceId();
+                if (!mine) {
+                    // Токен ещё не подтянулся — узнаём себя через сервер.
+                    var resp = await fetch(SERVER_URL + '/api/devices/self');
+                    if (resp.ok) {
+                        var data = await resp.json();
+                        mine = data.device_id || null;
+                        if (mine) window.VGAuth.save(null, mine);
+                    }
+                }
+                if (mine && terminated.indexOf(mine) !== -1) {
+                    window.VGAuth.kick();
+                }
+            } catch (err) {}
+        });
+
         
         const messageBox = document.getElementById('messageBox');
         const contactsModal = document.getElementById('contactsModal');
