@@ -1736,6 +1736,42 @@
             font-style: normal;
         }
 
+        /* Карточка "новый вход в аккаунт" от бота Vuntgram — обычный входящий
+           пузырь + две кнопки-действия под текстом. */
+        .vg-login-alert .vg-login-alert-content {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .vg-login-alert .message-text {
+            white-space: pre-line;
+        }
+        .vg-login-alert-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 2px;
+        }
+        .vg-login-alert-btn {
+            flex: 1;
+            border: none;
+            border-radius: 10px;
+            padding: 9px 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s ease, transform 0.1s ease;
+        }
+        .vg-login-alert-btn:active { transform: scale(0.97); }
+        .vg-login-alert-btn:disabled { opacity: 0.5; cursor: default; }
+        .vg-login-alert-btn.vg-login-alert-yes {
+            background: var(--telegram-success);
+            color: #fff;
+        }
+        .vg-login-alert-btn.vg-login-alert-no {
+            background: var(--telegram-destructive);
+            color: #fff;
+        }
+
         /* Когда активно редактирование — контейнер становится колонкой, а сама
            панель редактирования "сливается" с полем ввода в единую капсулу:
            одинаковый фон/ширина, у панели скруглены только верхние углы,
@@ -9893,10 +9929,85 @@ function getActiveElements() {
             if (showName) messageElement.insertAdjacentHTML('afterbegin', vgSenderNameHtml(message));
         }
 
+        // Карточка "новый вход в аккаунт" от бота (см. action_type === 'login_alert').
+        // Пока action_status === 'pending' — под текстом две кнопки; после ответа
+        // (с любого устройства) сервер меняет content/action_status, это доезжает
+        // сюда обычным поллингом чата (та же дорожка, что и правка обычных
+        // сообщений), и при следующей отрисовке карточка уже без кнопок.
+        function renderLoginAlertMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message message-incoming vg-login-alert';
+            messageElement.setAttribute('data-message-id', message.id);
+            messageElement.setAttribute('data-action-status', message.action_status || 'pending');
+
+            const messageTime = formatChatMessageTime(message.sent_at);
+            const isPending = message.action_status === 'pending';
+
+            const buttonsHtml = isPending ? `
+                <div class="vg-login-alert-actions">
+                    <button type="button" class="vg-login-alert-btn vg-login-alert-yes" data-action="confirm">Это я</button>
+                    <button type="button" class="vg-login-alert-btn vg-login-alert-no" data-action="deny">Это не я</button>
+                </div>
+            ` : '';
+
+            messageElement.innerHTML = `
+                <div class="message-content vg-login-alert-content">
+                    <span class="message-text">${linkifyHtml(message.content)}</span>
+                    ${buttonsHtml}
+                    <span class="message-time">${messageTime}</span>
+                </div>
+            `;
+            messageElement.style.opacity = '1';
+            messageElement.style.transform = 'translateY(0)';
+
+            if (isPending) {
+                messageElement.querySelectorAll('.vg-login-alert-btn').forEach(btn => {
+                    btn.addEventListener('click', () => vgHandleLoginAlertClick(message.id, btn.dataset.action, messageElement));
+                });
+            }
+
+            return messageElement;
+        }
+
+        async function vgHandleLoginAlertClick(messageId, action, messageElement) {
+            const btns = messageElement.querySelectorAll('.vg-login-alert-btn');
+            btns.forEach(b => { b.disabled = true; });
+            try {
+                const resp = await fetch(`${SERVER_URL}/api/devices/login_alert/respond`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        message_id: messageId,
+                        action: action,
+                        platform_user_id: userData.platform_user_id
+                    })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.status !== 'success') {
+                    btns.forEach(b => { b.disabled = false; });
+                    return;
+                }
+                // Локально сразу убираем кнопки — не ждём следующего опроса сервера.
+                const actionsEl = messageElement.querySelector('.vg-login-alert-actions');
+                if (actionsEl) actionsEl.remove();
+                messageElement.setAttribute('data-action-status', action === 'confirm' ? 'confirmed' : 'denied');
+                const textEl = messageElement.querySelector('.message-text');
+                if (textEl) {
+                    textEl.innerHTML = linkifyHtml(action === 'confirm'
+                        ? '✅ Подтверждено: это вы.'
+                        : '⛔ Сеанс завершён: вы отметили этот вход как чужой.');
+                }
+            } catch (e) {
+                btns.forEach(b => { b.disabled = false; });
+            }
+        }
+
         function renderMessage(message, runInfo) {
             // Плашка вместо пузыря — без времени, статуса, реакций,
             // long-press-меню, свайпа-ответа и выбора.
             if (vgIsGroupSystemMessage(message)) return renderSystemMessage(message);
+            if (message.action_type === 'login_alert') return renderLoginAlertMessage(message);
 
             const messageElement = document.createElement('div');
             messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
@@ -15633,6 +15744,17 @@ function stopProfileDataPolling() {
 
                 if (!needsFullRender && existingIds.has(msgId)) {
                     const el = messagesContainer.querySelector(`[data-message-id="${msgId}"]`);
+
+                    // Карточка входа: если статус (pending/confirmed/denied) изменился —
+                    // с кем-то другим устройством уже ответили на этот же алерт —
+                    // просто перерисовываем карточку целиком (кнопки исчезают везде).
+                    if (el && entry.type === 'single' && entry.item.action_type === 'login_alert') {
+                        const newStatus = entry.item.action_status || 'pending';
+                        if (el.getAttribute('data-action-status') !== newStatus) {
+                            el.replaceWith(renderLoginAlertMessage(entry.item));
+                        }
+                        return;
+                    }
 
                     // Update read status of existing outgoing messages
                     if (representativeMessage.is_me && representativeMessage.is_read && el) {
