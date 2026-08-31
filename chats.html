@@ -1737,39 +1737,87 @@
         }
 
         /* Карточка "новый вход в аккаунт" от бота Vuntgram — обычный входящий
-           пузырь + две кнопки-действия под текстом. */
+           пузырь, а под текстом — inline-кнопки как в настоящем Telegram:
+           полноширинные плашки, вплотную к краям пузыря, полупрозрачным
+           тёмным фоном поверх, разделены тонкой линией, без зазоров между
+           собой (нижние углы — как у самого пузыря). */
         .vg-login-alert .vg-login-alert-content {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            width: 100%;
+        }
+        .vg-login-alert .vg-login-alert-text-row {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            width: 100%;
+            padding: 0 2px 8px 0;
+        }
+        .vg-login-alert .vg-login-alert-text-row > .message-text {
+            flex: 1;
         }
         .vg-login-alert .message-text {
             white-space: pre-line;
         }
         .vg-login-alert-actions {
+            /* Гасим паддинг родительского .message (6px 10px 5px 12px), чтобы
+               кнопки доходили точно до краёв пузыря, как настоящая inline-
+               клавиатура Telegram, а не висели внутри текстовых полей. */
+            flex: 1 1 100%;
             display: flex;
-            gap: 8px;
-            margin-top: 2px;
+            flex-direction: column;
+            margin: 4px -10px -5px -12px;
+            border-top: 1px solid rgba(127, 127, 127, 0.22);
         }
         .vg-login-alert-btn {
-            flex: 1;
+            width: 100%;
             border: none;
-            border-radius: 10px;
-            padding: 9px 10px;
-            font-size: 14px;
-            font-weight: 600;
+            background: rgba(0, 0, 0, 0.035);
+            color: inherit;
+            padding: 11px 12px;
+            font-size: 15px;
+            font-weight: 500;
+            font-family: inherit;
             cursor: pointer;
-            transition: opacity 0.15s ease, transform 0.1s ease;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.12s ease;
         }
-        .vg-login-alert-btn:active { transform: scale(0.97); }
-        .vg-login-alert-btn:disabled { opacity: 0.5; cursor: default; }
-        .vg-login-alert-btn.vg-login-alert-yes {
-            background: var(--telegram-success);
-            color: #fff;
+        .vg-login-alert-btn + .vg-login-alert-btn {
+            border-top: 1px solid rgba(127, 127, 127, 0.18);
         }
-        .vg-login-alert-btn.vg-login-alert-no {
-            background: var(--telegram-destructive);
-            color: #fff;
+        .vg-login-alert-btn:last-child {
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 18px;
+        }
+        .vg-login-alert-btn:hover,
+        .vg-login-alert-btn:active {
+            background: rgba(0, 0, 0, 0.08);
+        }
+        .vg-login-alert-btn:disabled {
+            opacity: 0.5;
+            cursor: default;
+            background: rgba(0, 0, 0, 0.035) !important;
+        }
+        .vg-login-alert-btn.vg-login-alert-yes { color: var(--telegram-success); }
+        .vg-login-alert-btn.vg-login-alert-no { color: var(--telegram-destructive); }
+
+        @media (prefers-color-scheme: dark) {
+            .vg-login-alert-actions {
+                border-top-color: rgba(255, 255, 255, 0.14);
+            }
+            .vg-login-alert-btn {
+                background: rgba(255, 255, 255, 0.045);
+            }
+            .vg-login-alert-btn + .vg-login-alert-btn {
+                border-top-color: rgba(255, 255, 255, 0.12);
+            }
+            .vg-login-alert-btn:hover,
+            .vg-login-alert-btn:active {
+                background: rgba(255, 255, 255, 0.09);
+            }
+            .vg-login-alert-btn:disabled {
+                background: rgba(255, 255, 255, 0.045) !important;
+            }
         }
 
         /* Когда активно редактирование — контейнер становится колонкой, а сама
@@ -7446,6 +7494,23 @@
                         init = Object.assign({}, init, { headers: hdrs });
                     }
                     if (!init.credentials) init.credentials = 'include';
+
+                    // /get_chats и /get_messages: подмешиваем свой device_id в JSON-тело,
+                    // чтобы сервер мог скрыть от ЭТОГО устройства его же собственную
+                    // карточку "новый вход" (см. send_login_alert) — не трогая остальные
+                    // поля запроса и не заставляя переписывать каждый вызов по отдельности.
+                    var did = Auth.deviceId();
+                    if (did && typeof init.body === 'string'
+                        && (url.indexOf('/get_chats') !== -1 || url.indexOf('/get_messages') !== -1
+                            || url.indexOf('/get_chat_info') !== -1 || url.indexOf('/get_unread_count') !== -1)) {
+                        try {
+                            var bodyObj = JSON.parse(init.body);
+                            if (bodyObj && typeof bodyObj === 'object' && !bodyObj.device_id) {
+                                bodyObj.device_id = did;
+                                init = Object.assign({}, init, { body: JSON.stringify(bodyObj) });
+                            }
+                        } catch (e) {}
+                    }
                 }
                 return origFetch(input, init).then(function (resp) {
                     if (resp.status === 401 && Auth.token()
@@ -9952,9 +10017,11 @@ function getActiveElements() {
 
             messageElement.innerHTML = `
                 <div class="message-content vg-login-alert-content">
-                    <span class="message-text">${linkifyHtml(message.content)}</span>
+                    <div class="vg-login-alert-text-row">
+                        <span class="message-text">${linkifyHtml(message.content)}</span>
+                        <span class="message-time">${messageTime}</span>
+                    </div>
                     ${buttonsHtml}
-                    <span class="message-time">${messageTime}</span>
                 </div>
             `;
             messageElement.style.opacity = '1';
