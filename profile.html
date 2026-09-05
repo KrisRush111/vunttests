@@ -3486,11 +3486,6 @@ input:checked + .toggle-slider:before {
                     <div class="settings-item-label">Устройства</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
-                <div id="qrLoginScanBtn" class="settings-item">
-                    <div class="settings-item-icon" style="background: linear-gradient(135deg, #34d399, #059669); box-shadow: 0 4px 12px rgba(5,150,105,0.42);"><i class="fas fa-qrcode"></i></div>
-                    <div class="settings-item-label">Войти по QR-коду</div>
-                    <i class="fas fa-chevron-right chevron-icon"></i>
-                </div>
             </div>
 
             <div class="vg-group">
@@ -3728,11 +3723,6 @@ input:checked + .toggle-slider:before {
                 <div id="devicesBtnMobile" class="settings-item">
                     <div class="settings-item-icon" style="background: linear-gradient(135deg, #7f7fff, #4b4bd8); box-shadow: 0 4px 12px rgba(75,75,216,0.42);"><i class="fas fa-laptop"></i></div>
                     <div class="settings-item-label">Устройства</div>
-                    <i class="fas fa-chevron-right chevron-icon"></i>
-                </div>
-                <div id="qrLoginScanBtnMobile" class="settings-item">
-                    <div class="settings-item-icon" style="background: linear-gradient(135deg, #34d399, #059669); box-shadow: 0 4px 12px rgba(5,150,105,0.42);"><i class="fas fa-qrcode"></i></div>
-                    <div class="settings-item-label">Войти по QR-коду</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
             </div>
@@ -5444,15 +5434,21 @@ window.addEventListener("beforeunload", () => {
         }
 
         function openConnectDeviceSheet() {
-            openDeviceSheetHtml(
-                '<div class="dev-sheet-card">'
-                + '<div class="dev-sheet-head">' + DEV_SVG.laptop
-                +   '<div class="dev-sheet-title">Подключить устройство</div>'
-                +   '<div class="dev-sheet-sub">Вход по QR-коду скоро появится. Пока откройте Vuntgram в браузере на компьютере и войдите обычным способом — сеанс появится в списке ниже.</div>'
-                + '</div>'
-                + '<button type="button" class="dev-sheet-btn bold" data-sheet-close>Понятно</button>'
-                + '</div>'
-            );
+            // Вход по QR-коду: открываем камеру прямо здесь, а не заглушку.
+            // Реализация — ниже, в setupQrLoginScanner() (openQrScanner).
+            if (typeof window.openQrLoginScanner === 'function') {
+                window.openQrLoginScanner();
+            } else {
+                openDeviceSheetHtml(
+                    '<div class="dev-sheet-card">'
+                    + '<div class="dev-sheet-head">' + DEV_SVG.laptop
+                    +   '<div class="dev-sheet-title">Подключить устройство</div>'
+                    +   '<div class="dev-sheet-sub">Не удалось открыть камеру. Обновите страницу и попробуйте снова.</div>'
+                    + '</div>'
+                    + '<button type="button" class="dev-sheet-btn bold" data-sheet-close>Понятно</button>'
+                    + '</div>'
+                );
+            }
         }
 
         function openDeviceSheet(d, scope) {
@@ -9520,11 +9516,13 @@ html[data-theme="dark"] .vg-verified-tooltip {
 })();
 </script>
 <!-- ============================================================
-     Вход по QR-коду: сканер камерой (см. #qrLoginScanBtn(Mobile) выше).
-     Открывается это устройство — оно уже авторизовано, поэтому и confirm
-     ниже отправляется штатным (пропатченным VGAuth) fetch с его же
-     X-Device-Token/cookie. Сама сессия на СКАНИРУЕМОМ устройстве не
-     трогается вообще — её выдаёт /api/qrlogin/poll на index.html.
+     Вход по QR-коду: сканер камерой, открывается кнопкой "Подключить
+     устройство" в разделе "Устройства" (см. openConnectDeviceSheet /
+     window.openQrLoginScanner). Открывается это устройство — оно уже
+     авторизовано, поэтому confirm ниже отправляется штатным (пропатченным
+     VGAuth) fetch с его же X-Device-Token/cookie. Сама сессия на
+     СКАНИРУЕМОМ устройстве (index.html) не трогается вообще — её выдаёт
+     /api/qrlogin/poll там же, на index.html.
      ============================================================ -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
@@ -9657,8 +9655,6 @@ html[data-theme="dark"] .vg-verified-tooltip {
 
 <script>
 (function setupQrLoginScanner() {
-    const openBtns = [document.getElementById('qrLoginScanBtn'), document.getElementById('qrLoginScanBtnMobile')]
-        .filter(Boolean);
     const modal = document.getElementById('qrScanModal');
     const video = document.getElementById('qrScanVideo');
     const closeBtn = document.getElementById('qrScanCloseBtn');
@@ -9666,7 +9662,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
     const confirmSheet = document.getElementById('qrConfirmSheet');
     const confirmYesBtn = document.getElementById('qrConfirmYesBtn');
     const confirmNoBtn = document.getElementById('qrConfirmNoBtn');
-    if (!openBtns.length || !modal || !video) return;
+    if (!modal || !video) return;
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -9733,7 +9729,10 @@ html[data-theme="dark"] .vg-verified-tooltip {
         rafId = requestAnimationFrame(scanFrame);
     }
 
-    openBtns.forEach(btn => btn.addEventListener('click', openScanner));
+    // Открывается кнопкой "Подключить устройство" в разделе "Устройства"
+    // (см. openConnectDeviceSheet выше) — эта функция экспортирована в
+    // window, т.к. объявлена внутри отдельного IIFE.
+    window.openQrLoginScanner = openScanner;
     closeBtn.addEventListener('click', closeScanner);
 
     confirmNoBtn.addEventListener('click', () => {
