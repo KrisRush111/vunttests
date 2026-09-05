@@ -3486,6 +3486,11 @@ input:checked + .toggle-slider:before {
                     <div class="settings-item-label">Устройства</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
+                <div id="qrLoginScanBtn" class="settings-item">
+                    <div class="settings-item-icon" style="background: linear-gradient(135deg, #34d399, #059669); box-shadow: 0 4px 12px rgba(5,150,105,0.42);"><i class="fas fa-qrcode"></i></div>
+                    <div class="settings-item-label">Войти по QR-коду</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
             </div>
 
             <div class="vg-group">
@@ -3723,6 +3728,11 @@ input:checked + .toggle-slider:before {
                 <div id="devicesBtnMobile" class="settings-item">
                     <div class="settings-item-icon" style="background: linear-gradient(135deg, #7f7fff, #4b4bd8); box-shadow: 0 4px 12px rgba(75,75,216,0.42);"><i class="fas fa-laptop"></i></div>
                     <div class="settings-item-label">Устройства</div>
+                    <i class="fas fa-chevron-right chevron-icon"></i>
+                </div>
+                <div id="qrLoginScanBtnMobile" class="settings-item">
+                    <div class="settings-item-icon" style="background: linear-gradient(135deg, #34d399, #059669); box-shadow: 0 4px 12px rgba(5,150,105,0.42);"><i class="fas fa-qrcode"></i></div>
+                    <div class="settings-item-label">Войти по QR-коду</div>
                     <i class="fas fa-chevron-right chevron-icon"></i>
                 </div>
             </div>
@@ -9509,5 +9519,270 @@ html[data-theme="dark"] .vg-verified-tooltip {
     }, true);
 })();
 </script>
+<!-- ============================================================
+     Вход по QR-коду: сканер камерой (см. #qrLoginScanBtn(Mobile) выше).
+     Открывается это устройство — оно уже авторизовано, поэтому и confirm
+     ниже отправляется штатным (пропатченным VGAuth) fetch с его же
+     X-Device-Token/cookie. Сама сессия на СКАНИРУЕМОМ устройстве не
+     трогается вообще — её выдаёт /api/qrlogin/poll на index.html.
+     ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+.qr-scan-modal {
+    position: fixed;
+    inset: 0;
+    background: #1c1c1e;
+    z-index: 10050;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    color: #fff;
+}
+.qr-scan-modal.open { display: flex; }
+.qr-scan-topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    box-sizing: border-box;
+}
+.qr-scan-back {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(120,120,128,0.32);
+    color: #fff;
+    font-size: 17px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+}
+.qr-scan-hint {
+    text-align: center;
+    padding: 8px 32px 20px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #eaeaea;
+}
+.qr-scan-viewport {
+    position: relative;
+    width: min(78vw, 320px);
+    height: min(78vw, 320px);
+    border-radius: 18px;
+    overflow: hidden;
+    background: #000;
+}
+.qr-scan-viewport video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+}
+.qr-scan-corner {
+    position: absolute;
+    width: 28px; height: 28px;
+    border: 3px solid #fff;
+    opacity: 0.9;
+}
+.qr-scan-corner.tl { top: 10px; left: 10px; border-right: none; border-bottom: none; border-top-left-radius: 8px; }
+.qr-scan-corner.tr { top: 10px; right: 10px; border-left: none; border-bottom: none; border-top-right-radius: 8px; }
+.qr-scan-corner.bl { bottom: 10px; left: 10px; border-right: none; border-top: none; border-bottom-left-radius: 8px; }
+.qr-scan-corner.br { bottom: 10px; right: 10px; border-left: none; border-top: none; border-bottom-right-radius: 8px; }
+.qr-scan-status {
+    margin-top: 22px;
+    font-size: 14px;
+    color: #9a9a9e;
+    min-height: 20px;
+    text-align: center;
+    padding: 0 24px;
+}
+.qr-confirm-sheet {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 10060;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+}
+.qr-confirm-sheet.open { display: flex; }
+.qr-confirm-box {
+    width: 100%;
+    max-width: 420px;
+    background: #2c2c2e;
+    border-radius: 16px 16px 0 0;
+    padding: 22px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+    color: #fff;
+    text-align: center;
+}
+.qr-confirm-box h3 { margin: 0 0 8px; font-size: 17px; }
+.qr-confirm-box p { margin: 0 0 20px; font-size: 14px; color: #a8a8ad; line-height: 1.5; }
+.qr-confirm-btn {
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    padding: 13px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 10px;
+}
+.qr-confirm-btn.primary { background: #34c759; color: #fff; }
+.qr-confirm-btn.secondary { background: rgba(120,120,128,0.24); color: #fff; margin-bottom: 0; }
+</style>
+
+<div id="qrScanModal" class="qr-scan-modal">
+    <div class="qr-scan-topbar">
+        <button type="button" class="qr-scan-back" id="qrScanCloseBtn" aria-label="Закрыть"><i class="fas fa-chevron-left"></i></button>
+    </div>
+    <div class="qr-scan-hint">
+        Наведите камеру на QR-код<br>на экране входа Vuntgram
+    </div>
+    <div class="qr-scan-viewport">
+        <video id="qrScanVideo" playsinline autoplay muted></video>
+        <div class="qr-scan-corner tl"></div>
+        <div class="qr-scan-corner tr"></div>
+        <div class="qr-scan-corner bl"></div>
+        <div class="qr-scan-corner br"></div>
+    </div>
+    <div class="qr-scan-status" id="qrScanStatus"></div>
+</div>
+
+<div id="qrConfirmSheet" class="qr-confirm-sheet">
+    <div class="qr-confirm-box">
+        <h3>Войти в аккаунт на другом устройстве?</h3>
+        <p>Кто-то пытается войти в Vuntgram, отсканировав этот QR-код вашей камерой. Подтверждайте, только если это делаете вы сами.</p>
+        <button type="button" class="qr-confirm-btn primary" id="qrConfirmYesBtn">Подтвердить вход</button>
+        <button type="button" class="qr-confirm-btn secondary" id="qrConfirmNoBtn">Отмена</button>
+    </div>
+</div>
+
+<script>
+(function setupQrLoginScanner() {
+    const openBtns = [document.getElementById('qrLoginScanBtn'), document.getElementById('qrLoginScanBtnMobile')]
+        .filter(Boolean);
+    const modal = document.getElementById('qrScanModal');
+    const video = document.getElementById('qrScanVideo');
+    const closeBtn = document.getElementById('qrScanCloseBtn');
+    const statusEl = document.getElementById('qrScanStatus');
+    const confirmSheet = document.getElementById('qrConfirmSheet');
+    const confirmYesBtn = document.getElementById('qrConfirmYesBtn');
+    const confirmNoBtn = document.getElementById('qrConfirmNoBtn');
+    if (!openBtns.length || !modal || !video) return;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    let stream = null;
+    let rafId = null;
+    let pendingToken = null;
+    let scanning = false;
+
+    function setStatus(text) { statusEl.textContent = text || ''; }
+
+    async function openScanner() {
+        modal.classList.add('open');
+        setStatus('');
+        scanning = true;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            });
+            video.srcObject = stream;
+            await video.play();
+            rafId = requestAnimationFrame(scanFrame);
+        } catch (e) {
+            console.error('QR scanner camera error:', e);
+            setStatus('Не удалось получить доступ к камере');
+        }
+    }
+
+    function stopStream() {
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    }
+
+    function closeScanner() {
+        scanning = false;
+        stopStream();
+        modal.classList.remove('open');
+    }
+
+    function scanFrame() {
+        if (!scanning) return;
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code && code.data) {
+                const prefix = 'vuntgram-login:';
+                if (code.data.indexOf(prefix) === 0) {
+                    const token = code.data.slice(prefix.length).trim();
+                    if (token) {
+                        scanning = false; // не декодируем дальше, пока не разберёмся с этим кодом
+                        pendingToken = token;
+                        stopStream();
+                        modal.classList.remove('open');
+                        confirmSheet.classList.add('open');
+                        return;
+                    }
+                }
+                // Похоже на чужой QR-код — просто продолжаем сканировать.
+            }
+        }
+        rafId = requestAnimationFrame(scanFrame);
+    }
+
+    openBtns.forEach(btn => btn.addEventListener('click', openScanner));
+    closeBtn.addEventListener('click', closeScanner);
+
+    confirmNoBtn.addEventListener('click', () => {
+        confirmSheet.classList.remove('open');
+        pendingToken = null;
+    });
+
+    confirmYesBtn.addEventListener('click', async () => {
+        const token = pendingToken;
+        if (!token) { confirmSheet.classList.remove('open'); return; }
+        confirmYesBtn.disabled = true;
+        confirmYesBtn.textContent = 'Подтверждаем…';
+        try {
+            // Обычный fetch — глобальный патч VGAuth сам добавит
+            // X-Device-Token/X-Platform-User-Id этого (уже вошедшего)
+            // устройства, см. VGAuth выше.
+            const res = await fetch(`${SERVER_URL}/api/qrlogin/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+            });
+            const data = await res.json().catch(() => ({}));
+            confirmSheet.classList.remove('open');
+            confirmYesBtn.disabled = false;
+            confirmYesBtn.textContent = 'Подтвердить вход';
+            pendingToken = null;
+
+            if (res.ok && data.status === 'success') {
+                if (typeof showToast === 'function') {
+                    showToast('Вход подтверждён');
+                } else {
+                    alert('Вход подтверждён');
+                }
+            } else {
+                const msg = (data && data.error === 'invalid_or_expired')
+                    ? 'Код устарел, попробуйте отсканировать заново'
+                    : 'Не удалось подтвердить вход';
+                if (typeof showToast === 'function') showToast(msg); else alert(msg);
+            }
+        } catch (e) {
+            confirmSheet.classList.remove('open');
+            confirmYesBtn.disabled = false;
+            confirmYesBtn.textContent = 'Подтвердить вход';
+            pendingToken = null;
+            if (typeof showToast === 'function') showToast('Ошибка соединения с сервером'); else alert('Ошибка соединения с сервером');
+        }
+    });
+})();
+</script>
+
 </body>
 </html>
