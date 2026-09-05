@@ -305,6 +305,9 @@
         <div id="shaderBackground"></div>
         <script src="shader-background.bundle.js"></script>
         <script src="push-notifications.js"></script>
+        <!-- Генерация QR-кода для входа — рисуется прямо в браузере, сам
+             одноразовый токен на сторонние сервисы не уходит -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
 
 
@@ -389,6 +392,49 @@
                         Зарегистрироваться
                     </a>
                 </p>
+            </div>
+
+            <div class="mt-4 text-center">
+                <button type="button" id="showQrLoginBtn"
+                        class="text-sm font-medium text-emerald-300 hover:text-emerald-200 transition-colors underline bg-transparent border-0 cursor-pointer p-0">
+                    Войти по QR-коду
+                </button>
+            </div>
+        </div>
+
+        <!-- Вход по QR-коду: показывается вместо формы, не отдельная страница -->
+        <div id="qrLoginCard" class="login-card rounded-2xl p-8 w-full max-w-md z-10" style="display:none;">
+            <div class="flex justify-center mb-6">
+                <div class="flex items-center">
+                    <img src="vuntt.png" alt="Vuntgram Icon" class="mr-2" style="width: 50px; height: 50px;">
+                    <h1 class="text-3xl font-bold text-white">Vuntgram</h1>
+                </div>
+            </div>
+            <p class="text-center text-gray-200 text-sm mb-5 leading-relaxed">
+                Откройте Vuntgram на телефоне → Профиль → «Войти по QR-коду»<br>
+                и наведите камеру на этот код
+            </p>
+            <div class="flex justify-center mb-4">
+                <div id="qrLoginCodeBox" style="background:#fff;padding:14px;border-radius:16px;width:224px;height:224px;display:flex;align-items:center;justify-content:center;position:relative;">
+                    <div id="qrLoginCode"></div>
+                    <div id="qrLoginOverlay" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.95);border-radius:16px;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12px;">
+                        <i id="qrLoginOverlayIcon" class="fas fa-rotate-right" style="font-size:26px;color:#333;"></i>
+                        <p id="qrLoginOverlayText" style="color:#333;font-size:13px;margin-top:10px;">Код устарел</p>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-center mb-2">
+                <button type="button" id="qrLoginRefreshBtn"
+                        class="text-sm font-medium text-emerald-300 hover:text-emerald-200 underline bg-transparent border-0 cursor-pointer p-0"
+                        style="display:none;">
+                    Обновить код
+                </button>
+            </div>
+            <div class="mt-4 text-center">
+                <button type="button" id="showPasswordLoginBtn"
+                        class="text-sm font-medium text-emerald-300 hover:text-emerald-200 transition-colors underline bg-transparent border-0 cursor-pointer p-0">
+                    Войти по паролю
+                </button>
             </div>
         </div>
     </div>
@@ -768,34 +814,9 @@ initializePWA();
                 const result = await response.json();
                 
                 if (response.ok) {
-                    // Сохраняем данные пользователя
-                    sessionStorage.setItem('userData', JSON.stringify(result.user));
-
-                    // Токен устройства сервер уже выдал и создал строку в
-                    // user_devices прямо здесь, при входе (см. /login на
-                    // сервере) — и уже отправил "devices_changed" всем
-                    // остальным сеансам аккаунта. Раньше этот токен нигде не
-                    // сохранялся, и при первом же открытии chats.html/profile.html
-                    // VGAuth.bootstrap() регистрировал ЭТО ЖЕ устройство ещё
-                    // раз — как отдельную, вторую строку (задвоение в списке
-                    // "Устройства"). Сохраняя токен сразу, привязываем ровно
-                    // одну запись к этому входу.
-                    if (result.device_token) localStorage.setItem('vg_device_token', result.device_token);
-                    if (result.device_id) localStorage.setItem('vg_device_id', result.device_id);
-
                     // Если отмечен чекбокс "Запомнить меня" - сохраняем в localStorage
                     const rememberCheckbox = document.getElementById('remember');
-                    if (rememberCheckbox && rememberCheckbox.checked) {
-                        localStorage.setItem('rememberedUser', JSON.stringify(result.user));
-                        console.log('User saved to localStorage for auto-login');
-                    }
-                    
-                    if (typeof initPushNotifications === 'function') {
-                        initPushNotifications(result.user.platform_user_id);
-                    }
-                    
-                    // Перенаправляем на профиль
-                    window.location.href = getPostAuthDestination();
+                    finishLogin(result, rememberCheckbox && rememberCheckbox.checked);
                 } else {
                    
                     handleServerError(result.error, email);
@@ -806,6 +827,159 @@ initializePWA();
                 resetButtonState();
             }
         });
+
+        // Общая часть успешного входа — вызывается и обычным логином по
+        // паролю, и подтверждённым входом по QR (см. ниже), т.к. сервер в
+        // обоих случаях отдаёт один и тот же формат ответа (см. /login и
+        // /api/qrlogin/poll).
+        function finishLogin(result, remember) {
+            sessionStorage.setItem('userData', JSON.stringify(result.user));
+
+            // Токен устройства сервер уже выдал и создал строку в
+            // user_devices прямо здесь, при входе (см. /login на
+            // сервере) — и уже отправил "devices_changed" всем
+            // остальным сеансам аккаунта. Раньше этот токен нигде не
+            // сохранялся, и при первом же открытии chats.html/profile.html
+            // VGAuth.bootstrap() регистрировал ЭТО ЖЕ устройство ещё
+            // раз — как отдельную, вторую строку (задвоение в списке
+            // "Устройства"). Сохраняя токен сразу, привязываем ровно
+            // одну запись к этому входу.
+            if (result.device_token) localStorage.setItem('vg_device_token', result.device_token);
+            if (result.device_id) localStorage.setItem('vg_device_id', result.device_id);
+
+            if (remember) {
+                localStorage.setItem('rememberedUser', JSON.stringify(result.user));
+                console.log('User saved to localStorage for auto-login');
+            }
+
+            if (typeof initPushNotifications === 'function') {
+                initPushNotifications(result.user.platform_user_id);
+            }
+
+            window.location.href = getPostAuthDestination();
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           Вход по QR-коду
+
+           1) создаём одноразовый token на сервере;
+           2) рисуем из него QR ЛОКАЛЬНО (QRCode.js), не отдавая токен
+              на сторонний сервис генерации картинок;
+           3) опрашиваем /api/qrlogin/poll/<token> — как только другое
+              устройство подтвердит вход камерой в profile.html, этот же
+              ответ уже содержит готовую сессию (device_token/user), и
+              обрабатывается той же finishLogin(), что и обычный логин.
+           ═══════════════════════════════════════════════════════════ */
+        (function setupQrLogin() {
+            const passwordCard = document.querySelector('.login-card:not(#qrLoginCard)');
+            const qrCard = document.getElementById('qrLoginCard');
+            const showQrBtn = document.getElementById('showQrLoginBtn');
+            const showPasswordBtn = document.getElementById('showPasswordLoginBtn');
+            const codeBox = document.getElementById('qrLoginCode');
+            const overlay = document.getElementById('qrLoginOverlay');
+            const overlayText = document.getElementById('qrLoginOverlayText');
+            const refreshBtn = document.getElementById('qrLoginRefreshBtn');
+            if (!qrCard || !showQrBtn) return;
+
+            let qrObj = null;
+            let pollTimer = null;
+            let active = false;
+
+            function stopPolling() {
+                if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+            }
+
+            async function createAndShowCode() {
+                overlay.style.display = 'none';
+                refreshBtn.style.display = 'none';
+                codeBox.style.opacity = '0.35';
+                try {
+                    const res = await fetch(`${SERVER_URL}/api/qrlogin/create`, { method: 'POST' });
+                    const data = await res.json();
+                    codeBox.style.opacity = '1';
+                    if (!res.ok || data.status !== 'success') {
+                        overlayText.textContent = 'Не удалось создать код';
+                        overlay.style.display = 'flex';
+                        refreshBtn.style.display = 'inline-block';
+                        return;
+                    }
+
+                    codeBox.innerHTML = '';
+                    qrObj = new QRCode(codeBox, {
+                        text: 'vuntgram-login:' + data.token,
+                        width: 200,
+                        height: 200,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff'
+                    });
+
+                    poll(data.token, Date.now() + data.expires_in * 1000);
+                } catch (e) {
+                    codeBox.style.opacity = '1';
+                    overlayText.textContent = 'Ошибка соединения с сервером';
+                    overlay.style.display = 'flex';
+                    refreshBtn.style.display = 'inline-block';
+                }
+            }
+
+            async function poll(token, expiresAtMs) {
+                if (!active) return;
+                if (Date.now() > expiresAtMs) {
+                    overlayText.textContent = 'Код устарел';
+                    overlay.querySelector('i').className = 'fas fa-rotate-right';
+                    overlay.style.display = 'flex';
+                    refreshBtn.style.display = 'inline-block';
+                    return;
+                }
+                try {
+                    const res = await fetch(`${SERVER_URL}/api/qrlogin/poll/${token}`);
+                    const data = await res.json();
+
+                    if (res.ok && data.status === 'success') {
+                        stopPolling();
+                        overlayText.textContent = 'Вход выполнен';
+                        overlay.querySelector('i').className = 'fas fa-check';
+                        overlay.style.display = 'flex';
+                        finishLogin(data, false);
+                        return;
+                    }
+
+                    if (data.status === 'expired' || data.status === 'cancelled' ||
+                        data.status === 'consumed' || data.status === 'not_found') {
+                        overlayText.textContent = 'Код устарел';
+                        overlay.querySelector('i').className = 'fas fa-rotate-right';
+                        overlay.style.display = 'flex';
+                        refreshBtn.style.display = 'inline-block';
+                        return;
+                    }
+
+                    // status === 'pending' (или confirmed на долю секунды до
+                    // финализации) — продолжаем опрос
+                    pollTimer = setTimeout(() => poll(token, expiresAtMs), 1500);
+                } catch (e) {
+                    pollTimer = setTimeout(() => poll(token, expiresAtMs), 2500);
+                }
+            }
+
+            showQrBtn.addEventListener('click', () => {
+                if (passwordCard) passwordCard.style.display = 'none';
+                qrCard.style.display = 'block';
+                active = true;
+                createAndShowCode();
+            });
+
+            showPasswordBtn.addEventListener('click', () => {
+                active = false;
+                stopPolling();
+                qrCard.style.display = 'none';
+                if (passwordCard) passwordCard.style.display = 'block';
+            });
+
+            refreshBtn.addEventListener('click', () => {
+                active = true;
+                createAndShowCode();
+            });
+        })();
         
    
         function showError(message) {
