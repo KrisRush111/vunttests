@@ -9651,6 +9651,94 @@ html[data-theme="dark"] .vg-verified-tooltip {
 .qr-confirm-btn:active { transform: scale(.97); opacity: .88; }
 .qr-confirm-btn.primary { background: var(--dev-blue, #007aff); color: #fff; }
 .qr-confirm-btn.secondary { background: var(--dev-group-bg, rgba(120,120,128,0.24)); color: var(--dev-blue, #007aff); margin-bottom: 0; }
+
+/* ===== Тост «Вход подтверждён» — тот же дизайн, что и «Жалоба отправлена»
+   в chats.html: квадратная почти белая карточка с серой галочкой,
+   которая дорисовывается анимацией. ===== */
+.copy-toast {
+    position: fixed;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-10px) scale(0.94);
+    z-index: 10070;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 18px;
+    border-radius: 14px;
+    background: rgba(28, 28, 30, 0.92);
+    border: 1px solid rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 500;
+    white-space: nowrap;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.copy-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+}
+.copy-toast-check { width: 20px; height: 20px; flex-shrink: 0; }
+.copy-toast-check circle {
+    stroke: #34c759; stroke-width: 2; fill: none;
+    stroke-dasharray: 63; stroke-dashoffset: 63;
+}
+.copy-toast-check path {
+    stroke: #34c759; stroke-width: 2.5; fill: none;
+    stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 20; stroke-dashoffset: 20;
+}
+.copy-toast.show .copy-toast-check circle { animation: qrToastCheckCircle 0.4s ease forwards; }
+.copy-toast.show .copy-toast-check path { animation: qrToastCheckPath 0.3s ease 0.32s forwards; }
+@keyframes qrToastCheckCircle { to { stroke-dashoffset: 0; } }
+@keyframes qrToastCheckPath { to { stroke-dashoffset: 0; } }
+
+.copy-toast.report-toast {
+    --report-toast-size: 132px;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    flex-direction: column;
+    justify-content: center;
+    gap: 12px;
+    width: var(--report-toast-size);
+    height: var(--report-toast-size);
+    padding: 0 12px;
+    border-radius: 22px;
+    background: rgba(245, 245, 247, 0.82);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    color: #6e6e73;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.25;
+}
+.copy-toast.report-toast.show { transform: translate(-50%, -50%) scale(1); }
+@media (prefers-color-scheme: dark) {
+    .copy-toast.report-toast {
+        background: rgba(235, 235, 240, 0.80);
+        border-color: rgba(255, 255, 255, 0.35);
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+    }
+}
+.copy-toast.report-toast .copy-toast-check { width: 46px; height: 46px; }
+.copy-toast.report-toast .copy-toast-check circle { stroke: #8e8e93; stroke-width: 1.6; }
+.copy-toast.report-toast .copy-toast-check path { stroke: #8e8e93; stroke-width: 2.2; }
+@media (max-width: 767px) {
+    .copy-toast.report-toast {
+        --report-toast-size: 124px;
+        border-radius: 20px;
+        font-size: 13.5px;
+        gap: 10px;
+    }
+    .copy-toast.report-toast .copy-toast-check { width: 42px; height: 42px; }
+}
 </style>
 
 <div id="qrScanModal" class="qr-scan-modal">
@@ -9761,6 +9849,53 @@ html[data-theme="dark"] .vg-verified-tooltip {
     window.openQrLoginScanner = openScanner;
     closeBtn.addEventListener('click', closeScanner);
 
+    /* Тост «Вход подтверждён» — тот же вид, что и «Жалоба отправлена» в
+       chats.html: квадратная почти белая карточка с серой галочкой,
+       которая дорисовывается анимацией. Держим 2900 мс — как там же. */
+    function showQrConfirmToast(text) {
+        const existing = document.querySelector('.copy-toast');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'copy-toast report-toast';
+        toast.innerHTML = `
+            <svg class="copy-toast-check" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M7 12.5l3 3 7-7"></path>
+            </svg>
+            <span>${text}</span>
+        `;
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => toast.classList.add('show'));
+        });
+
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 250);
+        }, 2900);
+    }
+
+    function showQrSimpleToast(text) {
+        const existing = document.querySelector('.copy-toast');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'copy-toast';
+        toast.innerHTML = `<span>${text}</span>`;
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => toast.classList.add('show'));
+        });
+
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 250);
+        }, 1400);
+    }
+
     confirmNoBtn.addEventListener('click', () => {
         confirmSheet.classList.remove('open');
         pendingToken = null;
@@ -9787,23 +9922,19 @@ html[data-theme="dark"] .vg-verified-tooltip {
             pendingToken = null;
 
             if (res.ok && data.status === 'success') {
-                if (typeof showToast === 'function') {
-                    showToast('Вход подтверждён');
-                } else {
-                    alert('Вход подтверждён');
-                }
+                showQrConfirmToast('Вход подтверждён');
             } else {
                 const msg = (data && data.error === 'invalid_or_expired')
                     ? 'Код устарел, попробуйте отсканировать заново'
                     : 'Не удалось подтвердить вход';
-                if (typeof showToast === 'function') showToast(msg); else alert(msg);
+                showQrSimpleToast(msg);
             }
         } catch (e) {
             confirmSheet.classList.remove('open');
             confirmYesBtn.disabled = false;
             confirmYesBtn.textContent = 'Подтвердить вход';
             pendingToken = null;
-            if (typeof showToast === 'function') showToast('Ошибка соединения с сервером'); else alert('Ошибка соединения с сервером');
+            showQrSimpleToast('Ошибка соединения с сервером');
         }
     });
 })();
