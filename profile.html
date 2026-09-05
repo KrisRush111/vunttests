@@ -1285,6 +1285,12 @@
      
         .desktop-sidebar-content {
             flex: 1;
+            /* Без min-height:0 flex-элемент внутри колонки .desktop-sidebar
+               (overflow:hidden) по умолчанию не может сжаться меньше
+               высоты своего контента (min-height:auto у flex-детей) —
+               из-за этого список разделов просто обрезался родителем,
+               а overflow-y:auto ниже никогда не активировался. */
+            min-height: 0;
             overflow-y: auto;
             padding-bottom: 12px;
         }
@@ -6277,7 +6283,11 @@ function updateProfileUI() {
     const classValue = (classNumberClean && classLetterClean) ? `${classNumberClean}${classLetterClean}` : '';
 
     // Update mobile profile elements (used in profileModalMobile)
-    AvatarCache.render(SERVER_URL, profileAvatarMobile, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
+    // has_avatar приходил только из старого /profile-эндпоинта; свежий вход
+    // (обычный или по QR) отдаёт has_avatar_photo — раньше это поле тут не
+    // проверялось, и после входа в ДРУГОЙ аккаунт (для которого ещё нет
+    // локального кэша аватарки) вместо фото показывалась просто буква.
+    AvatarCache.render(SERVER_URL, profileAvatarMobile, userData.platform_user_id, firstLetter, bgColor, !!(userData.has_avatar_photo || userData.has_avatar));
     setNicknameWithBadge(profileNicknameMobile, nickname, isUserVerified());
     profileIdMobile.textContent = `ID: ${platformId}`;
     
@@ -6320,17 +6330,17 @@ function updateProfileUI() {
     }
 
     // Update desktop sidebar elements
-    AvatarCache.render(SERVER_URL, sidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
+    AvatarCache.render(SERVER_URL, sidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!(userData.has_avatar_photo || userData.has_avatar));
     setNicknameWithBadge(sidebarProfileNickname, nickname, isUserVerified());
     sidebarProfileId.textContent = `id: ${platformId}`; 
 
     // Update mobile sidebar elements (new)
-    AvatarCache.render(SERVER_URL, mobileSidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
+    AvatarCache.render(SERVER_URL, mobileSidebarProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!(userData.has_avatar_photo || userData.has_avatar));
     setNicknameWithBadge(mobileSidebarProfileNickname, nickname, isUserVerified());
     mobileSidebarProfileId.textContent = `id: ${platformId}`; 
 
     // Update desktop profile modal elements
-    AvatarCache.render(SERVER_URL, desktopProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!userData.has_avatar);
+    AvatarCache.render(SERVER_URL, desktopProfileAvatar, userData.platform_user_id, firstLetter, bgColor, !!(userData.has_avatar_photo || userData.has_avatar));
     setNicknameWithBadge(desktopProfileNickname, nickname, isUserVerified());
     desktopProfileId.textContent = `ID: ${platformId}`;
     
@@ -9572,10 +9582,10 @@ html[data-theme="dark"] .vg-verified-tooltip {
 .qr-scan-viewport video {
     width: 100%; height: 100%;
     object-fit: cover;
-    /* Чуть приближаем картинку с камеры (не сам квадрат) — по умолчанию
+    /* Приближаем картинку с камеры (не сам квадрат) — по умолчанию
        угол обзора у фронтальной/широкоугольной камеры показывает многовато
        пространства вокруг, из-за чего QR-код в кадре выглядит мелким. */
-    transform: scale(1.18);
+    transform: scale(1.7);
     transform-origin: center;
 }
 .qr-scan-corner {
