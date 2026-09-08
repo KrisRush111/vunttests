@@ -4071,10 +4071,23 @@ input:checked + .toggle-slider:before {
             var origFetch = window.fetch.bind(window);
             var API_HOST = 'vuntserverrr.site';
 
+            // /avatar/, /avatar_full/ и /avatar_version/ намеренно НЕ проверяют
+            // сессию (см. комментарий в avatar-cache.js) и /avatar* делает
+            // редирект на Cloudinary, который отвечает Access-Control-Allow-Origin: *.
+            // Wildcard-origin и credentials:'include' одновременно ЗАПРЕЩЕНЫ
+            // спецификацией CORS — браузер обязан заблокировать такой ответ.
+            // Раньше этот патч насильно ставил credentials:'include' ВСЕМ
+            // запросам к vuntserverrr.site без исключений, из-за чего скачивание
+            // самого файла аватарки падало в CORS-ошибку ещё до того, как
+            // avatar-cache.js успевал что-то отрисовать — фото оставалось
+            // недогруженным независимо от флага has_avatar_photo.
+            var NO_CREDENTIALS_PATTERN = /\/avatar(_full|_version)?\//;
+
             window.fetch = function (input, init) {
                 init = init || {};
                 var url = (typeof input === 'string') ? input : (input && input.url) || '';
-                if (url.indexOf(API_HOST) !== -1 || url.charAt(0) === '/') {
+                var isAvatarAsset = NO_CREDENTIALS_PATTERN.test(url);
+                if ((url.indexOf(API_HOST) !== -1 || url.charAt(0) === '/') && !isAvatarAsset) {
                     var t = Auth.token();
                     var pid = Auth.platformUserId();
                     if (t || pid) {
@@ -4733,17 +4746,33 @@ function setupWallpaperEventListeners() {
     ['wallpaperToggleDesktop', 'wallpaperToggleMobile'].forEach(toggleId => {
         const toggle = document.getElementById(toggleId);
         if (toggle) {
-            // Удаляем старый обработчик
-            toggle.removeEventListener('change', toggleChangeHandler);
-            
-            // Добавляем новый обработчик
+            // Обработчик объявляем ДО removeEventListener — раньше здесь
+            // было наоборот (removeEventListener ссылался на
+            // toggleChangeHandler, объявленный через const строкой ниже),
+            // а const/let недоступны до своего объявления (temporal dead
+            // zone) → ReferenceError на каждой загрузке страницы, который
+            // обрывал весь остальной код в этом же DOMContentLoaded
+            // (см. document.addEventListener('DOMContentLoaded', ...) ниже
+            // по файлу — код после initializeWallpaperSystem() просто не
+            // успевал выполниться).
+            //
+            // Заодно храним обработчик прямо на элементе — иначе
+            // removeEventListener ниже сравнивал бы с НОВОЙ функцией,
+            // созданной в этом же вызове, и никогда не находил бы старую:
+            // при повторном вызове setupWallpaperEventListeners()
+            // слушатели просто копились бы один поверх другого.
+            if (toggle._wallpaperChangeHandler) {
+                toggle.removeEventListener('change', toggle._wallpaperChangeHandler);
+            }
+
             const toggleChangeHandler = (e) => {
                 wallpaperState.enabled = e.target.checked;
                 saveWallpaperSettings();
                 applyWallpaper();
                 updateDesktopPlaceholderWallpaper();
             };
-            
+
+            toggle._wallpaperChangeHandler = toggleChangeHandler;
             toggle.addEventListener('change', toggleChangeHandler);
         }
     });
