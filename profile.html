@@ -131,7 +131,7 @@
                 --telegram-divider: rgba(255,255,255,0.14);
                 --telegram-shadow: 0 1px 3px rgba(0,0,0,0.24);
                 --telegram-shadow-large: 0 4px 16px rgba(0,0,0,0.24);
-                --wallpaper-url: url('https://i.postimg.cc/yYW4KzWB/fon.webpp');
+                --wallpaper-url: url('https://i.postimg.cc/yYW4KzWB/fon.webp');
             }
         }
         
@@ -4402,67 +4402,167 @@ let wallpaperState = {
 };
 
 // Конфигурация обоев
+// file  — относительный путь к картинке (кириллица кодируется в рантайме)
+// gradient — заглушка, если картинка недоступна (404 / нет файла на хостинге)
 const WALLPAPERS = [
     {
         id: 'default',
         name: 'Системные',
         emoji: '🖼️',
-        url: 'фон.jpg',
+        file: 'фон.jpg',
+        fallbackUrl: 'https://i.postimg.cc/yYW4KzWB/fon.webp',
+        gradient: 'linear-gradient(135deg, #2b2b45 0%, #1f1f33 100%)',
         isDefault: true
     },
     {
         id: 'wall1',
         name: 'Фиолетовые',
         emoji: '💜',
-        url: 'фон3.jpg'
+        file: 'фон3.jpg',
+        gradient: 'linear-gradient(135deg, #8b5cf6 0%, #5b21b6 100%)'
     },
     {
         id: 'wall6',
         name: 'фиолетово-розовые',
         emoji: '🔮',
-        url: 'фон8.jpg'
+        file: 'фон8.jpg',
+        gradient: 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)'
     },
     {
         id: 'wall2',
         name: 'Светлые',
         emoji: '☀️',
-        url: 'фон4.jpg'
+        file: 'фон4.jpg',
+        gradient: 'linear-gradient(135deg, #f8fafc 0%, #dbeafe 100%)'
     },
     {
         id: 'wall5',
         name: 'сине-зелёные',
         emoji: '🌊',
-        url: 'фон7.jpg'
+        file: 'фон7.jpg',
+        gradient: 'linear-gradient(135deg, #0ea5e9 0%, #10b981 100%)'
     },
     {
         id: 'wall3',
         name: 'зелёно-розовые',
         emoji: '🌸',
-        url: 'фон5.jpg'
+        file: 'фон5.jpg',
+        gradient: 'linear-gradient(135deg, #34d399 0%, #f472b6 100%)'
     },
     {
         id: 'wall4',
         name: 'Темные',
         emoji: '🌙',
-        url: 'фон6.jpg'
+        file: 'фон6.jpg',
+        gradient: 'linear-gradient(135deg, #1f2937 0%, #0b1120 100%)'
     },
     {
         id: 'wall7',
         name: 'жёлто-зелёные',
         emoji: '🍃',
-        url: 'фон9.jpg'
+        file: 'фон9.jpg',
+        gradient: 'linear-gradient(135deg, #facc15 0%, #4ade80 100%)'
     }
 
 ];
 
+/* ===== Единый источник правды для фона обоев =====
+   Раньше JS подставлял 'фонN.jpg', а CSS-переменная --wallpaper-url вела на
+   другую (внешнюю) картинку, поэтому превью и плитки показывали разное, а при
+   404 оставались пустыми. Теперь URL считается один раз, проверяется загрузкой
+   и кэшируется; если картинки нет — используется градиент-заглушка. */
+const WALLPAPER_BG_CACHE = new Map();   // id -> готовое значение background-image
+const WALLPAPER_RESOLVERS = new Map();  // id -> Promise
+
+function getWallpaperById(id) {
+    return WALLPAPERS.find(w => w.id === id) || WALLPAPERS.find(w => w.isDefault) || WALLPAPERS[0];
+}
+
+function wallpaperCandidates(wallpaper) {
+    const list = [];
+    if (wallpaper.file) {
+        const encoded = encodeURI(wallpaper.file);
+        list.push(encoded);
+        if (encoded !== wallpaper.file) list.push(wallpaper.file);
+    }
+    if (wallpaper.fallbackUrl) list.push(wallpaper.fallbackUrl);
+    return list;
+}
+
+function getWallpaperBackground(wallpaper) {
+    if (!wallpaper) return 'none';
+    return WALLPAPER_BG_CACHE.get(wallpaper.id) || wallpaper.gradient || 'none';
+}
+
+function loadImageSource(src) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(img.naturalWidth > 0);
+        img.onerror = () => resolve(false);
+        img.src = src;
+    });
+}
+
+// Проверяем кандидатов по очереди и запоминаем первый рабочий.
+function resolveWallpaper(wallpaper) {
+    if (WALLPAPER_RESOLVERS.has(wallpaper.id)) return WALLPAPER_RESOLVERS.get(wallpaper.id);
+
+    const task = (async () => {
+        for (const src of wallpaperCandidates(wallpaper)) {
+            if (await loadImageSource(src)) {
+                WALLPAPER_BG_CACHE.set(wallpaper.id, `url("${src}")`);
+                return WALLPAPER_BG_CACHE.get(wallpaper.id);
+            }
+        }
+        WALLPAPER_BG_CACHE.set(wallpaper.id, wallpaper.gradient || 'none');
+        return WALLPAPER_BG_CACHE.get(wallpaper.id);
+    })();
+
+    WALLPAPER_RESOLVERS.set(wallpaper.id, task);
+    return task;
+}
+
+/* Фон ставим только если он реально изменился: раньше на один тап
+   background-image перезаписывался 3-4 раза (selectWallpaper →
+   updateChatPreviewWallpaper → applyWallpaper), картинка каждый раз
+   перерисовывалась заново и получалось мерцание. */
+function setWallpaperBackground(el, value) {
+    if (!el || !value) return;
+    if (el.dataset.wallpaperBg === value) return;
+    el.dataset.wallpaperBg = value;
+    el.style.backgroundImage = value;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.style.backgroundRepeat = 'no-repeat';
+    el.style.backgroundColor = '';
+}
+
+// Предзагрузка всех обоев: плитки и превью обновляются по мере готовности,
+// поэтому переключение обоев дальше происходит уже без сетевых запросов.
+function preloadAllWallpapers() {
+    return Promise.all(WALLPAPERS.map(wallpaper => resolveWallpaper(wallpaper).then(bg => {
+        document
+            .querySelectorAll(`.wallpaper-item[data-wallpaper-id="${wallpaper.id}"] .wallpaper-preview`)
+            .forEach(el => setWallpaperBackground(el, bg));
+
+        if (wallpaper.id === wallpaperState.selectedWallpaper) {
+            applyWallpaper();
+        }
+    })));
+}
+
 // Инициализация обоев - ОДНА основная функция
 function initializeWallpaperSystem() {
     loadWallpaperSettings();
-    createWallpaperGrids(); // Теперь только создание сетки обоев
+    createWallpaperGrids();
     applyWallpaper();
     updateDesktopPlaceholderWallpaper();
     setupWallpaperEventListeners();
     setupWallpaperBroadcastListener();
+
+    // Разрешаем и кэшируем все картинки один раз — дальше переключение
+    // обоев идёт без запросов и без белых вспышек.
+    preloadAllWallpapers();
     
     // Анимируем сообщения в предпросмотре
     setTimeout(() => {
@@ -4472,54 +4572,28 @@ function initializeWallpaperSystem() {
         });
     }, 100);
     
-    // Устанавливаем обои в предпросмотр чата
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-    if (selectedWallpaper) {
-        const previewContainers = document.querySelectorAll('.chat-preview-messages');
-        previewContainers.forEach(container => {
-            container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            container.style.backgroundSize = 'cover';
-            container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = '';
-        });
-        
-        // Устанавливаем название обоев
-        const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
-        wallpaperNameElements.forEach(el => {
-            if (el) el.textContent = selectedWallpaper.name;
-        });
-    }
-    
-    setTimeout(() => {
-        updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
-        updateWallpaperControls();
-    }, 100);
+    // Превью и название ставит updateChatPreviewWallpaper() (его уже
+    // вызвали loadWallpaperSettings() и applyWallpaper()) — дублирующая
+    // установка фона здесь как раз и давала лишнюю перерисовку.
+    updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
+    updateWallpaperControls();
 }
 
 
 
 // Обновление обоев в превью чата
 function updateChatPreviewWallpaper() {
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-    if (selectedWallpaper) {
-        const previewContainers = document.querySelectorAll('.chat-preview-messages');
-        previewContainers.forEach(container => {
-            // Всегда используем обои, даже для системных
-            container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            container.style.backgroundSize = 'cover';
-            container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = '';
-            
-            // Для отладки
-            console.log('Wallpaper applied:', selectedWallpaper.url, 'isDefault:', wallpaperState.selectedWallpaper === 'default');
-        });
-        
-        // Обновляем название выбранных обоев
-        const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
-        wallpaperNameElements.forEach(el => {
-            if (el) el.textContent = selectedWallpaper.name;
-        });
-    }
+    const selectedWallpaper = getWallpaperById(wallpaperState.selectedWallpaper);
+    if (!selectedWallpaper) return;
+
+    const bg = getWallpaperBackground(selectedWallpaper);
+    document.querySelectorAll('.chat-preview-messages').forEach(container => {
+        setWallpaperBackground(container, bg);
+    });
+
+    document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop').forEach(el => {
+        if (el) el.textContent = selectedWallpaper.name;
+    });
 }
 
 
@@ -4561,44 +4635,10 @@ function loadWallpaperSettings() {
     updateChatPreviewWallpaper();
 }
 
-// Добавить явную функцию для работы с обоями (кэш отключен)
-function setupWallpaperButtons() {
-    const wallpaperButtons = document.querySelectorAll('.wallpaper-btn');
-    
-    wallpaperButtons.forEach(btn => {
-        // Удаляем старые обработчики
-        btn.replaceWith(btn.cloneNode(true));
-    });
-    
-    // Вешаем новые обработчики
-    document.querySelectorAll('.wallpaper-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation(); // Предотвращаем всплытие
-            
-            const wallpaperId = this.dataset.wallpaperId;
-            
-            // Обновляем состояние без кэширования
-            wallpaperState.enabled = true;
-            wallpaperState.selectedWallpaper = wallpaperId;
-            
-            // Применяем обои через общую функцию
-            applyWallpaper();
-            
-            // Снимаем выделение с других кнопок
-            document.querySelectorAll('.wallpaper-btn').forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            
-            // Уведомляем другие вкладки
-            broadcastWallpaperUpdate();
-        });
-    });
-}
-
-// Вызывать при каждой инициализации
-document.addEventListener('DOMContentLoaded', function() {
-    initializePage();
-    setupWallpaperButtons(); // Добавить эту строку
-});
+/* Здесь была setupWallpaperButtons() для селектора '.wallpaper-btn' —
+   таких элементов в разметке нет, а её DOMContentLoaded-обработчик вызывал
+   несуществующую initializePage() и падал с ReferenceError. Выбор обоев
+   целиком живёт в setupWallpaperEventListeners(). */
 
 // Сохранение настроек обоев в localStorage
 function saveWallpaperSettings() {
@@ -4624,14 +4664,16 @@ function updateDesktopPlaceholderWallpaper() {
     const isPlaceholderVisible = desktopPlaceholder.style.display !== 'none';
     
     if (wallpaperState.enabled && isPlaceholderVisible) {
-        const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+        const selectedWallpaper = getWallpaperById(wallpaperState.selectedWallpaper);
         if (selectedWallpaper) {
             desktopPlaceholder.classList.add('wallpaper-enabled');
-            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness}%)`;
+            setWallpaperBackground(desktopPlaceholder, getWallpaperBackground(selectedWallpaper));
+            // brightness мог приходить undefined из broadcast → filter ломался
+            desktopPlaceholder.style.filter = `brightness(${wallpaperState.brightness ?? 100}%)`;
         }
     } else {
         desktopPlaceholder.classList.remove('wallpaper-enabled');
+        delete desktopPlaceholder.dataset.wallpaperBg;
         desktopPlaceholder.style.backgroundImage = '';
         desktopPlaceholder.style.filter = '';
         desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
@@ -4639,49 +4681,43 @@ function updateDesktopPlaceholderWallpaper() {
 }
 
 // Создание сетки обоев - горизонтальная прокрутка
-function createWallpaperGrids() {
+// Сетка строится ОДИН раз: раньше innerHTML переписывался на каждом
+// обновлении UI, из-за чего картинки грузились заново, а горизонтальный
+// скролл прыгал в начало. Дальше меняется только выделение.
+function createWallpaperGrids(force = false) {
     const grids = ['wallpaperGridDesktop', 'wallpaperGridMobile'];
-    
+
     grids.forEach(gridId => {
         const grid = document.getElementById(gridId);
-        if (!grid) {
-            console.warn(`Grid not found: ${gridId}`);
-            return;
-        }
-        
-        // Очищаем сетку
+        if (!grid) return;
+
+        const alreadyBuilt = grid.dataset.built === '1' && grid.children.length === WALLPAPERS.length;
+        if (alreadyBuilt && !force) return;
+
         grid.innerHTML = '';
-        
-        // Создаем элементы обоев с горизонтальным расположением
+
         WALLPAPERS.forEach(wallpaper => {
             const wallpaperItem = document.createElement('div');
             wallpaperItem.className = 'wallpaper-item';
             wallpaperItem.dataset.wallpaperId = wallpaper.id;
-            
-            // Устанавливаем начальное состояние выделения
-            if (wallpaper.id === wallpaperState.selectedWallpaper) {
-                wallpaperItem.classList.add('selected');
-            }
-            
-            // Для ВСЕХ обоев используем фон, включая системные
+
             wallpaperItem.innerHTML = `
-                <div class="wallpaper-preview" style="background-image: url('${wallpaper.url}');"></div>
+                <div class="wallpaper-preview"></div>
                 <div class="wallpaper-label">${wallpaper.emoji}</div>
             `;
-            
-            // Добавляем галочку для выбранных обоев
-            if (wallpaper.id === wallpaperState.selectedWallpaper) {
-                const checkmark = document.createElement('div');
-                checkmark.className = 'wallpaper-checkmark';
-                checkmark.innerHTML = '<i class="fas fa-check"></i>';
-                wallpaperItem.appendChild(checkmark);
-            }
-            
+
+            setWallpaperBackground(
+                wallpaperItem.querySelector('.wallpaper-preview'),
+                getWallpaperBackground(wallpaper)
+            );
+
             grid.appendChild(wallpaperItem);
         });
+
+        grid.dataset.built = '1';
     });
-    
-    // Обновление переключателей
+
+    updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
     updateWallpaperControls();
 }
 
@@ -4700,13 +4736,15 @@ function updateWallpaperControls() {
 
 // Настройка обработчиков событий
 // Настройка обработчиков событий - исправленная версия
+let wallpaperDelegatesAttached = false;
+
 function setupWallpaperEventListeners() {
-    // Удаляем старые обработчики, если они есть
-    document.querySelectorAll('.wallpaper-item').forEach(item => {
-        item.replaceWith(item.cloneNode(true));
-    });
-    
-    // Выбор обоев - используем прямой обработчик вместо делегирования
+    // Делегированные слушатели на document навешиваем строго один раз:
+    // раньше каждый вызов добавлял ещё один click-обработчик, и один тап
+    // вызывал selectWallpaper() несколько раз.
+    if (!wallpaperDelegatesAttached) {
+    wallpaperDelegatesAttached = true;
+
     document.addEventListener('click', (e) => {
         const wallpaperItem = e.target.closest('.wallpaper-item');
         if (wallpaperItem) {
@@ -4741,6 +4779,8 @@ function setupWallpaperEventListeners() {
             wallpaperItem.style.transform = '';
         }
     });
+    }
+
     
     // Переключатель обоев
     ['wallpaperToggleDesktop', 'wallpaperToggleMobile'].forEach(toggleId => {
@@ -4781,40 +4821,31 @@ function setupWallpaperEventListeners() {
 }
 
 
-// Выбор обоев - исправленная версия
+// Выбор обоев
 function selectWallpaper(wallpaperId) {
     const wallpaper = WALLPAPERS.find(w => w.id === wallpaperId);
     if (!wallpaper) return;
-    
+    if (wallpaperState.selectedWallpaper === wallpaperId && wallpaperState.enabled) return;
+
     wallpaperState.selectedWallpaper = wallpaperId;
     wallpaperState.enabled = true;
-    
-    // Обновляем предпросмотр чата
-    const previewContainers = document.querySelectorAll('.chat-preview-messages');
-    previewContainers.forEach(container => {
-        container.style.backgroundImage = `url('${wallpaper.url}')`;
-        container.style.backgroundSize = 'cover';
-        container.style.backgroundPosition = 'center';
-        container.style.backgroundColor = '';
-    });
-    
-    // Обновляем название выбранных обоев
-    const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
-    wallpaperNameElements.forEach(el => {
-        if (el) el.textContent = wallpaper.name;
-    });
-    
-    updateChatPreviewWallpaper();
 
-    // Обновляем UI выбора
+    // Выделение и переключатель обновляем сразу (без пересборки сетки),
+    // фон — одним вызовом applyWallpaper(), который сам обновит превью.
     updateWallpaperSelectionUI(wallpaperId);
-    
-    // Сохраняем настройки
-    saveWallpaperSettings();
-    applyWallpaper();
-    
-    // Обновляем переключатель
     updateWallpaperControls();
+
+    // Если картинка ещё не проверена — дождёмся и применим уже готовый фон,
+    // чтобы не показывать пустой блок.
+    resolveWallpaper(wallpaper).then(() => {
+        if (wallpaperState.selectedWallpaper !== wallpaperId) return;
+        applyWallpaper();
+        updateDesktopPlaceholderWallpaper();
+    });
+
+    applyWallpaper();
+    updateDesktopPlaceholderWallpaper();
+    saveWallpaperSettings();
 }
 
 
@@ -4846,32 +4877,34 @@ function updateWallpaperSelectionUI(selectedId) {
 
 // Применение обоев - сохраняем оригинальный фон
 function applyWallpaper() {
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
+    const selectedWallpaper = getWallpaperById(wallpaperState.selectedWallpaper);
     const desktopPlaceholder = document.getElementById('desktopPlaceholder');
-    
+
     if (!selectedWallpaper) {
         console.error('Wallpaper not found');
         return;
     }
-    
+
+    const bg = getWallpaperBackground(selectedWallpaper);
+
     if (wallpaperState.enabled) {
-        // Применяем обои ко всему телу документа
+        // Один источник правды: CSS-переменная всегда равна выбранным обоям
         document.body.classList.add('wallpaper-enabled');
-        document.documentElement.style.setProperty('--wallpaper-url', `url('${selectedWallpaper.url}')`);
-        document.documentElement.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness || 100}%`);
-        
+        document.documentElement.style.setProperty('--wallpaper-url', bg);
+        document.documentElement.style.setProperty('--wallpaper-brightness', `${wallpaperState.brightness ?? 100}%`);
+
         if (desktopPlaceholder) {
             desktopPlaceholder.classList.add('wallpaper-enabled');
-            desktopPlaceholder.style.backgroundImage = `url('${selectedWallpaper.url}')`;
+            setWallpaperBackground(desktopPlaceholder, bg);
             desktopPlaceholder.style.backgroundColor = 'transparent';
         }
     } else {
-        // Убираем обои
         document.body.classList.remove('wallpaper-enabled');
         document.documentElement.style.setProperty('--wallpaper-url', 'none');
-        
+
         if (desktopPlaceholder) {
             desktopPlaceholder.classList.remove('wallpaper-enabled');
+            delete desktopPlaceholder.dataset.wallpaperBg;
             desktopPlaceholder.style.backgroundImage = '';
             desktopPlaceholder.style.backgroundColor = 'var(--telegram-secondary-bg)';
         }
@@ -4914,8 +4947,8 @@ function applyWallpaper() {
         }
     });
     
-    // Сохраняем настройки для других страниц
-    broadcastWallpaperUpdate();
+    // Рассылку в другие вкладки делает только saveWallpaperSettings(),
+    // иначе каждый рендер порождал лишние broadcast-сообщения.
 }
 
 function hideAllDesktopModules() {
@@ -4957,15 +4990,18 @@ function setupWallpaperBroadcastListener() {
             const channel = new BroadcastChannel('vuntgram_wallpaper');
             channel.addEventListener('message', (event) => {
                 if (event.data.type === 'wallpaper_update') {
+                    // Мержим, а не перезаписываем: раньше терялись blur и
+                    // brightness → filter: brightness(undefined%) и порча
+                    // настроек в localStorage.
                     wallpaperState = {
+                        ...wallpaperState,
                         enabled: event.data.data.enabled,
-                        selectedWallpaper: event.data.data.selectedWallpaper,
+                        selectedWallpaper: event.data.data.selectedWallpaper
                     };
                     updateWallpaperControls();
-                    createWallpaperGrids();
+                    updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
                     applyWallpaper();
                     updateDesktopPlaceholderWallpaper();
-                    updateChatPreviewWallpaper();
                 }
             });
         } catch (e) {
@@ -4979,32 +5015,18 @@ function setupWallpaperBroadcastListener() {
 
 // Обновление UI при открытии модуля оформления
 function updateAppearanceUI() {
-    createWallpaperGrids();
+    createWallpaperGrids();          // построит сетку только при первом открытии
     updateWallpaperControls();
+    updateWallpaperSelectionUI(wallpaperState.selectedWallpaper);
+    updateChatPreviewWallpaper();    // единственное место, где ставится фон превью
     updateDesktopPlaceholderWallpaper();
-    
-    // Анимируем сообщения в предпросмотре
-    const messages = document.querySelectorAll('.chat-preview-message');
-    messages.forEach((message, index) => {
+
+    // Если какие-то картинки ещё не проверены — дорисуем по готовности
+    preloadAllWallpapers();
+
+    document.querySelectorAll('.chat-preview-message').forEach((message, index) => {
         message.style.animationDelay = `${index * 0.1}s`;
     });
-    
-    // Обновляем предпросмотр чата текущими обоями
-    const selectedWallpaper = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper);
-    if (selectedWallpaper) {
-        const previewContainers = document.querySelectorAll('.chat-preview-messages');
-        previewContainers.forEach(container => {
-            container.style.backgroundImage = `url('${selectedWallpaper.url}')`;
-            container.style.backgroundSize = 'cover';
-            container.style.backgroundPosition = 'center';
-            container.style.backgroundColor = '';
-        });
-        
-        const wallpaperNameElements = document.querySelectorAll('#selectedWallpaperName, #selectedWallpaperNameDesktop');
-        wallpaperNameElements.forEach(el => {
-            if (el) el.textContent = selectedWallpaper.name;
-        });
-    }
 }
 
 
@@ -5044,7 +5066,7 @@ window.addEventListener('resize', () => {
     if (newIsDesktop !== isDesktop) {
         initializeLayout();
         updateProfileUI();
-        createWallpaperGrids(); // Обновляем сетку обоев
+        applyWallpaper();
         updateDesktopPlaceholderWallpaper(); // Обновляем placeholder
     }
 });
