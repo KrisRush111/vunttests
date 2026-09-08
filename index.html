@@ -417,20 +417,19 @@
             <div class="flex justify-center mb-4">
                 <div id="qrLoginCodeBox" style="background:#fff;padding:14px;border-radius:16px;width:224px;height:224px;display:flex;align-items:center;justify-content:center;position:relative;">
                     <div id="qrLoginCode"></div>
-                    <!-- Логотип поверх QR-кода: живёт ВНЕ #qrLoginCode, потому что
-                         тот при каждом обновлении кода очищается через
-                         codeBox.innerHTML = '' — если бы лого лежал внутри,
-                         он пропадал бы при каждом refresh/повторной генерации.
-                         Круглая форма + белое кольцо вокруг — как в Telegram:
-                         визуально код "обтекает" иконку, хотя физически
-                         под ней всё равно перекрыты модули — просто с высокой
-                         коррекцией ошибок (см. correctLevel: H ниже) это не
-                         мешает сканированию. Отдельного "огибания" пикселей
-                         на уровне самой QR-матрицы клиентские генераторы
-                         (как qrcode.js) не поддерживают — так же устроены
-                         почти все QR-с-лого на практике, включая Telegram. -->
-                    <div id="qrLoginLogoWrap" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border-radius:50%;overflow:hidden;box-shadow:0 0 0 5px #fff;">
-                        <img src="vunt.png" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">
+                    <!-- Логотип появляется ОДНОВРЕМЕННО с QR-кодом: изначально
+                         скрыт (opacity:0), включается в JS ровно в момент,
+                         когда QR уже отрисован — см. createAndShowCode() ниже.
+                         Живёт ВНЕ #qrLoginCode, потому что тот при каждом
+                         обновлении кода очищается через codeBox.innerHTML = ''
+                         — если бы лого лежал внутри, он пропадал бы при
+                         каждом refresh/повторной генерации.
+                         Белая заливка + белое кольцо — учтите: если vunt.png
+                         сам светлый/белый силуэт (как в шапке карточки), он
+                         может слиться с белым фоном и стать невидимым —
+                         тогда нужна либо тёмная версия иконки, либо другой фон. -->
+                    <div id="qrLoginLogoWrap" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border-radius:50%;overflow:hidden;background:#fff;box-shadow:0 0 0 5px #fff;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease;">
+                        <img src="vunt.png" alt="" style="width:62%;height:62%;object-fit:contain;display:block;">
                     </div>
                     <div id="qrLoginOverlay" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.95);border-radius:16px;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12px;">
                         <i id="qrLoginOverlayIcon" class="fas fa-rotate-right" style="font-size:26px;color:#333;"></i>
@@ -891,6 +890,7 @@ initializePWA();
             const showQrBtn = document.getElementById('showQrLoginBtn');
             const showPasswordBtn = document.getElementById('showPasswordLoginBtn');
             const codeBox = document.getElementById('qrLoginCode');
+            const logoWrap = document.getElementById('qrLoginLogoWrap');
             const overlay = document.getElementById('qrLoginOverlay');
             const overlayText = document.getElementById('qrLoginOverlayText');
             const refreshBtn = document.getElementById('qrLoginRefreshBtn');
@@ -913,6 +913,10 @@ initializePWA();
                 overlay.style.display = 'none';
                 refreshBtn.style.display = 'none';
                 codeBox.style.opacity = '0.35';
+                // Прячем лого на время загрузки — иначе он показывался сразу
+                // (он лежит в разметке отдельно от codeBox), а сам QR
+                // дорисовывался чуть позже, после ответа сервера.
+                if (logoWrap) logoWrap.style.opacity = '0';
                 try {
                     const res = await fetch(`${SERVER_URL}/api/qrlogin/create`, { method: 'POST' });
                     const data = await res.json();
@@ -937,6 +941,10 @@ initializePWA();
                         // занимает заметно меньше этого запаса.
                         correctLevel: QRCode.CorrectLevel.H
                     });
+                    // Показываем лого именно тут — сразу после того, как QR
+                    // реально оказался в DOM (qrcode.js рисует его синхронно),
+                    // так что оба появляются в один и тот же кадр.
+                    if (logoWrap) logoWrap.style.opacity = '1';
 
                     poll(data.token, Date.now() + data.expires_in * 1000);
                 } catch (e) {
