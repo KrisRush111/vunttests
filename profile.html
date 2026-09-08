@@ -9857,20 +9857,34 @@ html[data-theme="dark"] .vg-verified-tooltip {
     let rafId = null;
     let pendingToken = null;
     let scanning = false;
+    // Небольшая пауза перед началом декодирования: камера успевает
+    // навестись и выставить экспозицию, и мы не ловим случайный кадр
+    // сразу после открытия сканера.
+    let startTimer = null;
+    const SCAN_START_DELAY = 900; // мс
 
     function setStatus(text) { statusEl.textContent = text || ''; }
 
     async function openScanner() {
         modal.classList.add('open');
         setStatus('');
-        scanning = true;
+        scanning = false; // во время паузы кадры не декодируем
         try {
             stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment' }
             });
             video.srcObject = stream;
             await video.play();
-            rafId = requestAnimationFrame(scanFrame);
+
+            setStatus('Подготовка камеры…');
+            if (startTimer) clearTimeout(startTimer);
+            startTimer = setTimeout(() => {
+                startTimer = null;
+                if (!stream) return; // сканер успели закрыть во время паузы
+                scanning = true;
+                setStatus('');
+                rafId = requestAnimationFrame(scanFrame);
+            }, SCAN_START_DELAY);
         } catch (e) {
             console.error('QR scanner camera error:', e);
             setStatus('Не удалось получить доступ к камере');
@@ -9878,6 +9892,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
     }
 
     function stopStream() {
+        if (startTimer) { clearTimeout(startTimer); startTimer = null; }
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     }
