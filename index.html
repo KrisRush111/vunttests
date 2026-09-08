@@ -417,6 +417,13 @@
             <div class="flex justify-center mb-4">
                 <div id="qrLoginCodeBox" style="background:#fff;padding:14px;border-radius:16px;width:224px;height:224px;display:flex;align-items:center;justify-content:center;position:relative;">
                     <div id="qrLoginCode"></div>
+                    <!-- Логотип поверх QR-кода: живёт ВНЕ #qrLoginCode, потому что
+                         тот при каждом обновлении кода очищается через
+                         codeBox.innerHTML = '' — если бы лого лежал внутри,
+                         он пропадал бы при каждом refresh/повторной генерации. -->
+                    <div id="qrLoginLogoWrap" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px;background:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px #fff;">
+                        <img src="vunt.png" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:6px;">
+                    </div>
                     <div id="qrLoginOverlay" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.95);border-radius:16px;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12px;">
                         <i id="qrLoginOverlayIcon" class="fas fa-rotate-right" style="font-size:26px;color:#333;"></i>
                         <p id="qrLoginOverlayText" style="color:#333;font-size:13px;margin-top:10px;">Код устарел</p>
@@ -881,6 +888,11 @@ initializePWA();
             const refreshBtn = document.getElementById('qrLoginRefreshBtn');
             if (!qrCard || !showQrBtn) return;
 
+            // Один размер на весь QR — меняете тут, а не по всем местам.
+            // #qrLoginCodeBox в разметке чуть больше этого числа (на padding),
+            // подгоняйте его в CSS/style, если сильно увеличиваете QR_SIZE.
+            const QR_SIZE = 200;
+
             let qrObj = null;
             let pollTimer = null;
             let active = false;
@@ -907,10 +919,15 @@ initializePWA();
                     codeBox.innerHTML = '';
                     qrObj = new QRCode(codeBox, {
                         text: 'vuntgram-login:' + data.token,
-                        width: 200,
-                        height: 200,
+                        width: QR_SIZE,
+                        height: QR_SIZE,
                         colorDark: '#000000',
-                        colorLight: '#ffffff'
+                        colorLight: '#ffffff',
+                        // Логотип поверх кода закрывает часть модулей —
+                        // без максимальной коррекции ошибок (H, ~30%) код
+                        // может перестать сканироваться. Лого в разметке
+                        // занимает заметно меньше этого запаса.
+                        correctLevel: QRCode.CorrectLevel.H
                     });
 
                     poll(data.token, Date.now() + data.expires_in * 1000);
