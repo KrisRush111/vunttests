@@ -4967,10 +4967,24 @@ async function updateProfileModalUI(user) {
     updateField(user.main_school_name, activeElements.modalMainSchool, 
                activeElements.modalMainSchool.closest('.detail-item'), 'Основная школа');
     
-    updateField(user.class_number && user.class_letter ? 
-               `${user.class_number}${user.class_letter}` : null, 
-               activeElements.modalUserClass, 
-               activeElements.modalUserClass.closest('.detail-item'), 'Класс');
+    // Раньше здесь просто конкатенировались class_number и class_letter
+    // без проверки каждого по отдельности. Когда поле не заполнено, сервер
+    // хранит в БД не NULL, а буквально строку "не указано" -- и если оба
+    // поля были такими, получалась "не указаноне указано" (эта склеенная
+    // строка не совпадала ни с одним значением из invalidValues внутри
+    // updateField, поэтому проверка "скрыть, если не указано" не срабатывала
+    // и поле показывалось). Проверяем class_number и class_letter отдельно,
+    // как уже сделано для этого же случая в блоке рекомендаций выше.
+    {
+        const hasClassNumber = user.class_number && !isNotSpecified(user.class_number);
+        const hasClassLetter = user.class_letter && !isNotSpecified(user.class_letter);
+        const classValue = hasClassNumber
+            ? `${user.class_number}${hasClassLetter ? user.class_letter : ''}`
+            : null;
+        updateField(classValue,
+                   activeElements.modalUserClass,
+                   activeElements.modalUserClass.closest('.detail-item'), 'Класс');
+    }
     
     updateField(user.identity, activeElements.modalUserRole, 
                activeElements.modalUserRole.closest('.detail-item'), 'Роль');
