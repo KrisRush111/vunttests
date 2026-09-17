@@ -5643,6 +5643,19 @@ async function updateProfileModalUI(user) {
             const friendshipStatus = await checkFriendshipStatus(cleanUserId);
             await displayUserResult(data.user, friendshipStatus === 'accepted' ? 'added' : 
                                   friendshipStatus === 'request_sent' ? 'request_sent' : 'default');
+
+            // Найденный по ID пользователь почти всегда не входит в
+            // currentActivityData (он не из списка друзей), поэтому
+            // displayUserResult оставляет статус "Загрузка..." навсегда --
+            // без этого явного запроса статус обновлялся бы только по
+            // случайному 45-секундному тику startActivityPolling, а
+            // presence-пуш по WS не пришел бы вообще, так как ID не был
+            // передан в watchPresence. Дублируем то, что делает обычный
+            // рендер контактов в renderContactsData: сразу тянем статус и
+            // подписываемся на его live-обновления.
+            allContactIds.add(data.user.platform_user_id);
+            updateAllContactsActivity();
+            watchPresence([data.user.platform_user_id]);
         } else {
             noContacts.textContent = data.error || 'Пользователь не найден';
             noContacts.style.display = 'block';
