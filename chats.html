@@ -1810,26 +1810,35 @@
         }
         .vg-login-alert-btn.vg-login-alert-yes { color: #6fd67c; }
         .vg-login-alert-btn.vg-login-alert-no { color: #ff6b6b; }
-        /* В светлой теме чёрный 45%-й фон визуально "выбеливается" пузырём
-           сообщения и читается как серый. Держим тот же чистый чёрный канал
-           (0,0,0) и ту же прозрачность 45%, но подтемняем то, что просвечивает
-           сквозь кнопку, через backdrop-filter — так кнопка остаётся чёрной,
-           а не серой, без изменения самой альфы. */
-        html:not([data-theme="dark"]) .vg-login-alert-btn {
-            background: rgba(0, 0, 0, 0.45);
-            -webkit-backdrop-filter: brightness(0.6);
-            backdrop-filter: brightness(0.6);
+        /* Настоящая причина, почему кнопка выглядела сплошным серым, а обои
+           чата не просвечивали: .message-incoming рисует пузырь СПЛОШНЫМ
+           непрозрачным цветом (background:#fff !important). backdrop-filter
+           и rgba-фон кнопки физически смешиваются с тем, что нарисовано
+           ПОД ними — а под кнопкой в этом случае лежит не обои чата, а
+           именно этот сплошной белый пузырь. Чёрный 45% на белом всегда
+           даёт плоский серый, и обоям чата взяться неоткуда.
+           Чтобы кнопка была реально полупрозрачной и сквозь неё было видно
+           обои чата — сам пузырь этой карточки делаем стеклянным
+           (полупрозрачным + блюр), а не сплошным. Тогда чёрный фон кнопки
+           ложится на настоящие обои позади чата, а не на закрашенный пузырь. */
+        .vg-login-alert.message-incoming {
+            background: rgba(255, 255, 255, 0.55) !important;
+            -webkit-backdrop-filter: blur(18px) saturate(150%);
+            backdrop-filter: blur(18px) saturate(150%);
         }
-        html:not([data-theme="dark"]) .vg-login-alert-btn:hover,
-        html:not([data-theme="dark"]) .vg-login-alert-btn:active {
-            background: rgba(0, 0, 0, 0.6);
-            -webkit-backdrop-filter: brightness(0.5);
-            backdrop-filter: brightness(0.5);
+        .vg-login-alert-btn {
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
         }
-        html:not([data-theme="dark"]) .vg-login-alert-btn:disabled {
-            background: rgba(0, 0, 0, 0.45) !important;
-            -webkit-backdrop-filter: brightness(0.6);
-            backdrop-filter: brightness(0.6);
+        @media (prefers-color-scheme: dark) {
+            /* В тёмной теме пузырь и так тёмный (#1e1e1e) — делаем его тоже
+               стеклянным, чтобы кнопка была одинаково прозрачной в обеих
+               темах, а не только в светлой. */
+            .vg-login-alert.message-incoming {
+                background: rgba(30, 30, 30, 0.55) !important;
+                -webkit-backdrop-filter: blur(18px) saturate(150%);
+                backdrop-filter: blur(18px) saturate(150%);
+            }
         }
 
         /* Когда активно редактирование — контейнер становится колонкой, а сама
