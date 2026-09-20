@@ -18572,10 +18572,24 @@ function stopProfileDataPolling() {
         return parseFloat(v) || 0;
     }
 
+    // Высота верхней безопасной зоны iPhone (статус-бар / чёлка).
+    // Ненулевая только пока включён viewport-fit=cover (см. скрипт ниже).
+    function safeTop() {
+        const p = document.createElement('div');
+        p.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;' +
+                          'pointer-events:none;padding-top:env(safe-area-inset-top,0px)';
+        document.body.appendChild(p);
+        const h = p.offsetHeight;
+        p.remove();
+        return h;
+    }
+
     function targetHeight(header, content) {
-        // квадрат по ширине шапки с учётом выхода за padding модалки
+        // квадрат по ширине шапки с учётом выхода за padding модалки;
+        // + safeTop, чтобы фото заходило под статус-бар, а всё остальное
+        // осталось на прежних местах
         const w = header.offsetWidth + bleed(content) * 2;
-        return Math.round(Math.min(w, window.innerHeight * 0.78));
+        return Math.round(Math.min(w, window.innerHeight * 0.78)) + safeTop();
     }
 
     const ProfileHero = {
@@ -18665,6 +18679,54 @@ function stopProfileDataPolling() {
     });
 
     window.ProfileHero = ProfileHero;
+})();
+</script>
+
+<!-- ==========================================================================
+     ПРОФИЛЬ НА iPhone: фото аватарки заходит под статус-бар (как в Telegram).
+     Без viewport-fit=cover iOS обрезает страницу по безопасной зоне, поэтому
+     сверху остаётся светлая полоса, куда ничего нарисовать нельзя. Включаем
+     cover ТОЛЬКО пока открыта карточка профиля — остальные экраны не меняются.
+     ========================================================================== -->
+<style id="vg-profile-hero-safe-top">
+@media (max-width: 767px) {
+    /* обычное (свёрнутое) состояние: содержимое остаётся ниже статус-бара, где и было */
+    .profile-modal-content { padding-top: env(safe-area-inset-top, 0px); }
+
+    /* раскрытое фото: шапка поднимается под статус-бар, фото закрывает всю верхнюю область */
+    .hero-expanded .profile-header { margin-top: calc(-1 * env(safe-area-inset-top, 0px)) !important; }
+
+    /* кнопки в шапке остаются на прежних местах относительно экрана */
+    .hero-expanded .profile-back-button { top: calc(20px + env(safe-area-inset-top, 0px)); }
+    .hero-expanded .profile-header .edit-button.vg-gm-edit { top: calc(14px + env(safe-area-inset-top, 0px)); }
+}
+</style>
+<script>
+(function () {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    const BASE = meta.getAttribute('content') || '';
+    const COVER = /viewport-fit\s*=/.test(BASE) ? BASE : BASE + ', viewport-fit=cover';
+    let timer = null;
+
+    function isOpen() {
+        return !!document.querySelector('.profile-modal.active, .profile-modal.visible');
+    }
+    function sync() {
+        clearTimeout(timer);
+        if (!window.matchMedia('(max-width: 767px)').matches) return;
+        if (isOpen()) {
+            if (meta.getAttribute('content') !== COVER) meta.setAttribute('content', COVER);
+        } else {
+            // возвращаем после анимации закрытия карточки, чтобы не мигала полоса
+            timer = setTimeout(() => {
+                if (!isOpen() && meta.getAttribute('content') !== BASE) meta.setAttribute('content', BASE);
+            }, 450);
+        }
+    }
+    document.querySelectorAll('.profile-modal').forEach(m => {
+        new MutationObserver(sync).observe(m, { attributes: true, attributeFilter: ['class'] });
+    });
 })();
 </script>
 
