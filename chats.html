@@ -2962,7 +2962,8 @@
         }
 
         /* «Переслать» — зеркально кнопке удаления, у правого края панели, синяя */
-        .selection-forward-btn {
+        .selection-forward-btn,
+        .selection-share-btn {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -2977,11 +2978,13 @@
             transition: background 0.15s ease, opacity 0.15s ease;
         }
 
-        .selection-forward-btn:active {
+        .selection-forward-btn:active,
+        .selection-share-btn:active {
             background: rgba(10, 132, 255, 0.12);
         }
 
-        .selection-forward-btn.disabled {
+        .selection-forward-btn.disabled,
+        .selection-share-btn.disabled {
             opacity: 0.35;
             pointer-events: none;
         }
@@ -11922,6 +11925,8 @@ function getActiveElements() {
             if (_selectionBottomBar) {
                 const deleteBtn = _selectionBottomBar.querySelector('.selection-delete-btn');
                 if (deleteBtn) deleteBtn.classList.toggle('disabled', selectedMessageIds.size === 0);
+                const shareBtn = _selectionBottomBar.querySelector('.selection-share-btn');
+                if (shareBtn) shareBtn.classList.toggle('disabled', selectedMessageIds.size === 0);
                 const forwardBtn = _selectionBottomBar.querySelector('.selection-forward-btn');
                 if (forwardBtn) forwardBtn.classList.toggle('disabled', selectedMessageIds.size === 0);
             }
@@ -11976,12 +11981,16 @@ function getActiveElements() {
                     <button type="button" class="selection-delete-btn disabled">
                         <i class="fa-solid fa-trash-can"></i>
                     </button>
+                    <button type="button" class="selection-share-btn disabled" aria-label="Поделиться">
+                        <i class="fa-solid fa-arrow-up-from-bracket"></i>
+                    </button>
                     <button type="button" class="selection-forward-btn disabled" aria-label="Переслать">
                         <i class="fa-solid fa-share"></i>
                     </button>
                 `;
                 messageInputContainer.parentNode.insertBefore(bar, messageInputContainer.nextSibling);
                 bar.querySelector('.selection-delete-btn').addEventListener('click', handleBatchDeleteClick);
+                bar.querySelector('.selection-share-btn').addEventListener('click', handleBatchShareClick);
                 bar.querySelector('.selection-forward-btn').addEventListener('click', handleBatchForwardClick);
                 _selectionBottomBar = bar;
             }
@@ -12077,6 +12086,116 @@ function getActiveElements() {
             // В хронологическом порядке — как они идут в чате
             const ordered = currentMessages.filter(m => ids.has(m.id)).map(m => m.id);
             vgOpenForwardSheet(null, ordered);
+        }
+
+        // ===== Поделиться выбранными сообщениями в другие приложения и соцсети =====
+        // Открывает системное меню «Поделиться» (Web Share API): Telegram, WhatsApp,
+        // VK, почта и т.д. Текст уходит текстом, фото — файлами (если браузер умеет
+        // делиться файлами), иначе ссылками на фото. Если у браузера нет Web Share
+        // API (например, Firefox на десктопе) — текст и ссылки копируются в буфер.
+
+        // Выбранные сообщения в порядке чата; альбом раскрывается до всех своих фото
+        function getSelectedMessagesExpanded() {
+            const ids = new Set();
+            Array.from(selectedMessageIds)
+                .map(id => getMessageById(id))
+                .filter(m => m && vgCanForwardMessage(m))
+                .forEach(m => {
+                    if (m.media_group_id) {
+                        currentMessages.forEach(x => {
+                            if (x.media_group_id === m.media_group_id && !isTempMessageId(x.id)) ids.add(x.id);
+                        });
+                    } else {
+                        ids.add(m.id);
+                    }
+                });
+            return currentMessages.filter(m => ids.has(m.id));
+        }
+
+        async function vgUrlToShareFile(url, index) {
+            const resp = await fetch(url, { mode: 'cors' });
+            if (!resp.ok) throw new Error('image fetch failed');
+            const blob = await resp.blob();
+            const type = blob.type || 'image/jpeg';
+            const ext = (type.split('/')[1] || 'jpg').split('+')[0];
+            return new File([blob], `photo-${index + 1}.${ext}`, { type });
+        }
+
+        async function handleBatchShareClick(e) {
+            e.stopPropagation();
+            if (selectedMessageIds.size === 0) return;
+
+            const messages = getSelectedMessagesExpanded();
+            if (messages.length === 0) return;
+
+            const texts = [];
+            const imageUrls = [];
+            messages.forEach(m => {
+                if (isTextMessage(m)) {
+                    const t = m.content ? String(m.content).trim() : '';
+                    if (t) texts.push(t);
+                } else {
+                    const c = m.caption ? String(m.caption).trim() : '';
+                    if (c && !texts.includes(c)) texts.push(c);
+                    if (m.content) imageUrls.push(m.content);
+                }
+            });
+
+            const text = texts.join('\n\n');
+            const textWithLinks = [text, ...imageUrls].filter(Boolean).join('\n\n');
+            if (!textWithLinks) return;
+
+            const copyFallback = () => {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textWithLinks).catch(() => {});
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = textWithLinks;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); } catch (err) {}
+                    ta.remove();
+                }
+                showSimpleToast('Скопировано');
+            };
+
+            if (!navigator.share) {
+                copyFallback();
+                return;
+            }
+
+            try {
+                if (imageUrls.length === 0) {
+                    // Без await до вызова share — чтобы не потерять «жест пользователя» (Safari)
+                    await navigator.share({ text });
+                    return;
+                }
+
+                // Фото: пробуем отдать файлами (до 10 штук), чтобы они попали в соцсеть
+                // картинками, а не ссылками.
+                let files = [];
+                try {
+                    files = await Promise.all(imageUrls.slice(0, 10).map((u, i) => vgUrlToShareFile(u, i)));
+                } catch (err) {
+                    files = [];
+                }
+
+                if (files.length && navigator.canShare && navigator.canShare({ files })) {
+                    try {
+                        await navigator.share(text ? { files, text } : { files });
+                        return;
+                    } catch (err) {
+                        if (err && err.name === 'AbortError') return;
+                        // иначе — ниже отдадим ссылками
+                    }
+                }
+                await navigator.share({ text: textWithLinks });
+            } catch (err) {
+                if (err && err.name === 'AbortError') return; // пользователь закрыл меню «Поделиться»
+                copyFallback();
+            }
         }
 
         function getMessageById(id) {
