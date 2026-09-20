@@ -2194,6 +2194,356 @@
             background: rgba(120, 120, 128, 0.24);
         }
 
+        /* ===== Пересланные сообщения: шапка «Переслано от <аватар> Имя» =====
+           Цвета шапки берутся из переменных пузыря: у входящего (белого/тёмного)
+           — фирменный фиолетовый, у исходящего (фиолетового) — белый. Поменять
+           оформление можно тут: --vg-fwd-accent (имя) и --vg-fwd-label (подпись). */
+        .message-incoming {
+            --vg-fwd-accent: #9501ff;
+            --vg-fwd-label: rgba(149, 1, 255, 0.72);
+        }
+
+        .message-outgoing {
+            --vg-fwd-accent: #ffffff;
+            --vg-fwd-label: rgba(255, 255, 255, 0.78);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .message-incoming {
+                --vg-fwd-accent: #c78bff;
+                --vg-fwd-label: rgba(199, 139, 255, 0.8);
+            }
+        }
+
+        /* Пузырь с шапкой раскладывается КОЛОНКОЙ (шапка сверху, под ней обычное
+           содержимое) — по той же причине и тем же приёмом, что и .vg-has-sender-name
+           (см. комментарий выше: flex-basis в inline-flex ломает ширину в Safari/iOS). */
+        .message.vg-is-forwarded {
+            flex-direction: column !important;
+            flex-wrap: nowrap !important;
+            align-items: stretch !important;
+        }
+
+        .message.vg-is-forwarded > .message-content {
+            width: auto;
+        }
+
+        /* Фото без подписи: у него своя раскладка «в строку» (время висит на фото),
+           поэтому колонку для шапки включаем отдельным, более точным правилом. */
+        .message.vg-is-forwarded.message-with-image.no-caption {
+            flex-direction: column !important;
+            flex-wrap: nowrap !important;
+            align-items: stretch !important;
+        }
+
+        .vg-fwd-header {
+            display: block;
+            min-width: 0;
+            max-width: 100%;
+            margin: 0 0 4px;
+            line-height: 1.25;
+            pointer-events: none;
+        }
+
+        .vg-fwd-label {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--vg-fwd-label);
+            white-space: nowrap;
+        }
+
+        .vg-fwd-author {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            margin-top: 3px;
+        }
+
+        .vg-fwd-avatar {
+            flex: 0 0 22px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 600;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+
+        .vg-fwd-name {
+            min-width: 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--vg-fwd-accent);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .message-with-image .vg-fwd-header {
+            padding: 2px 6px 2px;
+        }
+
+        .message-with-image.no-caption .vg-fwd-header {
+            padding: 5px 8px 7px;
+            margin-bottom: 0;
+        }
+
+        /* Групповой чат + пересланное фото без подписи: имя отправителя обычно
+           висит плашкой поверх фото, но при шапке фото оказывается ниже неё —
+           поэтому в этом случае имя рисуется обычной строкой над шапкой. */
+        .message.vg-group-msg.message-with-image.no-caption.vg-is-forwarded .vg-msg-sender-name {
+            position: static;
+            padding: 2px 8px 0;
+            background: transparent;
+            -webkit-backdrop-filter: none;
+            backdrop-filter: none;
+            color: inherit !important;
+        }
+
+        /* ===== Лист «Переслать»: список контактов, НЕ на весь экран =====
+           На телефоне — панель, выезжающая снизу (~60% высоты), на десктопе —
+           карточка по центру. */
+        .vg-fwd-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 5200;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0);
+            transition: background 0.22s ease;
+        }
+
+        .vg-fwd-overlay.visible {
+            background: rgba(0, 0, 0, 0.45);
+        }
+
+        .vg-fwd-sheet {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 520px;
+            height: 60vh;
+            height: min(60svh, 560px);
+            overflow: hidden;
+            background: var(--telegram-bg, #ffffff);
+            color: var(--telegram-text, #000000);
+            border-radius: 22px 22px 0 0;
+            box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.25);
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .vg-fwd-overlay.visible .vg-fwd-sheet {
+            transform: translateY(0);
+        }
+
+        @media (min-width: 768px) {
+            .vg-fwd-overlay {
+                align-items: center;
+            }
+
+            .vg-fwd-sheet {
+                width: 400px;
+                height: 70vh;
+                height: min(70vh, 540px);
+                border-radius: 18px;
+                padding-bottom: 0;
+                opacity: 0;
+                transform: translateY(14px) scale(0.97);
+                transition: transform 0.24s ease, opacity 0.2s ease;
+            }
+
+            .vg-fwd-overlay.visible .vg-fwd-sheet {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        .vg-fwd-head {
+            position: relative;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px 56px 10px;
+        }
+
+        .vg-fwd-title {
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        .vg-fwd-close {
+            position: absolute;
+            right: 12px;
+            top: 11px;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            cursor: pointer;
+            background: var(--telegram-secondary-bg, #f4f4f5);
+            color: var(--telegram-hint, #8e8e93);
+        }
+
+        .vg-fwd-search {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 2px 16px 8px;
+            padding: 0 14px;
+            border-radius: 999px;
+            background: var(--telegram-secondary-bg, #f4f4f5);
+        }
+
+        .vg-fwd-search i {
+            font-size: 14px;
+            color: var(--telegram-hint, #8e8e93);
+        }
+
+        .vg-fwd-search-input {
+            flex: 1;
+            min-width: 0;
+            margin: 0;
+            padding: 10px 0;
+            border: none;
+            outline: none;
+            box-shadow: none;
+            border-radius: 0;
+            background: transparent;
+            color: inherit;
+            font-size: 16px; /* 16px — иначе iOS приближает страницу при фокусе */
+            font-family: inherit;
+        }
+
+        .vg-fwd-error {
+            flex-shrink: 0;
+            margin: 0 16px 6px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            background: rgba(238, 104, 111, 0.14);
+            color: var(--telegram-destructive, #ee686f);
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .vg-fwd-list {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }
+
+        .vg-fwd-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 16px;
+            cursor: pointer;
+            transition: background-color 0.15s ease, opacity 0.15s ease;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            .vg-fwd-item:hover {
+                background-color: rgba(120, 120, 128, 0.12);
+            }
+        }
+
+        .vg-fwd-item:active {
+            background-color: rgba(120, 120, 128, 0.2);
+        }
+
+        .vg-fwd-item-avatar {
+            flex: 0 0 44px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+
+        .vg-fwd-item-name {
+            flex: 1;
+            min-width: 0;
+            font-size: 16px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .vg-fwd-spinner {
+            display: none;
+            flex: 0 0 18px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid rgba(120, 120, 128, 0.3);
+            border-top-color: var(--telegram-blue, #0088cc);
+            animation: vg-fwd-spin 0.7s linear infinite;
+        }
+
+        .vg-fwd-item.is-sending .vg-fwd-spinner {
+            display: block;
+        }
+
+        .vg-fwd-sheet.busy .vg-fwd-item {
+            pointer-events: none;
+            opacity: 0.55;
+        }
+
+        .vg-fwd-sheet.busy .vg-fwd-item.is-sending {
+            opacity: 1;
+        }
+
+        .vg-fwd-empty {
+            padding: 32px 16px;
+            text-align: center;
+            font-size: 15px;
+            color: var(--telegram-hint, #8e8e93);
+        }
+
+        @keyframes vg-fwd-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .vg-fwd-sheet {
+                background: #1c1c1e;
+                color: #ffffff;
+            }
+
+            .vg-fwd-close,
+            .vg-fwd-search {
+                background: #2c2c2e;
+            }
+        }
+
         /* ===== Выбор варианта удаления (у себя / у всех) ===== */
         .delete-choice-menu {
             position: fixed;
@@ -10178,6 +10528,7 @@ function getActiveElements() {
             messageElement.style.opacity = '1';
             messageElement.style.transform = 'translateY(0)';
 
+            vgApplyForwardedHeader(messageElement, message);
             renderReactionsOnElement(messageElement, message.reactions);
             attachMessageLongPress(messageElement, message);
             vgApplyGroupSenderUi(messageElement, message, runInfo);
@@ -10234,6 +10585,8 @@ function getActiveElements() {
             messageElement.style.opacity = '1';
             messageElement.style.transform = 'translateY(0)';
 
+            // Все фото пересланного альбома несут одного и того же автора оригинала
+            vgApplyForwardedHeader(messageElement, groupMessages.find(m => m.forwarded_from_id) || lastMsg);
             renderReactionsOnElement(messageElement, lastMsg.reactions);
             attachMessageLongPress(messageElement, lastMsg);
             vgApplyGroupSenderUi(messageElement, lastMsg, runInfo);
@@ -10836,9 +11189,26 @@ function getActiveElements() {
                 menu.appendChild(Object.assign(document.createElement('div'), { className: 'message-action-divider' }));
             }
 
+            // "Переслать" — прямо над кнопкой "Изменить". Доступно для текста, фото и
+            // альбома, но только пока сообщение реально сохранено на сервере.
+            if (vgCanForwardMessage(message)) {
+                const forwardBtn = document.createElement('button');
+                forwardBtn.type = 'button';
+                forwardBtn.className = 'message-action-item';
+                forwardBtn.innerHTML = '<span>Переслать</span><span class="message-action-item-icon"><i class="fa-solid fa-share"></i></span>';
+                forwardBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeReactionPicker();
+                    vgOpenForwardSheet(message);
+                });
+                menu.appendChild(forwardBtn);
+                menu.appendChild(Object.assign(document.createElement('div'), { className: 'message-action-divider' }));
+            }
+
             // "Изменить" доступно только для своих текстовых сообщений (не фото),
-            // и только пока сообщение реально сохранено на сервере (не temp_-id)
-            if (isTextMessage(message) && message.is_me && !isTempMessageId(message.id)) {
+            // и только пока сообщение реально сохранено на сервере (не temp_-id).
+            // Пересланные сообщения не редактируются (как в Telegram).
+            if (isTextMessage(message) && message.is_me && !isTempMessageId(message.id) && !message.forwarded_from_id) {
                 const editBtn = document.createElement('button');
                 editBtn.type = 'button';
                 editBtn.className = 'message-action-item';
@@ -10876,6 +11246,303 @@ function getActiveElements() {
             menu.appendChild(selectBtn);
 
             return menu;
+        }
+
+        // ================= ПЕРЕСЫЛКА СООБЩЕНИЙ =================
+        // «Переслать» в меню сообщения открывает НЕполноэкранный лист со списком
+        // контактов. Тап по контакту — сообщение (или весь альбом) уходит ему через
+        // POST /forward_messages: сервер копирует его в чат с этим контактом и
+        // запоминает автора оригинала (forwarded_from_id). Получателю (и нам, если
+        // этот чат открыт) над пузырём рисуется шапка «Переслано от <аватар> Имя»
+        // — см. vgApplyForwardedHeader, вызывается из renderMessage/renderMessageGroup.
+
+        let activeForwardSheet = null;
+
+        function vgCanForwardMessage(message) {
+            if (!message || message.action_type || message.is_uploading) return false;
+            if (message.id == null || isTempMessageId(message.id)) return false;
+            if (vgIsGroupSystemMessage(message)) return false;
+            return true;
+        }
+
+        // У альбома в меню приходит только последнее фото, а пересылать нужно все.
+        function vgGetForwardMessageIds(message) {
+            if (message.media_group_id) {
+                const ids = currentMessages
+                    .filter(m => m.media_group_id && m.media_group_id === message.media_group_id && !isTempMessageId(m.id))
+                    .map(m => m.id);
+                if (ids.length) return ids;
+            }
+            return [message.id];
+        }
+
+        // Шапка «Переслано от» — вставляется ПЕРВЫМ потомком самого пузыря (не внутрь
+        // .message-content), по той же причине, что и имя отправителя в группах.
+        function vgApplyForwardedHeader(messageElement, message) {
+            if (!messageElement || !message || !message.forwarded_from_id) return;
+            if (messageElement.querySelector(':scope > .vg-fwd-header')) return;
+
+            const name = message.forwarded_from_name || 'Неизвестный';
+            const bg = message.forwarded_from_avatar_background || '#0088cc';
+            const initials = vgMessageInitials(name);
+
+            const header = document.createElement('div');
+            header.className = 'vg-fwd-header';
+
+            const label = document.createElement('div');
+            label.className = 'vg-fwd-label';
+            label.textContent = 'Переслано от';
+
+            const author = document.createElement('div');
+            author.className = 'vg-fwd-author';
+
+            const avatar = document.createElement('span');
+            avatar.className = 'vg-fwd-avatar';
+            avatar.style.background = `linear-gradient(135deg, ${bg}, ${adjustColor(bg, 20)})`;
+            avatar.textContent = initials;
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'vg-fwd-name';
+            nameEl.textContent = name;
+
+            author.appendChild(avatar);
+            author.appendChild(nameEl);
+            header.appendChild(label);
+            header.appendChild(author);
+
+            messageElement.insertBefore(header, messageElement.firstChild);
+            messageElement.classList.add('vg-is-forwarded');
+
+            // Тот же лоадер/кэш аватарок, что и в списке контактов и у отправителей в группах
+            loadContactAvatar(avatar, message.forwarded_from_id, initials, bg);
+        }
+
+        function vgCloseForwardSheet() {
+            const ctx = activeForwardSheet;
+            if (!ctx) return;
+            activeForwardSheet = null;
+            document.removeEventListener('keydown', ctx.onKeyDown, true);
+            ctx.overlay.classList.remove('visible');
+            setTimeout(() => ctx.overlay.remove(), 300);
+        }
+
+        function vgOpenForwardSheet(message) {
+            if (!vgCanForwardMessage(message) || !currentChat) return;
+            vgCloseForwardSheet();
+
+            // Фиксируем источник сразу: пока лист открыт, чат за ним может обновляться.
+            const sourceChatId = currentChat.id;
+            const messageIds = vgGetForwardMessageIds(message);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'vg-fwd-overlay';
+            overlay.innerHTML = `
+                <div class="vg-fwd-sheet" role="dialog" aria-modal="true" aria-label="Переслать">
+                    <div class="vg-fwd-head">
+                        <div class="vg-fwd-title">Переслать</div>
+                        <button type="button" class="vg-fwd-close" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="vg-fwd-search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" class="vg-fwd-search-input" placeholder="Поиск" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+                    </div>
+                    <div class="vg-fwd-list"></div>
+                </div>
+            `;
+
+            const sheet = overlay.querySelector('.vg-fwd-sheet');
+            const listEl = overlay.querySelector('.vg-fwd-list');
+            const inputEl = overlay.querySelector('.vg-fwd-search-input');
+
+            let contacts = [];
+            let contactsLoaded = false;
+            let contactsSignature = '';
+            let sending = false;
+            let errorTimer = null;
+
+            const showError = (text) => {
+                let errEl = sheet.querySelector('.vg-fwd-error');
+                if (!errEl) {
+                    errEl = document.createElement('div');
+                    errEl.className = 'vg-fwd-error';
+                    sheet.insertBefore(errEl, listEl);
+                }
+                errEl.textContent = text;
+                clearTimeout(errorTimer);
+                errorTimer = setTimeout(() => errEl.remove(), 3500);
+            };
+
+            const forwardTo = async (contact, row) => {
+                if (sending) return;
+                sending = true;
+                sheet.classList.add('busy');
+                row.classList.add('is-sending');
+
+                try {
+                    // 1) Чат с контактом (create_chat идемпотентен: вернёт существующий или создаст новый)
+                    const chatResp = await fetch(`${SERVER_URL}/create_chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ platform_user_id: userData.platform_user_id, contact_id: contact.platform_user_id }),
+                        credentials: 'include'
+                    });
+                    const chatData = await chatResp.json();
+                    if (chatData.status !== 'success') throw new Error(chatData.error || 'Не удалось открыть чат');
+                    const targetChatId = chatData.chat_id;
+
+                    // 2) Сама пересылка — копирование делает сервер
+                    const fwdResp = await fetch(`${SERVER_URL}/forward_messages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sender_id: userData.platform_user_id,
+                            source_chat_id: sourceChatId,
+                            target_chat_id: targetChatId,
+                            message_ids: messageIds
+                        }),
+                        credentials: 'include'
+                    });
+                    const fwdData = await fwdResp.json();
+                    if (fwdData.status !== 'success') throw new Error(fwdData.error || 'Не удалось переслать');
+
+                    vgCloseForwardSheet();
+                    showSimpleToast('Сообщение переслано');
+
+                    // Поднимаем/создаём чат получателя в списке чатов. Если это чат,
+                    // который сейчас открыт, сообщение подтянется обычным поллингом.
+                    updateSingleChat(targetChatId);
+                } catch (err) {
+                    console.error('forward error', err);
+                    sending = false;
+                    sheet.classList.remove('busy');
+                    row.classList.remove('is-sending');
+                    showError('Не удалось переслать. Попробуйте ещё раз');
+                }
+            };
+
+            const buildRow = (contact) => {
+                const row = document.createElement('div');
+                row.className = 'vg-fwd-item';
+                row.setAttribute('role', 'button');
+                row.tabIndex = 0;
+
+                const name = contact.nickname || 'Без имени';
+                const initials = vgMessageInitials(name);
+                const bg = contact.avatar_background || '#0088cc';
+
+                const avatar = document.createElement('div');
+                avatar.className = 'vg-fwd-item-avatar';
+                avatar.style.background = `linear-gradient(135deg, ${bg}, ${adjustColor(bg, 20)})`;
+                avatar.textContent = initials;
+                if (contact.has_avatar_photo) loadContactAvatar(avatar, contact.platform_user_id, initials, bg);
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'vg-fwd-item-name';
+                nameEl.textContent = name;
+
+                const spinner = document.createElement('div');
+                spinner.className = 'vg-fwd-spinner';
+
+                row.appendChild(avatar);
+                row.appendChild(nameEl);
+                row.appendChild(spinner);
+
+                row.addEventListener('click', () => forwardTo(contact, row));
+                row.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        forwardTo(contact, row);
+                    }
+                });
+                return row;
+            };
+
+            const renderList = () => {
+                const q = inputEl.value.trim().toLowerCase();
+                const items = q ? contacts.filter(c => (c.nickname || '').toLowerCase().includes(q)) : contacts;
+
+                listEl.innerHTML = '';
+                if (!items.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'vg-fwd-empty';
+                    empty.textContent = !contactsLoaded ? 'Загрузка…' : (contacts.length ? 'Ничего не найдено' : 'Нет контактов');
+                    listEl.appendChild(empty);
+                    return;
+                }
+                const fragment = document.createDocumentFragment();
+                items.forEach(contact => fragment.appendChild(buildRow(contact)));
+                listEl.appendChild(fragment);
+            };
+
+            // Пересылать можно контактам: без себя и без ботов, по алфавиту.
+            const applyContacts = (raw) => {
+                const next = (raw || [])
+                    .filter(c => c && c.platform_user_id
+                        && c.platform_user_id !== userData.platform_user_id
+                        && !c.is_bot
+                        && !(window.vgIsBotId && window.vgIsBotId(c.platform_user_id)))
+                    .sort((a, b) => (a.nickname || '').localeCompare(b.nickname || '', 'ru'));
+                const signature = next.map(c => `${c.platform_user_id}|${c.nickname}|${c.has_avatar_photo ? 1 : 0}`).join(',');
+                const changed = signature !== contactsSignature || !contactsLoaded;
+                contacts = next;
+                contactsSignature = signature;
+                contactsLoaded = true;
+                // Список не перерисовываем зря (мигали бы аватарки) и не трогаем во время отправки
+                if (changed && !sending) renderList();
+            };
+
+            const alive = () => activeForwardSheet && activeForwardSheet.overlay === overlay;
+
+            (async () => {
+                // 1. Мгновенно — то, что уже лежит в локальном кэше (тот же, что у списка контактов)
+                try {
+                    const cached = await getCacheItemIgnoreTTL(CONTACTS_CACHE_KEY);
+                    if (alive() && cached && cached.length) applyContacts(cached);
+                } catch (e) {}
+
+                // 2. Фоновая сверка с сервером
+                try {
+                    const response = await fetch(`${SERVER_URL}/get_friends`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ platform_user_id: userData.platform_user_id }),
+                        credentials: 'include'
+                    });
+                    const data = await response.json();
+                    if (data.status === 'success' && Array.isArray(data.friends)) {
+                        setCacheItem(CONTACTS_CACHE_KEY, data.friends, CACHE.CHATS_TTL);
+                        if (alive()) applyContacts(data.friends);
+                    } else if (alive() && !contactsLoaded) {
+                        applyContacts([]);
+                    }
+                } catch (e) {
+                    if (alive() && !contactsLoaded) applyContacts([]);
+                }
+            })();
+
+            inputEl.addEventListener('input', renderList);
+            overlay.querySelector('.vg-fwd-close').addEventListener('click', vgCloseForwardSheet);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) vgCloseForwardSheet(); });
+
+            const onKeyDown = (e) => {
+                if (e.key === 'Escape') {
+                    e.stopPropagation();
+                    vgCloseForwardSheet();
+                }
+            };
+            document.addEventListener('keydown', onKeyDown, true);
+
+            document.body.appendChild(overlay);
+            activeForwardSheet = { overlay, onKeyDown };
+            renderList();
+
+            requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('visible')));
+
+            // На десктопе сразу можно печатать; на телефоне не открываем клавиатуру
+            // сама — она закрыла бы половину списка.
+            if (window.matchMedia('(min-width: 768px)').matches) {
+                setTimeout(() => inputEl.focus(), 50);
+            }
         }
 
         /* Центрирование тоста на десктопе.
