@@ -3507,9 +3507,32 @@ body {
 
         // --- Обработчики realtime-событий (см. redis_bus.py publish_*) ---
 
+        // Время захода: у тех, кто его ограничил, сервер шлёт событие БЕЗ last_online
+        // (одно на всех подписчиков — своё значение каждому он подставить не может).
+        // Настоящий статус для ЭТОГО зрителя (точный или «был(а) недавно») отдаёт REST.
+        const _presenceRefreshTimers = {};
+        function refreshRestrictedPresence(userId) {
+            if (_presenceRefreshTimers[userId]) return;
+            _presenceRefreshTimers[userId] = setTimeout(async () => {
+                delete _presenceRefreshTimers[userId];
+                const data = await getUsersActivityStatus([userId]);
+                if (data && data[userId]) {
+                    currentActivityData[userId] = data[userId];
+                    updateContactsUI();
+                    if (typeof _profileViewedUserId !== 'undefined' && _profileViewedUserId === userId) {
+                        updateProfileModalStatus(userId);
+                    }
+                }
+            }, 250);
+        }
+
         function handleRealtimePresenceUpdate(payload) {
             if (!payload || !payload.user_id) return;
             const userId = String(payload.user_id);
+            if (!payload.is_online && !payload.last_online) {
+                refreshRestrictedPresence(userId);
+                return;
+            }
             currentActivityData[userId] = {
                 is_online: !!payload.is_online,
                 last_online: payload.last_online
@@ -4602,7 +4625,8 @@ if (!isDesktop) {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        platform_user_id: userId
+                        platform_user_id: userId,
+                        viewer_id: userData && userData.platform_user_id
                     }),
                     credentials: 'include'
                 });
@@ -4629,7 +4653,9 @@ if (!isDesktop) {
 
    
         // Добавьте функцию для форматирования времени
-        function formatLastSeen(lastOnline) {
+        function formatLastSeen(lastOnline, activity) {
+            // Пользователь скрыл время захода от нас -> точного времени нет вообще.
+            if (activity && activity.last_seen_hidden) return 'был(а) недавно';
             // Синхронизировано с chats.html: без last_online (null/undefined)
             // считаем, что пользователь ещё не выходил из сети — иначе тут
             // и в chats.html текст статуса расходился.
@@ -4727,7 +4753,8 @@ async function sendOfflineStatus() {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        user_ids: userIds
+                        user_ids: userIds,
+                        viewer_id: userData && userData.platform_user_id
                     }),
                     credentials: 'include'
                 });
@@ -4766,7 +4793,8 @@ async function sendOfflineStatus() {
                             'Content-Type': 'application/json',
                         },
                         body: JSON.stringify({
-                            user_ids: Array.from(allContactIds)
+                            user_ids: Array.from(allContactIds),
+                            viewer_id: userData && userData.platform_user_id
                         }),
                         credentials: 'include'
                     });
@@ -4805,7 +4833,7 @@ async function sendOfflineStatus() {
                         statusElement.textContent = 'В сети';
                         statusElement.className = 'user-status online';
                     } else {
-                        const lastSeenText = formatLastSeen(activity.last_online);
+                        const lastSeenText = formatLastSeen(activity.last_online, activity);
                         statusElement.textContent = lastSeenText;
                         statusElement.className = 'user-status';
                     }
@@ -4833,7 +4861,7 @@ function updateProfileModalStatus(userId) {
             statusElement.classList.remove('offline');
             statusElement.classList.add('online');
         } else {
-            const lastSeenText = formatLastSeen(activity.last_online);
+            const lastSeenText = formatLastSeen(activity.last_online, activity);
             statusTextSpan.textContent = lastSeenText;
             statusElement.classList.add('offline');
             statusElement.classList.remove('online');
@@ -4868,7 +4896,7 @@ function startProfileStatusPolling(userId) {
             const r = await fetch(`${SERVER_URL}/get_activity_status`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_ids: [_profileViewedUserId] }),
+                body: JSON.stringify({ user_ids: [_profileViewedUserId], viewer_id: userData && userData.platform_user_id }),
                 credentials: 'include'
             });
             const d = await r.json();
@@ -5359,7 +5387,7 @@ async function updateProfileModalUI(user) {
                     statusElement.textContent = 'В сети';
                     statusElement.classList.add('online');
                 } else {
-                    statusElement.textContent = formatLastSeen(knownActivity.last_online);
+                    statusElement.textContent = formatLastSeen(knownActivity.last_online, knownActivity);
                 }
             } else {
                 statusElement.textContent = 'Загрузка...';
@@ -5462,7 +5490,7 @@ async function updateProfileModalUI(user) {
                     statusElement.textContent = 'В сети';
                     statusElement.classList.add('online');
                 } else {
-                    const lastSeenText = formatLastSeen(activity.last_online);
+                    const lastSeenText = formatLastSeen(activity.last_online, activity);
                     statusElement.textContent = lastSeenText;
                 }
             } else {
