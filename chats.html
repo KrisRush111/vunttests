@@ -8764,7 +8764,7 @@
                             chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                             chatStatus.classList.add('online');
                         } else {
-                            chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                            chatStatus.textContent = formatLastSeen(userActivity.last_online, userActivity);
                             chatStatus.classList.remove('online');
                         }
                     } else {
@@ -13592,7 +13592,7 @@ function getActiveElements() {
                 const response = await fetch(`${SERVER_URL}/get_activity_status`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user_ids: uncachedIds }),
+                    body: JSON.stringify({ user_ids: uncachedIds, viewer_id: userData && userData.platform_user_id }),
                     credentials: 'include'
                 });
                 const data = await response.json();
@@ -13644,7 +13644,7 @@ function getActiveElements() {
                     statusElement.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                     statusElement.classList.add('online');
                 } else {
-                    statusElement.textContent = userActivity ? formatLastSeen(userActivity.last_online) : 'был(а) недавно';
+                    statusElement.textContent = userActivity ? formatLastSeen(userActivity.last_online, userActivity) : 'был(а) недавно';
                     statusElement.classList.remove('online');
                 }
             }
@@ -13751,7 +13751,7 @@ function getActiveElements() {
                             statusText = 'В сети';
                             isOnline = true;
                         } else {
-                            statusText = formatLastSeen(userActivity.last_online);
+                            statusText = formatLastSeen(userActivity.last_online, userActivity);
                             isOnline = false;
                         }
                     }
@@ -14564,7 +14564,7 @@ function getActiveElements() {
                 const response = await fetch(`${SERVER_URL}/get_activity_status`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user_ids: uncachedIds }),
+                    body: JSON.stringify({ user_ids: uncachedIds, viewer_id: userData && userData.platform_user_id }),
                     credentials: 'include'
                 });
 
@@ -14581,7 +14581,10 @@ function getActiveElements() {
             return result;
         }
 
-        function formatLastSeen(lastOnline) {
+        function formatLastSeen(lastOnline, activity) {
+            // Пользователь скрыл время захода от нас (настройки приватности):
+            // сервер не присылает last_online вовсе, только флаг last_seen_hidden.
+            if (activity && activity.last_seen_hidden) return 'был(а) недавно';
             if (!lastOnline) return 'в сети';
             
             const now = new Date();
@@ -14779,7 +14782,7 @@ function getActiveElements() {
                 const response = await fetch(`${SERVER_URL}/get_activity_status`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user_ids: uncachedIds }),
+                    body: JSON.stringify({ user_ids: uncachedIds, viewer_id: userData && userData.platform_user_id }),
                     credentials: 'include'
                 });
                 const data = await response.json();
@@ -14798,7 +14801,7 @@ function getActiveElements() {
                         statusEl.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                     } else {
                         statusEl.classList.remove('online');
-                        statusEl.textContent = formatLastSeen(status.last_online);
+                        statusEl.textContent = formatLastSeen(status.last_online, status);
                     }
                 });
             } catch (e) {}
@@ -14855,7 +14858,7 @@ function getActiveElements() {
                         statusText = 'В сети';
                         isOnline = true;
                     } else {
-                        statusText = formatLastSeen(userActivity.last_online);
+                        statusText = formatLastSeen(userActivity.last_online, userActivity);
                         isOnline = false;
                     }
                 }
@@ -15789,7 +15792,7 @@ async function openChat(chatId) {
                         chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                         chatStatus.classList.add('online');
                     } else {
-                        chatStatus.textContent = formatLastSeen(syncStatus.last_online);
+                        chatStatus.textContent = formatLastSeen(syncStatus.last_online, syncStatus);
                         chatStatus.classList.remove('online');
                     }
                 } else {
@@ -15816,7 +15819,7 @@ async function openChat(chatId) {
                     freshChatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                     freshChatStatus.classList.add('online');
                 } else {
-                    freshChatStatus.textContent = formatLastSeen(userActivity.last_online);
+                    freshChatStatus.textContent = formatLastSeen(userActivity.last_online, userActivity);
                     freshChatStatus.classList.remove('online');
                 }
             }
@@ -15950,7 +15953,7 @@ async function openChat(chatId) {
                                 latestChatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                                 latestChatStatus.classList.add('online');
                             } else {
-                                latestChatStatus.textContent = formatLastSeen(userActivity.last_online);
+                                latestChatStatus.textContent = formatLastSeen(userActivity.last_online, userActivity);
                                 latestChatStatus.classList.remove('online');
                             }
                         }
@@ -16008,7 +16011,7 @@ async function openChat(chatId) {
                             const r = await fetch(`${SERVER_URL}/get_activity_status`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ user_ids: [userId] }),
+                                body: JSON.stringify({ user_ids: [userId], viewer_id: userData && userData.platform_user_id }),
                                 credentials: 'include'
                             });
                             const d = await r.json();
@@ -16332,7 +16335,7 @@ function updateProfileModalStatus(userId) {
             statusElement.classList.remove('offline');
             statusElement.classList.add('online');
         } else {
-            const lastSeenText = formatLastSeen(activity.last_online);
+            const lastSeenText = formatLastSeen(activity.last_online, activity);
             statusTextSpan.textContent = lastSeenText;
             statusElement.classList.add('offline');
             statusElement.classList.remove('online');
@@ -16352,7 +16355,7 @@ function updateProfileModalStatus(userId) {
                 statusElement.classList.remove('offline');
                 statusElement.classList.add('online');
             } else {
-                statusTextSpan.textContent = formatLastSeen(act.last_online);
+                statusTextSpan.textContent = formatLastSeen(act.last_online, act);
                 statusElement.classList.add('offline');
                 statusElement.classList.remove('online');
             }
@@ -16374,7 +16377,7 @@ function startProfileStatusPolling(userId) {
             const r = await fetch(`${SERVER_URL}/get_activity_status`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_ids: [_profileViewedUserId] }),
+                body: JSON.stringify({ user_ids: [_profileViewedUserId], viewer_id: userData && userData.platform_user_id }),
                 credentials: 'include'
             });
             const d = await r.json();
@@ -17603,7 +17606,7 @@ function stopProfileDataPolling() {
                                     chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                                     chatStatus.classList.add('online');
                                 } else {
-                                    chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                                    chatStatus.textContent = formatLastSeen(userActivity.last_online, userActivity);
                                     chatStatus.classList.remove('online');
                                 }
                             } else {
@@ -17647,7 +17650,7 @@ function stopProfileDataPolling() {
                                         chatStatus.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
                                         chatStatus.classList.add('online');
                                     } else {
-                                        chatStatus.textContent = formatLastSeen(userActivity.last_online);
+                                        chatStatus.textContent = formatLastSeen(userActivity.last_online, userActivity);
                                         chatStatus.classList.remove('online');
                                     }
                                 }
@@ -18023,7 +18026,7 @@ function stopProfileDataPolling() {
                 const activity = activityData[contact.platform_user_id];
                 const isOnline = !!(activity && activity.is_online);
                 const statusText = activity && !activity.is_online
-                    ? formatLastSeen(activity.last_online)
+                    ? formatLastSeen(activity.last_online, activity)
                     : 'был(а) недавно';
 
                 item.innerHTML = `
@@ -22283,7 +22286,7 @@ vgResolveBadgeSrc();
     function memberStatusText(p) {
         if (p.is_online) return 'в сети';
         if (p.last_online && typeof formatLastSeen === 'function') {
-            const t = formatLastSeen(p.last_online);
+            const t = formatLastSeen(p.last_online, p);
             if (!t) return 'был(а) недавно';
             return /^был/i.test(t) ? t : `был(а) ${t}`;
         }
@@ -22585,7 +22588,7 @@ vgResolveBadgeSrc();
     function amStatusFor(activity) {
         if (activity && activity.is_online) return { online: true, text: 'в сети' };
         if (activity && activity.last_online && typeof formatLastSeen === 'function') {
-            const t = formatLastSeen(activity.last_online);
+            const t = formatLastSeen(activity.last_online, activity);
             if (t) return { online: false, text: /^был/i.test(t) ? t : `был(а) ${t}` };
         }
         return { online: false, text: 'был(а) недавно' };
