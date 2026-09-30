@@ -8861,55 +8861,6 @@ window.addEventListener('DOMContentLoaded', () => {
     z-index: 100000;
 }
 .ls-toast.show { opacity: 1; transform: translate(-50%, 0); }
-
-/* Кнопка "Изм." экрана исключений в режиме редактирования — синий кружок с галочкой */
-.dev-edit-btn.ls-done-btn.ls-done-checkmark {
-    width: 28px; height: 28px; padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-    background: var(--dev-blue);
-    color: #fff;
-    font-size: 13px;
-}
-
-/* Экран «список исключений»: строка добавления людей */
-.privacy-item.ls-exc-add { gap: 12px; }
-.ls-exc-add-icon {
-    width: 30px; height: 30px; flex: 0 0 30px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-    background: rgba(36, 129, 204, 0.12);
-    color: var(--dev-blue);
-    font-size: 14px;
-}
-
-/* Строки уже добавленных пользователей: минус слева в режиме редактирования */
-.privacy-item.ls-exc-user { gap: 12px; }
-.ls-exc-minus {
-    width: 22px; height: 22px; flex: 0 0 22px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-    background: #ff3b30;
-    color: #fff;
-    font-size: 11px;
-    cursor: pointer;
-}
-
-/* Подтверждение удаления одного исключения (тап на минус) */
-.privacy-item.ls-exc-confirm-remove { justify-content: space-between; }
-.ls-exc-confirm-name { font-size: 16px; color: var(--telegram-text); }
-.ls-exc-delete-btn {
-    border: none;
-    background: none;
-    color: #ff3b30;
-    font-size: 16px;
-    font-weight: 500;
-    cursor: pointer;
-    padding: 6px 0;
-}
-
-/* "Удалить все исключения" — отдельная карточка под списком */
-.privacy-item.ls-danger-item { justify-content: center; }
 </style>
 
 <!-- ==========================================================================
@@ -10765,41 +10716,95 @@ html[data-theme="dark"] .vg-verified-tooltip {
     }
 
     function back(target, setting) {
-        setting = setting || (exc && exc.setting);
         if (target === 'main') {
-            // Если открыт экран подбора людей (пикер), кнопка "назад" должна
-            // вернуть на список исключений, а не сразу закрыть весь раздел —
-            // если пикер был открыт именно с этого списка.
-            if (exc && exc.screen === 'picker' && exc.pickerReturnTo === 'list' && exc.listIds.length) {
-                exc.screen = 'list';
-                exc.query = '';
-                renderExcScreen();
-                return;
-            }
             var cfg = cfgFor(setting);
             if (!cfg) return;
             exc = null;
             go(cfg.mainDesktop, cfg.mainMobile);
             renderMain(setting);
         } else {
-            // Кнопка "назад" со списка настройки
-            // на список "Конфиденциальность" не была привязана к конкретной настройке
-            // (data-setting у неё нет), поэтому cfgFor(setting) раньше был undefined и
-            // функция выходила до вызова go() — стрелка "назад" визуально ничего не делала.
             go('privacyModule', 'privacyModuleMobile');
         }
     }
 
+    /* ---------- экран «Время захода» / «Фотографии профиля» ---------- */
+
+    function optionRow(setting, scope) {
+        var sel = state[setting].scope === scope;
+        return '<div class="privacy-item ls-option' + (sel ? ' is-selected' : '') + '" data-ls-scope="' + scope +
+               '" data-setting="' + setting + '" role="radio" aria-checked="' + sel + '" tabindex="0">' +
+               '<i class="fas fa-check ls-check"></i>' +
+               '<span class="privacy-item-label">' + SCOPES[scope] + '</span></div>';
+    }
+
+    function excRow(setting, mode) {
+        var n = state[setting][mode].length;
+        return '<div class="privacy-item" data-ls-exc="' + mode + '" data-setting="' + setting + '" role="button" tabindex="0">' +
+               '<span class="privacy-item-label">' + EXC_TITLES[mode] + '</span>' +
+               '<span class="privacy-item-value">' + (n ? countText(n) : 'Добавить') + '</span>' +
+               '<i class="fas fa-chevron-right privacy-item-chevron"></i></div>';
+    }
+
+    function renderMain(setting) {
+        var cfg = cfgFor(setting);
+        var st = state[setting];
+        var html;
+        if (!st.loaded) {
+            html = st.error
+                ? '<div class="ls-empty">Не удалось загрузить настройки.<br><button type="button" class="dev-retry-btn" data-ls-retry data-setting="' + setting + '">Повторить</button></div>'
+                : '<div class="ls-empty"><div class="devices-spinner"></div>Загрузка…</div>';
+        } else {
+            var rows = '';
+            if (st.scope !== 'everyone') rows += excRow(setting, 'allow');
+            if (st.scope !== 'nobody') rows += excRow(setting, 'deny');
+            html =
+                '<div class="ls-group">' +
+                    '<div class="privacy-section-title">' + esc(cfg.scopeTitle) + '</div>' +
+                    '<div class="privacy-list" role="radiogroup">' +
+                        optionRow(setting, 'everyone') + optionRow(setting, 'contacts') + optionRow(setting, 'nobody') +
+                    '</div>' +
+                    '<div class="ls-footnote">' + esc(cfg.scopeFootnote) + '</div>' +
+                '</div>' +
+                '<div class="ls-group">' +
+                    '<div class="privacy-section-title">Исключения</div>' +
+                    '<div class="privacy-list">' + rows + '</div>' +
+                    '<div class="ls-footnote">Вы можете добавить пользователей в список исключений из настроек выше.</div>' +
+                '</div>';
+        }
+        setHtml([cfg.contentMobile, cfg.contentDesktop], html);
+    }
+
+    function openMain(setting) {
+        var cfg = cfgFor(setting);
+        if (!cfg) return;
+        go(cfg.mainDesktop, cfg.mainMobile);
+        renderMain(setting);
+        load(true).catch(function () {
+            if (!state[setting].loaded) { state[setting].error = true; renderMain(setting); }
+        });
+    }
+
+    function setScope(setting, scope) {
+        var st = state[setting];
+        if (!st.loaded || !SCOPES[scope] || scope === st.scope) return;
+        st.scope = scope;
+        // Как и на сервере: исключения, которые при новом значении ничего не значат, сбрасываются.
+        if (scope === 'everyone') st.allow = [];
+        if (scope === 'nobody') st.deny = [];
+        refreshLabels(setting);
+        renderMain(setting);
+
+        var mySeq = ++saveSeq[setting];
+        api('/api/privacy/' + setting, { scope: scope }).then(function (d) {
+            setConfirmed(setting, d[setting]);
+            if (mySeq === saveSeq[setting]) applyServer(setting, d[setting]);
+        }).catch(function () {
+            if (mySeq === saveSeq[setting] && confirmed[setting]) applyServer(setting, confirmed[setting]);
+            toast('Не удалось сохранить настройку');
+        });
+    }
+
     /* ---------- экран исключений ---------- */
-    /* Два состояния:
-       - screen === 'list'   — список уже добавленных исключений (как на скринах
-         Telegram): строка "Добавить людей или группы" + список людей, с
-         переключением в режим редактирования (красные "минусы" и подтверждение
-         удаления) через кнопку "Изм." / галочку.
-       - screen === 'picker' — подбор новых людей: поиск + чекбокс-список
-         контактов (аналог модалки выбора контактов в чатах), кнопка "Готово"
-         добавляет отмеченных в список исключений.
-       Если исключений пока нет, "Добавить людей или группы" сразу открывает picker. */
 
     function normalizeUser(u) {
         return {
@@ -10826,222 +10831,12 @@ html[data-theme="dark"] .vg-verified-tooltip {
         return el;
     }
 
-    function emptyBlock(text) {
-        var d = document.createElement('div');
-        d.className = 'ls-empty';
-        d.textContent = text;
-        return d;
-    }
-
-    function setHtmlNode(ids, node) {
-        for (var i = 0; i < ids.length; i++) {
-            var el = byId(ids[i]);
-            if (el) { el.innerHTML = ''; el.appendChild(node.cloneNode(true)); }
-        }
-    }
-
-    /* -- шапка экрана: заголовок уже фиксирует openExceptions(), тут только кнопка справа -- */
-
-    function updateExcHeader() {
-        if (!exc) return;
-        var cfg = cfgFor(exc.setting);
-        var btns = document.querySelectorAll(
-            '#' + cfg.excMobile + ' [data-ls-done], #' + cfg.excDesktop + ' [data-ls-done]'
-        );
-        for (var i = 0; i < btns.length; i++) {
-            var b = btns[i];
-            b.disabled = false;
-            if (exc.screen === 'picker') {
-                b.classList.remove('ls-done-checkmark');
-                b.textContent = 'Готово';
-            } else if (exc.editMode) {
-                b.classList.add('ls-done-checkmark');
-                b.innerHTML = '<i class="fas fa-check"></i>';
-            } else {
-                b.classList.remove('ls-done-checkmark');
-                b.textContent = 'Изм.';
-            }
-        }
-    }
-
-    function renderExcScreen() {
-        if (!exc) return;
-        updateExcHeader();
-        if (exc.screen === 'picker') renderExcPickerScreen();
-        else renderExcListScreen();
-    }
-
-    /* ---------- экран «список исключений» ---------- */
-
-    function excUserViewRow(u) {
+    function userRow(u) {
         var row = document.createElement('div');
-        if (exc.confirmRemoveId === u.id) {
-            row.className = 'privacy-item ls-exc-user ls-exc-confirm-remove';
-            row.setAttribute('data-ls-user-row', u.id);
-            var nameSpan = document.createElement('span');
-            nameSpan.className = 'ls-exc-confirm-name';
-            nameSpan.textContent = u.nickname;
-            var delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.className = 'ls-exc-delete-btn';
-            delBtn.setAttribute('data-ls-confirm-remove', u.id);
-            delBtn.textContent = 'Удалить';
-            row.appendChild(nameSpan);
-            row.appendChild(delBtn);
-            return row;
-        }
-        row.className = 'privacy-item ls-exc-user';
-        row.setAttribute('data-ls-user-row', u.id);
-        if (exc.editMode) {
-            var minus = document.createElement('span');
-            minus.className = 'ls-exc-minus';
-            minus.setAttribute('data-ls-remove', u.id);
-            minus.innerHTML = '<i class="fas fa-minus"></i>';
-            row.appendChild(minus);
-        }
-        row.appendChild(makeAvatar(u));
-        var info = document.createElement('div');
-        info.className = 'ls-user-info';
-        var name = document.createElement('div');
-        name.className = 'ls-user-name';
-        name.textContent = u.nickname;
-        info.appendChild(name);
-        if (u.is_group && u.members_count) {
-            var sub = document.createElement('div');
-            sub.className = 'ls-user-id';
-            sub.textContent = u.members_count + ' ' + plural(u.members_count, ['участник', 'участника', 'участников']);
-            info.appendChild(sub);
-        }
-        row.appendChild(info);
-        return row;
-    }
-
-    function renderExcListScreen() {
-        var cfg = cfgFor(exc.setting);
-        var users = exc.listIds.map(function (id) { return exc.users[id]; }).filter(Boolean);
-        users.sort(function (a, b) { return a.nickname.toLowerCase().localeCompare(b.nickname.toLowerCase(), 'ru'); });
-
-        var wrap = document.createElement('div');
-
-        var group1 = document.createElement('div');
-        group1.className = 'ls-group';
-        var title = document.createElement('div');
-        title.className = 'privacy-section-title';
-        title.textContent = users.length + ' ' + plural(users.length, ['ИСКЛЮЧЕНИЕ', 'ИСКЛЮЧЕНИЯ', 'ИСКЛЮЧЕНИЙ']);
-        group1.appendChild(title);
-
-        var list = document.createElement('div');
-        list.className = 'privacy-list';
-
-        var addRow = document.createElement('div');
-        addRow.className = 'privacy-item ls-exc-add';
-        addRow.setAttribute('data-ls-add-more', '1');
-        addRow.setAttribute('role', 'button');
-        addRow.setAttribute('tabindex', '0');
-        addRow.innerHTML = '<span class="ls-exc-add-icon"><i class="fas fa-plus"></i></span>' +
-            '<span class="privacy-item-label" style="color:var(--dev-blue);">Добавить людей или группы</span>';
-        list.appendChild(addRow);
-
-        users.forEach(function (u) { list.appendChild(excUserViewRow(u)); });
-
-        group1.appendChild(list);
-        wrap.appendChild(group1);
-
-        if (users.length) {
-            var group2 = document.createElement('div');
-            group2.className = 'ls-group';
-            var list2 = document.createElement('div');
-            list2.className = 'privacy-list';
-            var delAll = document.createElement('div');
-            delAll.className = 'privacy-item ls-danger-item';
-            delAll.setAttribute('data-ls-remove-all', '1');
-            delAll.setAttribute('role', 'button');
-            delAll.setAttribute('tabindex', '0');
-            delAll.innerHTML = '<span class="privacy-item-label" style="color:#ff3b30;">Удалить все исключения</span>';
-            list2.appendChild(delAll);
-            group2.appendChild(list2);
-            wrap.appendChild(group2);
-        }
-
-        setHtmlNode([cfg.excContentMobile, cfg.excContentDesktop], wrap);
-    }
-
-    function toggleEditMode() {
-        if (!exc || exc.screen !== 'list') return;
-        exc.editMode = !exc.editMode;
-        exc.confirmRemoveId = null;
-        renderExcScreen();
-    }
-
-    function removeException(id) {
-        if (!exc || exc.busy || !id) return;
-        var setting = exc.setting, mode = exc.mode;
-        var newIds = exc.listIds.filter(function (x) { return x !== id; });
-        exc.busy = true;
-        api('/api/privacy/' + setting + '/exceptions', { mode: mode, user_ids: newIds }).then(function (d) {
-            if (!exc) return;
-            exc.busy = false;
-            applyServer(setting, d[setting]);
-            if (!exc) return;
-            exc.listIds = newIds;
-            exc.confirmRemoveId = null;
-            if (exc.listIds.length === 0) back('main', setting);
-            else renderExcListScreen();
-        }).catch(function () {
-            if (!exc) return;
-            exc.busy = false;
-            exc.confirmRemoveId = null;
-            toast('Не удалось удалить исключение');
-            renderExcListScreen();
-        });
-    }
-
-    function removeAllExceptions() {
-        if (!exc || exc.busy) return;
-        if (!window.confirm('Удалить все исключения?')) return;
-        var setting = exc.setting, mode = exc.mode;
-        exc.busy = true;
-        api('/api/privacy/' + setting + '/exceptions', { mode: mode, user_ids: [] }).then(function (d) {
-            if (!exc) return;
-            exc.busy = false;
-            applyServer(setting, d[setting]);
-            back('main', setting);
-        }).catch(function () {
-            if (!exc) return;
-            exc.busy = false;
-            toast('Не удалось удалить список');
-        });
-    }
-
-    /* ---------- экран «подбор людей» (пикер) ---------- */
-
-    function openPicker(returnTo) {
-        if (!exc) return;
-        exc.screen = 'picker';
-        exc.pickerReturnTo = returnTo; // 'list' или 'main'
-        exc.pickerDraft = {};
-        exc.query = '';
-        renderExcScreen();
-    }
-
-    function renderExcPickerScreen() {
-        var cfg = cfgFor(exc.setting);
-        var html =
-            '<div class="ls-search"><i class="fas fa-search"></i>' +
-            '<input type="text" data-ls-search placeholder="Поиск по нику или ID" autocomplete="off" ' +
-            'autocapitalize="off" autocorrect="off" spellcheck="false"></div>' +
-            '<div class="privacy-list" data-ls-list></div>' +
-            '<div class="ls-footnote">' + esc(cfg.excHints[exc.mode]) + '</div>';
-        setHtml([cfg.excContentMobile, cfg.excContentDesktop], html);
-        renderExcPickerList();
-    }
-
-    function pickerUserRow(u) {
-        var row = document.createElement('div');
-        row.className = 'ls-user-row' + (exc.pickerDraft[u.id] ? ' is-selected' : '');
-        row.setAttribute('data-ls-picker-user', u.id);
+        row.className = 'ls-user-row' + (exc.draft[u.id] ? ' is-selected' : '');
+        row.setAttribute('data-ls-user', u.id);
         row.setAttribute('role', 'checkbox');
-        row.setAttribute('aria-checked', exc.pickerDraft[u.id] ? 'true' : 'false');
+        row.setAttribute('aria-checked', exc.draft[u.id] ? 'true' : 'false');
 
         var check = document.createElement('span');
         check.className = 'ls-check-circle';
@@ -11063,13 +10858,31 @@ html[data-theme="dark"] .vg-verified-tooltip {
         return row;
     }
 
-    function renderExcPickerList() {
+    function renderExcSkeleton() {
+        var cfg = cfgFor(exc.setting);
+        var html =
+            '<div class="ls-search"><i class="fas fa-search"></i>' +
+            '<input type="text" data-ls-search placeholder="Поиск по нику или ID" autocomplete="off" ' +
+            'autocapitalize="off" autocorrect="off" spellcheck="false"></div>' +
+            '<div class="privacy-list" data-ls-list></div>' +
+            '<div class="ls-footnote">' + esc(cfg.excHints[exc.mode]) + '</div>';
+        setHtml([cfg.excContentMobile, cfg.excContentDesktop], html);
+    }
+
+    function emptyBlock(text) {
+        var d = document.createElement('div');
+        d.className = 'ls-empty';
+        d.textContent = text;
+        return d;
+    }
+
+    function renderExcList() {
         if (!exc) return;
         var q = exc.query.trim().toLowerCase();
-        var users = Object.keys(exc.users)
-            .filter(function (id) { return exc.listIds.indexOf(id) === -1; })
-            .map(function (id) { return exc.users[id]; });
-        users.sort(function (a, b) { return a.nickname.toLowerCase().localeCompare(b.nickname.toLowerCase(), 'ru'); });
+        var users = Object.keys(exc.users).map(function (id) { return exc.users[id]; });
+        users.sort(function (a, b) {
+            return a.nickname.toLowerCase().localeCompare(b.nickname.toLowerCase(), 'ru');
+        });
         var shown = users.filter(function (u) {
             return !q || u.nickname.toLowerCase().indexOf(q) !== -1 || u.id.toLowerCase().indexOf(q) !== -1;
         });
@@ -11082,7 +10895,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
         for (var i = 0; i < lists.length; i++) {
             var list = lists[i];
             list.innerHTML = '';
-            shown.forEach(function (u) { list.appendChild(pickerUserRow(u)); });
+            shown.forEach(function (u) { list.appendChild(userRow(u)); });
 
             if (!shown.length) {
                 if (!exc.friendsLoaded) list.appendChild(emptyBlock('Загрузка…'));
@@ -11102,15 +10915,59 @@ html[data-theme="dark"] .vg-verified-tooltip {
         }
     }
 
-    function togglePickerUser(el) {
+    function setDoneDisabled(flag) {
+        var btns = document.querySelectorAll('[data-ls-done]');
+        for (var i = 0; i < btns.length; i++) btns[i].disabled = !!flag;
+    }
+
+    function openExceptions(setting, mode) {
+        var cfg = cfgFor(setting);
+        var st = state[setting];
+        if (!cfg || !st.loaded || !EXC_TITLES[mode]) return;
+        exc = {
+            setting: setting, mode: mode, initial: [], draft: {}, users: {}, query: '',
+            busy: false, lookupBusy: false, friendsLoaded: false, friendsError: false
+        };
+        (st[mode] || []).forEach(function (u) {
+            var n = normalizeUser(u);
+            exc.users[n.id] = n;
+            exc.draft[n.id] = true;
+            exc.initial.push(n.id);
+        });
+
+        var titles = document.querySelectorAll('#' + cfg.excMobile + ' [data-ls-exc-title], #' + cfg.excDesktop + ' [data-ls-exc-title]');
+        for (var i = 0; i < titles.length; i++) titles[i].textContent = EXC_TITLES[mode];
+        setDoneDisabled(false);
+
+        go(cfg.excDesktop, cfg.excMobile);
+        renderExcSkeleton();
+        renderExcList();
+
+        api('/get_friends').then(function (d) {
+            if (!exc || exc.setting !== setting || exc.mode !== mode) return;
+            (d.friends || []).forEach(function (u) {
+                var n = normalizeUser(u);
+                if (!exc.users[n.id]) exc.users[n.id] = n;
+            });
+            exc.friendsLoaded = true;
+            renderExcList();
+        }).catch(function () {
+            if (!exc || exc.setting !== setting || exc.mode !== mode) return;
+            exc.friendsLoaded = true;
+            exc.friendsError = true;
+            renderExcList();
+        });
+    }
+
+    function toggleUser(el) {
         if (!exc || exc.busy) return;
-        var id = el.getAttribute('data-ls-picker-user');
-        if (exc.pickerDraft[id]) delete exc.pickerDraft[id]; else exc.pickerDraft[id] = true;
-        var rows = document.querySelectorAll('[data-ls-picker-user]');
+        var id = el.getAttribute('data-ls-user');
+        if (exc.draft[id]) delete exc.draft[id]; else exc.draft[id] = true;
+        var rows = document.querySelectorAll('[data-ls-user]');
         for (var i = 0; i < rows.length; i++) {
-            if (rows[i].getAttribute('data-ls-picker-user') === id) {
-                rows[i].classList.toggle('is-selected', !!exc.pickerDraft[id]);
-                rows[i].setAttribute('aria-checked', exc.pickerDraft[id] ? 'true' : 'false');
+            if (rows[i].getAttribute('data-ls-user') === id) {
+                rows[i].classList.toggle('is-selected', !!exc.draft[id]);
+                rows[i].setAttribute('aria-checked', exc.draft[id] ? 'true' : 'false');
             }
         }
     }
@@ -11120,103 +10977,40 @@ html[data-theme="dark"] .vg-verified-tooltip {
         var q = exc.query.trim();
         if (!q) return;
         exc.lookupBusy = true;
-        renderExcPickerList();
+        renderExcList();
         api('/search_user', { platform_user_id: q, requester_id: myId() }).then(function (d) {
             if (!exc) return;
             var n = normalizeUser(d.user);
             exc.users[n.id] = n;
-            if (exc.listIds.indexOf(n.id) === -1) exc.pickerDraft[n.id] = true;
+            exc.draft[n.id] = true;
             exc.query = '';
             var inputs = document.querySelectorAll('[data-ls-search]');
             for (var i = 0; i < inputs.length; i++) inputs[i].value = '';
         }).catch(function (e) {
             toast(e && e.message ? e.message : 'Пользователь не найден');
         }).then(function () {
-            if (exc) { exc.lookupBusy = false; renderExcPickerList(); }
+            if (exc) { exc.lookupBusy = false; renderExcList(); }
         });
     }
 
-    function doneWithPicker() {
+    function saveExceptions() {
         if (!exc || exc.busy) return;
-        var setting = exc.setting, mode = exc.mode;
-        var addedIds = Object.keys(exc.pickerDraft).filter(function (id) { return exc.listIds.indexOf(id) === -1; });
-
-        if (!addedIds.length) {
-            if (exc.pickerReturnTo === 'list' && exc.listIds.length) {
-                exc.screen = 'list';
-                renderExcScreen();
-            } else {
-                back('main', setting);
-            }
+        var setting = exc.setting;
+        var ids = Object.keys(exc.draft);
+        if (ids.slice().sort().join('|') === exc.initial.slice().sort().join('|')) {
+            back('main', setting);
             return;
         }
-
-        var newIds = exc.listIds.concat(addedIds);
         exc.busy = true;
-        var btns = document.querySelectorAll('[data-ls-done]');
-        for (var i = 0; i < btns.length; i++) btns[i].disabled = true;
-
-        api('/api/privacy/' + setting + '/exceptions', { mode: mode, user_ids: newIds }).then(function (d) {
-            if (!exc) return;
-            exc.busy = false;
+        setDoneDisabled(true);
+        api('/api/privacy/' + setting + '/exceptions', { mode: exc.mode, user_ids: ids }).then(function (d) {
+            exc = null;
             applyServer(setting, d[setting]);
-            if (!exc) return;
-            exc.listIds = newIds;
-            exc.pickerDraft = {};
-            exc.screen = 'list';
-            renderExcScreen();
+            go(cfgFor(setting).mainDesktop, cfgFor(setting).mainMobile);
         }).catch(function () {
-            if (!exc) return;
-            exc.busy = false;
             toast('Не удалось сохранить список');
-            var btns2 = document.querySelectorAll('[data-ls-done]');
-            for (var j = 0; j < btns2.length; j++) btns2[j].disabled = false;
-        });
-    }
-
-    /* ---------- открытие экрана исключений ---------- */
-
-    function openExceptions(setting, mode) {
-        var cfg = cfgFor(setting);
-        var st = state[setting];
-        if (!cfg || !st.loaded || !EXC_TITLES[mode]) return;
-        exc = {
-            setting: setting, mode: mode, users: {}, listIds: [], query: '',
-            busy: false, lookupBusy: false, friendsLoaded: false, friendsError: false,
-            screen: 'list', editMode: false, confirmRemoveId: null,
-            pickerDraft: {}, pickerReturnTo: 'main'
-        };
-        (st[mode] || []).forEach(function (u) {
-            var n = normalizeUser(u);
-            exc.users[n.id] = n;
-            exc.listIds.push(n.id);
-        });
-
-        var titles = document.querySelectorAll('#' + cfg.excMobile + ' [data-ls-exc-title], #' + cfg.excDesktop + ' [data-ls-exc-title]');
-        for (var i = 0; i < titles.length; i++) titles[i].textContent = EXC_TITLES[mode];
-
-        go(cfg.excDesktop, cfg.excMobile);
-
-        if (exc.listIds.length) {
-            exc.screen = 'list';
-            renderExcScreen();
-        } else {
-            openPicker('main');
-        }
-
-        api('/get_friends').then(function (d) {
-            if (!exc || exc.setting !== setting || exc.mode !== mode) return;
-            (d.friends || []).forEach(function (u) {
-                var n = normalizeUser(u);
-                if (!exc.users[n.id]) exc.users[n.id] = n;
-            });
-            exc.friendsLoaded = true;
-            if (exc.screen === 'picker') renderExcPickerList();
-        }).catch(function () {
-            if (!exc || exc.setting !== setting || exc.mode !== mode) return;
-            exc.friendsLoaded = true;
-            exc.friendsError = true;
-            if (exc.screen === 'picker') renderExcPickerList();
+            if (exc) exc.busy = false;
+            setDoneDisabled(false);
         });
     }
 
@@ -11232,27 +11026,10 @@ html[data-theme="dark"] .vg-verified-tooltip {
         }
         if ((el = t.closest('[data-ls-scope]'))) { setScope(el.getAttribute('data-setting'), el.getAttribute('data-ls-scope')); return; }
         if ((el = t.closest('[data-ls-exc]'))) { openExceptions(el.getAttribute('data-setting'), el.getAttribute('data-ls-exc')); return; }
-        if ((el = t.closest('[data-ls-confirm-remove]'))) { removeException(el.getAttribute('data-ls-confirm-remove')); return; }
-        if ((el = t.closest('[data-ls-remove]'))) {
-            if (exc) { exc.confirmRemoveId = el.getAttribute('data-ls-remove'); renderExcListScreen(); }
-            return;
-        }
-        if ((el = t.closest('[data-ls-remove-all]'))) { removeAllExceptions(); return; }
-        if ((el = t.closest('[data-ls-add-more]'))) { openPicker('list'); return; }
-        if ((el = t.closest('[data-ls-user-row]'))) {
-            if (exc && exc.confirmRemoveId === el.getAttribute('data-ls-user-row')) {
-                exc.confirmRemoveId = null;
-                renderExcListScreen();
-            }
-            return;
-        }
-        if ((el = t.closest('[data-ls-picker-user]'))) { togglePickerUser(el); return; }
+        if ((el = t.closest('[data-ls-user]'))) { toggleUser(el); return; }
         if ((el = t.closest('[data-ls-lookup]'))) { lookupById(); return; }
         if ((el = t.closest('[data-ls-back]'))) { back(el.getAttribute('data-ls-back'), el.getAttribute('data-setting')); return; }
-        if ((el = t.closest('[data-ls-done]'))) {
-            if (exc && exc.screen === 'picker') doneWithPicker(); else toggleEditMode();
-            return;
-        }
+        if ((el = t.closest('[data-ls-done]'))) { saveExceptions(); return; }
         if ((el = t.closest('[data-ls-retry]'))) { openMain(el.getAttribute('data-setting')); return; }
     });
 
@@ -11266,9 +11043,9 @@ html[data-theme="dark"] .vg-verified-tooltip {
 
     document.addEventListener('input', function (e) {
         var t = e.target;
-        if (exc && exc.screen === 'picker' && t && t.hasAttribute && t.hasAttribute('data-ls-search')) {
+        if (exc && t && t.hasAttribute && t.hasAttribute('data-ls-search')) {
             exc.query = t.value;
-            renderExcPickerList();
+            renderExcList();
         }
     });
 
