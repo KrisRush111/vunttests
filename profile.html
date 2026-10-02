@@ -8875,14 +8875,12 @@ window.addEventListener('DOMContentLoaded', () => {
 }
 .ls-exc-add { color: var(--dev-blue); font-size: 16px; cursor: pointer; }
 .ls-exc-add i { width: 22px; text-align: center; font-size: 18px; }
-.ls-exc-card.is-editing .ls-exc-add { justify-content: center; }
-.ls-exc-row::before, .ls-exc-add::after {
+.ls-exc-swipe::before, .ls-exc-add::after {
     content: ""; position: absolute; top: 0; right: 0; left: 16px; height: 1px; background: var(--dev-sep);
 }
 .ls-exc-add::after { top: auto; bottom: 0; }
-.ls-exc-row:first-child::before { display: none; }
-.ls-exc-row + .ls-exc-row::before { left: 68px; }
-.ls-exc-row:first-child::before { display: block; left: 16px; }
+.ls-exc-swipe::before { z-index: 2; pointer-events: none; }
+.ls-exc-swipe + .ls-exc-swipe::before { left: 16px; }
 .ls-exc-minus {
     display: none; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: none; border-radius: 50%;
     background: #ff453a; color: #fff; font-size: 11px; align-items: center; justify-content: center; cursor: pointer;
@@ -8961,11 +8959,22 @@ body.dark-theme .ls-pick-search { background: #2C2C2E; }
 .ls-pick-overlay { transition: opacity .45s ease; }
 @keyframes lsRowIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .ls-pick-sheet.active .ls-pick-list .ls-user-row,
-.ls-exc-card .ls-exc-row { animation: lsRowIn .4s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.ls-exc-card .ls-exc-swipe { animation: lsRowIn .4s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
 .ls-pick-sheet.active .ls-pick-list .ls-user-row:nth-child(n+2) { animation-delay: .04s; }
 .ls-pick-sheet.active .ls-pick-list .ls-user-row:nth-child(n+5) { animation-delay: .08s; }
 .ls-pick-sheet.active .ls-pick-list .ls-user-row:nth-child(n+9) { animation-delay: .12s; }
 .ls-exc-add, .ls-exc-delall { animation: lsRowIn .4s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.ls-exc-swipe { position: relative; overflow: hidden; }
+.ls-exc-swipe .ls-exc-row {
+    background: var(--dev-card-bg); touch-action: pan-y; user-select: none; position: relative; z-index: 1;
+    will-change: transform;
+}
+.ls-exc-delbtn {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    height: 34px; padding: 0 16px; border: none; border-radius: 999px;
+    background: #d4141c; color: #fff; font-size: 15px; cursor: pointer;
+}
+.ls-exc-delbtn:active { opacity: .7; }
 </style>
 
 <!-- ==========================================================================
@@ -11113,13 +11122,21 @@ html[data-theme="dark"] .vg-verified-tooltip {
     /* ----- экран со списком уже выбранных (как «Всегда показывать» в iOS) ----- */
 
     function listRow(u) {
+        var wrap = document.createElement('div');
+        wrap.className = 'ls-exc-swipe';
+        wrap.setAttribute('data-ls-exc-user', u.id);
+        var act = document.createElement('button');
+        act.type = 'button';
+        act.className = 'ls-exc-delbtn';
+        act.setAttribute('data-ls-del', u.id);
+        act.textContent = 'Удалить';
+        wrap.appendChild(act);
         var row = document.createElement('div');
         row.className = 'ls-exc-row';
-        row.setAttribute('data-ls-exc-user', u.id);
         var minus = document.createElement('button');
         minus.type = 'button';
         minus.className = 'ls-exc-minus';
-        minus.setAttribute('data-ls-remove', u.id);
+        minus.setAttribute('data-ls-minus', u.id);
         minus.setAttribute('aria-label', 'Удалить');
         minus.innerHTML = '<i class="fas fa-minus"></i>';
         row.appendChild(minus);
@@ -11135,7 +11152,80 @@ html[data-theme="dark"] .vg-verified-tooltip {
         info.appendChild(name);
         info.appendChild(id);
         row.appendChild(info);
-        return row;
+        wrap.appendChild(row);
+        return wrap;
+    }
+
+    /* ----- свайп влево -> «Удалить» ----- */
+    var SW_W = 96;
+    function swRow(w) { return w.querySelector('.ls-exc-row'); }
+    function swSet(w, x, anim) {
+        var r = swRow(w);
+        r.style.transition = anim ? 'transform .28s cubic-bezier(0.22, 1, 0.36, 1)' : 'none';
+        r.style.transform = x ? 'translateX(' + x + 'px)' : '';
+        w.classList.toggle('swiped', x < 0);
+    }
+    function swCloseAll(except) {
+        var all = document.querySelectorAll('.ls-exc-swipe.swiped');
+        for (var i = 0; i < all.length; i++) if (all[i] !== except) swSet(all[i], 0, true);
+    }
+    var sw = null;
+    document.addEventListener('pointerdown', function (e) {
+        var w = e.target.closest && e.target.closest('.ls-exc-swipe');
+        if (!w) { swCloseAll(null); return; }
+        if (e.target.closest('.ls-exc-delbtn')) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        swCloseAll(w);
+        sw = { w: w, x0: e.clientX, y0: e.clientY, base: w.classList.contains('swiped') ? -SW_W : 0,
+               dx: 0, dragging: false, id: e.pointerId, moved: false };
+    });
+    document.addEventListener('pointermove', function (e) {
+        if (!sw || e.pointerId !== sw.id) return;
+        var dx = e.clientX - sw.x0, dy = e.clientY - sw.y0;
+        if (!sw.dragging) {
+            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+            if (Math.abs(dy) > Math.abs(dx)) { sw = null; return; }
+            sw.dragging = true;
+            try { sw.w.setPointerCapture(e.pointerId); } catch (er) {}
+        }
+        sw.moved = true;
+        var x = Math.max(-SW_W - 30, Math.min(0, sw.base + dx));
+        sw.dx = x;
+        swSet(sw.w, x, false);
+    });
+    function swEnd(e) {
+        if (!sw || e.pointerId !== sw.id) return;
+        var cur = sw;
+        sw = null;
+        if (!cur.dragging) return;
+        swSet(cur.w, cur.dx < -SW_W / 2 ? -SW_W : 0, true);
+        cur.w.setAttribute('data-sw-just', '1');
+        setTimeout(function () { cur.w.removeAttribute('data-sw-just'); }, 50);
+    }
+    document.addEventListener('pointerup', swEnd);
+    document.addEventListener('pointercancel', swEnd);
+
+    function swipeDelete(id) {
+        if (!exc || exc.busy) return;
+        var w = document.querySelector('.ls-exc-swipe[data-ls-exc-user="' + id + '"]');
+        delete exc.draft[id];
+        var setting = exc.setting;
+        var finish = function () {
+            persist(Object.keys(exc.draft), function (ok) {
+                if (!ok) { exc.draft[id] = true; renderExcView(); return; }
+                if (!Object.keys(exc.draft).length) { exc = null; back('main', setting); return; }
+                renderExcView();
+            });
+        };
+        var boxes = document.querySelectorAll('.ls-exc-swipe[data-ls-exc-user="' + id + '"]');
+        for (var i = 0; i < boxes.length; i++) {
+            boxes[i].style.transition = 'height .25s ease, opacity .25s ease';
+            boxes[i].style.height = boxes[i].offsetHeight + 'px';
+            void boxes[i].offsetHeight;
+            boxes[i].style.height = '0px';
+            boxes[i].style.opacity = '0';
+        }
+        setTimeout(finish, 250);
     }
 
     function paintEditBtns() {
@@ -11303,7 +11393,12 @@ html[data-theme="dark"] .vg-verified-tooltip {
         if ((el = t.closest('[data-ls-pick-close]'))) { closePicker(); return; }
         if ((el = t.closest('[data-ls-pick-done]'))) { finishPicker(); return; }
         if ((el = t.closest('[data-ls-add]'))) { openPicker(); return; }
-        if ((el = t.closest('[data-ls-remove]'))) { removeOne(el.getAttribute('data-ls-remove')); return; }
+        if ((el = t.closest('[data-ls-del]'))) { swipeDelete(el.getAttribute('data-ls-del')); return; }
+        if ((el = t.closest('[data-ls-minus]'))) {
+            var mw = el.closest('.ls-exc-swipe');
+            if (mw) { var open = mw.classList.contains('swiped'); swCloseAll(mw); swSet(mw, open ? 0 : -SW_W, true); }
+            return;
+        }
         if ((el = t.closest('[data-ls-delall]'))) { deleteAll(); return; }
         if ((el = t.closest('[data-ls-edit]'))) { toggleEdit(); return; }
         if ((el = t.closest('[data-ls-user]'))) { toggleUser(el); return; }
