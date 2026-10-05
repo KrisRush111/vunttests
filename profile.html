@@ -5865,6 +5865,8 @@ window.addEventListener("beforeunload", () => {
                 requestAnimationFrame(() => overlay.classList.add('visible'));
             });
         }
+        // Доступно из других скриптов (например, из раздела «Конфиденциальность»)
+        window.vgConfirm = devicesConfirmDialog;
 
         async function terminateDevice(deviceId, scope) {
             if (!deviceId) return;
@@ -11597,12 +11599,23 @@ html[data-theme="dark"] .vg-verified-tooltip {
 
     function deleteAll() {
         if (!exc || exc.busy) return;
-        if (!window.confirm('Удалить все исключения?')) return;
         var setting = exc.setting;
-        persist([], function (ok) {
-            if (!ok) return;
-            exc = null;
-            back('main', setting);
+        // Тот же iOS-диалог, что и в «Завершить другие сеансы»
+        var ask = window.vgConfirm
+            ? window.vgConfirm({
+                title: 'Удалить все исключения?',
+                text: 'Список исключений будет полностью очищен.',
+                yesLabel: 'Удалить',
+                noLabel: 'Отмена'
+              })
+            : Promise.resolve(window.confirm('Удалить все исключения?'));
+        ask.then(function (yes) {
+            if (!yes || !exc || exc.busy) return;
+            persist([], function (ok) {
+                if (!ok) return;
+                exc = null;
+                back('main', setting);
+            });
         });
     }
 
