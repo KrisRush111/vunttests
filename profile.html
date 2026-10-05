@@ -6112,6 +6112,7 @@ window.addEventListener("beforeunload", () => {
         // "без фото" и вызывала лишнюю перерисовку сразу после загрузки.
         userData.has_avatar_photo = true;
         userData.avatar_url = data.avatar_url || userData.avatar_url;
+        try { AvatarCache.setSelf(userData.platform_user_id, userData.avatar_url); } catch (e) {}
         userData.avatar_background = data.avatar_background || userData.avatar_background;
         // Увеличиваем версию аватара — это обновит ?v= во всех будущих загрузках
         // и не даст браузеру показать старую картинку из кэша
@@ -6142,7 +6143,8 @@ window.addEventListener("beforeunload", () => {
         // заходе не находил фото в localStorage и снова рисовал букву.
         try {
             const dataUrl = await fileToDataURL(file);
-            const version = data.avatar_version_hash || await fetchAvatarVersion(userData.platform_user_id);
+            // Для своего аватара версия = сам avatar_url (так её сверяет AvatarCache)
+            const version = data.avatar_url || data.avatar_version_hash || await fetchAvatarVersion(userData.platform_user_id);
             // Профиль — самое крупное место отрисовки, берём соответствующий bucket,
             // чтобы копия не оказалась мелкой и не перекачивалась ради резкости.
             const bucket = AvatarCache.bucketFor(360);
@@ -6262,6 +6264,7 @@ window.addEventListener("beforeunload", () => {
                 
                 // Локальная копия больше не актуальна — убираем из IndexedDB
                 AvatarCache.removeLocal(userData.platform_user_id);
+                try { AvatarCache.setSelf(userData.platform_user_id, null); } catch (e) {}
                 removeFullAvatarLocal(userData.platform_user_id);
                 if (avatarModalImage) avatarModalImage.removeAttribute('src');
 
@@ -6298,6 +6301,8 @@ window.addEventListener("beforeunload", () => {
                     };
 
                     sessionStorage.setItem('userData', JSON.stringify(userData));
+                    // Свой аватар AvatarCache берёт напрямую по avatar_url (см. avatar-cache.js)
+                    try { AvatarCache.setSelf(userData.platform_user_id, userData.avatar_url); } catch (e) {}
                     if (userData.platform_user_id) {
                         localStorage.setItem('vg_last_user_id', String(userData.platform_user_id));
                         // Проверяем бан сразу после авторизации.
@@ -6699,12 +6704,12 @@ function updateProfileUI() {
             const cached = await AvatarCache.getLocal(uid);
             // мгновенно показываем то, что уже есть (без пустого чёрного экрана),
             // затем подменяем на крупный кадр, когда он загрузится
-            const placeholder = cached?.dataUrl || `${SERVER_URL}/avatar/${uid}`;
+            const placeholder = cached?.dataUrl || AvatarCache.avatarUrl(SERVER_URL, uid, AvatarCache.bucketFor(360));
             openPhotoViewer(placeholder, userData.nickname || '');
 
             const results = (await Promise.all([
-                probe(`${SERVER_URL}/avatar_full/${uid}`),
-                probe(`${SERVER_URL}/avatar/${uid}`)
+                probe(AvatarCache.fullUrl(SERVER_URL, uid)),
+                probe(AvatarCache.avatarUrl(SERVER_URL, uid, AvatarCache.bucketFor(360)))
             ])).filter(Boolean);
 
             if (results.length) {
