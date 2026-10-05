@@ -97,7 +97,102 @@ const AvatarCache = (function () {
         return w > 0 ? w : 100;
     }
 
+    // ------------------------------------------------------------------
+    // СВОЙ аватар
+    // ------------------------------------------------------------------
+    // /avatar, /avatar_full и /avatar_version намеренно ходят БЕЗ cookie и
+    // токена (иначе редирект на Cloudinary режется CORS), поэтому сервер не
+    // знает, кто смотрит, и для владельца с ограничением «Фотографии
+    // профиля» (Контакты / Никто / исключения) считает его посторонним:
+    // отдаёт заглушку, а /avatar_version = 'none' (клиент выбрасывал кэш).
+    // Свой аватар поэтому берём не с /avatar*, а напрямую по своему
+    // avatar_url (его отдаёт /get_user_data владельцу всегда) через
+    // Cloudinary — трансформация та же, что на сервере. Для других
+    // пользователей ничего не меняется, их приватность по-прежнему решает
+    // сервер.
+    let selfExplicit = null;           // {id, url} — выставляет страница через setSelf()
+    const selfFresh = new Map();       // id -> Promise<url|null>: одна сверка за загрузку страницы
+
+    function readSelfFromStorage() {
+        const sources = [
+            () => sessionStorage.getItem('userData'),
+            () => localStorage.getItem('rememberedUser')
+        ];
+        for (const get of sources) {
+            try {
+                const raw = get();
+                if (!raw) continue;
+                const u = JSON.parse(raw);
+                if (u && u.platform_user_id) {
+                    return { id: String(u.platform_user_id), url: u.avatar_url || null };
+                }
+            } catch (e) {}
+        }
+        return null;
+    }
+
+    function currentSelf() {
+        return selfExplicit || readSelfFromStorage();
+    }
+
+    function isSelf(userId) {
+        const me = currentSelf();
+        return !!me && !!userId && me.id === String(userId);
+    }
+
+    // Страница сообщает свой id и актуальный avatar_url (после /get_user_data,
+    // загрузки или удаления аватара). url = null — у пользователя фото нет.
+    function setSelf(userId, url) {
+        if (!userId) return;
+        const id = String(userId);
+        selfExplicit = { id, url: url || null };
+        selfFresh.delete(id);
+        if (url) selfFresh.set(id, Promise.resolve(url));
+    }
+
+    function cloudinaryAvatar(url, bucket) {
+        if (!url || url.indexOf('/upload/') === -1) return url || null;
+        return url.replace('/upload/',
+            `/upload/w_${bucket},h_${bucket},c_fill,g_face,q_auto:good,f_auto,dpr_${screenDpr().toFixed(1)}/`);
+    }
+
+    function cloudinaryFull(url) {
+        if (!url || url.indexOf('/upload/') === -1) return url || null;
+        return url.replace('/upload/', '/upload/q_auto:best,f_auto/');
+    }
+
+    // Актуальный avatar_url владельца. Спрашиваем у сервера один раз за
+    // загрузку страницы (viewer_id = он сам -> фото не скрывается); если
+    // запрос не удался — берём то, что лежит в sessionStorage.
+    function freshSelfUrl(serverUrl, userId) {
+        const id = String(userId);
+        if (!selfFresh.has(id)) {
+            const p = (async () => {
+                const known = currentSelf();
+                const fallback = (known && known.id === id) ? known.url : null;
+                try {
+                    const r = await fetch(`${serverUrl}/get_user_data`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ platform_user_id: id, viewer_id: id }),
+                        credentials: 'include'
+                    });
+                    if (!r.ok) return fallback;
+                    const d = await r.json();
+                    const u = d && d.status === 'success' ? d.user : null;
+                    return (u && u.avatar_url) || fallback;
+                } catch (e) {
+                    return fallback;
+                }
+            })();
+            selfFresh.set(id, p);
+        }
+        return selfFresh.get(id);
+    }
+
     function avatarUrl(serverUrl, userId, bucket) {
+        const me = currentSelf();
+        if (me && me.url && me.id === String(userId)) return cloudinaryAvatar(me.url, bucket);
         return `${serverUrl}/avatar/${userId}?size=${bucket}&dpr=${screenDpr().toFixed(1)}`;
     }
 
@@ -106,6 +201,8 @@ const AvatarCache = (function () {
     // использовать нельзя: её растянет на весь экран (а с зумом до 5x — в
     // 20 раз), и выглядит это отвратительно.
     function fullUrl(serverUrl, userId) {
+        const me = currentSelf();
+        if (me && me.url && me.id === String(userId)) return cloudinaryFull(me.url);
         return `${serverUrl}/avatar_full/${userId}`;
     }
 
@@ -303,7 +400,30 @@ const AvatarCache = (function () {
         }
     }
 
+    // Свой аватар: без /avatar и /avatar_version (см. блок «СВОЙ аватар»).
+    // Версией служит сам avatar_url — при перезаливке он всегда меняется.
+    async function checkAndUpdateSelf(serverUrl, userId, local, bucket) {
+        try {
+            const url = await freshSelfUrl(serverUrl, userId);
+            // URL неизвестен — оставляем показанное как есть и НЕ идём на
+            // /avatar: для владельца с ограничением там лежит заглушка.
+            if (!url) return null;
+
+            const needsBiggerCopy = !!local && (!local.bucket || local.bucket < bucket);
+            if (local && !needsBiggerCopy && local.version === url) return null;
+
+            const imgRes = await fetch(cloudinaryAvatar(url, bucket));
+            if (!imgRes.ok) return null;
+            const dataUrl = await blobToDataURL(await imgRes.blob());
+            await saveLocal(userId, url, dataUrl, bucket);
+            return { changed: true, dataUrl };
+        } catch (e) {
+            return null;
+        }
+    }
+
     async function checkAndUpdate(serverUrl, userId, local, bucket) {
+        if (isSelf(userId)) return checkAndUpdateSelf(serverUrl, userId, local, bucket);
         try {
             // Ни /avatar_version, ни /avatar не проверяют сессию на сервере,
             // поэтому credentials здесь не нужны. Это важно для /avatar:
@@ -388,6 +508,7 @@ const AvatarCache = (function () {
         // Служебные хелперы для страниц: fullUrl нужен везде, где аватар
         // показывается крупно (полноэкранный просмотрщик, раскрытая шапка).
         fullUrl, avatarUrl, bucketFor, screenDpr,
+        setSelf, isSelf,
         knownHasPhoto, setKnownHasPhoto,
         applyImage, applyPlaceholder
     };
