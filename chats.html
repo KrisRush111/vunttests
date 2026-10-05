@@ -23876,5 +23876,154 @@ vgResolveBadgeSrc();
 })();
 </script>
 
+<style id="vg-typing-style">
+/* «печатает...» под именем в шапке чата — зелёным, как «в сети» */
+.vg-typing-text { color: var(--online-green, #00c73c) !important; }
+.vg-typing-dots { display: inline-flex; margin-left: 2px; vertical-align: baseline; }
+.vg-typing-dots i {
+    display: inline-block; width: 3px; height: 3px; margin: 0 1px;
+    border-radius: 50%; background: currentColor; align-self: flex-end; margin-bottom: 3px;
+    animation: vgTypingBounce 1.2s infinite ease-in-out;
+}
+.vg-typing-dots i:nth-child(2) { animation-delay: .15s; }
+.vg-typing-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes vgTypingBounce {
+    0%, 60%, 100% { opacity: .35; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-2px); }
+}
+</style>
+
+<script id="vg-typing-script">
+/* ===== «печатает...» ===== */
+(function () {
+    const SEND_EVERY = 3000;   // как часто слать "печатаю" пока идёт набор
+    const IDLE_STOP  = 4000;   // пауза в наборе -> шлём "перестал"
+    const SHOW_TTL   = 5000;   // если "стоп" не пришёл — гасим сами
+
+    const TYPING_HTML = '<span class="status-text vg-typing-text">печатает<span class="vg-typing-dots"><i></i><i></i><i></i></span></span>';
+
+    /* ---------- получатель ---------- */
+    let typingChatId = null, hideTimer = null, observer = null;
+
+    const statusEls = () => ['chatStatusDesktop', 'chatStatusMobile']
+        .map(id => document.getElementById(id)).filter(Boolean);
+
+    const isPrivateChat = () => !window.VG_CURRENT_CHAT_IS_BOT && !window.VG_CURRENT_CHAT_IS_GROUP;
+
+    function typingStillValid() {
+        return typingChatId != null && currentChatId != null
+            && String(typingChatId) === String(currentChatId) && isPrivateChat();
+    }
+
+    function applyTyping() {
+        if (!typingStillValid()) return false;
+        statusEls().forEach(el => {
+            if (!el.querySelector('.vg-typing-dots')) el.innerHTML = TYPING_HTML;
+            el.classList.remove('online');
+        });
+        return true;
+    }
+
+    function startObserver() {
+        if (observer || typeof MutationObserver === 'undefined') return;
+        observer = new MutationObserver(() => {
+            // Любой другой код (поллинг статуса) перезаписал статус — возвращаем «печатает...»
+            if (typingChatId == null) return;
+            if (!typingStillValid()) { stopTyping(false); return; }
+            observer.disconnect();
+            applyTyping();
+            watch();
+        });
+        watch();
+    }
+    function watch() {
+        statusEls().forEach(el => observer.observe(el, { childList: true, characterData: true, subtree: true }));
+    }
+
+    function paintRealStatus(el, a) {
+        if (a && a.is_online) {
+            el.innerHTML = '<span class="status-indicator"></span><span class="status-text">В сети</span>';
+            el.classList.add('online');
+        } else {
+            el.textContent = a ? formatLastSeen(a.last_online, a) : 'был(а) недавно';
+            el.classList.remove('online');
+        }
+    }
+
+    async function stopTyping(restore = true) {
+        clearTimeout(hideTimer);
+        const wasChat = typingChatId;
+        typingChatId = null;
+        if (observer) { observer.disconnect(); observer = null; }
+        if (!restore || wasChat == null) return;
+        if (String(wasChat) !== String(currentChatId) || !isPrivateChat()) return;
+        try {
+            const other = currentChat && currentChat.participants
+                && currentChat.participants.find(p => p.platform_user_id !== userData.platform_user_id);
+            if (!other) return;
+            const data = await getCachedActivityStatus([other.platform_user_id]);
+            if (typingChatId != null) return;               // успел начать печатать снова
+            statusEls().forEach(el => paintRealStatus(el, data[other.platform_user_id]));
+        } catch (e) {}
+    }
+
+    function onUserTyping(p) {
+        if (!p || String(p.user_id) === String(userData.platform_user_id)) return; // своё же с другого устройства
+        if (currentChatId == null || String(p.chat_id) !== String(currentChatId)) return;
+        if (!isPrivateChat()) return;
+        if (p.is_typing === false) { stopTyping(); return; }
+        typingChatId = p.chat_id;
+        applyTyping();
+        startObserver();
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(stopTyping, SHOW_TTL);
+    }
+
+    /* ---------- отправитель ---------- */
+    let lastSent = 0, sentChatId = null, idleTimer = null;
+
+    function sendStop() {
+        clearTimeout(idleTimer);
+        if (lastSent && appSocket && sentChatId != null) {
+            appSocket.emit('typing', { chat_id: sentChatId, is_typing: false });
+        }
+        lastSent = 0; sentChatId = null;
+    }
+
+    document.addEventListener('input', (e) => {
+        const t = e.target;
+        if (!t || (t.id !== 'messageInputDesktop' && t.id !== 'messageInputMobile')) return;
+        if (!appSocket || !appSocket.connected || currentChatId == null || !isPrivateChat()) return;
+        if (!t.value.trim()) { sendStop(); return; }
+        const now = Date.now();
+        if (sentChatId != null && String(sentChatId) !== String(currentChatId)) sendStop();
+        if (now - lastSent >= SEND_EVERY) {
+            lastSent = now; sentChatId = currentChatId;
+            appSocket.emit('typing', { chat_id: currentChatId, is_typing: true });
+        }
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(sendStop, IDLE_STOP);
+    }, true);
+
+    document.addEventListener('focusout', (e) => {
+        const t = e.target;
+        if (t && (t.id === 'messageInputDesktop' || t.id === 'messageInputMobile')) sendStop();
+    }, true);
+
+    /* ---------- подключение к сокету ----------
+       appSocket создаётся лениво в connectAppSocket(), поэтому ждём его появления. */
+    const wait = setInterval(() => {
+        if (typeof appSocket === 'undefined' || !appSocket || appSocket.__vgTyping) return;
+        appSocket.__vgTyping = true;
+        appSocket.on('user_typing', onUserTyping);
+        // пришло сообщение от собеседника — «печатает...» исчезает сразу
+        appSocket.on('new_message', (p) => {
+            if (p && typingChatId != null && String(p.chat_id) === String(typingChatId)) stopTyping();
+        });
+        clearInterval(wait);
+    }, 500);
+})();
+</script>
+
 </body>
 </html>
