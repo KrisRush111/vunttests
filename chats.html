@@ -21927,17 +21927,36 @@ vgResolveBadgeSrc();
    --------------------------------------------------------------------------- */
 .vg-am-sheet {
     position: fixed;
-    inset: 0;
+    left: 0; right: 0; bottom: 0;
+    height: 95vh; height: 95svh;
+    max-width: 640px;
+    margin: 0 auto;
     z-index: 7000;
     display: flex;
     flex-direction: column;
     background: var(--telegram-bg, #fff);
+    border-top-left-radius: 32px;
+    border-top-right-radius: 32px;
+    box-shadow: 0 -4px 30px rgba(0, 0, 0, .25);
+    overflow: hidden;
     transform: translateY(100%);
     visibility: hidden;
-    transition: transform .3s cubic-bezier(.32, .72, 0, 1), visibility .3s;
-    padding-top: env(safe-area-inset-top, 0px);
+    transition: transform .45s cubic-bezier(.22, 1, .36, 1), visibility .45s;
+    will-change: transform;
 }
-.vg-am-sheet.active { transform: none; visibility: visible; }
+.vg-am-sheet.active { transform: translateY(0); visibility: visible; }
+
+/* Затемнение под шторкой (как .ls-pick-overlay в profile.html) */
+.vg-am-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 6999;
+    background: rgba(0, 0, 0, .45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .45s ease;
+}
+.vg-am-overlay.active { opacity: 1; pointer-events: auto; }
 
 .vg-am-header {
     display: flex;
@@ -22115,6 +22134,45 @@ vgResolveBadgeSrc();
 }
 @media (prefers-color-scheme: dark) {
     .vg-gm-add-card.active.has-add { background: #1C1C1E; }
+}
+/* ---------------------------------------------------------------------------
+   Плавное появление рамок профиля группы («Добавить участников» и список)
+   и строк в шторке выбора контактов — как в profile.html
+   --------------------------------------------------------------------------- */
+@keyframes vgGroupFrameIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: none; }
+}
+/* backwards — после анимации transform не остаётся */
+.vg-gm-add-card.active.has-add {
+    animation: vgGroupFrameIn .4s cubic-bezier(.22, 1, .36, 1) .02s backwards;
+}
+.profile-modal .profile-details.vg-group-members.active,
+.profile-modal-content .profile-details.vg-group-members.active {
+    animation: vgGroupFrameIn .4s cubic-bezier(.22, 1, .36, 1) .08s backwards;
+}
+
+/* Шторка: поиск-«таблетка», строки выезжают снизу с небольшой задержкой */
+.vg-am-search { border-radius: 999px; padding: 11px 16px; }
+@keyframes vgAmRowIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: none; }
+}
+.vg-am-sheet.active .vg-am-list .vg-am-item,
+.vg-am-sheet.active .vg-am-list .vg-am-section {
+    animation: vgAmRowIn .4s cubic-bezier(.22, 1, .36, 1) backwards;
+}
+.vg-am-sheet.active .vg-am-list > :nth-child(n+2) { animation-delay: .04s; }
+.vg-am-sheet.active .vg-am-list > :nth-child(n+5) { animation-delay: .08s; }
+.vg-am-sheet.active .vg-am-list > :nth-child(n+9) { animation-delay: .12s; }
+
+@media (prefers-reduced-motion: reduce) {
+    .vg-gm-add-card.active.has-add,
+    .profile-modal .profile-details.vg-group-members.active,
+    .profile-modal-content .profile-details.vg-group-members.active,
+    .vg-am-sheet.active .vg-am-list .vg-am-item,
+    .vg-am-sheet.active .vg-am-list .vg-am-section { animation: none; }
+    .vg-am-overlay { transition: none; }
 }
 </style>
 <script>
@@ -22590,6 +22648,7 @@ vgResolveBadgeSrc();
        остальных можно отметить (синяя галочка) и добавить одной кнопкой.
        ===================================================================== */
     let amSheet = null;                 // корневой элемент шторки
+    let amOverlay = null;               // затемнение под шторкой
     let amContacts = [];                // кэш контактов (/get_friends)
     const amSelected = new Map();       // platform_user_id -> contact
     let amInGroup = new Set();          // id тех, кто уже в группе
@@ -22615,6 +22674,10 @@ vgResolveBadgeSrc();
             '</div>' +
             '<input type="text" class="vg-am-search" placeholder="Поиск контактов">' +
             '<div class="vg-am-list"></div>';
+        amOverlay = document.createElement('div');
+        amOverlay.className = 'vg-am-overlay';
+        amOverlay.addEventListener('click', closeAddSheet);
+        document.body.appendChild(amOverlay);
         document.body.appendChild(amSheet);
 
         amSheet.querySelector('.vg-am-back').addEventListener('click', closeAddSheet);
@@ -22780,6 +22843,7 @@ vgResolveBadgeSrc();
     function closeAddSheet() {
         if (!amSheet) return;
         amSheet.classList.remove('active');
+        if (amOverlay) amOverlay.classList.remove('active');
         amSelected.clear();
     }
 
@@ -22796,6 +22860,7 @@ vgResolveBadgeSrc();
             '<div class="vg-am-empty">Загрузка…</div>';
         amUpdateCounter();
 
+        if (amOverlay) amOverlay.classList.add('active');
         amSheet.classList.add('active');
         amLoadContacts();
     }
