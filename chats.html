@@ -22080,6 +22080,42 @@ vgResolveBadgeSrc();
     .vg-am-check { transition: none; }
 }
 
+/* ---------------------------------------------------------------------------
+   Рамки группы: «Добавить участников» — отдельная карточка НАД списком,
+   обе рамки с одним, более сильным скруглением (меняется одной переменной).
+   --------------------------------------------------------------------------- */
+.vg-gm-add-card,
+.profile-modal .profile-details.vg-group-members,
+.profile-modal-content .profile-details.vg-group-members {
+    --vg-gm-radius: 24px;
+    border-radius: var(--vg-gm-radius) !important;
+    overflow: hidden !important;
+}
+.vg-gm-add-card { display: none; }
+.vg-gm-add-card.active.has-add {
+    display: block;
+    width: auto;
+    margin: 14px 12px 0;
+    background: var(--telegram-bg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 8px 26px rgba(0, 0, 0, .06);
+}
+/* зазор между рамкой кнопки и рамкой списка */
+.vg-gm-add-card.active.has-add + .vg-group-members {
+    margin-top: 16px !important;
+}
+/* в отдельной рамке одна строка — разделитель не нужен */
+.vg-gm-add-card .vg-gm-add-row::after { display: none; }
+@media (min-width: 768px) {
+    .vg-gm-add-card.active.has-add {
+        width: 100%;
+        max-width: 480px;
+        margin: 20px auto 0;
+    }
+    .vg-gm-add-card.active.has-add + .vg-group-members { margin-top: 16px !important; }
+}
+@media (prefers-color-scheme: dark) {
+    .vg-gm-add-card.active.has-add { background: #1C1C1E; }
+}
 </style>
 <script>
 (function () {
@@ -22156,10 +22192,16 @@ vgResolveBadgeSrc();
             '</div>' +
             '<div class="vg-gm-list"></div>';
 
+        // Отдельная рамка для кнопки «Добавить участников» — над списком участников
+        const addCard = document.createElement('div');
+        addCard.className = 'vg-gm-add-card';
+        addCard.id = 'vg-gm-add-card-' + suffix;
+
         const parent = (details && details.parentNode) || modal.querySelector('.profile-modal-content');
         if (!parent) return box;
         const anchor = details ? details.nextSibling : null;
         parent.insertBefore(tabbar, anchor);
+        parent.insertBefore(addCard, anchor);
         parent.insertBefore(box, anchor);
         return box;
     }
@@ -22182,6 +22224,8 @@ vgResolveBadgeSrc();
             const photos = document.getElementById('modal-photos-section-' + sfx);
             const files = document.getElementById('modal-files-section-' + sfx);
             if (box) box.classList.toggle('active', tab === 'members');
+            const addCardEl = modal.querySelector('.vg-gm-add-card');
+            if (addCardEl) addCardEl.classList.toggle('active', tab === 'members');
             if (photos) {
                 photos.style.display = tab === 'media' ? 'block' : 'none';
                 photos.classList.toggle('active', tab === 'media');
@@ -22208,6 +22252,8 @@ vgResolveBadgeSrc();
             } else {
                 const box = modal.querySelector('.vg-group-members');
                 if (box) box.classList.remove('active');
+                const addCardEl = modal.querySelector('.vg-gm-add-card');
+                if (addCardEl) addCardEl.classList.remove('active');
                 // Дальше видимостью медиа-секций управляет
                 // renderProfileMediaSections() профиля контакта
                 if (oldTabs) oldTabs.classList.remove('media-hidden');
@@ -22473,20 +22519,32 @@ vgResolveBadgeSrc();
         const addBtn = box.querySelector('.vg-gm-add');
         if (addBtn) addBtn.style.display = 'none'; // старая кнопка не используется
 
-        // Строка «Добавить участников» — создаётся один раз, только владельцу
-        let addRow = list.querySelector('.vg-gm-add-row');
-        if (data.is_admin && !addRow) {
+        // Строка «Добавить участников» — в ОТДЕЛЬНОЙ рамке над списком,
+        // создаётся один раз, только владельцу/админу
+        list.querySelectorAll('.vg-gm-add-row').forEach(el => el.remove()); // остатки старой разметки
+        const modalEl = modalOf(suffix);
+        let addCard = modalEl && modalEl.querySelector('.vg-gm-add-card');
+        if (!addCard && modalEl) {
+            addCard = document.createElement('div');
+            addCard.className = 'vg-gm-add-card';
+            addCard.id = 'vg-gm-add-card-' + suffix;
+            box.parentNode.insertBefore(addCard, box);
+            if (box.classList.contains('active')) addCard.classList.add('active');
+        }
+        let addRow = addCard ? addCard.querySelector('.vg-gm-add-row') : null;
+        if (data.is_admin && addCard && !addRow) {
             addRow = document.createElement('div');
             addRow.className = 'vg-gm-add-row';
             addRow.innerHTML =
                 '<span class="vg-gm-add-icon"><i class="fas fa-user-plus"></i></span>' +
                 '<span class="vg-gm-add-text">Добавить участников</span>';
             addRow.addEventListener('click', () => addMembersFlow());
-            list.insertBefore(addRow, list.firstChild);
+            addCard.appendChild(addRow);
         } else if (!data.is_admin && addRow) {
             addRow.remove();
             addRow = null;
         }
+        if (addCard) addCard.classList.toggle('has-add', !!addRow);
 
         const participants = (data.participants || []);
         list.querySelectorAll('.vg-gm-empty').forEach(el => el.remove());
@@ -22504,7 +22562,7 @@ vgResolveBadgeSrc();
         const existing = new Map();
         list.querySelectorAll('.vg-gm-item').forEach(el => existing.set(el.dataset.userId, el));
 
-        let anchor = addRow || null; // после какого узла ставим следующую строку
+        let anchor = null; // после какого узла ставим следующую строку
         participants.forEach(p => {
             const id = String(p.platform_user_id);
             let item = existing.get(id);
