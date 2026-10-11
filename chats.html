@@ -7851,6 +7851,21 @@
     </div>
 
     <!-- Socket.IO client -- доставка события удаления сообщения в реальном времени -->
+    <script>
+    // Фото группы показываем так же, как аватарки пользователей: квадратная
+    // обрезка по центру (миниатюра нужного размера), а не оригинал целиком.
+    // Работает для ссылок Cloudinary; остальные ссылки возвращаются как есть.
+    window.vgGroupPhotoThumb = function (url, size) {
+        if (!url || typeof url !== 'string') return url;
+        var m = url.match(/^(https?:\/\/res\.cloudinary\.com\/[^\/]+\/image\/upload\/)(.+)$/);
+        if (!m) return url;
+        var first = m[2].split('/')[0];
+        // трансформация уже есть в ссылке — не трогаем
+        if (/^[a-z]{1,3}_[^\/,]+(,[a-z]{1,3}_[^\/,]+)*$/.test(first)) return url;
+        var px = Math.round((size || 50) * Math.min(window.devicePixelRatio || 1, 3));
+        return m[1] + 'c_fill,g_auto,w_' + px + ',h_' + px + ',f_auto,q_auto/' + m[2];
+    };
+    </script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         const SERVER_URL = 'https://vuntserverrr.site';
@@ -13794,7 +13809,7 @@ function getActiveElements() {
                     if (chat.group_photo_url) {
                         const gAv = chatItem.querySelector('.chat-avatar');
                         gAv.textContent = '';
-                        gAv.style.backgroundImage = `url("${chat.group_photo_url}")`;
+                        gAv.style.backgroundImage = `url("${window.vgGroupPhotoThumb ? window.vgGroupPhotoThumb(chat.group_photo_url, 50) : chat.group_photo_url}")`;
                         gAv.style.backgroundSize = 'cover';
                         gAv.style.backgroundPosition = 'center';
                     }
@@ -15756,7 +15771,7 @@ async function openChat(chatId) {
             chatAvatar.style.backgroundImage = 'none';
             if (cachedChat.group_photo_url) {
                 chatAvatar.textContent = '';
-                chatAvatar.style.backgroundImage = `url("${cachedChat.group_photo_url}")`;
+                chatAvatar.style.backgroundImage = `url("${window.vgGroupPhotoThumb ? window.vgGroupPhotoThumb(cachedChat.group_photo_url, 40) : cachedChat.group_photo_url}")`;
                 chatAvatar.style.backgroundSize = 'cover';
                 chatAvatar.style.backgroundPosition = 'center';
             } else {
@@ -15910,7 +15925,7 @@ async function openChat(chatId) {
                         : '?';
                     if (currentChat.group_photo_url) {
                         chatAvatar.textContent = '';
-                        chatAvatar.style.backgroundImage = `url("${currentChat.group_photo_url}")`;
+                        chatAvatar.style.backgroundImage = `url("${window.vgGroupPhotoThumb ? window.vgGroupPhotoThumb(currentChat.group_photo_url, 40) : currentChat.group_photo_url}")`;
                         chatAvatar.style.backgroundSize = 'cover';
                         chatAvatar.style.backgroundPosition = 'center';
                     } else {
@@ -21819,18 +21834,39 @@ vgResolveBadgeSrc();
 }
 .vg-gm-item:last-child::after { display: none; }
 
-/* Строка участника */
+/* Строка участника.
+   .vg-gm-item — неподвижная обёртка, .vg-gm-row — содержимое, которое
+   сдвигается свайпом влево и открывает кнопку «Удалить» (как в profile.html). */
 .vg-gm-item {
+    position: relative;
+    overflow: hidden;
+    min-height: 62px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.vg-gm-row {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 8px 16px;
     min-height: 62px;
-    cursor: pointer;
     position: relative;
-    -webkit-tap-highlight-color: transparent;
+    z-index: 1;
+    background: var(--telegram-bg);
+    touch-action: pan-y;
+    will-change: transform;
 }
-.vg-gm-item:active { background: rgba(120, 120, 128, .10); }
+.vg-gm-item:active .vg-gm-row {
+    background-image: linear-gradient(rgba(120, 120, 128, .10), rgba(120, 120, 128, .10));
+}
+.vg-gm-item::after { z-index: 2; pointer-events: none; }
+.vg-gm-delbtn {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    width: 88px; height: 36px; padding: 0; border: none; border-radius: 999px;
+    background: #ff453a; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer;
+    white-space: nowrap; text-align: center;
+}
+.vg-gm-delbtn:active { opacity: .7; }
 
 .vg-gm-avatar {
     width: 46px; height: 46px;
@@ -21905,14 +21941,12 @@ vgResolveBadgeSrc();
 @media (prefers-color-scheme: dark) {
     .vg-gm-role--owner { background: rgba(139, 92, 246, .20); color: #C4A9FB; }
     .vg-gm-role--admin { background: rgba(47, 168, 79, .20); color: #7BD694; }
-    .vg-gm-add-row:active,
-    .vg-gm-item:active { background: rgba(120, 120, 128, .22); }
+    .vg-gm-add-row:active { background: rgba(120, 120, 128, .22); }
+    .vg-gm-item:active .vg-gm-row {
+        background-image: linear-gradient(rgba(120, 120, 128, .22), rgba(120, 120, 128, .22));
+    }
 }
 
-.vg-gm-kick {
-    background: none; border: none; color: #ff3b30;
-    font-size: 16px; padding: 6px 8px; cursor: pointer; flex-shrink: 0;
-}
 .vg-gm-empty {
     color: var(--telegram-hint, #8e8e93);
     font-size: 15px;
@@ -22144,12 +22178,21 @@ vgResolveBadgeSrc();
     to   { opacity: 1; transform: none; }
 }
 /* backwards — после анимации transform не остаётся */
-.vg-gm-add-card.active.has-add {
-    animation: vgGroupFrameIn .4s cubic-bezier(.22, 1, .36, 1) .02s backwards;
+/* Рамки показываются только когда в них уже есть содержимое (класс
+   vg-gm-ready ставит JS после отрисовки списка). Раньше пустая рамка
+   появлялась сразу, а строки «выскакивали» после ответа сервера и рамка
+   резко раздувалась по высоте. */
+.profile-modal .profile-details.vg-group-members.active:not(.vg-gm-ready),
+.profile-modal-content .profile-details.vg-group-members.active:not(.vg-gm-ready) {
+    visibility: hidden;
+    animation: none;
 }
-.profile-modal .profile-details.vg-group-members.active,
-.profile-modal-content .profile-details.vg-group-members.active {
-    animation: vgGroupFrameIn .4s cubic-bezier(.22, 1, .36, 1) .08s backwards;
+.vg-gm-add-card.active.has-add.vg-gm-ready {
+    animation: vgGroupFrameIn .45s cubic-bezier(.22, 1, .36, 1) .02s backwards;
+}
+.profile-modal .profile-details.vg-group-members.active.vg-gm-ready,
+.profile-modal-content .profile-details.vg-group-members.active.vg-gm-ready {
+    animation: vgGroupFrameIn .45s cubic-bezier(.22, 1, .36, 1) .08s backwards;
 }
 
 /* Шторка: поиск-«таблетка», строки выезжают снизу с небольшой задержкой */
@@ -22168,8 +22211,11 @@ vgResolveBadgeSrc();
 
 @media (prefers-reduced-motion: reduce) {
     .vg-gm-add-card.active.has-add,
+    .vg-gm-add-card.active.has-add.vg-gm-ready,
     .profile-modal .profile-details.vg-group-members.active,
     .profile-modal-content .profile-details.vg-group-members.active,
+    .profile-modal .profile-details.vg-group-members.active.vg-gm-ready,
+    .profile-modal-content .profile-details.vg-group-members.active.vg-gm-ready,
     .vg-am-sheet.active .vg-am-list .vg-am-item,
     .vg-am-sheet.active .vg-am-list .vg-am-section { animation: none; }
     .vg-am-overlay { transition: none; }
@@ -22187,6 +22233,9 @@ vgResolveBadgeSrc();
     // профиль группы, а не в чат (см. createMemberRow и closeProfileModal).
     window.__vgReturnToGroupChatId = null;
     let groupData = null;
+    // Последние загруженные данные групп: при повторном открытии профиля
+    // рамка сразу рисуется с готовым списком и плавно появляется.
+    const GROUP_INFO_CACHE = new Map();
 
     function suffixNow() {
         return window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
@@ -22346,7 +22395,7 @@ vgResolveBadgeSrc();
             const initials = (data.name || '').split(' ').slice(0, 2)
                 .map(w => w[0] || '').join('').toUpperCase() || 'ГР';
             avatarEl.textContent = data.photo_url ? '' : initials;
-            avatarEl.style.backgroundImage = data.photo_url ? `url("${data.photo_url}")` : 'none';
+            avatarEl.style.backgroundImage = data.photo_url ? `url("${window.vgGroupPhotoThumb ? window.vgGroupPhotoThumb(data.photo_url, 200) : data.photo_url}")` : 'none';
             avatarEl.style.backgroundSize = 'cover';
             avatarEl.style.backgroundPosition = 'center';
             if (!data.photo_url) {
@@ -22460,15 +22509,20 @@ vgResolveBadgeSrc();
         const grad = `linear-gradient(135deg, ${bg}, ${typeof adjustColor === 'function' ? adjustColor(bg, 20) : bg})`;
 
         item.innerHTML =
-            `<div class="vg-gm-avatar" style="background: ${grad}"></div>` +
-            '<div class="vg-gm-info">' +
-                '<div class="vg-gm-name"><span class="vg-gm-name-text"></span></div>' +
-                '<div class="vg-gm-status"></div>' +
+            '<div class="vg-gm-row">' +
+                `<div class="vg-gm-avatar" style="background: ${grad}"></div>` +
+                '<div class="vg-gm-info">' +
+                    '<div class="vg-gm-name"><span class="vg-gm-name-text"></span></div>' +
+                    '<div class="vg-gm-status"></div>' +
+                '</div>' +
             '</div>';
 
         // Тап по участнику — обычный профиль контакта. Данные читаем из
         // item.__p, поэтому обработчик не нужно перевешивать при обновлении.
         item.addEventListener('click', () => {
+            // Сразу после свайпа клик не считается; на открытой строке тап её закрывает
+            if (item.hasAttribute('data-sw-just')) return;
+            if (item.classList.contains('swiped')) { gmSwipeSet(item, 0, true); return; }
             const cur = item.__p;
             if (!cur || cur.is_me) return;
             // Запоминаем группу, из которой открыли участника, ДО того как
@@ -22538,7 +22592,7 @@ vgResolveBadgeSrc();
         if (role) {
             if (!roleEl) {
                 roleEl = document.createElement('span');
-                item.appendChild(roleEl);
+                (item.querySelector('.vg-gm-row') || item).appendChild(roleEl);
             }
             const cls = `vg-gm-role vg-gm-role--${role.cls}`;
             if (roleEl.className !== cls) roleEl.className = cls;
@@ -22547,28 +22601,102 @@ vgResolveBadgeSrc();
             roleEl.remove();
         }
 
-        // Кнопка удаления — только владельцу и не на себе
-        const canKick = !!data.is_admin && !p.is_me;
-        let kick = item.querySelector('.vg-gm-kick');
-        if (canKick && !kick) {
-            kick = document.createElement('button');
-            kick.type = 'button';
-            kick.className = 'vg-gm-kick';
-            kick.title = 'Удалить из группы';
-            kick.innerHTML = '<i class="fas fa-user-minus"></i>';
-            kick.addEventListener('click', async (e) => {
+        // «Удалить» — только админу/владельцу и не на себе: открывается свайпом влево
+        gmSetSwipeable(item, !!data.is_admin && !p.is_me);
+    }
+
+    /* ---------------------------------------------------------------------
+       СВАЙП ВЛЕВО -> «Удалить» (логика как в profile.html, список исключений)
+       --------------------------------------------------------------------- */
+    const GM_SW_W = 112;
+    function gmRowEl(item) { return item.querySelector(':scope > .vg-gm-row'); }
+
+    function gmSwipeSet(item, x, anim) {
+        const r = gmRowEl(item);
+        if (!r) return;
+        r.style.transition = anim ? 'transform .28s cubic-bezier(0.22, 1, 0.36, 1)' : 'none';
+        r.style.transform = x ? 'translateX(' + x + 'px)' : '';
+        item.classList.toggle('swiped', x < 0);
+    }
+
+    function gmSwipeCloseAll(except) {
+        document.querySelectorAll('.vg-gm-item.swiped').forEach(el => {
+            if (el !== except) gmSwipeSet(el, 0, true);
+        });
+    }
+
+    function gmSetSwipeable(item, on) {
+        let btn = item.querySelector(':scope > .vg-gm-delbtn');
+        if (on && !btn) {
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'vg-gm-delbtn';
+            btn.textContent = 'Удалить';
+            btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const cur = item.__p || p;
-                if (!confirm(`Удалить ${cur.nickname} из группы?`)) return;
-                await groupAction('/remove_group_member', { target_id: cur.platform_user_id },
-                                  'Участник удалён');
-                refresh();
+                gmRemoveMember(item);
             });
-            item.appendChild(kick);
-        } else if (!canKick && kick) {
-            kick.remove();
+            item.insertBefore(btn, item.firstChild);
+            item.classList.add('vg-gm-swipeable');
+        } else if (!on && btn) {
+            btn.remove();
+            item.classList.remove('vg-gm-swipeable');
+            gmSwipeSet(item, 0, false);
         }
     }
+
+    async function gmRemoveMember(item) {
+        const cur = item.__p;
+        if (!cur) return;
+        if (!confirm(`Удалить ${cur.nickname} из группы?`)) { gmSwipeSet(item, 0, true); return; }
+        const ok = await groupAction('/remove_group_member', { target_id: cur.platform_user_id },
+                                     'Участник удалён');
+        if (!ok) { gmSwipeSet(item, 0, true); return; }
+        // Строка плавно схлопывается, затем список обновляется с сервера
+        item.style.transition = 'height .25s ease, opacity .25s ease';
+        item.style.height = item.offsetHeight + 'px';
+        item.style.minHeight = '0';
+        void item.offsetHeight;
+        item.style.height = '0px';
+        item.style.opacity = '0';
+        setTimeout(refresh, 250);
+    }
+
+    let gmSw = null;
+    document.addEventListener('pointerdown', (e) => {
+        const it = e.target.closest && e.target.closest('.vg-gm-item.vg-gm-swipeable');
+        if (!it) { gmSwipeCloseAll(null); return; }
+        if (e.target.closest('.vg-gm-delbtn')) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        gmSwipeCloseAll(it);
+        gmSw = { it, x0: e.clientX, y0: e.clientY,
+                 base: it.classList.contains('swiped') ? -GM_SW_W : 0,
+                 dx: 0, dragging: false, id: e.pointerId };
+    });
+    document.addEventListener('pointermove', (e) => {
+        if (!gmSw || e.pointerId !== gmSw.id) return;
+        const dx = e.clientX - gmSw.x0, dy = e.clientY - gmSw.y0;
+        if (!gmSw.dragging) {
+            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+            if (Math.abs(dy) > Math.abs(dx)) { gmSw = null; return; }
+            gmSw.dragging = true;
+            try { gmSw.it.setPointerCapture(e.pointerId); } catch (er) {}
+        }
+        const x = Math.max(-GM_SW_W - 30, Math.min(0, gmSw.base + dx));
+        gmSw.dx = x;
+        gmSwipeSet(gmSw.it, x, false);
+    });
+    function gmSwipeEnd(e) {
+        if (!gmSw || e.pointerId !== gmSw.id) return;
+        const cur = gmSw;
+        gmSw = null;
+        if (!cur.dragging) return;
+        gmSwipeSet(cur.it, cur.dx < -GM_SW_W / 2 ? -GM_SW_W : 0, true);
+        cur.it.setAttribute('data-sw-just', '1');
+        setTimeout(() => cur.it.removeAttribute('data-sw-just'), 50);
+    }
+    document.addEventListener('pointerup', gmSwipeEnd);
+    document.addEventListener('pointercancel', gmSwipeEnd);
 
     function renderMembers(suffix, data) {
         const box = ensureMembersBox(suffix);
@@ -22603,6 +22731,9 @@ vgResolveBadgeSrc();
             addRow = null;
         }
         if (addCard) addCard.classList.toggle('has-add', !!addRow);
+        // Содержимое готово — рамки можно плавно показать (см. .vg-gm-ready в CSS)
+        box.classList.add('vg-gm-ready');
+        if (addCard) addCard.classList.add('vg-gm-ready');
 
         const participants = (data.participants || []);
         list.querySelectorAll('.vg-gm-empty').forEach(el => el.remove());
@@ -22923,6 +23054,7 @@ vgResolveBadgeSrc();
         if (chatId == null) return;
         try {
             groupData = await fetchGroupInfo(chatId);
+            GROUP_INFO_CACHE.set(String(chatId), groupData);
             if (window.__vgGroupProfileChatId !== chatId) return; // успели закрыть/сменить
             const sfx = suffixNow();
             renderHero(sfx, groupData);
@@ -22938,6 +23070,7 @@ vgResolveBadgeSrc();
                 const sfx = suffixNow();
                 const box = ensureMembersBox(sfx);
                 const list = box && box.querySelector('.vg-gm-list');
+                if (box) box.classList.add('vg-gm-ready'); // ошибку тоже показываем плавно
                 if (list) {
                     list.innerHTML = '<div class="vg-gm-empty">Не удалось загрузить участников' +
                         (err && err.message ? ': ' + esc(err.message) : '') +
@@ -22959,10 +23092,21 @@ vgResolveBadgeSrc();
         // Путь к картинке галочки резолвим ДО первого рендера списка: тогда
         // бейджи сразу рисуются картинкой, без промежуточного SVG-кадра.
         if (window.vgResolveBadgeSrc) window.vgResolveBadgeSrc();
-        ensureMembersBox('desktop');
-        ensureMembersBox('mobile');
+        ['desktop', 'mobile'].forEach(sx => {
+            const bx = ensureMembersBox(sx);
+            if (bx) bx.classList.remove('vg-gm-ready');
+            const ac = modalOf(sx) && modalOf(sx).querySelector('.vg-gm-add-card');
+            if (ac) ac.classList.remove('vg-gm-ready');
+        });
         setContactBlocksHidden(true);
         if (window.ProfileHero) window.ProfileHero.resetAll();
+        // Данные этой группы уже грузили — рисуем список сразу (рамка появится
+        // плавно уже с содержимым), а свежие данные потом обновят строки на месте
+        const prefetched = GROUP_INFO_CACHE.get(String(chatId));
+        if (prefetched) {
+            groupData = prefetched;
+            renderMembers(sfx, prefetched);
+        }
 
         // Мгновенно показываем то, что уже известно из списка чатов,
         // чтобы карточка не открывалась пустой на время запроса.
