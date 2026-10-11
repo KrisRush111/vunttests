@@ -16082,6 +16082,9 @@ async function openChat(chatId) {
 let VG_VERIFIED_STICKY = { id: null, value: false };
 
 async function updateProfileModalUI(user) {
+    // Открыт профиль группы — запоздавший ответ про контакта не должен
+    // дорисовывать в шапке группы галочку, статус и прочее от контакта
+    if (window.__vgGroupProfileChatId != null) return;
     const activeElements = getActiveElements();
     
     currentViewedUser = user;
@@ -16332,6 +16335,8 @@ let _profileStatusInterval = null;
 let _profileViewedUserId = null;
 
 function updateProfileModalStatus(userId) {
+    // Открыт профиль группы — шапка принадлежит группе, статус контакта не пишем
+    if (window.__vgGroupProfileChatId != null) return;
     const activeElements = getActiveElements();
     const statusElement = activeElements.modalProfileStatus;
     
@@ -16363,6 +16368,7 @@ function updateProfileModalStatus(userId) {
     } else {
         // Данных нет — пробуем запросить напрямую
         getCachedActivityStatus([userId]).then(data => {
+            if (window.__vgGroupProfileChatId != null) return; // за время запроса открыли профиль группы
             const act = data && data[userId];
             if (!act) {
                 statusTextSpan.textContent = 'не в сети';
@@ -16380,6 +16386,7 @@ function updateProfileModalStatus(userId) {
                 statusElement.classList.remove('online');
             }
         }).catch(() => {
+            if (window.__vgGroupProfileChatId != null) return;
             statusTextSpan.textContent = 'не в сети';
             statusElement.classList.add('offline');
             statusElement.classList.remove('online');
@@ -22390,6 +22397,9 @@ vgResolveBadgeSrc();
             const textSpan = nickEl.querySelector('.vg-nick-text');
             if (textSpan) textSpan.textContent = data.name;
             else nickEl.textContent = data.name;
+            // У группы нет верификации: убираем галочку, оставшуюся от контакта
+            nickEl.querySelectorAll('.vg-verified-badge').forEach(b => b.remove());
+            nickEl.classList.remove('vg-has-badge', 'is-verified');
         }
         if (idEl) idEl.textContent = `${data.members_count} ${plural(data.members_count)}`;
         if (statusEl) {
@@ -22397,7 +22407,7 @@ vgResolveBadgeSrc();
             const ind = statusEl.querySelector('.status-indicator');
             if (t) t.textContent = '';
             if (ind) ind.style.display = 'none';
-            statusEl.classList.remove('online');
+            statusEl.classList.remove('online', 'offline');
         }
         if (avatarEl) {
             const initials = (data.name || '').split(' ').slice(0, 2)
@@ -23103,6 +23113,9 @@ vgResolveBadgeSrc();
         // Путь к картинке галочки резолвим ДО первого рендера списка: тогда
         // бейджи сразу рисуются картинкой, без промежуточного SVG-кадра.
         if (window.vgResolveBadgeSrc) window.vgResolveBadgeSrc();
+        // Опросы статуса/данных контакта, открытого ранее, у группы не нужны
+        if (typeof stopProfileStatusPolling === 'function') stopProfileStatusPolling();
+        if (typeof stopProfileDataPolling === 'function') stopProfileDataPolling();
         ['desktop', 'mobile'].forEach(sx => {
             const bx = ensureMembersBox(sx);
             if (bx) bx.classList.remove('vg-gm-ready');
