@@ -7871,6 +7871,47 @@
         return m[1] + 'w_' + bucket + ',h_' + bucket + ',c_fill,g_center,q_auto:good,f_auto,dpr_' + dpr.toFixed(1) + '/' + m[2];
     };
     </script>
+    <script>
+    // Диалог подтверждения — копия devicesConfirmDialog из profile.html
+    // (рамка «Завершить сеанс?»): заголовок, текст и кнопки «Нет» / «Да».
+    window.vgConfirmDialog = function (opts) {
+        opts = opts || {};
+        var esc = function (t) {
+            var d = document.createElement('div');
+            d.textContent = t == null ? '' : String(t);
+            return d.innerHTML;
+        };
+        return new Promise(function (resolve) {
+            var overlay = document.getElementById('devConfirmOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'devConfirmOverlay';
+                overlay.className = 'dev-confirm-overlay';
+                document.body.appendChild(overlay);
+            }
+            overlay.innerHTML = '<div class="dev-confirm-card">'
+                + '<div class="dev-confirm-title">' + esc(opts.title || '') + '</div>'
+                + (opts.text ? '<div class="dev-confirm-text">' + esc(opts.text) + '</div>' : '')
+                + '<div class="dev-confirm-actions">'
+                +   '<button type="button" class="dev-confirm-btn" data-confirm-no>' + esc(opts.noLabel || 'Нет') + '</button>'
+                +   '<button type="button" class="dev-confirm-btn danger" data-confirm-yes>' + esc(opts.yesLabel || 'Да') + '</button>'
+                + '</div>'
+                + '</div>';
+            var settled = false;
+            var close = function (result) {
+                if (settled) return;
+                settled = true;
+                overlay.classList.remove('visible');
+                setTimeout(function () { if (overlay.parentNode) overlay.remove(); }, 200);
+                resolve(result);
+            };
+            overlay.querySelector('[data-confirm-no]').addEventListener('click', function () { close(false); });
+            overlay.querySelector('[data-confirm-yes]').addEventListener('click', function () { close(true); });
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) close(false); });
+            requestAnimationFrame(function () { overlay.classList.add('visible'); });
+        });
+    };
+    </script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         const SERVER_URL = 'https://vuntserverrr.site';
@@ -8195,7 +8236,7 @@
                 // не дожидаясь следующего /get_chats, и закрываем его, если он открыт.
                 appSocket.on('chat_deleted', (payload) => {
                     if (!payload || payload.chat_id == null) return;
-                    removeChatFromUI(payload.chat_id);
+                    vgHandleChatGone(payload.chat_id);
                 });
 
                 // Закрепление/открепление чата с другого устройства/вкладки этого же
@@ -13576,6 +13617,11 @@ function getActiveElements() {
                         currentChatsList = sortChats(currentChatsList);
                         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                     }
+                } else if (response.status === 403 &&
+                           currentChatsList.some(c => String(c.id) === String(chatId))) {
+                    // Сервер больше не пускает в этот чат (удалили из группы) —
+                    // убираем его, даже если событие chat_deleted не дошло
+                    vgHandleChatGone(chatId);
                 }
             } catch (error) {}
         }
@@ -14485,6 +14531,21 @@ function getActiveElements() {
                 setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 showMessage('Не удалось открепить чат. Проверьте соединение', 'error');
             }
+        }
+
+        // Чат исчез у этого пользователя извне: его удалили из группы, группу
+        // удалили, либо он вышел с другого устройства. Если открыт профиль этой
+        // группы — закрываем и его; о причине сообщаем, только если сам
+        // пользователь этого не делал (при своём выходе чата в списке уже нет).
+        function vgHandleChatGone(chatId) {
+            const gone = (currentChatsList || []).find(c => String(c.id) === String(chatId));
+            const wasGroup = !!(gone && gone.is_group);
+            if (String(window.__vgGroupProfileChatId) === String(chatId) && window.vgAfterGroupGone) {
+                window.vgAfterGroupGone(chatId);
+            } else {
+                removeChatFromUI(chatId);
+            }
+            if (wasGroup) showMessage('Эта группа вам больше недоступна');
         }
 
         // Убирает чат из currentChatsList/кэша/DOM/IndexedDB и закрывает его
@@ -21867,6 +21928,62 @@ vgResolveBadgeSrc();
 }
 .vg-gm-item:last-child::after { display: none; }
 
+/* ===== Диалог подтверждения — точная копия «Завершить сеанс?» из profile.html ===== */
+:root {
+    --dev-card-bg: #ffffff;
+    --dev-sep: rgba(60,60,67,0.13);
+    --dev-hint: #8a8a8e;
+    --dev-blue: #007aff;
+    --dev-red: #ff3b30;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --dev-card-bg: #1c1c1e;
+        --dev-sep: rgba(84,84,88,0.5);
+        --dev-hint: #8d8d93;
+        --dev-blue: #0a84ff;
+        --dev-red: #ff453a;
+    }
+}
+.dev-confirm-overlay {
+    position: fixed; inset: 0; z-index: 100003;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    background: rgba(0,0,0,0); pointer-events: none;
+    transition: background .18s ease;
+}
+.dev-confirm-overlay.visible {
+    background: rgba(0,0,0,.4); pointer-events: auto;
+}
+.dev-confirm-card {
+    width: 100%; max-width: 270px;
+    background: var(--dev-card-bg); border-radius: 14px;
+    overflow: hidden; text-align: center;
+    opacity: 0; transform: scale(.92);
+    transition: opacity .18s ease, transform .18s ease;
+}
+.dev-confirm-overlay.visible .dev-confirm-card {
+    opacity: 1; transform: scale(1);
+}
+.dev-confirm-title {
+    font-size: 17px; font-weight: 600; color: var(--telegram-text);
+    padding: 19px 16px 6px;
+}
+.dev-confirm-text {
+    font-size: 13px; line-height: 1.35; color: var(--dev-hint);
+    padding: 0 16px 18px;
+}
+.dev-confirm-actions {
+    display: flex; border-top: 1px solid var(--dev-sep);
+}
+.dev-confirm-btn {
+    flex: 1; border: none; background: transparent; cursor: pointer;
+    padding: 13px 8px; font-size: 17px; color: var(--dev-blue);
+    -webkit-tap-highlight-color: transparent;
+}
+.dev-confirm-btn:active { background: rgba(120,120,128,.14); }
+.dev-confirm-btn + .dev-confirm-btn { border-left: 1px solid var(--dev-sep); }
+.dev-confirm-btn.danger { color: var(--dev-red); font-weight: 600; }
+
 /* Строка участника.
    .vg-gm-item — неподвижная обёртка, .vg-gm-row — содержимое, которое
    сдвигается свайпом влево и открывает кнопку «Удалить» (как в profile.html). */
@@ -22690,7 +22807,11 @@ vgResolveBadgeSrc();
     async function gmRemoveMember(item) {
         const cur = item.__p;
         if (!cur) return;
-        if (!confirm(`Удалить ${cur.nickname} из группы?`)) { gmSwipeSet(item, 0, true); return; }
+        const sure = await window.vgConfirmDialog({
+            title: 'Удалить участника?',
+            text: `${cur.nickname || 'Участник'} будет удалён из группы.`
+        });
+        if (!sure) { gmSwipeSet(item, 0, true); return; }
         const ok = await groupAction('/remove_group_member', { target_id: cur.platform_user_id },
                                      'Участник удалён');
         if (!ok) { gmSwipeSet(item, 0, true); return; }
@@ -23054,9 +23175,13 @@ vgResolveBadgeSrc();
     // Профиль группы закрыли — шторку тоже прячем
     document.addEventListener('vg-group-profile-closed', closeAddSheet);
 
+    let groupActionBusy = false;
     async function groupAction(path, extra, okText) {
         const chatId = window.__vgGroupProfileChatId;
         if (chatId == null) return null;
+        // Пока предыдущее действие (выход/удаление) не завершилось — повторный запрос не шлём
+        if (groupActionBusy) return null;
+        groupActionBusy = true;
         try {
             const res = await fetch(`${SERVER_URL}${path}`, {
                 method: 'POST',
@@ -23077,6 +23202,8 @@ vgResolveBadgeSrc();
             console.error('[GROUP ACTION]', path, err);
             showMessage('Ошибка сети');
             return null;
+        } finally {
+            groupActionBusy = false;
         }
     }
 
@@ -23402,12 +23529,18 @@ vgResolveBadgeSrc();
                 if (act === 'report') {
                     showMessage('Жалоба на группу отправлена', 'success');
                 } else if (act === 'leave') {
-                    if (!confirm('Покинуть группу?')) return;
+                    if (!await window.vgConfirmDialog({
+                        title: 'Покинуть группу?',
+                        text: 'Вы перестанете получать сообщения из этой группы.'
+                    })) return;
                     const chatId = window.__vgGroupProfileChatId;
                     const ok = await groupAction('/leave_group', {}, 'Вы покинули группу');
                     if (ok) afterGroupGone(chatId);
                 } else if (act === 'delete') {
-                    if (!confirm('Удалить группу у всех участников?')) return;
+                    if (!await window.vgConfirmDialog({
+                        title: 'Удалить группу?',
+                        text: 'Группа и вся переписка будут удалены у всех участников. Это действие нельзя отменить.'
+                    })) return;
                     const chatId = window.__vgGroupProfileChatId;
                     const ok = await groupAction('/delete_group', {}, 'Группа удалена');
                     if (ok) afterGroupGone(chatId);
@@ -23421,11 +23554,17 @@ vgResolveBadgeSrc();
     // После выхода/удаления: закрыть профиль и чат, убрать строку из списка
     function afterGroupGone(chatId) {
         closeGroupProfile();
-        const row = document.querySelector(`.chat-item-swipe[data-chat-id="${chatId}"]`);
-        if (row) row.remove();
-        if (typeof currentChatsList !== 'undefined' && Array.isArray(currentChatsList)) {
-            const i = currentChatsList.findIndex(c => String(c.id) === String(chatId));
-            if (i > -1) currentChatsList.splice(i, 1);
+        if (typeof removeChatFromUI === 'function') {
+            // список, кэш, локальная база сообщений, закрытие экрана чата —
+            // ровно как при событии chat_deleted
+            removeChatFromUI(chatId);
+        } else {
+            const row = document.querySelector(`.chat-item-swipe[data-chat-id="${chatId}"]`);
+            if (row) row.remove();
+            if (typeof currentChatsList !== 'undefined' && Array.isArray(currentChatsList)) {
+                const i = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+                if (i > -1) currentChatsList.splice(i, 1);
+            }
         }
         if (typeof closeProfileModal === 'function') closeProfileModal();
         if (window.matchMedia('(min-width: 768px)').matches) {
@@ -23440,6 +23579,9 @@ vgResolveBadgeSrc();
         }
         if (typeof loadChats === 'function') loadChats();
     }
+
+    // Нужно обработчику chat_deleted (вне этого блока): закрыть профиль группы и убрать чат
+    window.vgAfterGroupGone = afterGroupGone;
 
     // Добавление участников (владелец) — пока через ввод ID; полноценный
     // выбор из списка друзей подключим на шаге "управление участниками".
