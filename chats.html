@@ -14374,19 +14374,47 @@ function getActiveElements() {
                 ? `background: linear-gradient(135deg, ${chat.avatar_background}, ${adjustColor(chat.avatar_background, 20)})`
                 : 'background: linear-gradient(135deg, #0088cc, #40a7e3)';
 
-            card.innerHTML = `
-                <div class="chat-delete-confirm-avatar" style="${avatarStyle}">${(chat && chat.initials) || '?'}</div>
-                <div class="chat-delete-confirm-title">Удалить чат</div>
-                <div class="chat-delete-confirm-text">Удалить чат с ${chatName} без возможности восстановления?</div>
-                <button type="button" class="chat-delete-confirm-btn" data-mode="me">Удалить только у себя</button>
-                <button type="button" class="chat-delete-confirm-btn" data-mode="everyone">Удалить у меня и ${chatName}</button>
-                <button type="button" class="chat-delete-confirm-btn chat-delete-confirm-cancel" data-mode="cancel">Отмена</button>
-            `;
+            const isGroup = !!(chat && chat.is_group);
+            const isGroupOwner = isGroup && userData &&
+                String(chat.group_creator_id) === String(userData.platform_user_id);
 
-            // Подставляем реальную фотографию аватара, если она есть — как и в
-            // самом списке чатов (loadChatAvatar подменяет фон после загрузки).
-            if (chat && chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
-                loadChatAvatar(card.querySelector('.chat-delete-confirm-avatar'), chat.participants[0].platform_user_id, (chat.initials) || '?', chat.avatar_background);
+            if (isGroup) {
+                // Группа: аватарка — фото ГРУППЫ (а не первого участника), «у себя» =
+                // выйти из группы, «у всех» (только владельцу) = удалить группу и переписку.
+                const gName = escapeHtml(chat.name || 'Группа');
+                const gTitle = isGroupOwner ? 'Удалить группу' : 'Выйти из группы';
+                const gText = isGroupOwner
+                    ? `Группа «${gName}». «Только у себя» — вы выйдете из группы, а владельцем станет следующий участник. «У всех» — группа и вся переписка удалятся у всех участников.`
+                    : `Вы выйдете из группы «${gName}» и перестанете получать её сообщения.`;
+                card.innerHTML = `
+                    <div class="chat-delete-confirm-avatar" style="${avatarStyle}">${chat.group_photo_url ? '' : (chat.initials || '?')}</div>
+                    <div class="chat-delete-confirm-title">${gTitle}</div>
+                    <div class="chat-delete-confirm-text">${gText}</div>
+                    <button type="button" class="chat-delete-confirm-btn" data-mode="me">Удалить только у себя</button>
+                    ${isGroupOwner ? '<button type="button" class="chat-delete-confirm-btn" data-mode="everyone">Удалить у всех</button>' : ''}
+                    <button type="button" class="chat-delete-confirm-btn chat-delete-confirm-cancel" data-mode="cancel">Отмена</button>
+                `;
+                if (chat.group_photo_url) {
+                    const gAvatarEl = card.querySelector('.chat-delete-confirm-avatar');
+                    gAvatarEl.style.backgroundImage = `url("${chat.group_photo_url}")`;
+                    gAvatarEl.style.backgroundSize = 'cover';
+                    gAvatarEl.style.backgroundPosition = 'center';
+                }
+            } else {
+                card.innerHTML = `
+                    <div class="chat-delete-confirm-avatar" style="${avatarStyle}">${(chat && chat.initials) || '?'}</div>
+                    <div class="chat-delete-confirm-title">Удалить чат</div>
+                    <div class="chat-delete-confirm-text">Удалить чат с ${chatName} без возможности восстановления?</div>
+                    <button type="button" class="chat-delete-confirm-btn" data-mode="me">Удалить только у себя</button>
+                    <button type="button" class="chat-delete-confirm-btn" data-mode="everyone">Удалить у меня и ${chatName}</button>
+                    <button type="button" class="chat-delete-confirm-btn chat-delete-confirm-cancel" data-mode="cancel">Отмена</button>
+                `;
+
+                // Подставляем реальную фотографию аватара, если она есть — как и в
+                // самом списке чатов (loadChatAvatar подменяет фон после загрузки).
+                if (chat && chat.has_avatar_photo && chat.participants && chat.participants.length > 0) {
+                    loadChatAvatar(card.querySelector('.chat-delete-confirm-avatar'), chat.participants[0].platform_user_id, (chat.initials) || '?', chat.avatar_background);
+                }
             }
 
             card.querySelectorAll('.chat-delete-confirm-btn').forEach(btn => {
@@ -14395,7 +14423,8 @@ function getActiveElements() {
                     const mode = btn.dataset.mode;
                     closeDeleteChatDialog();
                     if (mode === 'me' || mode === 'everyone') {
-                        deleteChatFromList(chatId, mode);
+                        if (isGroup) deleteGroupFromList(chatId, mode);
+                        else deleteChatFromList(chatId, mode);
                     }
                 });
             });
@@ -14409,6 +14438,35 @@ function getActiveElements() {
             activeChatDeleteDialog = overlay;
 
             requestAnimationFrame(() => overlay.classList.add('visible'));
+        }
+
+        // Группа из списка чатов. mode='me' — выйти из группы (если это владелец,
+        // сервер передаёт владение следующему участнику, а сама группа остаётся);
+        // mode='everyone' — удалить группу вместе с перепиской у всех (только владелец).
+        // Из UI убираем сразу, при ошибке сервера список перезагружается как есть.
+        async function deleteGroupFromList(chatId, mode) {
+            closeAllChatSwipes();
+            if (String(window.__vgGroupProfileChatId) === String(chatId) && window.vgAfterGroupGone) {
+                window.vgAfterGroupGone(chatId);
+            } else {
+                removeChatFromUI(chatId);
+            }
+            try {
+                const response = await fetch(`${SERVER_URL}${mode === 'everyone' ? '/delete_group' : '/leave_group'}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    showMessage(data.error || 'Не удалось выполнить действие', 'error');
+                    loadChats();
+                }
+            } catch (error) {
+                showMessage('Не удалось выполнить действие. Проверьте соединение', 'error');
+                loadChats();
+            }
         }
 
         // Удаляет чат — mode='everyone' стирает его и все сообщения у ОБОИХ
@@ -22825,13 +22883,65 @@ vgResolveBadgeSrc();
         setTimeout(refresh, 250);
     }
 
+    // ----- Десктоп: ПКМ по участнику -> компактное меню с красной строкой «Удалить»
+    // (тот же .message-action-menu, что и у контекстного меню чатов и сообщений)
+    let gmCtxMenu = null;
+    function gmCloseContextMenu() {
+        if (gmCtxMenu) { gmCtxMenu.remove(); gmCtxMenu = null; }
+        document.removeEventListener('click', gmCloseContextMenu, true);
+        document.removeEventListener('scroll', gmCloseContextMenu, true);
+        document.removeEventListener('keydown', gmCtxOnKey, true);
+        document.removeEventListener('contextmenu', gmCtxOnOutside, true);
+    }
+    function gmCtxOnKey(e) { if (e.key === 'Escape') gmCloseContextMenu(); }
+    function gmCtxOnOutside(e) { if (gmCtxMenu && !gmCtxMenu.contains(e.target)) gmCloseContextMenu(); }
+
+    function gmOpenContextMenu(e, item) {
+        gmCloseContextMenu();
+        gmSwipeCloseAll(null);
+        const menu = document.createElement('div');
+        menu.className = 'message-action-menu animate__animated animate__fadeIn';
+        menu.style.zIndex = '100002';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'message-action-item destructive';
+        del.innerHTML = '<span>Удалить</span><span class="message-action-item-icon"><i class="fa-solid fa-trash-can"></i></span>';
+        del.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            gmCloseContextMenu();
+            gmRemoveMember(item);   // дальше — рамка подтверждения
+        });
+        menu.appendChild(del);
+        document.body.appendChild(menu);
+
+        const w = menu.offsetWidth || 200, h = menu.offsetHeight || 44;
+        menu.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, e.clientX)) + 'px';
+        menu.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, e.clientY)) + 'px';
+        gmCtxMenu = menu;
+        setTimeout(() => {
+            document.addEventListener('click', gmCloseContextMenu, true);
+            document.addEventListener('scroll', gmCloseContextMenu, true);
+            document.addEventListener('keydown', gmCtxOnKey, true);
+            document.addEventListener('contextmenu', gmCtxOnOutside, true);
+        }, 0);
+    }
+
+    document.addEventListener('contextmenu', (e) => {
+        if (e.pointerType === 'touch') return;   // долгое касание на телефоне — не наш случай
+        const it = e.target.closest && e.target.closest('.vg-gm-item.vg-gm-swipeable');
+        if (!it) return;                          // нет прав удалять / это вы — обычное меню браузера
+        e.preventDefault();
+        gmOpenContextMenu(e, it);
+    });
+
     let gmSw = null;
     document.addEventListener('pointerdown', (e) => {
         const it = e.target.closest && e.target.closest('.vg-gm-item.vg-gm-swipeable');
         if (!it) { gmSwipeCloseAll(null); return; }
         if (e.target.closest('.vg-gm-delbtn')) return;
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
         gmSwipeCloseAll(it);
+        // На десктопе (мышь) свайпа нет — «Удалить» открывается правой кнопкой мыши
+        if (e.pointerType === 'mouse') return;
         gmSw = { it, x0: e.clientX, y0: e.clientY,
                  base: it.classList.contains('swiped') ? -GM_SW_W : 0,
                  dx: 0, dragging: false, id: e.pointerId };
