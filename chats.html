@@ -16275,6 +16275,20 @@ async function updateProfileModalUI(user) {
 
 
 
+// Закрывает карточку профиля контакта без возврата куда-либо, чтобы поверх
+// неё открылся чат (то же, что делает кнопка «Чат» в профиле группы).
+function vgLeaveProfileForChat() {
+    if (window.ProfileHero) window.ProfileHero.resetAll();
+    window.__reportTargetUserId = null;
+    window.__vgReturnToGroupChatId = null;
+    stopProfileStatusPolling();
+    stopProfileDataPolling();
+    document.body.classList.remove('modal-open');
+    if (profileModalDesktop) profileModalDesktop.classList.remove('visible');
+    if (profileModalMobile) profileModalMobile.classList.remove('active');
+    if (modalOverlay) modalOverlay.classList.remove('active');
+}
+
 async function openChatWithContact(user) {
     if (!user || !user.platform_user_id) {
         console.error('No user data to open chat with');
@@ -16308,16 +16322,23 @@ async function openChatWithContact(user) {
         const data = await response.json();
         
         if (data.status === 'success') {
+            // Страница уже chats.html — перезагружать её незачем (раньше тут был
+            // window.location.href = 'chats.html'). Закрываем профиль и открываем
+            // чат прямо на месте, ровно как кнопка «Чат» в профиле группы.
+            vgLeaveProfileForChat();
             if (!data.is_new) {
                 // ЧАТ УЖЕ СУЩЕСТВУЕТ - открываем его
-                sessionStorage.setItem('openChatId', data.chat_id);
-                sessionStorage.setItem('openChatName', user.nickname || 'Чат');
-                window.location.href = 'chats.html';
+                openChat(data.chat_id);
             } else {
-                // ЧАТ НОВЫЙ - создаем временный и перенаправляем
-                sessionStorage.setItem('tempChatContactId', user.platform_user_id);
-                sessionStorage.setItem('tempChatName', user.nickname || 'Новый чат');
-                window.location.href = 'chats.html';
+                // ЧАТ НОВЫЙ - временный чат, создастся при первом сообщении
+                openTempChat({
+                    id: `temp_${Date.now()}`,
+                    name: user.nickname || 'Новый чат',
+                    participants: [{ platform_user_id: user.platform_user_id }],
+                    is_temp: true,
+                    has_avatar_photo: !!(user.has_avatar_photo || user.has_avatar),
+                    avatar_background: user.avatar_background || '#0088cc'
+                });
             }
         } else {
             throw new Error(data.error || 'Не удалось проверить чат');
