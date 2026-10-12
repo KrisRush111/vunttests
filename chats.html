@@ -19140,6 +19140,9 @@ function stopProfileDataPolling() {
 
         let moreMenuEl = null;
         let reportSending = false;
+        // Жалоба на ГРУППУ: пока открыт процесс жалобы — { chatId, name }, иначе null.
+        // Рамки (подтверждение, лист с причинами, предупреждение) те же, что для пользователя.
+        let reportGroupCtx = null;
 
         /* Кто жалуется: берём из userData (сессия), с запасным вариантом из
            sessionStorage/localStorage — на случай, если скрипт сработал раньше,
@@ -19214,6 +19217,14 @@ function stopProfileDataPolling() {
                 comment: comment || '',
                 chat_id: target.chat_id
             };
+            if (reportGroupCtx) {
+                // Жалоба на группу: объект — сама группа (участника-«виновного» нет),
+                // сервер проверит членство и сам подставит название/владельца
+                payload.is_group = true;
+                payload.chat_id = String(reportGroupCtx.chatId);
+                payload.reported_user_id = '';
+                payload.reported_nickname = reportGroupCtx.name || '';
+            }
 
             try {
                 const response = await fetch(REPORT_ENDPOINT, {
@@ -19230,6 +19241,8 @@ function stopProfileDataPolling() {
                     reportToast('Опишите проблему подробнее');
                 } else if (result.error === 'bad_reason') {
                     reportToast('Неизвестная причина жалобы');
+                } else if (result.error === 'not_in_group') {
+                    reportToast('Вы больше не состоите в этой группе');
                 } else {
                     reportToast('Не удалось отправить жалобу. Попробуйте позже');
                 }
@@ -19305,6 +19318,7 @@ function stopProfileDataPolling() {
 
             menu.querySelector('[data-action="report"]').addEventListener('click', () => {
                 closeMoreMenu();
+                reportGroupCtx = null;
                 openReportConfirm(getContactName());
             });
 
@@ -19340,12 +19354,15 @@ function stopProfileDataPolling() {
             }
 
             overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) close();
+                if (e.target === overlay) { reportGroupCtx = null; close(); }
             });
             overlay.querySelector('[data-answer="yes"]').addEventListener('click', () => {
                 close(() => openReportSheet(name));
             });
-            overlay.querySelector('[data-answer="no"]').addEventListener('click', () => close());
+            overlay.querySelector('[data-answer="no"]').addEventListener('click', () => {
+                reportGroupCtx = null;
+                close();
+            });
         }
 
         /* ---------- Лист «Сообщить о нарушении» ---------- */
@@ -19371,6 +19388,7 @@ function stopProfileDataPolling() {
                 overlay.classList.remove('visible');
                 setTimeout(() => overlay.remove(), 240);
                 document.removeEventListener('keydown', onKey, true);
+                reportGroupCtx = null;
             }
 
             function onKey(e) {
@@ -19469,7 +19487,8 @@ function stopProfileDataPolling() {
                 setBackAction(null);
 
                 const html =
-                    '<div class="report-sheet-subtitle">Что не так с пользователем?</div>' +
+                    '<div class="report-sheet-subtitle">' +
+                        (reportGroupCtx ? 'Что не так с группой?' : 'Что не так с пользователем?') + '</div>' +
                     '<div class="report-option-list">' +
                         REPORT_REASONS.map((r, i) =>
                             '<button type="button" class="report-option" data-index="' + i + '">' +
@@ -19665,6 +19684,13 @@ function stopProfileDataPolling() {
                 });
             });
         }
+
+        // Для профиля группы: те же рамки «Пожаловаться» → причины → комментарий → предупреждение
+        window.vgOpenGroupReport = function (chatId, groupName) {
+            if (chatId == null) return;
+            reportGroupCtx = { chatId: chatId, name: groupName || 'Группа' };
+            openReportConfirm(reportGroupCtx.name);
+        };
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', bindMoreButtons);
@@ -23825,7 +23851,11 @@ vgResolveBadgeSrc();
                 const act = b.dataset.act;
                 closeMenu();
                 if (act === 'report') {
-                    showMessage('Жалоба на группу отправлена', 'success');
+                    // Тот же процесс жалобы, что у пользователя; уходит модераторам
+                    if (window.vgOpenGroupReport) {
+                        window.vgOpenGroupReport(window.__vgGroupProfileChatId,
+                            groupData && groupData.name);
+                    }
                 } else if (act === 'leave') {
                     if (!await window.vgConfirmDialog({
                         title: 'Покинуть группу?',
