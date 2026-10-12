@@ -15805,6 +15805,12 @@ async function openChat(chatId) {
     openChat._lastToken = openToken;
     const isStale = () => openChat._lastToken !== openToken || signal.aborted;
 
+    // Групповой чат: заранее подгружаем участников, чтобы профиль группы открылся мгновенно
+    try {
+        const gc = (currentChatsList || []).find(c => String(c.id) === String(chatId));
+        if (gc && gc.is_group && window.vgPrefetchGroupInfo) window.vgPrefetchGroupInfo(chatId);
+    } catch (e) {}
+
     stopMessagePolling(); // сразу останавливаем polling предыдущего чата
     cancelEditMode(); // выходим из режима редактирования при смене чата
 
@@ -21993,6 +21999,35 @@ vgResolveBadgeSrc();
 }
 .vg-gm-item:last-child::after { display: none; }
 
+/* Заглушки строк: рамка с участниками появляется мгновенно, пока грузятся данные */
+.vg-gm-skel {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 16px; min-height: 62px; position: relative;
+}
+.vg-gm-skel::after {
+    content: ''; position: absolute; left: 60px; right: 0; bottom: 0; height: 1px;
+    background: var(--telegram-divider, rgba(60, 60, 67, .12));
+}
+.vg-gm-skel:last-child::after { display: none; }
+.vg-gm-skel-av {
+    width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+    background: rgba(120, 120, 128, .16);
+}
+.vg-gm-skel-lines { flex: 1; display: flex; flex-direction: column; gap: 9px; }
+.vg-gm-skel-lines i {
+    display: block; height: 11px; border-radius: 6px; background: rgba(120, 120, 128, .16);
+}
+.vg-gm-skel-lines i:first-child { width: 42%; }
+.vg-gm-skel-lines i:last-child { width: 26%; height: 9px; }
+.vg-gm-skel-av, .vg-gm-skel-lines i { animation: vgGmSkelPulse 1.3s ease-in-out infinite; }
+@keyframes vgGmSkelPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+/* Настоящие строки, пришедшие на место заглушек, мягко проявляются */
+.vg-gm-item.vg-gm-enter { animation: vgGmRowIn .28s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes vgGmRowIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+    .vg-gm-skel-av, .vg-gm-skel-lines i, .vg-gm-item.vg-gm-enter { animation: none; }
+}
+
 /* ===== Диалог подтверждения — точная копия «Завершить сеанс?» из profile.html ===== */
 :root {
     --dev-card-bg: #ffffff;
@@ -22473,6 +22508,62 @@ vgResolveBadgeSrc();
     // Последние загруженные данные групп: при повторном открытии профиля
     // рамка сразу рисуется с готовым списком и плавно появляется.
     const GROUP_INFO_CACHE = new Map();
+    const GROUP_INFO_SS_KEY = 'vg_group_info_';
+
+    // Кэш переживает перезагрузку страницы (sessionStorage — только эта вкладка):
+    // профиль группы открывается с готовым списком даже сразу после обновления страницы
+    function groupCacheGet(chatId) {
+        const k = String(chatId);
+        let v = GROUP_INFO_CACHE.get(k);
+        if (v) return v;
+        try {
+            const raw = sessionStorage.getItem(GROUP_INFO_SS_KEY + k);
+            if (raw) { v = JSON.parse(raw); GROUP_INFO_CACHE.set(k, v); return v; }
+        } catch (e) {}
+        return null;
+    }
+    function groupCacheSet(chatId, data) {
+        GROUP_INFO_CACHE.set(String(chatId), data);
+        try { sessionStorage.setItem(GROUP_INFO_SS_KEY + chatId, JSON.stringify(data)); } catch (e) {}
+    }
+
+    // Тихо подгружаем данные группы, как только открыт её ЧАТ: к тому моменту, когда
+    // пользователь нажмёт на шапку, список участников уже лежит в кэше
+    const groupPrefetching = new Set();
+    window.vgPrefetchGroupInfo = function (chatId) {
+        if (chatId == null || typeof userData === 'undefined' || !userData) return;
+        const k = String(chatId);
+        if (groupPrefetching.has(k)) return;
+        groupPrefetching.add(k);
+        fetchGroupInfo(chatId)
+            .then(d => groupCacheSet(chatId, d))
+            .catch(() => {})
+            .finally(() => groupPrefetching.delete(k));
+    };
+
+    // Нет данных в кэше — рамка всё равно появляется сразу (с заглушками строк),
+    // а не ждёт ответа сервера пустой/скрытой
+    function showMembersSkeleton(chatId) {
+        let n = 3;
+        if (typeof currentChatsList !== 'undefined' && Array.isArray(currentChatsList)) {
+            const c = currentChatsList.find(x => String(x.id) === String(chatId));
+            if (c && c.members_count) n = c.members_count;
+        }
+        n = Math.max(1, Math.min(8, n));
+        ['desktop', 'mobile'].forEach(sx => {
+            const bx = ensureMembersBox(sx);
+            const lst = bx && bx.querySelector('.vg-gm-list');
+            if (!lst) return;
+            lst.innerHTML = '';   // убираем строки ранее открытой группы
+            for (let i = 0; i < n; i++) {
+                const r = document.createElement('div');
+                r.className = 'vg-gm-skel';
+                r.innerHTML = '<div class="vg-gm-skel-av"></div><div class="vg-gm-skel-lines"><i></i><i></i></div>';
+                lst.appendChild(r);
+            }
+            bx.classList.add('vg-gm-ready');
+        });
+    }
 
     function suffixNow() {
         return window.matchMedia('(min-width: 768px)').matches ? 'desktop' : 'mobile';
@@ -23051,6 +23142,8 @@ vgResolveBadgeSrc();
 
         const participants = (data.participants || []);
         list.querySelectorAll('.vg-gm-empty').forEach(el => el.remove());
+        const hadSkel = !!list.querySelector('.vg-gm-skel');
+        list.querySelectorAll('.vg-gm-skel').forEach(el => el.remove());
 
         if (!participants.length) {
             list.querySelectorAll('.vg-gm-item').forEach(el => el.remove());
@@ -23074,6 +23167,10 @@ vgResolveBadgeSrc();
                 updateMemberRow(item, p, data);
             } else {
                 item = createMemberRow(p, data);
+                if (hadSkel) {
+                    item.classList.add('vg-gm-enter');
+                    item.addEventListener('animationend', () => item.classList.remove('vg-gm-enter'), { once: true });
+                }
             }
             const shouldBeAfter = anchor ? anchor.nextSibling : list.firstChild;
             if (shouldBeAfter !== item) {
@@ -23374,7 +23471,7 @@ vgResolveBadgeSrc();
         if (chatId == null) return;
         try {
             groupData = await fetchGroupInfo(chatId);
-            GROUP_INFO_CACHE.set(String(chatId), groupData);
+            groupCacheSet(chatId, groupData);
             if (window.__vgGroupProfileChatId !== chatId) return; // успели закрыть/сменить
             const sfx = suffixNow();
             renderHero(sfx, groupData);
@@ -23425,10 +23522,12 @@ vgResolveBadgeSrc();
         if (window.ProfileHero) window.ProfileHero.resetAll();
         // Данные этой группы уже грузили — рисуем список сразу (рамка появится
         // плавно уже с содержимым), а свежие данные потом обновят строки на месте
-        const prefetched = GROUP_INFO_CACHE.get(String(chatId));
+        const prefetched = groupCacheGet(chatId);
         if (prefetched) {
             groupData = prefetched;
             renderMembers(sfx, prefetched);
+        } else {
+            showMembersSkeleton(chatId);
         }
 
         // Мгновенно показываем то, что уже известно из списка чатов,
