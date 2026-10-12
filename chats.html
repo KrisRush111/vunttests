@@ -24119,70 +24119,59 @@ vgResolveBadgeSrc();
     z-index: 100000;
     display: flex;
     flex-direction: column;
-    background: #f2f2f7;
+    background: transparent;
     -webkit-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
-    /* Обычное «вступление»: окно целиком (одним слоем) плавно проявляется
-       и чуть увеличивается с 96% до 100%. Содержимое не анимируется по
-       отдельности, поэтому ничего не мигает. */
     visibility: hidden;
     pointer-events: none;
-    opacity: 0;
     transform: scale(.96);
     transform-origin: 50% 50%;
-    will-change: opacity, transform;
-    backface-visibility: hidden;
-    transition: opacity .18s ease-out,
-                transform .18s ease-out,
+    transition: transform .18s ease-out,
                 visibility 0s linear .18s;
 }
 .vg-ge-screen.active {
     visibility: visible;
     pointer-events: auto;
-    opacity: 1;
     transform: scale(1);
-    transition: opacity .28s cubic-bezier(.2, .8, .2, 1),
-                transform .34s cubic-bezier(.2, .8, .2, 1),
+    transition: transform .34s cubic-bezier(.2, .8, .2, 1),
                 visibility 0s linear 0s;
 }
+/* ВАЖНО: прозрачность анимируем НЕ у всего окна, а отдельно у фона, шапки и
+   прокручиваемого тела. Если fade висит на родителе, WebKit (iPhone) не
+   включает в него содержимое прокручиваемого блока — аватар и рамка с
+   названием «выскакивали» сразу, а остальное проявлялось плавно. */
+.vg-ge-screen::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: #f2f2f7;
+    opacity: 0;
+    transition: opacity .18s ease-out;
+}
+.vg-ge-screen .vg-ge-top,
+.vg-ge-screen .vg-ge-body {
+    position: relative;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity .18s ease-out;
+}
+.vg-ge-screen.active::before,
+.vg-ge-screen.active .vg-ge-top,
+.vg-ge-screen.active .vg-ge-body {
+    opacity: 1;
+    transition: opacity .28s cubic-bezier(.2, .8, .2, 1);
+}
 
 @media (prefers-reduced-motion: reduce) {
     .vg-ge-screen,
-    .vg-ge-screen.active { transition-duration: .01s !important; }
-}
-@media (prefers-color-scheme: dark) {
-    .vg-ge-screen { background: #000; }
-}
-
-.vg-ge-top { transition-delay: .04s; }
-.vg-ge-screen.active .vg-ge-avatar-wrap { transition-delay: .08s; }
-.vg-ge-screen.active .vg-ge-photo-link { transition-delay: .11s; }
-.vg-ge-screen.active .vg-ge-card { transition-delay: .14s; }
-.vg-ge-screen.active .vg-ge-hint { transition-delay: .17s; }
-/* На закрытии лесенка не нужна — всё уезжает вместе с окном */
-.vg-ge-screen:not(.active) .vg-ge-top,
-.vg-ge-screen:not(.active) .vg-ge-avatar-wrap,
-.vg-ge-screen:not(.active) .vg-ge-photo-link,
-.vg-ge-screen:not(.active) .vg-ge-card,
-.vg-ge-screen:not(.active) .vg-ge-hint {
-    transition-duration: .16s;
-    transition-delay: 0s;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .vg-ge-screen,
+    .vg-ge-screen.active,
+    .vg-ge-screen::before,
     .vg-ge-screen .vg-ge-top,
-    .vg-ge-screen .vg-ge-avatar-wrap,
-    .vg-ge-screen .vg-ge-photo-link,
-    .vg-ge-screen .vg-ge-card,
-    .vg-ge-screen .vg-ge-hint {
-        transition-duration: .01s !important;
-        transform: none !important;
-    }
+    .vg-ge-screen .vg-ge-body { transition-duration: .01s !important; }
 }
 @media (prefers-color-scheme: dark) {
-    .vg-ge-screen { background: #000; }
+    .vg-ge-screen::before { background: #000; }
 }
 
 .vg-ge-top {
