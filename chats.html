@@ -22071,17 +22071,36 @@ vgResolveBadgeSrc();
     touch-action: pan-y;
     will-change: transform;
 }
-.vg-gm-item:active .vg-gm-row {
+/* Подсветка нажатия — только на самой строке: кнопка «Удалить» лежит рядом
+   с .vg-gm-row (не внутри), поэтому нажатие на неё строку не подсвечивает */
+.vg-gm-row:active {
     background-image: linear-gradient(rgba(120, 120, 128, .10), rgba(120, 120, 128, .10));
 }
 .vg-gm-item::after { z-index: 2; pointer-events: none; }
+.vg-gm-item { --gm-p: 0; }   /* прогресс свайпа 0..1 — выставляет JS */
 .vg-gm-delbtn {
-    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    --gm-press: 1;
+    position: absolute; right: 12px; top: 50%;
     width: 88px; height: 36px; padding: 0; border: none; border-radius: 999px;
     background: #ff453a; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer;
     white-space: nowrap; text-align: center;
+    outline: none; box-shadow: none; -webkit-tap-highlight-color: transparent;
+    /* проявляется и «вырастает» по мере того, как строка уезжает влево */
+    opacity: var(--gm-p);
+    transform: translateY(-50%) scale(calc((0.78 + 0.22 * var(--gm-p)) * var(--gm-press)));
+    transform-origin: 70% 50%;
+    transition: opacity .3s cubic-bezier(.25, .8, .25, 1),
+                transform .38s cubic-bezier(.34, 1.45, .64, 1);   /* мягкая пружина при отпускании */
 }
-.vg-gm-delbtn:active { opacity: .7; }
+/* Пока строку тянут пальцем — кнопка следует за пальцем без задержки */
+.vg-gm-item.gm-drag .vg-gm-delbtn { transition: none; }
+/* Нажатие: кнопка слегка вдавливается и пружинит обратно (без тени и затемнения) */
+.vg-gm-delbtn:active {
+    --gm-press: .92;
+    transition: opacity .3s cubic-bezier(.25, .8, .25, 1),
+                transform .12s cubic-bezier(.3, 0, .5, 1);
+}
+.vg-gm-delbtn:focus { outline: none; }
 
 .vg-gm-avatar {
     width: 46px; height: 46px;
@@ -22159,7 +22178,7 @@ vgResolveBadgeSrc();
     .vg-gm-role--owner { background: rgba(139, 92, 246, .20); color: #C4A9FB; }
     .vg-gm-role--admin { background: rgba(47, 168, 79, .20); color: #7BD694; }
     .vg-gm-add-row:active { background: rgba(120, 120, 128, .22); }
-    .vg-gm-item:active .vg-gm-row {
+    .vg-gm-row:active {
         background-image: linear-gradient(rgba(120, 120, 128, .22), rgba(120, 120, 128, .22));
     }
 }
@@ -22838,9 +22857,12 @@ vgResolveBadgeSrc();
     function gmSwipeSet(item, x, anim) {
         const r = gmRowEl(item);
         if (!r) return;
-        r.style.transition = anim ? 'transform .28s cubic-bezier(0.22, 1, 0.36, 1)' : 'none';
+        r.style.transition = anim ? 'transform .34s cubic-bezier(.25, .8, .25, 1)' : 'none';
         r.style.transform = x ? 'translateX(' + x + 'px)' : '';
         item.classList.toggle('swiped', x < 0);
+        item.classList.toggle('gm-drag', !anim);   // тянут пальцем — кнопка без transition
+        // прогресс раскрытия для кнопки «Удалить» (проявление + рост)
+        item.style.setProperty('--gm-p', String(Math.max(0, Math.min(1, -x / GM_SW_W))));
     }
 
     function gmSwipeCloseAll(except) {
@@ -22951,7 +22973,8 @@ vgResolveBadgeSrc();
         if (e.pointerType === 'mouse') return;
         gmSw = { it, x0: e.clientX, y0: e.clientY,
                  base: it.classList.contains('swiped') ? -GM_SW_W : 0,
-                 dx: 0, dragging: false, id: e.pointerId };
+                 dx: 0, dragging: false, id: e.pointerId,
+                 lastX: e.clientX, lastT: performance.now(), v: 0 };
     });
     document.addEventListener('pointermove', (e) => {
         if (!gmSw || e.pointerId !== gmSw.id) return;
@@ -22962,7 +22985,14 @@ vgResolveBadgeSrc();
             gmSw.dragging = true;
             try { gmSw.it.setPointerCapture(e.pointerId); } catch (er) {}
         }
-        const x = Math.max(-GM_SW_W - 30, Math.min(0, gmSw.base + dx));
+        // скорость (px/мс, сглаженная) — быстрый бросок открывает/закрывает без доводки пальцем
+        const now = performance.now(), dt = Math.max(1, now - gmSw.lastT);
+        gmSw.v = 0.8 * ((e.clientX - gmSw.lastX) / dt) + 0.2 * gmSw.v;
+        gmSw.lastX = e.clientX; gmSw.lastT = now;
+        let x = gmSw.base + dx;
+        if (x > 0) x = 0;
+        // за пределом раскрытия строка тянется «резинкой», а не упирается в стену
+        if (x < -GM_SW_W) x = -GM_SW_W - Math.min(36, (-GM_SW_W - x) * 0.35);
         gmSw.dx = x;
         gmSwipeSet(gmSw.it, x, false);
     });
@@ -22971,7 +23001,11 @@ vgResolveBadgeSrc();
         const cur = gmSw;
         gmSw = null;
         if (!cur.dragging) return;
-        gmSwipeSet(cur.it, cur.dx < -GM_SW_W / 2 ? -GM_SW_W : 0, true);
+        // Как в Telegram: решает и положение, и скорость броска
+        let open = cur.dx < -GM_SW_W / 2;
+        if (cur.v < -0.45) open = true;        // быстрый бросок влево — открыть
+        else if (cur.v > 0.45) open = false;   // быстрый бросок вправо — закрыть
+        gmSwipeSet(cur.it, open ? -GM_SW_W : 0, true);
         cur.it.setAttribute('data-sw-just', '1');
         setTimeout(() => cur.it.removeAttribute('data-sw-just'), 50);
     }
