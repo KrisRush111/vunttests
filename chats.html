@@ -10424,7 +10424,9 @@ function getActiveElements() {
             if (!message || message.is_image || message.caption) return false;
             const text = (message.content || '').trim();
             if (!text) return false;
-            if (message.is_system || message.type === 'system') return true;
+            // Служебные события группы (вышел/удалён/добавлен/новый владелец):
+            // сервер помечает их action_type='group_event'
+            if (message.is_system || message.type === 'system' || message.action_type === 'group_event') return true;
             if (!VG_GROUP_CREATED_RE.test(text)) return false;
             // только в групповом чате и только для самого первого сообщения
             const isGroup = window.vgHeaderChatIsGroup ? window.vgHeaderChatIsGroup()
@@ -16763,8 +16765,13 @@ function stopProfileDataPolling() {
         }
 
         // "Вы: текст" / "Ник: текст" — только в групповых чатах.
+        // Тексты служебных событий группы (см. _post_group_event на сервере) —
+        // в превью списка чатов у них не должно быть префикса «Вы:»/«Ник:»
+        const VG_GROUP_EVENT_TEXT_RE = /(вышел\(-ла\) из группы|был\(а\) удал[её]н\(а\) из группы|был\(а\) добавлен\(а\) в группу|добавлены в группу|теперь владелец группы)$/;
+
         function vgApplyChatPreviewPrefix(chat, text) {
             if (!chat || !chat.is_group || !text) return text;
+            if (VG_GROUP_EVENT_TEXT_RE.test(String(text).trim())) return text;
             if (chat.last_message_is_me) return `Вы: ${text}`;
             const name = vgLastMessageSenderName(chat);
             return name ? `${name}: ${text}` : text;
