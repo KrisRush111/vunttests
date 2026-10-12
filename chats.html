@@ -24117,57 +24117,40 @@ vgResolveBadgeSrc();
     position: fixed;
     inset: 0;
     z-index: 100000;
-    /* Раньше было display:none -> display:flex, из-за чего переход по opacity
-       на открытии просто не запускался (браузер не анимирует смену display),
-       и окно появлялось рывком. Теперь элемент всегда в потоке, а прячется
-       через visibility/opacity — анимация играет и на открытии, и на закрытии. */
     display: flex;
     flex-direction: column;
     background: #f2f2f7;
     -webkit-user-select: none;
     user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    /* Окно выезжает снизу целиком, ОДНОЙ анимацией transform — как модальные
+       экраны в Telegram. Без прозрачности и «лесенки» из отдельных элементов:
+       именно они давали мигание. */
     visibility: hidden;
     pointer-events: none;
-    opacity: 0;
-    transform: translateY(14px) scale(.985);
-    transform-origin: 50% 60%;
-    will-change: opacity, transform;
-    transition: opacity .22s cubic-bezier(.4, 0, 1, 1),
-                transform .28s cubic-bezier(.4, 0, 1, 1),
-                visibility 0s linear .28s;
+    transform: translate3d(0, 100%, 0);
+    will-change: transform;
+    backface-visibility: hidden;
+    transition: transform .30s cubic-bezier(.4, 0, .2, 1),
+                visibility 0s linear .30s;
 }
 .vg-ge-screen.active {
     visibility: visible;
     pointer-events: auto;
-    opacity: 1;
-    transform: none;
-    /* мягкий "выезд" с лёгким доводом — как системные экраны iOS */
-    transition: opacity .26s cubic-bezier(.32, .72, 0, 1),
-                transform .42s cubic-bezier(.32, .72, 0, 1),
+    transform: translate3d(0, 0, 0);
+    transition: transform .42s cubic-bezier(.32, .72, 0, 1),
                 visibility 0s linear 0s;
 }
 
-/* Содержимое подтягивается следом за окном, с небольшой лесенкой задержек —
-   именно это убирает ощущение "мгновенно подставленного" экрана. */
-.vg-ge-screen .vg-ge-top,
-.vg-ge-screen .vg-ge-avatar-wrap,
-.vg-ge-screen .vg-ge-photo-link,
-.vg-ge-screen .vg-ge-card,
-.vg-ge-screen .vg-ge-hint {
-    opacity: 0;
-    transform: translateY(10px);
-    transition: opacity .3s cubic-bezier(.32, .72, 0, 1),
-                transform .38s cubic-bezier(.32, .72, 0, 1);
+@media (prefers-reduced-motion: reduce) {
+    .vg-ge-screen,
+    .vg-ge-screen.active { transition-duration: .01s !important; }
 }
-.vg-ge-screen.active .vg-ge-top,
-.vg-ge-screen.active .vg-ge-avatar-wrap,
-.vg-ge-screen.active .vg-ge-photo-link,
-.vg-ge-screen.active .vg-ge-card,
-.vg-ge-screen.active .vg-ge-hint {
-    opacity: 1;
-    transform: none;
+@media (prefers-color-scheme: dark) {
+    .vg-ge-screen { background: #000; }
 }
-.vg-ge-screen.active .vg-ge-top { transition-delay: .04s; }
+
+.vg-ge-top { transition-delay: .04s; }
 .vg-ge-screen.active .vg-ge-avatar-wrap { transition-delay: .08s; }
 .vg-ge-screen.active .vg-ge-photo-link { transition-delay: .11s; }
 .vg-ge-screen.active .vg-ge-card { transition-delay: .14s; }
@@ -24324,6 +24307,75 @@ vgResolveBadgeSrc();
     color: #8a8a8e;
 }
 
+/* Разделы под полями — тот же вид, что группы-карточки в profile.html */
+.vg-ge-groups {
+    width: 100%;
+    max-width: 560px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 22px;
+}
+.vg-ge-group {
+    background: #fff;
+    border-radius: 32px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 26px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark) {
+    .vg-ge-group { background: #1c1c1e; box-shadow: none; }
+}
+.vg-ge-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    cursor: pointer;
+    background: transparent;
+    transition: background-color .18s ease;
+}
+.vg-ge-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 56px; right: 0; bottom: 0;
+    height: 1px;
+    background: var(--telegram-divider, rgba(0,0,0,.08));
+}
+.vg-ge-item:active { background-color: rgba(120,120,128,.10); }
+.vg-ge-item-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    color: #fff;
+    margin-right: 12px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 7px rgba(0,0,0,.16);
+}
+.vg-ge-item-icon.green  { background: linear-gradient(135deg, #22e07a, #00b85e); box-shadow: 0 4px 12px rgba(0,200,100,.45); }
+.vg-ge-item-icon.yellow { background: linear-gradient(135deg, #ffd23f, #ff9500); box-shadow: 0 4px 12px rgba(255,149,0,.40); }
+.vg-ge-item-icon.purple { background: linear-gradient(135deg, #c158ff, #8a2be2); box-shadow: 0 4px 12px rgba(138,43,226,.40); }
+.vg-ge-item-icon.blue   { background: linear-gradient(135deg, #29b6ff, #0088ff); box-shadow: 0 4px 12px rgba(0,136,255,.40); }
+.vg-ge-item-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: #000;
+}
+@media (prefers-color-scheme: dark) {
+    .vg-ge-item-label { color: #fff; }
+}
+.vg-ge-item .vg-ge-chevron {
+    color: #8e8e93;
+    opacity: .55;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
 /* Меню выбора действия с фото */
 .vg-ge-sheet {
     position: fixed;
@@ -24417,6 +24469,16 @@ vgResolveBadgeSrc();
                     '<textarea class="vg-ge-field vg-ge-desc" rows="3" maxlength="255" placeholder="Описание"></textarea>' +
                 '</div>' +
                 '<div class="vg-ge-hint">Описание видят все участники группы.</div>' +
+                '<div class="vg-ge-groups">' +
+                    '<div class="vg-ge-group">' +
+                        '<div class="vg-ge-item">' + '<div class="vg-ge-item-icon green"><i class="fas fa-users"></i></div>' + '<div class="vg-ge-item-label">Тип группы</div>' + '<i class="fas fa-chevron-right vg-ge-chevron"></i>' + '</div>' +
+                        '<div class="vg-ge-item">' + '<div class="vg-ge-item-icon blue"><i class="fas fa-link"></i></div>' + '<div class="vg-ge-item-label">Пригласительные ссылки</div>' + '<i class="fas fa-chevron-right vg-ge-chevron"></i>' + '</div>' +
+                        '<div class="vg-ge-item">' + '<div class="vg-ge-item-icon yellow"><i class="fas fa-palette"></i></div>' + '<div class="vg-ge-item-label">Оформление</div>' + '<i class="fas fa-chevron-right vg-ge-chevron"></i>' + '</div>' +
+                    '</div>' +
+                    '<div class="vg-ge-group">' +
+                        '<div class="vg-ge-item">' + '<div class="vg-ge-item-icon purple"><i class="fas fa-user-shield"></i></div>' + '<div class="vg-ge-item-label">Администраторы</div>' + '<i class="fas fa-chevron-right vg-ge-chevron"></i>' + '</div>' +
+                    '</div>' +
+                '</div>' +
                 '<input type="file" accept="image/*" class="vg-ge-file" style="display:none">' +
             '</div>';
 
@@ -24549,7 +24611,12 @@ vgResolveBadgeSrc();
         els.name.oninput = function () { paintAvatar(); syncDoneEnabled(); };
         paintAvatar();
         syncDoneEnabled();
-        els.screen.classList.add('active');
+        // фиксируем стартовое положение (за экраном): на первом открытии элемент
+        // только что создан, и без этого браузер не запускает переход
+        void els.screen.offsetHeight;
+        requestAnimationFrame(function () {
+            els.screen.classList.add('active');
+        });
         document.body.classList.add('modal-open');
     }
 
