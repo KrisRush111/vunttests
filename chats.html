@@ -12022,8 +12022,19 @@ function getActiveElements() {
             }
         }
 
+        // Анимации режима выбора: кружки выезжают слева, входящие сообщения плавно
+        // сдвигаются вправо, шапка и нижняя панель проявляются (как в Telegram)
+        let _vgSelAnimT = 0, _vgSelExitT = 0, _vgSelExitFinish = null;
+        const _vgReducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        function vgPlayOnce(el, cls, ms) {
+            if (!el) return;
+            el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+            setTimeout(() => el.classList.remove(cls), ms);
+        }
+
         function enterSelectionMode(initialMessageId) {
             if (selectionModeActive) return;
+            if (_vgSelExitFinish) _vgSelExitFinish();     // предыдущий выход ещё анимируется
             closeReactionPicker();
 
             selectionModeActive = true;
@@ -12087,6 +12098,14 @@ function getActiveElements() {
 
             applySelectionWrappers();
             updateSelectionHeader();
+
+            const { messagesContainer: selMc } = getActiveElements();
+            if (selMc && !_vgReducedMotion()) {
+                clearTimeout(_vgSelAnimT);
+                selMc.classList.remove('vg-sel-leaving');
+                selMc.classList.add('vg-sel-entering');
+                _vgSelAnimT = setTimeout(() => selMc.classList.remove('vg-sel-entering'), 420);
+            }
         }
 
         function exitSelectionMode() {
@@ -12094,13 +12113,32 @@ function getActiveElements() {
             selectionModeActive = false;
             selectedMessageIds = new Set();
 
-            removeSelectionWrappers();
+            // Кружки уезжают влево, сообщения возвращаются на место — и только потом
+            // снимаем обёртки (в этот момент сообщения уже стоят ровно там, где окажутся)
+            const { messagesContainer: selMc } = getActiveElements();
+            if (selMc && !_vgReducedMotion()) {
+                clearTimeout(_vgSelAnimT);
+                selMc.classList.remove('vg-sel-entering');
+                selMc.classList.add('vg-sel-leaving');
+                const finish = () => {
+                    if (_vgSelExitFinish !== finish) return;
+                    _vgSelExitFinish = null;
+                    clearTimeout(_vgSelExitT);
+                    removeSelectionWrappers();
+                    selMc.classList.remove('vg-sel-leaving');
+                };
+                _vgSelExitFinish = finish;
+                _vgSelExitT = setTimeout(finish, 240);
+            } else {
+                removeSelectionWrappers();
+            }
 
             if (_savedHeaderEl) {
                 if (_selectionHeaderEl) { _selectionHeaderEl.remove(); _selectionHeaderEl = null; }
                 _hiddenHeaderChildren.forEach(ch => {
                     ch.style.display = ch.dataset._prevDisplay || '';
                     delete ch.dataset._prevDisplay;
+                    vgPlayOnce(ch, 'vg-restore-in', 300);
                 });
                 _hiddenHeaderChildren = [];
                 _savedHeaderEl = null;
@@ -12108,6 +12146,7 @@ function getActiveElements() {
 
             if (_savedInputContainerEl) {
                 _savedInputContainerEl.style.display = '';
+                vgPlayOnce(_savedInputContainerEl, 'vg-restore-up', 320);
                 _savedInputContainerEl = null;
             }
 
@@ -15822,6 +15861,8 @@ function vgSanitizeUnreadList(list) {
 }
 
 async function openChat(chatId) {
+    // Предыдущий чат ещё уезжает (анимация закрытия) — закрываем его сразу
+    if (window.__vgFinishChatClose) window.__vgFinishChatClose();
     // ── Отменяем любой предыдущий openChat ──────────────────────────
     if (openChatAbortController) openChatAbortController.abort();
     openChatAbortController = new AbortController();
@@ -16673,7 +16714,32 @@ function stopProfileDataPolling() {
     VG_VERIFIED_STICKY = { id: null, value: false };
 }
 
+        // Закрытие чата как в Telegram: экран чата уезжает вправо, список чатов
+        // выезжает из-под него. Состояние чата сбрасываем ПОСЛЕ анимации, иначе
+        // уезжал бы уже пустой экран. Если за это время открыли другой чат —
+        // openChat() досрочно завершает закрытие (window.__vgFinishChatClose).
         function closeChat() {
+            const modalEl = getActiveElements().chatModal;
+            const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (!isDesktop && modalEl && modalEl.classList.contains('active') && !reduced) {
+                if (modalEl.classList.contains('vg-chat-closing')) return;   // уже закрывается
+                modalEl.classList.add('vg-chat-closing');
+                let timer = 0;
+                const finish = () => {
+                    if (window.__vgFinishChatClose !== finish) return;
+                    window.__vgFinishChatClose = null;
+                    clearTimeout(timer);
+                    closeChatNow();
+                    modalEl.classList.remove('vg-chat-closing');
+                };
+                window.__vgFinishChatClose = finish;
+                timer = setTimeout(finish, 300);
+                return;
+            }
+            closeChatNow();
+        }
+
+        function closeChatNow() {
             const { chatModal, chatAvatar, chatTitle, chatStatus, messagesContainer, noMessages } = getActiveElements();
 
             if (!chatModal) return;
@@ -16980,6 +17046,9 @@ function stopProfileDataPolling() {
             const fragment = document.createDocumentFragment();
             let lastDateHeader = '';
             let addedAny = false;
+            // Дорисовка к уже показанной переписке (новое сообщение) — только такие
+            // сообщения анимируем, как в Telegram. Первичная отрисовка — без анимации.
+            const isIncremental = !needsFullRender && existingCount > 0;
 
             if (!needsFullRender) {
                 const headers = messagesContainer.querySelectorAll('.date-header');
@@ -17045,7 +17114,7 @@ function stopProfileDataPolling() {
                 
                 if (currentDateHeader !== lastDateHeader) {
                     const dateHeader = document.createElement('div');
-                    dateHeader.className = 'date-header animate__animated animate__fadeIn';
+                    dateHeader.className = isIncremental ? 'date-header animate__animated animate__fadeIn' : 'date-header';
                     dateHeader.textContent = currentDateHeader;
                     fragment.appendChild(dateHeader);
                     lastDateHeader = currentDateHeader;
@@ -17053,12 +17122,25 @@ function stopProfileDataPolling() {
                 
                 const runInfo = runInfoByKey.get(msgId) || null;
                 const messageElement = entry.type === 'group' ? renderMessageGroup(entry.items, runInfo) : renderMessage(entry.item, runInfo);
+                if (isIncremental && messageElement.classList) {
+                    messageElement.classList.add('vg-msg-new');
+                    // Снимаем класс после анимации: иначе при перестановке узла
+                    // (режим выбора и т.п.) анимация проигралась бы снова
+                    messageElement.addEventListener('animationend', () => messageElement.classList.remove('vg-msg-new'), { once: true });
+                    setTimeout(() => messageElement.classList.remove('vg-msg-new'), 600);
+                }
                 fragment.appendChild(messageElement);
                 addedAny = true;
             });
 
             if (fragment.childNodes.length > 0) {
                 const wasAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 60;
+                // Переписка появилась в пустом чате — вся разом мягко проявляется
+                if (!isIncremental) {
+                    messagesContainer.classList.remove('vg-msgs-fadein');
+                    void messagesContainer.offsetWidth;
+                    messagesContainer.classList.add('vg-msgs-fadein');
+                }
                 messagesContainer.appendChild(fragment);
                 if (wasAtBottom || needsFullRender) {
                     // Double rAF: wait for browser to finish layout before scrolling
@@ -24903,9 +24985,7 @@ vgResolveBadgeSrc();
 </script>
 
 <!-- =========================================================================
-     ФАЙЛЫ В ЧАТАХ — патч для chats.html
-     Вставить ОДНИМ блоком перед </body> (после всех остальных <script>).
-     Плюс 3 маленькие правки в существующем коде — они описаны в самом низу.
+     ФАЙЛЫ В ЧАТАХ: пузырь файла, просмотр на весь экран, вкладка «Файлы» в профиле
      ========================================================================= -->
 
 <input type="file" id="vgFileInput" multiple style="display:none"
@@ -25319,19 +25399,27 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         ctx.onClose.push(() => pdf.destroy());
 
         const width = Math.min(ctx.cam.region().w, 900);
-        const first = await pdf.getPage(1);
-        const v1 = first.getViewport({ scale: 1 });
-        const ratio = v1.height / v1.width;
+        // Размеры ВСЕХ страниц узнаём до показа: если досчитывать их по ходу,
+        // высота страниц выше экрана меняется и документ сам «съезжает»
+        const N = pdf.numPages;
+        const ratios = new Array(N).fill(0);
+        const known = Math.min(N, 600);
+        await Promise.all(Array.from({ length: known }, (_, i) => pdf.getPage(i + 1).then(pg => {
+            const v = pg.getViewport({ scale: 1 });
+            ratios[i] = v.height / v.width;
+        })));
+        if (!ctx.alive) return;
+        const fallback = ratios[0] || 1.414;
 
         ctx.stage.innerHTML = '';
         const pages = [];
-        for (let n = 1; n <= pdf.numPages; n++) {
+        for (let n = 1; n <= N; n++) {
             const box = document.createElement('div');
             box.className = 'vg-viewer-pdfpage';
             box.style.width = width + 'px';
-            box.style.height = Math.round(width * ratio) + 'px';
+            box.style.height = Math.round(width * (ratios[n - 1] || fallback)) + 'px';
             ctx.stage.appendChild(box);
-            pages.push({ n, box, canvas: null, res: 0, cssW: width, sized: n === 1 });
+            pages.push({ n, box, canvas: null, res: 0, cssW: width, sized: !!ratios[n - 1] });
         }
         ctx.cam.reset();
 
@@ -25460,12 +25548,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // ---- «камера»: положение (x, y) и масштаб s сцены, жесты и анимации
     function createCamera(ctx) {
         const { body, stage } = ctx;
-        let s = 1, x = 0, y = 0;
+        let s = 1, x = 0, y = 0;             // то, что на экране
         let maxS = ZOOM_MAX;
         let W = 1, H = 1;                    // размер сцены без масштаба
         let raf = 0, anim = null;            // текущая анимация / инерция
         let touching = false;
-        let settleT = 0, crispT = 0;
+        let settleT = 0, crispScale = 1;
 
         // Видимая область: под верхней и над нижней панелью кнопок
         function region() {
@@ -25476,46 +25564,88 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
         function measure() { W = stage.offsetWidth || 1; H = stage.offsetHeight || 1; }
 
-        // Допустимые x/y при масштаб sc: если сцена уже экрана — по центру,
-        // если шире/выше — можно двигать, но не дальше краёв
+        // Допустимые x/y при масштабе sc: сцена уже экрана — строго по центру,
+        // шире/выше — можно двигать, но не дальше краёв
         function bounds(sc) {
             const R = region(), sw = W * sc, sh = H * sc;
-            const bx = sw <= R.w ? [R.l + (R.w - sw) / 2, R.l + (R.w - sw) / 2] : [R.r - sw, R.l];
-            const by = sh <= R.h ? [R.t + (R.h - sh) / 2, R.t + (R.h - sh) / 2] : [R.b - sh, R.t];
-            return { x0: bx[0], x1: bx[1], y0: by[0], y1: by[1] };
+            const fitX = sw <= R.w, fitY = sh <= R.h;
+            const cx = R.l + (R.w - sw) / 2, cy = R.t + (R.h - sh) / 2;
+            return {
+                fitX, fitY, R,
+                x0: fitX ? cx : R.r - sw, x1: fitX ? cx : R.l,
+                y0: fitY ? cy : R.b - sh, y1: fitY ? cy : R.t
+            };
         }
         const clampTo = (v, a, b) => Math.min(b, Math.max(a, v));
+
+        // «Резинка» как в iOS: чем дальше за край, тем сильнее сопротивление
+        function rubber(over, size) {
+            const c = 0.55;
+            return (over * size * c) / (size + c * Math.abs(over));
+        }
+        function rubberClamp(v, a, b, size) {
+            if (v < a) return a + rubber(v - a, size);
+            if (v > b) return b + rubber(v - b, size);
+            return v;
+        }
+        // Масштаб за пределами [1, max] тоже «тянется» с сопротивлением
+        function rubberScale(raw) {
+            if (raw > maxS) return maxS * (1 + rubber(raw / maxS - 1, 0.25));   // не больше ~+25%
+            if (raw < 1) return 1 - rubber(1 - raw, 0.35);                      // не меньше ~0,65
+            return raw;
+        }
 
         function apply() {
             stage.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
         }
 
-        // Во время движения слой живёт на видеокарте; после — браузер перерисует его чётко
+        // Слой всегда на видеокарте; после увеличения просим браузер перерисовать
+        // его чётко в новом масштабе (один раз, когда жест закончился)
+        stage.style.willChange = 'transform';
         function startMoving() {
-            clearTimeout(crispT);
-            stage.style.willChange = 'transform';
+            if (stage.style.willChange !== 'transform') stage.style.willChange = 'transform';
         }
         function settle() {
             clearTimeout(settleT);
             settleT = setTimeout(() => {
                 if (touching || anim) return;
-                crispT = setTimeout(() => { stage.style.willChange = 'auto'; }, 60);
+                if (Math.abs(s - crispScale) > 0.05) {
+                    crispScale = s;
+                    if (s > 1.01) stage.style.willChange = 'auto';   // перерастеризация в чёткость
+                }
                 ctx.onSettle.forEach(f => f());
-            }, 120);
+            }, 140);
         }
 
         function stop() { cancelAnimationFrame(raf); raf = 0; anim = null; }
 
-        // Плавный переход к (ts, tx, ty) — двойной тап, возврат после щипка
-        function animateTo(ts, tx, ty, ms = 260) {
+        // Пружина (как в iOS/Telegram): быстро стартует и мягко «доезжает», без рывка в конце
+        function animateTo(ts, tx, ty) {
             stop(); startMoving();
-            const fs = s, fx = x, fy = y, t0 = performance.now();
-            anim = 'to';
+            anim = 'spring';
+            const st = { s: [s, 0, ts], x: [x, 0, tx], y: [y, 0, ty] };   // [значение, скорость, цель]
+            const K = 0.00028, D = 0.032;    // жёсткость и затухание (критическое ≈ без отскока)
+            let last = performance.now();
             const step = (t) => {
-                const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
-                s = fs + (ts - fs) * e; x = fx + (tx - fx) * e; y = fy + (ty - fy) * e;
+                let dt = Math.min(32, t - last); last = t;
+                let done = true;
+                // интегрируем мелкими шагами — устойчиво на 60/120 Гц
+                while (dt > 0) {
+                    const h = Math.min(4, dt); dt -= h;
+                    for (const k in st) {
+                        const v = st[k];
+                        const f = -K * (v[0] - v[2]) - D * v[1];
+                        v[1] += f * h; v[0] += v[1] * h;
+                    }
+                }
+                for (const k in st) {
+                    const v = st[k], tol = k === 's' ? 0.0005 : 0.3;
+                    if (Math.abs(v[0] - v[2]) > tol || Math.abs(v[1]) > tol / 50) done = false;
+                }
+                s = st.s[0]; x = st.x[0]; y = st.y[0];
+                if (done) { s = ts; x = tx; y = ty; }
                 apply();
-                if (k < 1) raf = requestAnimationFrame(step);
+                if (!done) raf = requestAnimationFrame(step);
                 else { anim = null; raf = 0; settle(); }
             };
             raf = requestAnimationFrame(step);
@@ -25530,72 +25660,72 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
 
         // Вернуться в допустимые границы (после щипка/перетаскивания за край)
-        function snapBack() {
-            const ts = clampTo(s, 1, maxS);
-            if (ts !== s) {
-                const R = region();
-                const [a, b, c] = zoomTarget(ts, lastMid[0] || R.l + R.w / 2, lastMid[1] || R.t + R.h / 2);
-                animateTo(a, b, c);
-                return;
-            }
-            const B = bounds(s);
-            const tx = clampTo(x, B.x0, B.x1), ty = clampTo(y, B.y0, B.y1);
-            if (Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) animateTo(s, tx, ty, 300);
+        function snapBack(ax, ay) {
+            const R = region();
+            const [ts, tx, ty] = zoomTarget(s, ax == null ? R.l + R.w / 2 : ax, ay == null ? R.t + R.h / 2 : ay);
+            if (Math.abs(ts - s) > 0.001 || Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) animateTo(ts, tx, ty);
             else settle();
         }
 
-        // Инерция после броска: скорость затухает, за краем — «резинка» и возврат
+        // Инерция после броска (как UIScrollView: замедление 0.998 за мс),
+        // упёрлись в край — мягкий отскок пружиной
         function fling(vx, vy) {
             stop(); startMoving();
             anim = 'fling';
             let last = performance.now();
+            const B = bounds(s);
+            if (B.fitX) vx = 0;
+            if (B.fitY) vy = 0;
             const step = (t) => {
                 const dt = Math.min(32, t - last); last = t;
+                const decay = Math.pow(0.998, dt);
                 x += vx * dt; y += vy * dt;
-                const decay = Math.pow(0.996, dt);
                 vx *= decay; vy *= decay;
-                const B = bounds(s);
-                const ox = x < B.x0 ? x - B.x0 : x > B.x1 ? x - B.x1 : 0;
-                const oy = y < B.y0 ? y - B.y0 : y > B.y1 ? y - B.y1 : 0;
-                if (ox) { vx *= Math.pow(0.6, dt / 16); x -= ox * (1 - Math.pow(0.8, dt / 16)); }
-                if (oy) { vy *= Math.pow(0.6, dt / 16); y -= oy * (1 - Math.pow(0.8, dt / 16)); }
+                const out = x < B.x0 || x > B.x1 || y < B.y0 || y > B.y1;
                 apply();
-                if (Math.abs(vx) + Math.abs(vy) > 0.02 || Math.abs(ox) > 0.5 || Math.abs(oy) > 0.5) {
-                    raf = requestAnimationFrame(step);
-                } else {
-                    x = clampTo(x, B.x0, B.x1); y = clampTo(y, B.y0, B.y1); apply();
-                    anim = null; raf = 0; settle();
+                if (out || Math.abs(vx) + Math.abs(vy) < 0.02) {
+                    anim = null; raf = 0;
+                    if (out) {                       // вылетели за край — пружиной назад
+                        animateTo(s, clampTo(x, B.x0, B.x1), clampTo(y, B.y0, B.y1));
+                    } else settle();
+                    return;
                 }
+                raf = requestAnimationFrame(step);
             };
             raf = requestAnimationFrame(step);
         }
 
         // ---------- жесты (Pointer Events: и пальцы, и мышь)
         const pts = new Map();
-        let pinch = null, drag = null, lastMid = [0, 0], lastTap = null, samples = [];
+        let pinch = null, drag = null, lastTap = null, samples = [];
         const local = (e) => { const r = body.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-        const two = () => { const [a, b] = [...pts.values()]; return a && b ? [a, b] : null; };
+        const two = () => { const v = [...pts.values()]; return v.length >= 2 ? [v[0], v[1]] : null; };
+        const midOf = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const distOf = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) || 1;
 
-        function rubber(over, size) {               // сопротивление при выходе за край
-            const c = 0.55;
-            return (over * size * c) / (size + c * Math.abs(over));
+        // Начать перетаскивание одним пальцем из текущего положения
+        function beginDrag(px, py, fromPinch) {
+            const B = bounds(s);
+            // «сырые» координаты без резинки — чтобы она не накапливалась
+            drag = { px, py, rx: x, ry: y, moved: !!fromPinch, sx: px, sy: py, fromPinch: !!fromPinch };
+            if (x < B.x0 || x > B.x1) drag.rx = x;  // уже за краем — продолжаем оттуда
+            samples = [[performance.now(), x, y]];
         }
 
         body.addEventListener('pointerdown', (e) => {
             if (e.button !== 0 && e.pointerType === 'mouse') return;
-            body.setPointerCapture(e.pointerId);
+            try { body.setPointerCapture(e.pointerId); } catch (err) {}
             pts.set(e.pointerId, local(e));
             touching = true;
             stop(); startMoving();
             if (pts.size === 2) {
                 const [a, b] = two();
-                const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-                pinch = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, s0: s, cx: (mx - x) / s, cy: (my - y) / s };
+                const m = midOf(a, b);
+                pinch = { d: distOf(a, b), m, raw: s };
                 drag = null; lastTap = null;
             } else if (pts.size === 1) {
                 const [px, py] = local(e);
-                drag = { px, py, x0: x, y0: y, sx: px, sy: py, t0: performance.now(), moved: false };
-                samples = [[performance.now(), x, y]];
+                beginDrag(px, py, false);
             }
         });
 
@@ -25604,30 +25734,36 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             pts.set(e.pointerId, local(e));
             if (pinch && pts.size >= 2) {
                 const [a, b] = two();
-                const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-                lastMid = [mx, my];
-                let ns = pinch.s0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d0;
-                // «резинка» масштаба: можно чуть меньше 1 и чуть больше максимума
-                if (ns > maxS) ns = maxS * Math.pow(ns / maxS, 0.35);
-                if (ns < 1) ns = Math.max(0.6, Math.pow(ns, 0.5));
+                const m = midOf(a, b), d = distOf(a, b);
+                // Пошагово: масштаб относительно прошлого кадра, вокруг точки между пальцами
+                pinch.raw *= d / pinch.d;
+                const ns = rubberScale(pinch.raw);
+                const k = ns / s;
+                let nx = m[0] - (pinch.m[0] - x) * k;
+                let ny = m[1] - (pinch.m[1] - y) * k;
                 s = ns;
-                x = mx - pinch.cx * s;                // точка между пальцами остаётся под ними
-                y = my - pinch.cy * s;
+                // Пока файл уже экрана — он стоит по центру и никуда не «уезжает» вбок;
+                // шире экрана — за край пускаем только с сопротивлением
+                const B = bounds(s);
+                x = B.fitX ? B.x0 : rubberClamp(nx, B.x0, B.x1, B.R.w);
+                y = B.fitY ? B.y0 : rubberClamp(ny, B.y0, B.y1, B.R.h);
+                pinch.d = d; pinch.m = m;
                 apply();
             } else if (drag && pts.size === 1) {
                 const [px, py] = local(e);
-                if (!drag.moved && Math.hypot(px - drag.sx, py - drag.sy) > 6) drag.moved = true;
+                if (!drag.moved && Math.hypot(px - drag.sx, py - drag.sy) > 6) {
+                    drag.moved = true; drag.px = px; drag.py = py;   // без скачка на величину порога
+                }
                 if (!drag.moved) return;
+                drag.rx += px - drag.px; drag.ry += py - drag.py;
+                drag.px = px; drag.py = py;
                 const B = bounds(s);
-                let nx = drag.x0 + (px - drag.px), ny = drag.y0 + (py - drag.py);
-                const R = region();
-                if (nx < B.x0) nx = B.x0 + rubber(nx - B.x0, R.w); else if (nx > B.x1) nx = B.x1 + rubber(nx - B.x1, R.w);
-                if (ny < B.y0) ny = B.y0 + rubber(ny - B.y0, R.h); else if (ny > B.y1) ny = B.y1 + rubber(ny - B.y1, R.h);
-                x = nx; y = ny;
+                x = B.fitX ? B.x0 : rubberClamp(drag.rx, B.x0, B.x1, B.R.w);
+                y = B.fitY ? B.y0 : rubberClamp(drag.ry, B.y0, B.y1, B.R.h);
                 apply();
                 const now = performance.now();
                 samples.push([now, x, y]);
-                while (samples.length > 2 && now - samples[0][0] > 90) samples.shift();
+                while (samples.length > 2 && now - samples[0][0] > 80) samples.shift();
             }
         });
 
@@ -25636,12 +25772,16 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             pts.delete(e.pointerId);
             if (pinch) {
                 if (pts.size < 2) {
+                    const m = pinch.m;
                     pinch = null;
-                    if (pts.size === 1) {           // один палец остался — продолжаем двигать им
+                    if (pts.size === 1) {
+                        // Один палец остался — двигаем им, но без инерции после щипка
                         const [px, py] = [...pts.values()][0];
-                        drag = { px, py, x0: x, y0: y, sx: px, sy: py, t0: performance.now(), moved: true };
-                        samples = [[performance.now(), x, y]];
-                    } else { touching = false; snapBack(); }
+                        beginDrag(px, py, true);
+                    } else {
+                        touching = false;
+                        snapBack(m[0], m[1]);
+                    }
                 }
                 return;
             }
@@ -25653,7 +25793,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             if (!d.moved && e.type === 'pointerup') {
                 // Двойной тап / двойной клик: увеличить в точку или вернуть как было
                 const now = performance.now(), [px, py] = local(e);
-                if (lastTap && now - lastTap.t < 320 && Math.hypot(px - lastTap.x, py - lastTap.y) < 40) {
+                if (lastTap && now - lastTap.t < 300 && Math.hypot(px - lastTap.x, py - lastTap.y) < 40) {
                     lastTap = null;
                     const [ts, tx, ty] = zoomTarget(s > 1.05 ? 1 : 2.5, px, py);
                     animateTo(ts, tx, ty);
@@ -25663,45 +25803,69 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                 }
                 return;
             }
-            // Скорость за последние ~90 мс → инерция
+            const B = bounds(s);
+            const outside = x < B.x0 - 0.5 || x > B.x1 + 0.5 || y < B.y0 - 0.5 || y > B.y1 + 0.5;
+            if (d.fromPinch || outside) { snapBack(); return; }
+
+            // Скорость за последние ~80 мс → инерция (только если палец ещё двигался при отпускании)
             const now = performance.now();
             const first = samples[0], lastS = samples[samples.length - 1];
-            const dt = Math.max(1, lastS[0] - first[0]);
-            const fresh = now - lastS[0] < 60;
-            const vx = fresh ? (lastS[1] - first[1]) / dt : 0, vy = fresh ? (lastS[2] - first[2]) / dt : 0;
-            if (Math.hypot(vx, vy) > 0.15) fling(vx * 1.1, vy * 1.1);
-            else snapBack();
+            const dt = Math.max(16, lastS[0] - first[0]);
+            const fresh = now - lastS[0] < 50;
+            let vx = fresh ? (lastS[1] - first[1]) / dt : 0, vy = fresh ? (lastS[2] - first[2]) / dt : 0;
+            const sp = Math.hypot(vx, vy);
+            if (sp > 6) { vx *= 6 / sp; vy *= 6 / sp; }          // не улетать от случайного рывка
+            if (sp > 0.12) fling(vx, vy);
+            else settle();
         }
         body.addEventListener('pointerup', onUp);
         body.addEventListener('pointercancel', onUp);
 
-        // Колесо: прокрутка; Ctrl/⌘ + колесо или щипок на тачпаде — масштаб
+        // Колесо/тачпад: плавно «догоняем» цель, а не прыгаем на каждый щелчок колеса
+        let wheelT = null;
+        function wheelLoop() {
+            if (!wheelT) return;
+            const a = 0.28;
+            s += (wheelT.s - s) * a; x += (wheelT.x - x) * a; y += (wheelT.y - y) * a;
+            apply();
+            if (Math.abs(wheelT.s - s) < 0.001 && Math.abs(wheelT.x - x) < 0.3 && Math.abs(wheelT.y - y) < 0.3) {
+                s = wheelT.s; x = wheelT.x; y = wheelT.y; apply();
+                wheelT = null; anim = null; raf = 0; settle();
+                return;
+            }
+            raf = requestAnimationFrame(wheelLoop);
+        }
         body.addEventListener('wheel', (e) => {
             e.preventDefault();
-            stop(); startMoving();
+            if (anim !== 'wheel') { stop(); wheelT = { s, x, y }; }
+            startMoving();
             const [px, py] = local(e);
+            const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? body.clientHeight : 1;
+            const dx = e.deltaX * unit, dy = e.deltaY * unit;
             if (e.ctrlKey || e.metaKey) {
-                const ts = clampTo(s * Math.exp(-e.deltaY * 0.01), 1, maxS);
-                [s, x, y] = zoomTarget(ts, px, py);
+                const ts = clampTo(wheelT.s * Math.exp(-dy * 0.01), 1, maxS);
+                const cx = (px - wheelT.x) / wheelT.s, cy = (py - wheelT.y) / wheelT.s;
+                const B = bounds(ts);
+                wheelT = { s: ts, x: clampTo(px - cx * ts, B.x0, B.x1), y: clampTo(py - cy * ts, B.y0, B.y1) };
             } else {
-                const B = bounds(s);
-                x = clampTo(x - e.deltaX, B.x0, B.x1);
-                y = clampTo(y - e.deltaY, B.y0, B.y1);
+                const B = bounds(wheelT.s);
+                wheelT.x = clampTo(wheelT.x - dx, B.x0, B.x1);
+                wheelT.y = clampTo(wheelT.y - dy, B.y0, B.y1);
             }
-            apply();
-            settle();
+            if (anim !== 'wheel') { anim = 'wheel'; raf = requestAnimationFrame(wheelLoop); }
         }, { passive: false });
 
-        // Размер сцены меняется (подгрузились страницы PDF, картинки в docx) — пересчитываем
+        // Размер сцены изменился (подгрузились картинки в docx и т.п.) — без рывков:
+        // поправляем положение, только если сцена реально вышла за допустимые границы
         const ro = new ResizeObserver(() => {
             measure();
-            if (!touching && !anim) {
-                const B = bounds(s);
-                x = clampTo(x, B.x0, B.x1); y = clampTo(y, B.y0, B.y1); apply();
-            }
+            if (touching || anim) return;
+            const B = bounds(s);
+            const tx = clampTo(x, B.x0, B.x1), ty = clampTo(y, B.y0, B.y1);
+            if (Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) { x = tx; y = ty; apply(); }
         });
         ro.observe(stage);
-        ctx.onClose.push(() => { ro.disconnect(); stop(); });
+        ctx.onClose.push(() => { ro.disconnect(); stop(); clearTimeout(settleT); });
 
         return {
             region,
@@ -25711,7 +25875,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             // Начальное положение: по ширине по центру, сверху — начало документа
             reset() {
                 stop(); measure();
-                s = 1;
+                s = 1; crispScale = 1;
+                stage.style.willChange = 'transform';
                 const B = bounds(1);
                 x = B.x1; y = B.y1;
                 apply(); settle();
@@ -26029,6 +26194,79 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     };
 })();
 </script>
+
+
+<style id="vg-motion-style">
+/* =====================================================================
+   Плавные анимации как в Telegram (подключено последним — перекрывает старые правила)
+   ===================================================================== */
+
+/* --- Сообщения: больше никакой «лестницы» и постоянной анимации градиента.
+       При открытии чата переписка просто есть; анимируются только новые. --- */
+.message { opacity: 1; transform: none; animation: none; }
+.message-incoming, .message-outgoing { animation: none; }
+.message-select-row { animation: none; }
+
+.message.vg-msg-new { animation: vgMsgIn .32s cubic-bezier(.2, .9, .3, 1) both; }
+.message-outgoing.vg-msg-new { transform-origin: 100% 100%; }
+.message-incoming.vg-msg-new { transform-origin: 0 100%; }
+@keyframes vgMsgIn {
+    from { opacity: 0; transform: translate3d(0, 18px, 0) scale(.92); }
+    to   { opacity: 1; transform: none; }
+}
+.vg-msgs-fadein { animation: vgFadeIn .22s ease-out both; }
+@keyframes vgFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* --- Открытие / закрытие чата на телефоне: экран чата выезжает справа,
+       список чатов уходит влево «вглубь» (параллакс), как в Telegram --- */
+@media (max-width: 767px) {
+    #chatModalMobile.active {
+        animation: vgChatIn .38s cubic-bezier(.22, .8, .24, 1) both;
+        box-shadow: -12px 0 32px rgba(0, 0, 0, .14);
+    }
+    #chatModalMobile.active.vg-chat-closing {
+        animation: vgChatOut .3s cubic-bezier(.3, .6, .3, 1) both;
+        pointer-events: none;
+    }
+    .chats-container.mobile-only {
+        transition: transform .38s cubic-bezier(.22, .8, .24, 1);
+    }
+    body:has(#chatModalMobile.active:not(.vg-chat-closing)) .chats-container.mobile-only {
+        transform: translate3d(-24%, 0, 0);
+    }
+    body:has(#chatModalMobile.vg-chat-closing) .chats-container.mobile-only {
+        transition-duration: .3s;
+        transition-timing-function: cubic-bezier(.3, .6, .3, 1);
+    }
+}
+@keyframes vgChatIn  { from { transform: translate3d(100%, 0, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes vgChatOut { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(100%, 0, 0); } }
+
+/* --- Режим «Выбрать» --- */
+.vg-sel-entering .message-select-circle { animation: vgSelCircleIn .34s cubic-bezier(.2, .85, .25, 1) both; }
+.vg-sel-entering .message-select-row > .message-incoming,
+.vg-sel-entering .message-select-row > .message:not(.message-outgoing) { animation: vgSelShiftIn .34s cubic-bezier(.2, .85, .25, 1) both; }
+.vg-sel-leaving .message-select-circle { animation: vgSelCircleOut .24s cubic-bezier(.4, 0, .6, 1) both; }
+.vg-sel-leaving .message-select-row > .message-incoming,
+.vg-sel-leaving .message-select-row > .message:not(.message-outgoing) { animation: vgSelShiftOut .24s cubic-bezier(.4, 0, .6, 1) both; }
+@keyframes vgSelCircleIn  { from { opacity: 0; transform: translate3d(-34px, 0, 0) scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes vgSelCircleOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translate3d(-34px, 0, 0) scale(.6); } }
+@keyframes vgSelShiftIn   { from { transform: translate3d(-34px, 0, 0); } to { transform: none; } }
+@keyframes vgSelShiftOut  { from { transform: none; } to { transform: translate3d(-34px, 0, 0); } }
+
+.selection-header { animation: vgSelFade .24s ease-out both; }
+.selection-bottom-bar { animation: vgSelBarIn .3s cubic-bezier(.2, .85, .25, 1) both; }
+.vg-restore-in { animation: vgSelFade .24s ease-out both; }
+.vg-restore-up { animation: vgSelBarIn .3s cubic-bezier(.2, .85, .25, 1) both; }
+@keyframes vgSelFade  { from { opacity: 0; transform: translate3d(0, -4px, 0); } to { opacity: 1; transform: none; } }
+@keyframes vgSelBarIn { from { opacity: 0; transform: translate3d(0, 100%, 0); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .message.vg-msg-new, .vg-msgs-fadein, #chatModalMobile.active,
+    .selection-header, .selection-bottom-bar, .vg-restore-in, .vg-restore-up { animation: none !important; }
+    .chats-container.mobile-only { transition: none !important; }
+}
+</style>
 
 </body>
 </html>
