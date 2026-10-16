@@ -24988,18 +24988,18 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-viewer-name { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vg-viewer-sub  { font-size: 12px; opacity: .6; margin-top: 1px; }
 .vg-viewer-body {
-    flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
-    padding: calc(env(safe-area-inset-top, 0px) + 72px) 12px calc(env(safe-area-inset-bottom, 0px) + 84px);
-    touch-action: pan-x pan-y;            /* щипок обрабатываем сами — страница не масштабируется */
+    flex: 1; position: relative; overflow: hidden;
+    touch-action: none;                  /* все жесты обрабатываем сами (щипок, перемещение, инерция) */
+    -webkit-user-select: none; user-select: none; cursor: grab;
 }
-/* «Сцена» с содержимым: её и масштабируем (CSS zoom), а прокрутка .vg-viewer-body
-   сама даёт перемещение по увеличенному файлу — как в «Просмотре» на iPhone */
+.vg-viewer-body:active { cursor: grabbing; }
+/* «Сцена» с содержимым: двигаем и масштабируем её только через transform —
+   это делает видеокарта, без пересчёта вёрстки, поэтому без лагов */
 .vg-zoom {
-    margin: 0 auto; min-height: 100%;
+    position: absolute; left: 0; top: 0; transform-origin: 0 0;
     display: flex; flex-direction: column; align-items: center; gap: 10px;
+    backface-visibility: hidden;
 }
-/* центрируем отступами auto, а не justify-content: так увеличенная картинка не уезжает вверх за край прокрутки */
-.vg-viewer-body.is-center .vg-zoom > * { margin-top: auto; margin-bottom: auto; }
 .vg-viewer-img { display: block; border-radius: 4px; -webkit-user-drag: none; user-select: none; }
 .vg-viewer-pdfpage { position: relative; flex: 0 0 auto; background: #fff; border-radius: 4px;
                      box-shadow: 0 2px 14px rgba(0,0,0,.5); overflow: hidden; }
@@ -25016,12 +25016,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-viewer-doc img { max-width: 100%; height: auto; }
 .vg-viewer-doc table { border-collapse: collapse; margin: 10px 0; }
 .vg-viewer-doc td, .vg-viewer-doc th { border: 1px solid #ccc; padding: 4px 8px; vertical-align: top; }
-.vg-viewer-sheet { width: 100%; max-width: 1200px; }
+.vg-viewer-sheet { width: max-content; min-width: 100%; }
 .vg-viewer-sheet h4 { margin: 6px 2px 8px; font-size: 13px; font-weight: 600; opacity: .7; }
-.vg-viewer-sheet .vg-sheet-wrap { overflow: auto; background: #fff; border-radius: 6px; }
+.vg-viewer-sheet .vg-sheet-wrap { background: #fff; border-radius: 6px; }
 .vg-viewer-sheet table { border-collapse: collapse; color: #111; font-size: 13px; }
 .vg-viewer-sheet td, .vg-viewer-sheet th { border: 1px solid #d9d9d9; padding: 4px 8px; white-space: nowrap; }
-.vg-viewer-frame { width: 100%; max-width: 1100px; flex: 1; min-height: 70vh; border: none; background: #fff; border-radius: 6px; }
+.vg-viewer-frame { width: 100%; border: none; background: #fff; border-radius: 6px; }
 .vg-viewer-empty { text-align: center; max-width: 320px; }
 .vg-viewer-empty .vg-big-icon {
     width: 96px; height: 96px; border-radius: 50%; margin: 0 auto 16px; background: var(--vg-file-color, #0a84ff);
@@ -25230,8 +25230,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     // ---------------------------------------------------- просмотр на весь экран
     // Слева вверху ✕, слева внизу «Поделиться» (иконка как в iOS), справа внизу «Сохранить».
-    // Щипок двумя пальцами — увеличить/уменьшить, одним пальцем — двигать,
-    // двойной тап — увеличить в точку / вернуть. На компьютере: Ctrl/⌘ + колесо, двойной клик.
+    //
+    // Масштаб и перемещение — как в Telegram: во время жеста меняется только
+    // transform (translate + scale) на видеокарте, без пересчёта вёрстки, поэтому
+    // 60 кадров/с даже на длинных PDF. Есть «резинка» за краями и при щипке
+    // за пределы масштаба, инерция после броска пальцем, двойной тап с анимацией.
+    // Чёткость восстанавливается после окончания жеста (PDF перерисовывается).
     const ICONS = {
         close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11"/><path d="M8.2 7.3L12 3.5l3.8 3.8"/><path d="M8.5 10H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1.5"/></svg>',
@@ -25259,7 +25263,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     const TEXT_EXT = ['txt', 'py', 'js', 'css'];
     const IMG_EXT = ['png', 'jpg', 'jpeg', 'webp'];
-    const ZOOM_MAX = 6;
+    const ZOOM_MAX = 5;
 
     function fileFromBlob(blob, message) {
         return new File([blob], message.file_name || 'file',
@@ -25296,22 +25300,13 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     function noPreview(ctx, text) {
         const [color, label] = metaOf(ctx.message.file_name);
-        ctx.body.classList.add('is-center');
         ctx.stage.innerHTML = `
             <div class="vg-viewer-empty">
                 <div class="vg-big-icon" style="--vg-file-color:${color}">${label}</div>
                 <div class="vg-viewer-name">${escapeHtml(ctx.message.file_name || 'file')}</div>
                 <p>${text || 'Предпросмотр этого формата недоступен. Нажмите «Поделиться», чтобы открыть файл в другом приложении, или «Сохранить».'}</p>
             </div>`;
-    }
-
-    // Свободное место внутри области просмотра (без отступов под кнопки)
-    function viewport(body) {
-        const cs = getComputedStyle(body);
-        return {
-            w: body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
-            h: body.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
-        };
+        ctx.cam.reset();
     }
 
     // ---- PDF: страницы рисуются только рядом с экраном и в чёткости под текущий зум
@@ -25323,12 +25318,11 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (!ctx.alive) { pdf.destroy(); return; }
         ctx.onClose.push(() => pdf.destroy());
 
-        const width = Math.min(ctx.view.w, 900);
+        const width = Math.min(ctx.cam.region().w, 900);
         const first = await pdf.getPage(1);
         const v1 = first.getViewport({ scale: 1 });
         const ratio = v1.height / v1.width;
 
-        ctx.body.classList.remove('is-center');
         ctx.stage.innerHTML = '';
         const pages = [];
         for (let n = 1; n <= pdf.numPages; n++) {
@@ -25339,6 +25333,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             ctx.stage.appendChild(box);
             pages.push({ n, box, canvas: null, res: 0, cssW: width, sized: n === 1 });
         }
+        ctx.cam.reset();
 
         const dpr = Math.min(window.devicePixelRatio || 1, 3);
         let busy = false, again = false;
@@ -25352,6 +25347,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                     const vh = ctx.body.clientHeight;
                     for (const p of pages) {
                         if (!ctx.alive) return;
+                        if (ctx.cam.moving()) { again = true; break; }   // палец на экране — не мешаем жесту
                         const r = p.box.getBoundingClientRect();
                         const near = r.bottom > -vh && r.top < vh * 2;      // экран + запас
                         if (!near) {
@@ -25361,7 +25357,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                         const cssH = parseFloat(p.box.style.height);
                         // Ограничение размера холста (iPhone не тянет больше ~16 Мп)
                         const cap = Math.sqrt(16e6 / (p.cssW * cssH * dpr * dpr));
-                        const target = Math.max(0.5, Math.min(ctx.zoom, ZOOM_MAX, cap));
+                        const target = Math.max(0.5, Math.min(ctx.cam.scale(), ZOOM_MAX, cap));
                         if (p.canvas && Math.abs(target - p.res) < 0.35) continue;
 
                         const page = await pdf.getPage(p.n);
@@ -25380,6 +25376,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                         p.box.appendChild(c);
                         p.canvas = c; p.res = target;
                     }
+                    if (again) await new Promise(r => setTimeout(r, 120));
                 } while (again && ctx.alive);
             } finally { busy = false; }
         }
@@ -25389,8 +25386,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     async function renderPreview(ctx) {
         const ext = extOf(ctx.message.file_name);
-        const { body, stage, blob } = ctx;
-        const top = () => body.classList.remove('is-center');   // документы — от верха, не по центру
+        const { stage, blob, cam } = ctx;
 
         if (IMG_EXT.includes(ext)) {
             const u = URL.createObjectURL(blob); ctx.urls.push(u);
@@ -25398,10 +25394,15 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             img.className = 'vg-viewer-img'; img.alt = ''; img.draggable = false;
             await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = u; });
             // Вписываем картинку в экран; дальше её размер меняет только зум
-            const k = Math.min(1, ctx.view.w / img.naturalWidth, ctx.view.h / img.naturalHeight);
+            const R = cam.region();
+            const k = Math.min(1, R.w / img.naturalWidth, R.h / img.naturalHeight);
             img.style.width = Math.round(img.naturalWidth * k) + 'px';
             img.style.height = Math.round(img.naturalHeight * k) + 'px';
+            stage.style.width = 'auto';
             stage.innerHTML = ''; stage.appendChild(img);
+            // Мелкую картинку разрешаем увеличить до её реального размера ×2
+            cam.setMax(Math.max(ZOOM_MAX, 2 / k));
+            cam.reset();
             return;
         }
 
@@ -25409,8 +25410,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             let text = await blob.text();
             const cut = text.length > 400000;
             if (cut) text = text.slice(0, 400000);
-            top();
             stage.innerHTML = `<pre class="vg-viewer-code">${escapeHtml(text)}${cut ? '\n\n… (файл обрезан для просмотра)' : ''}</pre>`;
+            cam.reset();
             return;
         }
 
@@ -25419,9 +25420,10 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             const fr = document.createElement('iframe');
             fr.className = 'vg-viewer-frame';
             fr.setAttribute('sandbox', '');
+            fr.style.height = cam.region().h + 'px';
             fr.srcdoc = await blob.text();
-            top();
             stage.innerHTML = ''; stage.appendChild(fr);
+            cam.reset();
             return;
         }
 
@@ -25430,15 +25432,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (ext === 'docx') {
             await loadLib(LIBS.docx);
             const r = await window.mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
-            top();
             stage.innerHTML = `<div class="vg-viewer-doc">${r.value || '<p>(пустой документ)</p>'}</div>`;
+            cam.reset();
             return;
         }
 
         if (ext === 'xlsx' || ext === 'xls') {
             await loadLib(LIBS.xlsx);
             const wb = window.XLSX.read(await blob.arrayBuffer(), { type: 'array' });
-            top();
             stage.innerHTML = '';
             wb.SheetNames.forEach(name => {
                 const box = document.createElement('div');
@@ -25447,89 +25448,275 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                     window.XLSX.utils.sheet_to_html(wb.Sheets[name], { header: '', footer: '' })}</div>`;
                 stage.appendChild(box);
             });
+            // Широкая таблица: сцена шириной с таблицу, двигаем её пальцем
+            stage.style.width = Math.max(cam.region().w, stage.scrollWidth) + 'px';
+            cam.reset();
             return;
         }
 
         noPreview(ctx);   // doc, odt, ppt, pptx
     }
 
-    // ---- масштаб: щипок, двойной тап, Ctrl+колесо
-    function setupZoom(ctx) {
+    // ---- «камера»: положение (x, y) и масштаб s сцены, жесты и анимации
+    function createCamera(ctx) {
         const { body, stage } = ctx;
-        let settleT = 0;
-        const settle = () => { clearTimeout(settleT); settleT = setTimeout(() => ctx.onSettle.forEach(f => f()), 180); };
+        let s = 1, x = 0, y = 0;
+        let maxS = ZOOM_MAX;
+        let W = 1, H = 1;                    // размер сцены без масштаба
+        let raf = 0, anim = null;            // текущая анимация / инерция
+        let touching = false;
+        let settleT = 0, crispT = 0;
 
-        // Меняем масштаб так, чтобы точка (cx, cy) экрана осталась под пальцами
-        function zoomAt(z, cx, cy) {
-            z = Math.max(1, Math.min(ZOOM_MAX, z));
-            const r = stage.getBoundingClientRect();
-            const px = (cx - r.left) / ctx.zoom, py = (cy - r.top) / ctx.zoom;
-            ctx.zoom = z;
-            stage.style.zoom = z;
-            const r2 = stage.getBoundingClientRect();
-            body.scrollLeft += r2.left + px * z - cx;
-            body.scrollTop += r2.top + py * z - cy;
-            settle();
+        // Видимая область: под верхней и над нижней панелью кнопок
+        function region() {
+            const top = ctx.topBar.offsetHeight + 4;
+            const bottom = ctx.bottomBar.offsetHeight + 4;
+            const l = 12, t = top, r = body.clientWidth - 12, b = body.clientHeight - bottom;
+            return { l, t, r, b, w: r - l, h: b - t };
         }
-        function animateTo(z, cx, cy) {
-            const from = ctx.zoom, t0 = performance.now();
+        function measure() { W = stage.offsetWidth || 1; H = stage.offsetHeight || 1; }
+
+        // Допустимые x/y при масштаб sc: если сцена уже экрана — по центру,
+        // если шире/выше — можно двигать, но не дальше краёв
+        function bounds(sc) {
+            const R = region(), sw = W * sc, sh = H * sc;
+            const bx = sw <= R.w ? [R.l + (R.w - sw) / 2, R.l + (R.w - sw) / 2] : [R.r - sw, R.l];
+            const by = sh <= R.h ? [R.t + (R.h - sh) / 2, R.t + (R.h - sh) / 2] : [R.b - sh, R.t];
+            return { x0: bx[0], x1: bx[1], y0: by[0], y1: by[1] };
+        }
+        const clampTo = (v, a, b) => Math.min(b, Math.max(a, v));
+
+        function apply() {
+            stage.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
+        }
+
+        // Во время движения слой живёт на видеокарте; после — браузер перерисует его чётко
+        function startMoving() {
+            clearTimeout(crispT);
+            stage.style.willChange = 'transform';
+        }
+        function settle() {
+            clearTimeout(settleT);
+            settleT = setTimeout(() => {
+                if (touching || anim) return;
+                crispT = setTimeout(() => { stage.style.willChange = 'auto'; }, 60);
+                ctx.onSettle.forEach(f => f());
+            }, 120);
+        }
+
+        function stop() { cancelAnimationFrame(raf); raf = 0; anim = null; }
+
+        // Плавный переход к (ts, tx, ty) — двойной тап, возврат после щипка
+        function animateTo(ts, tx, ty, ms = 260) {
+            stop(); startMoving();
+            const fs = s, fx = x, fy = y, t0 = performance.now();
+            anim = 'to';
             const step = (t) => {
-                const k = Math.min(1, (t - t0) / 220), e = 1 - Math.pow(1 - k, 3);
-                zoomAt(from + (z - from) * e, cx, cy);
-                if (k < 1 && ctx.alive) requestAnimationFrame(step);
+                const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+                s = fs + (ts - fs) * e; x = fx + (tx - fx) * e; y = fy + (ty - fy) * e;
+                apply();
+                if (k < 1) raf = requestAnimationFrame(step);
+                else { anim = null; raf = 0; settle(); }
             };
-            requestAnimationFrame(step);
+            raf = requestAnimationFrame(step);
         }
-        const toggle = (cx, cy) => animateTo(ctx.zoom > 1.05 ? 1 : 2.5, cx, cy);
 
-        let pinch = null, lastTap = null;
-        const mid = (t) => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
-        const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        // Масштаб ts вокруг точки экрана (ax, ay), с приведением к границам
+        function zoomTarget(ts, ax, ay) {
+            ts = clampTo(ts, 1, maxS);
+            const cx = (ax - x) / s, cy = (ay - y) / s;
+            const B = bounds(ts);
+            return [ts, clampTo(ax - cx * ts, B.x0, B.x1), clampTo(ay - cy * ts, B.y0, B.y1)];
+        }
 
-        body.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 2) {
-                e.preventDefault();
-                const [x, y] = mid(e.touches);
-                pinch = { d0: dist(e.touches) || 1, z0: ctx.zoom, x, y };
-                lastTap = null;
+        // Вернуться в допустимые границы (после щипка/перетаскивания за край)
+        function snapBack() {
+            const ts = clampTo(s, 1, maxS);
+            if (ts !== s) {
+                const R = region();
+                const [a, b, c] = zoomTarget(ts, lastMid[0] || R.l + R.w / 2, lastMid[1] || R.t + R.h / 2);
+                animateTo(a, b, c);
+                return;
             }
-        }, { passive: false });
+            const B = bounds(s);
+            const tx = clampTo(x, B.x0, B.x1), ty = clampTo(y, B.y0, B.y1);
+            if (Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) animateTo(s, tx, ty, 300);
+            else settle();
+        }
 
-        body.addEventListener('touchmove', (e) => {
-            if (!pinch || e.touches.length !== 2) return;
-            e.preventDefault();
-            const [x, y] = mid(e.touches);
-            zoomAt(pinch.z0 * dist(e.touches) / pinch.d0, x, y);
-            body.scrollLeft -= x - pinch.x;            // двигаем двумя пальцами одновременно
-            body.scrollTop -= y - pinch.y;
-            pinch.x = x; pinch.y = y;
-        }, { passive: false });
+        // Инерция после броска: скорость затухает, за краем — «резинка» и возврат
+        function fling(vx, vy) {
+            stop(); startMoving();
+            anim = 'fling';
+            let last = performance.now();
+            const step = (t) => {
+                const dt = Math.min(32, t - last); last = t;
+                x += vx * dt; y += vy * dt;
+                const decay = Math.pow(0.996, dt);
+                vx *= decay; vy *= decay;
+                const B = bounds(s);
+                const ox = x < B.x0 ? x - B.x0 : x > B.x1 ? x - B.x1 : 0;
+                const oy = y < B.y0 ? y - B.y0 : y > B.y1 ? y - B.y1 : 0;
+                if (ox) { vx *= Math.pow(0.6, dt / 16); x -= ox * (1 - Math.pow(0.8, dt / 16)); }
+                if (oy) { vy *= Math.pow(0.6, dt / 16); y -= oy * (1 - Math.pow(0.8, dt / 16)); }
+                apply();
+                if (Math.abs(vx) + Math.abs(vy) > 0.02 || Math.abs(ox) > 0.5 || Math.abs(oy) > 0.5) {
+                    raf = requestAnimationFrame(step);
+                } else {
+                    x = clampTo(x, B.x0, B.x1); y = clampTo(y, B.y0, B.y1); apply();
+                    anim = null; raf = 0; settle();
+                }
+            };
+            raf = requestAnimationFrame(step);
+        }
 
-        body.addEventListener('touchend', (e) => {
-            if (pinch) { if (e.touches.length < 2) pinch = null; return; }
-            if (e.touches.length || e.changedTouches.length !== 1) return;
-            const t = e.changedTouches[0], now = Date.now();
-            if (lastTap && now - lastTap.t < 300 && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < 30) {
-                e.preventDefault();
-                toggle(t.clientX, t.clientY);
-                lastTap = null;
-            } else {
-                lastTap = { t: now, x: t.clientX, y: t.clientY };
+        // ---------- жесты (Pointer Events: и пальцы, и мышь)
+        const pts = new Map();
+        let pinch = null, drag = null, lastMid = [0, 0], lastTap = null, samples = [];
+        const local = (e) => { const r = body.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+        const two = () => { const [a, b] = [...pts.values()]; return a && b ? [a, b] : null; };
+
+        function rubber(over, size) {               // сопротивление при выходе за край
+            const c = 0.55;
+            return (over * size * c) / (size + c * Math.abs(over));
+        }
+
+        body.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 && e.pointerType === 'mouse') return;
+            body.setPointerCapture(e.pointerId);
+            pts.set(e.pointerId, local(e));
+            touching = true;
+            stop(); startMoving();
+            if (pts.size === 2) {
+                const [a, b] = two();
+                const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+                pinch = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, s0: s, cx: (mx - x) / s, cy: (my - y) / s };
+                drag = null; lastTap = null;
+            } else if (pts.size === 1) {
+                const [px, py] = local(e);
+                drag = { px, py, x0: x, y0: y, sx: px, sy: py, t0: performance.now(), moved: false };
+                samples = [[performance.now(), x, y]];
             }
-        }, { passive: false });
-
-        body.addEventListener('dblclick', (e) => {
-            if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;  // уже обработали тапом
-            toggle(e.clientX, e.clientY);
         });
 
+        body.addEventListener('pointermove', (e) => {
+            if (!pts.has(e.pointerId)) return;
+            pts.set(e.pointerId, local(e));
+            if (pinch && pts.size >= 2) {
+                const [a, b] = two();
+                const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+                lastMid = [mx, my];
+                let ns = pinch.s0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d0;
+                // «резинка» масштаба: можно чуть меньше 1 и чуть больше максимума
+                if (ns > maxS) ns = maxS * Math.pow(ns / maxS, 0.35);
+                if (ns < 1) ns = Math.max(0.6, Math.pow(ns, 0.5));
+                s = ns;
+                x = mx - pinch.cx * s;                // точка между пальцами остаётся под ними
+                y = my - pinch.cy * s;
+                apply();
+            } else if (drag && pts.size === 1) {
+                const [px, py] = local(e);
+                if (!drag.moved && Math.hypot(px - drag.sx, py - drag.sy) > 6) drag.moved = true;
+                if (!drag.moved) return;
+                const B = bounds(s);
+                let nx = drag.x0 + (px - drag.px), ny = drag.y0 + (py - drag.py);
+                const R = region();
+                if (nx < B.x0) nx = B.x0 + rubber(nx - B.x0, R.w); else if (nx > B.x1) nx = B.x1 + rubber(nx - B.x1, R.w);
+                if (ny < B.y0) ny = B.y0 + rubber(ny - B.y0, R.h); else if (ny > B.y1) ny = B.y1 + rubber(ny - B.y1, R.h);
+                x = nx; y = ny;
+                apply();
+                const now = performance.now();
+                samples.push([now, x, y]);
+                while (samples.length > 2 && now - samples[0][0] > 90) samples.shift();
+            }
+        });
+
+        function onUp(e) {
+            if (!pts.has(e.pointerId)) return;
+            pts.delete(e.pointerId);
+            if (pinch) {
+                if (pts.size < 2) {
+                    pinch = null;
+                    if (pts.size === 1) {           // один палец остался — продолжаем двигать им
+                        const [px, py] = [...pts.values()][0];
+                        drag = { px, py, x0: x, y0: y, sx: px, sy: py, t0: performance.now(), moved: true };
+                        samples = [[performance.now(), x, y]];
+                    } else { touching = false; snapBack(); }
+                }
+                return;
+            }
+            if (pts.size) return;
+            touching = false;
+            const d = drag; drag = null;
+            if (!d) { snapBack(); return; }
+
+            if (!d.moved && e.type === 'pointerup') {
+                // Двойной тап / двойной клик: увеличить в точку или вернуть как было
+                const now = performance.now(), [px, py] = local(e);
+                if (lastTap && now - lastTap.t < 320 && Math.hypot(px - lastTap.x, py - lastTap.y) < 40) {
+                    lastTap = null;
+                    const [ts, tx, ty] = zoomTarget(s > 1.05 ? 1 : 2.5, px, py);
+                    animateTo(ts, tx, ty);
+                } else {
+                    lastTap = { t: now, x: px, y: py };
+                    settle();
+                }
+                return;
+            }
+            // Скорость за последние ~90 мс → инерция
+            const now = performance.now();
+            const first = samples[0], lastS = samples[samples.length - 1];
+            const dt = Math.max(1, lastS[0] - first[0]);
+            const fresh = now - lastS[0] < 60;
+            const vx = fresh ? (lastS[1] - first[1]) / dt : 0, vy = fresh ? (lastS[2] - first[2]) / dt : 0;
+            if (Math.hypot(vx, vy) > 0.15) fling(vx * 1.1, vy * 1.1);
+            else snapBack();
+        }
+        body.addEventListener('pointerup', onUp);
+        body.addEventListener('pointercancel', onUp);
+
+        // Колесо: прокрутка; Ctrl/⌘ + колесо или щипок на тачпаде — масштаб
         body.addEventListener('wheel', (e) => {
-            if (!e.ctrlKey && !e.metaKey) return;      // щипок на тачпаде Mac приходит как Ctrl+колесо
             e.preventDefault();
-            zoomAt(ctx.zoom * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+            stop(); startMoving();
+            const [px, py] = local(e);
+            if (e.ctrlKey || e.metaKey) {
+                const ts = clampTo(s * Math.exp(-e.deltaY * 0.01), 1, maxS);
+                [s, x, y] = zoomTarget(ts, px, py);
+            } else {
+                const B = bounds(s);
+                x = clampTo(x - e.deltaX, B.x0, B.x1);
+                y = clampTo(y - e.deltaY, B.y0, B.y1);
+            }
+            apply();
+            settle();
         }, { passive: false });
 
-        body.addEventListener('scroll', settle, { passive: true });
+        // Размер сцены меняется (подгрузились страницы PDF, картинки в docx) — пересчитываем
+        const ro = new ResizeObserver(() => {
+            measure();
+            if (!touching && !anim) {
+                const B = bounds(s);
+                x = clampTo(x, B.x0, B.x1); y = clampTo(y, B.y0, B.y1); apply();
+            }
+        });
+        ro.observe(stage);
+        ctx.onClose.push(() => { ro.disconnect(); stop(); });
+
+        return {
+            region,
+            scale: () => s,
+            moving: () => touching || !!anim,
+            setMax: (m) => { maxS = m; },
+            // Начальное положение: по ширине по центру, сверху — начало документа
+            reset() {
+                stop(); measure();
+                s = 1;
+                const B = bounds(1);
+                x = B.x1; y = B.y1;
+                apply(); settle();
+            }
+        };
     }
 
     // iOS Safari масштабирует всю страницу жестом, даже при user-scalable=no — гасим, пока открыт просмотр
@@ -25550,7 +25737,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                     <div class="vg-viewer-sub">${fmtSize(blob.size)}</div>
                 </div>
             </div>
-            <div class="vg-viewer-body is-center"><div class="vg-zoom"><div class="vg-viewer-spinner"></div></div></div>
+            <div class="vg-viewer-body"><div class="vg-zoom"><div class="vg-viewer-spinner"></div></div></div>
             <div class="vg-viewer-bottom">
                 <button type="button" class="vg-viewer-btn" data-v="share" aria-label="Поделиться">${ICONS.share}</button>
                 <button type="button" class="vg-viewer-btn" data-v="save" aria-label="Сохранить">${ICONS.save}</button>
@@ -25560,12 +25747,15 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         document.addEventListener('gesturestart', stopGesture);
         requestAnimationFrame(() => v.classList.add('is-open'));
 
-        const body = v.querySelector('.vg-viewer-body');
-        const stage = v.querySelector('.vg-zoom');
-        const ctx = { blob, message, body, stage, zoom: 1, alive: true, urls: [], onSettle: [], onClose: [], view: null };
-        ctx.view = viewport(body);
-        stage.style.width = ctx.view.w + 'px';       // фиксируем ширину: при зуме текст не переносится заново
-        stage.style.minHeight = ctx.view.h + 'px';   // в px, а не %: тогда зум масштабирует сцену целиком и точка под пальцами не «плывёт»
+        const ctx = {
+            blob, message, alive: true, urls: [], onSettle: [], onClose: [],
+            body: v.querySelector('.vg-viewer-body'), stage: v.querySelector('.vg-zoom'),
+            topBar: v.querySelector('.vg-viewer-top'), bottomBar: v.querySelector('.vg-viewer-bottom')
+        };
+        ctx.cam = createCamera(ctx);
+        // Ширина сцены = ширина экрана: при зуме текст не переносится заново, а просто увеличивается
+        ctx.stage.style.width = ctx.cam.region().w + 'px';
+        ctx.cam.reset();
 
         const close = () => {
             if (!ctx.alive) return;
@@ -25588,7 +25778,6 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             else if (b.dataset.v === 'save') saveFile(file);
         });
 
-        setupZoom(ctx);
         requestAnimationFrame(() => {
             renderPreview(ctx).catch(() => {
                 if (ctx.alive) noPreview(ctx,
