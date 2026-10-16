@@ -10606,6 +10606,8 @@ function getActiveElements() {
             // long-press-меню, свайпа-ответа и выбора.
             if (vgIsGroupSystemMessage(message)) return renderSystemMessage(message);
             if (message.action_type === 'login_alert') return renderLoginAlertMessage(message);
+            // Файл (документ/код/картинка «как файл») — свой пузырь, см. vg-files-script
+            if (message.is_file && window.vgRenderFileMessage) return window.vgRenderFileMessage(message, runInfo);
 
             const messageElement = document.createElement('div');
             messageElement.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'}`;
@@ -11270,7 +11272,7 @@ function getActiveElements() {
         }
 
         function isTextMessage(message) {
-            return !message.is_image && !(message.content && isImageUrl(message.content));
+            return !message.is_file && !message.is_image && !(message.content && isImageUrl(message.content));
         }
 
         // Достаёт текст, который имеет смысл копировать:
@@ -17672,7 +17674,9 @@ function stopProfileDataPolling() {
                 attachButton.dataset.clickBound = '1';
                 attachButton.addEventListener('click', (e) => {
                     e.preventDefault();
-                    imageInput.click();
+                    // Меню «Фото / Файл» (vg-files-script); без него — старое поведение
+                    if (window.vgOpenAttachMenu) window.vgOpenAttachMenu(attachButton);
+                    else imageInput.click();
                 });
             }
 
@@ -24870,6 +24874,413 @@ vgResolveBadgeSrc();
         });
         clearInterval(wait);
     }, 500);
+})();
+</script>
+
+<!-- =========================================================================
+     ФАЙЛЫ В ЧАТАХ — патч для chats.html
+     Вставить ОДНИМ блоком перед </body> (после всех остальных <script>).
+     Плюс 3 маленькие правки в существующем коде — они описаны в самом низу.
+     ========================================================================= -->
+
+<input type="file" id="vgFileInput" multiple style="display:none"
+       accept=".doc,.docx,.pdf,.odt,.ppt,.pptx,.xls,.xlsx,.html,.htm,.css,.js,.png,.jpg,.jpeg,.webp,.txt,.py">
+
+<style id="vg-files-style">
+.vg-file-msg { padding: 9px 12px 22px 10px !important; min-width: 240px; }
+.vg-file-msg .message-content.vg-file-content {
+    display: flex !important; flex-wrap: nowrap !important; align-items: center !important;
+    gap: 12px; width: 100%;
+}
+.vg-file-msg .message-time { position: absolute; right: 11px; bottom: 5px; margin: 0; }
+
+.vg-file-icon {
+    position: relative; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 50%;
+    border: none; padding: 0; cursor: pointer; color: #fff;
+    background: var(--vg-file-color, #0a84ff);
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent; transition: transform .15s ease;
+}
+.vg-file-icon:active { transform: scale(.93); }
+.message-outgoing .vg-file-icon { background: rgba(255,255,255,.24); }
+
+.vg-file-icon > * { position: absolute; transition: opacity .18s ease, transform .18s ease; }
+.vg-file-ext  { font-size: 11px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; }
+.vg-file-arrow, .vg-file-cancel { font-size: 19px; opacity: 0; transform: scale(.6); }
+.vg-file-ring { inset: 0; width: 52px; height: 52px; opacity: 0; transform: rotate(-90deg); }
+.vg-file-ring circle { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round;
+                       stroke-dasharray: 144.5; stroke-dashoffset: 144.5;
+                       transition: stroke-dashoffset .2s linear; }
+
+/* remote — есть в облаке, на устройстве нет: стрелка вниз */
+.vg-file.is-remote .vg-file-ext   { opacity: 0; transform: scale(.6); }
+.vg-file.is-remote .vg-file-arrow { opacity: 1; transform: scale(1); }
+/* loading / uploading — кольцо прогресса + крестик отмены */
+.vg-file.is-loading .vg-file-ext, .vg-file.is-uploading .vg-file-ext { opacity: 0; }
+.vg-file.is-loading .vg-file-cancel, .vg-file.is-uploading .vg-file-cancel,
+.vg-file.is-loading .vg-file-ring,   .vg-file.is-uploading .vg-file-ring { opacity: 1; transform: none; }
+.vg-file.is-loading .vg-file-ring, .vg-file.is-uploading .vg-file-ring { transform: rotate(-90deg); }
+.vg-file.is-loading .vg-file-cancel, .vg-file.is-uploading .vg-file-cancel { transform: scale(1); }
+/* ready — уже на устройстве: подпись расширения */
+
+.vg-file-info { min-width: 0; flex: 1; cursor: pointer; }
+.vg-file-name { font-weight: 600; font-size: 15.5px; line-height: 1.3;
+                overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+                -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
+.message-incoming .vg-file-name { color: var(--vg-file-color, #0a84ff); }
+.vg-file-size { margin-top: 2px; font-size: 13px; opacity: .7; white-space: nowrap; }
+</style>
+
+<script id="vg-files-script">
+(function () {
+    'use strict';
+
+    // Тип файла -> цвет кружка и подпись (как разноцветные иконки в Telegram)
+    const VG_FILE_TYPES = {
+        doc:  ['#2b5797', 'DOC'],  docx: ['#2b5797', 'DOC'], odt: ['#2b5797', 'ODT'],
+        pdf:  ['#e5252a', 'PDF'],
+        ppt:  ['#d24726', 'PPT'],  pptx: ['#d24726', 'PPT'],
+        xls:  ['#1d7044', 'XLS'],  xlsx: ['#1d7044', 'XLS'],
+        html: ['#e44d26', 'HTML'], htm:  ['#e44d26', 'HTML'],
+        css:  ['#264de4', 'CSS'],  js:   ['#c9a400', 'JS'],  py: ['#3776ab', 'PY'],
+        txt:  ['#7a7f87', 'TXT'],
+        png:  ['#8e44ad', 'PNG'],  jpg:  ['#8e44ad', 'JPG'], jpeg: ['#8e44ad', 'JPG'],
+        webp: ['#8e44ad', 'WEBP']
+    };
+    const VG_FILE_MAX_BYTES = 10 * 1024 * 1024;   // = CHAT_FILE_MAX_MB на сервере
+    const VG_FILE_CACHE = 'vg-files-v1';          // локальное хранилище скачанных файлов
+
+    const fileJobs = new Map();   // id -> {abort()}  (идущие загрузки/скачивания)
+    const fileMem = new Map();    // id -> Blob       (только что отправленные/скачанные)
+
+    const extOf = (n) => { const m = /\.([a-z0-9]+)$/i.exec(n || ''); return m ? m[1].toLowerCase() : ''; };
+    const metaOf = (n) => VG_FILE_TYPES[extOf(n)] || ['#0a84ff', 'FILE'];
+
+    function fmtSize(b) {
+        b = Number(b) || 0;
+        const u = [['ГБ', 1 << 30], ['МБ', 1 << 20], ['КБ', 1 << 10]];
+        for (const [name, s] of u) if (b >= s) return (b / s).toFixed(1).replace('.', ',').replace(',0', '') + ' ' + name;
+        return b + ' Б';
+    }
+
+    // ---------------------------------------------------- локальный кэш (как у Telegram)
+    const cacheKey = (id) => '/vgfile/' + encodeURIComponent(id);
+    async function cacheGet(id) {
+        if (fileMem.has(String(id))) return fileMem.get(String(id));
+        try {
+            const r = await (await caches.open(VG_FILE_CACHE)).match(cacheKey(id));
+            return r ? await r.blob() : null;
+        } catch (e) { return null; }
+    }
+    async function cachePut(id, blob) {
+        fileMem.set(String(id), blob);
+        try {
+            await (await caches.open(VG_FILE_CACHE)).put(cacheKey(id),
+                new Response(blob, { headers: { 'Content-Type': blob.type || 'application/octet-stream' } }));
+            if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+        } catch (e) { /* приватный режим / переполнено — останется только в памяти */ }
+    }
+
+    // ---------------------------------------------------- состояние кружка
+    function paint(id, state, progress, doneBytes) {
+        document.querySelectorAll(`.vg-file[data-file-id="${CSS.escape(String(id))}"]`).forEach(el => {
+            el.classList.remove('is-remote', 'is-loading', 'is-uploading', 'is-ready');
+            el.classList.add('is-' + state);
+            const ring = el.querySelector('.vg-file-ring circle');
+            if (ring) ring.style.strokeDashoffset = 144.5 * (1 - Math.max(0.03, Math.min(1, progress || 0)));
+            const sizeEl = el.querySelector('.vg-file-size');
+            const total = Number(el.dataset.fileSize) || 0;
+            if (sizeEl) sizeEl.textContent = (state === 'loading' || state === 'uploading')
+                ? `${fmtSize(doneBytes || (progress || 0) * total)} / ${fmtSize(total)}`
+                : fmtSize(total);
+        });
+    }
+
+    // ---------------------------------------------------- отрисовка пузыря
+    window.vgRenderFileMessage = function (message, runInfo) {
+        const el = document.createElement('div');
+        el.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'} vg-file-msg`;
+        el.setAttribute('data-message-id', message.id);
+
+        const [color, label] = metaOf(message.file_name);
+        const isRead = message.is_read;
+        const status = message.is_me
+            ? `<div class="message-status"><div class="status-icons"><i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i></div></div>` : '';
+        const id = String(message.id);
+
+        el.innerHTML = `
+            <div class="message-content vg-file-content vg-file ${message.is_uploading ? 'is-uploading' : 'is-remote'}"
+                 data-file-id="${escapeHtml(id)}" data-file-size="${Number(message.file_size) || 0}"
+                 style="--vg-file-color:${color}">
+                <button type="button" class="vg-file-icon" aria-label="Файл">
+                    <span class="vg-file-ext">${label}</span>
+                    <i class="fa-solid fa-arrow-down vg-file-arrow"></i>
+                    <i class="fa-solid fa-xmark vg-file-cancel"></i>
+                    <svg class="vg-file-ring" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23"></circle></svg>
+                </button>
+                <div class="vg-file-info">
+                    <div class="vg-file-name">${escapeHtml(message.file_name || 'file')}</div>
+                    <div class="vg-file-size">${fmtSize(message.file_size)}</div>
+                </div>
+                <span class="message-time">${formatChatMessageTime(message.sent_at)}${status}</span>
+            </div>`;
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+
+        const onTap = (e) => { e.stopPropagation(); vgFileTap(message); };
+        el.querySelector('.vg-file-icon').addEventListener('click', onTap);
+        el.querySelector('.vg-file-info').addEventListener('click', onTap);
+
+        vgApplyForwardedHeader(el, message);
+        renderReactionsOnElement(el, message.reactions);
+        attachMessageLongPress(el, message);
+        vgApplyGroupSenderUi(el, message, runInfo);
+
+        // Уже скачан на это устройство? -> сразу показываем «готов»
+        if (!message.is_uploading) {
+            if (fileJobs.has(id)) paint(id, 'loading', 0);
+            else cacheGet(id).then(b => { if (b) paint(id, 'ready'); });
+        }
+        return el;
+    };
+
+    function vgFileTap(message) {
+        const id = String(message.id);
+        if (fileJobs.has(id)) { fileJobs.get(id).abort(); return; }   // отмена
+        cacheGet(id).then(blob => blob ? openBlob(blob, message) : download(message));
+    }
+
+    // ---------------------------------------------------- скачивание с прогрессом
+    async function download(message) {
+        const id = String(message.id);
+        if (!message.file_url) return;
+        const ctrl = new AbortController();
+        fileJobs.set(id, { abort: () => ctrl.abort() });
+        paint(id, 'loading', 0);
+        try {
+            const resp = await fetch(message.file_url, { signal: ctrl.signal, mode: 'cors' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const total = Number(resp.headers.get('Content-Length')) || Number(message.file_size) || 0;
+            const reader = resp.body.getReader();
+            const chunks = []; let got = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value); got += value.length;
+                paint(id, 'loading', total ? got / total : 0, got);
+            }
+            const blob = new Blob(chunks, { type: message.file_mime || '' });
+            await cachePut(id, blob);
+            paint(id, 'ready');
+        } catch (e) {
+            paint(id, 'remote');
+            if (e.name !== 'AbortError') showMessage('Не удалось скачать файл', 'error');
+        } finally {
+            fileJobs.delete(id);
+        }
+    }
+
+    // ---------------------------------------------------- открыть / сохранить
+    async function openBlob(blob, message) {
+        const file = new File([blob], message.file_name || 'file', { type: blob.type || message.file_mime || '' });
+        const mobile = /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
+        // Телефон: системное меню («Сохранить в Файлы», открыть в Word/Excel…)
+        if (mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try { await navigator.share({ files: [file] }); return; }
+            catch (e) { if (e.name === 'AbortError') return; }
+        }
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        // PDF / TXT / картинки открываем в новой вкладке, остальное — скачиваем
+        if (/^(application\/pdf|text\/plain|image\/)/.test(file.type)) a.target = '_blank';
+        else a.download = file.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+
+    // ---------------------------------------------------- если чат ещё temp_ — создаём
+    async function ensureRealChat() {
+        if (!currentChat.is_temp) return currentChat.id;
+        const oldId = currentChat.id;
+        const r = await fetch(`${SERVER_URL}/create_chat`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({ platform_user_id: userData.platform_user_id,
+                                   contact_id: currentChat.participants[0].platform_user_id })
+        });
+        const d = await r.json();
+        if (d.status !== 'success') throw new Error(d.error || 'Не удалось создать чат');
+        currentChat.id = d.chat_id; currentChat.is_temp = false; currentChatId = d.chat_id;
+        currentChatsList = currentChatsList.filter(c => c.id !== oldId);
+        currentChatsList.unshift({
+            id: d.chat_id, name: currentChat.name, last_message: '', last_message_time: new Date().toISOString(),
+            unread_count: 0, participants: currentChat.participants,
+            has_avatar_photo: currentChat.has_avatar_photo, avatar_background: currentChat.avatar_background
+        });
+        currentChatsList = sortChats(currentChatsList);
+        renderChats(currentChatsList);
+        return d.chat_id;
+    }
+
+    // Загрузка в Cloudinary напрямую (XHR — ради прогресса)
+    function uploadToCloud(sig, file, onProgress, setAbort) {
+        return new Promise((resolve, reject) => {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('api_key', sig.api_key);
+            fd.append('timestamp', sig.timestamp);
+            fd.append('signature', sig.signature);
+            if (sig.folder) fd.append('folder', sig.folder);
+            fd.append('public_id', sig.public_id);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `https://api.cloudinary.com/v1_1/${sig.cloud_name}/raw/upload`);
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total, e.loaded); };
+            xhr.onload = () => {
+                let body = {}; try { body = JSON.parse(xhr.responseText); } catch (e) {}
+                if (xhr.status >= 200 && xhr.status < 300 && body.public_id) resolve(body);
+                else reject(new Error((body.error && body.error.message) || 'Ошибка загрузки'));
+            };
+            xhr.onerror = () => reject(new Error('Нет соединения'));
+            xhr.onabort = () => { const e = new Error('cancel'); e.name = 'AbortError'; reject(e); };
+            setAbort(() => xhr.abort());
+            xhr.send(fd);
+        });
+    }
+
+    // ---------------------------------------------------- отправка одного файла
+    async function sendFile(file) {
+        if (!currentChat) return;
+        const name = file.name || 'file';
+        if (!VG_FILE_TYPES[extOf(name)]) { showMessage(`Файл «${name}» такого типа отправить нельзя`, 'error'); return; }
+        if (!file.size) { showMessage(`Файл «${name}» пустой`, 'error'); return; }
+        if (file.size > VG_FILE_MAX_BYTES) {
+            showMessage(`«${name}» больше ${fmtSize(VG_FILE_MAX_BYTES)}`, 'error'); return;
+        }
+
+        const tempId = `temp_file_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const temp = {
+            id: tempId, sender_id: userData.platform_user_id, content: `📎 ${name}`,
+            sent_at: new Date().toISOString(), is_read: false, is_me: true, is_temp: true,
+            is_file: true, is_uploading: true, file_name: name, file_size: file.size, file_mime: file.type
+        };
+        fileMem.set(tempId, file);
+        currentMessages.push(temp);
+        const { messagesContainer, noMessages } = getActiveElements();
+        noMessages.style.display = 'none';
+        renderMessages(currentMessages);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        let aborted = false;
+        fileJobs.set(tempId, { abort: () => { aborted = true; } });
+        paint(tempId, 'uploading', 0);
+
+        try {
+            const chatId = await ensureRealChat();
+
+            const s = await fetch(`${SERVER_URL}/file_upload_signature`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                body: JSON.stringify({ chat_id: chatId, platform_user_id: userData.platform_user_id,
+                                       file_name: name, file_size: file.size })
+            });
+            const sig = await s.json();
+            if (sig.status !== 'success') throw new Error(sig.error === 'file_too_large'
+                ? 'Файл слишком большой' : (sig.error || 'Ошибка'));
+            if (aborted) throw Object.assign(new Error('cancel'), { name: 'AbortError' });
+
+            const up = await uploadToCloud(sig, file,
+                (p, loaded) => paint(tempId, 'uploading', p, loaded),
+                (fn) => fileJobs.set(tempId, { abort: fn }));
+
+            const r = await fetch(`${SERVER_URL}/send_file_message`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                body: JSON.stringify({
+                    chat_id: chatId, sender_id: userData.platform_user_id, file_name: name,
+                    upload: { public_id: up.public_id, version: up.version,
+                              signature: up.signature, bytes: up.bytes }
+                })
+            });
+            const d = await r.json();
+            if (d.status !== 'success') throw new Error(d.error || 'Не удалось отправить файл');
+
+            // Пользователь удалил сообщение, пока оно грузилось
+            if (pendingDeleteTempIds.has(tempId)) {
+                const mode = pendingDeleteTempIds.get(tempId) || 'everyone';
+                pendingDeleteTempIds.delete(tempId);
+                locallyDeletedMessageIds.add(String(d.message_id));
+                fetch(`${SERVER_URL}/delete_message`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                    body: JSON.stringify({ chat_id: chatId, message_id: d.message_id,
+                                           platform_user_id: userData.platform_user_id, mode })
+                }).catch(() => {});
+                return;
+            }
+
+            // temp -> реальное сообщение (мутируем тот же объект — на него ссылается long-press)
+            Object.assign(temp, {
+                id: d.message_id, sent_at: d.sent_at, file_url: d.file_url,
+                file_mime: d.file_mime, file_size: d.file_size
+            });
+            delete temp.is_uploading; delete temp.is_temp;
+            const realId = String(d.message_id);
+            document.querySelectorAll(`[data-message-id="${tempId}"]`).forEach(n => n.setAttribute('data-message-id', realId));
+            document.querySelectorAll(`.vg-file[data-file-id="${tempId}"]`).forEach(n => n.setAttribute('data-file-id', realId));
+
+            // У отправителя файл уже есть — сразу кладём в локальный кэш
+            await cachePut(realId, file);
+            fileMem.delete(tempId);
+            paint(realId, 'ready');
+            saveMessagesToDB(chatId, currentMessages);
+
+            updateChatItemInDOM(chatId, { last_message: `📎 ${name}`, last_message_time: d.sent_at,
+                                          last_message_is_me: true, last_message_is_read: false, unread_count: 0 });
+            const i = currentChatsList.findIndex(c => String(c.id) === String(chatId));
+            if (i !== -1) {
+                Object.assign(currentChatsList[i], { last_message: `📎 ${name}`, last_message_time: d.sent_at,
+                    last_message_is_me: true, last_message_is_read: false, last_message_sender_id: userData.platform_user_id });
+                currentChatsList.unshift(currentChatsList.splice(i, 1)[0]);
+                moveChatToTop(chatId);
+                setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
+            }
+        } catch (e) {
+            currentMessages = currentMessages.filter(m => m.id !== tempId);
+            fileMem.delete(tempId);
+            renderMessages(currentMessages);
+            if (e.name !== 'AbortError') showMessage('Ошибка отправки файла: ' + e.message, 'error');
+        } finally {
+            fileJobs.delete(tempId);
+        }
+    }
+
+    // Несколько файлов — уходят по очереди, как в Telegram
+    document.getElementById('vgFileInput').addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        for (const f of files.slice(0, 10)) await sendFile(f);
+    });
+
+    // ---------------------------------------------------- меню скрепки: Фото / Файл
+    window.vgOpenAttachMenu = function (anchor) {
+        document.querySelectorAll('.vg-attach-menu').forEach(m => m.remove());
+        const menu = document.createElement('div');
+        menu.className = 'message-action-menu vg-attach-menu animate__animated animate__fadeIn';
+        menu.innerHTML = `
+            <button type="button" class="message-action-item" data-a="photo"><span>Фото</span><span class="message-action-item-icon"><i class="fa-solid fa-image"></i></span></button>
+            <div class="message-action-divider"></div>
+            <button type="button" class="message-action-item" data-a="file"><span>Файл</span><span class="message-action-item-icon"><i class="fa-solid fa-file"></i></span></button>`;
+        document.body.appendChild(menu);
+        const r = anchor.getBoundingClientRect();
+        menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
+        menu.style.top = Math.max(8, r.top - menu.offsetHeight - 10) + 'px';
+        const close = () => { menu.remove(); document.removeEventListener('pointerdown', outside, true); };
+        const outside = (e) => { if (!menu.contains(e.target)) close(); };
+        menu.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-a]'); if (!b) return;
+            close();
+            if (b.dataset.a === 'photo') document.getElementById('imageInput').click();
+            else document.getElementById('vgFileInput').click();
+        });
+        setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+    };
 })();
 </script>
 
