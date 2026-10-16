@@ -8984,14 +8984,9 @@ function openProfileModal(userId) {
         updateDesktopVisibility(false, true);
         document.querySelector('.desktop-content').scrollTo({ top: 0, behavior: 'smooth' });
     } else {
-        // Для мобильной версии - закрываем чат и показываем профиль
+        // Для мобильной версии профиль выезжает ПОВЕРХ чата (как в Telegram):
+        // чат не закрываем — он остаётся под профилем и сдвигается влево
         document.body.classList.add('modal-open');
-        
-        // Скрываем модальное окно чата
-        const chatModalMobile = document.getElementById('chatModalMobile');
-        if (chatModalMobile) {
-            chatModalMobile.classList.remove('active');
-        }
         
         // Показываем модальное окно профиля
         profileModalMobile.classList.add('active');
@@ -23720,8 +23715,7 @@ vgResolveBadgeSrc();
             if (dc) dc.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
             document.body.classList.add('modal-open');
-            const chatModal = document.getElementById('chatModalMobile');
-            if (chatModal) chatModal.classList.remove('active');
+            // Профиль группы — поверх чата, чат под ним не закрываем
             document.getElementById('profileModalMobile').classList.add('active');
             const overlay = document.getElementById('modalOverlay');
             if (overlay) overlay.classList.add('active');
@@ -26221,7 +26215,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
        список чатов уходит влево «вглубь» (параллакс), как в Telegram --- */
 @media (max-width: 767px) {
     #chatModalMobile.active {
-        animation: vgChatIn .38s cubic-bezier(.22, .8, .24, 1) both;
+        animation: vgChatIn .38s cubic-bezier(.22, .8, .24, 1) backwards;
+        transition: transform .38s cubic-bezier(.22, .8, .24, 1);
         box-shadow: -12px 0 32px rgba(0, 0, 0, .14);
     }
     #chatModalMobile.active.vg-chat-closing {
@@ -26237,6 +26232,36 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     body:has(#chatModalMobile.vg-chat-closing) .chats-container.mobile-only {
         transition-duration: .3s;
         transition-timing-function: cubic-bezier(.3, .6, .3, 1);
+    }
+
+    /* Нижнее меню (футер) — часть экрана списка чатов: при открытии чата оно не
+       исчезает, а остаётся ПОД чатом и уходит влево вместе со списком. При выходе
+       из чата оно уже на месте, а не появляется заново. */
+    .bottom-nav.mobile-only-nav {
+        transition: transform .38s cubic-bezier(.22, .8, .24, 1);
+    }
+    .chat-modal.active ~ .bottom-nav.mobile-only-nav {
+        display: flex !important;
+        opacity: 1;
+        z-index: 99;                         /* ниже экрана чата (100) */
+        pointer-events: none;
+        animation: none;
+        transform: translate3d(-24%, 0, 0);
+    }
+    .chat-modal.active.vg-chat-closing ~ .bottom-nav.mobile-only-nav {
+        transform: none;
+        transition-duration: .3s;
+        transition-timing-function: cubic-bezier(.3, .6, .3, 1);
+    }
+
+    /* Профиль контакта/группы выезжает поверх ЧАТА, а чат уходит под него влево */
+    #profileModalMobile {
+        transition: transform .38s cubic-bezier(.22, .8, .24, 1), box-shadow .38s ease !important;
+        box-shadow: -12px 0 32px rgba(0, 0, 0, .14);
+    }
+    #profileModalMobile:not(.active) { box-shadow: none; }
+    body:has(#profileModalMobile.active) #chatModalMobile.active:not(.vg-chat-closing) {
+        transform: translate3d(-24%, 0, 0);
     }
 }
 @keyframes vgChatIn  { from { transform: translate3d(100%, 0, 0); } to { transform: translate3d(0, 0, 0); } }
