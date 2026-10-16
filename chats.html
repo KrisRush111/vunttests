@@ -9048,7 +9048,12 @@ function _profileMediaOpenPartnerId() {
 }
 
 function _profileMediaFilter(list) {
-    return (list || []).filter(msg => msg && (msg.is_image || (msg.content && isImageUrl(msg.content))));
+    return (list || []).filter(msg => msg && !msg.is_file && (msg.is_image || (msg.content && isImageUrl(msg.content))));
+}
+
+// Файлы чата для вкладки «Файлы»: только уже отправленные (не грузящиеся)
+function _profileFilesFilter(list) {
+    return (list || []).filter(msg => msg && msg.is_file && !msg.is_uploading && msg.file_url);
 }
 
 // Точка входа: профиль контакта. profileUserId === null → берём открытый личный чат.
@@ -9063,7 +9068,8 @@ function renderProfileMediaSections(profileUserId) {
         if (partnerId) {
             _profileMediaTarget = 'u:' + partnerId;
             _profileMediaFetchToken = null;
-            paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), _profileMediaTarget);
+            paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), _profileMediaTarget,
+                                      _profileFilesFilter(typeof currentMessages !== 'undefined' ? currentMessages : []));
         } else {
             _profileMediaTarget = null;
             _profileMediaFetchToken = null;
@@ -9077,7 +9083,8 @@ function renderProfileMediaSections(profileUserId) {
     // Открытый чат — это личная переписка ровно с этим человеком: данные уже есть
     if (partnerId && String(profileUserId) === partnerId) {
         _profileMediaFetchToken = null;
-        paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), _profileMediaTarget);
+        paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), _profileMediaTarget,
+                                      _profileFilesFilter(typeof currentMessages !== 'undefined' ? currentMessages : []));
         return;
     }
 
@@ -9091,6 +9098,8 @@ function clearProfileMediaUi() {
     ['desktop', 'mobile'].forEach(sfx => {
         const grid = document.getElementById(`modal-photos-grid-${sfx}`);
         if (grid) grid.innerHTML = '';
+        const fl = document.getElementById(`modal-files-list-${sfx}`);
+        if (fl) { fl.className = 'profile-files-empty'; fl.textContent = 'Файлов пока нет'; }
         hideProfileMediaBlock(sfx);
     });
 }
@@ -9098,15 +9107,28 @@ function clearProfileMediaUi() {
 // Рисует переданные фото-сообщения в разделе «Медиа» профиля.
 // target — цель, для которой данные загружались; если профиль уже переключили,
 // поздний ответ игнорируется.
-function paintProfileMediaSections(photoMessages, target) {
+function paintProfileMediaSections(photoMessages, target, fileMessages) {
     if (target != null && target !== _profileMediaTarget) return;
 
     const activeElements = getActiveElements();
     if (!activeElements.modalPhotosGrid) return;
 
+    fileMessages = fileMessages || photoMessages.files || [];
     const hasMedia = photoMessages.length > 0;
-    const hasFiles = false; // файлов в переписке пока не бывает — вкладку не показываем
+    const hasFiles = fileMessages.length > 0;
     const suffix = window.matchMedia("(min-width: 768px)").matches ? 'desktop' : 'mobile';
+
+    // Вкладка «Файлы»: список как в Telegram (иконка/превью, имя, размер • дата)
+    const filesList = document.getElementById(`modal-files-list-${suffix}`);
+    if (filesList) {
+        if (hasFiles && typeof window.vgRenderProfileFiles === 'function') {
+            filesList.className = 'vg-pf-list';
+            window.vgRenderProfileFiles(filesList, fileMessages);
+        } else {
+            filesList.className = 'profile-files-empty';
+            filesList.textContent = 'Файлов пока нет';
+        }
+    }
 
     const photosSection = document.getElementById(`modal-photos-section-${suffix}`);
     const emptyEl = photosSection ? ensureProfileMediaEmptyEl(photosSection) : null;
@@ -9199,7 +9221,9 @@ async function fetchChatPhotos(chatId) {
         });
         const data = await res.json();
         if (data.status !== 'success') return null;
-        return _profileMediaFilter(data.messages);
+        const photos = _profileMediaFilter(data.messages);
+        photos.files = _profileFilesFilter(data.messages);   // для вкладки «Файлы»
+        return photos;
     } catch (e) {
         console.warn('[PROFILE MEDIA] get_messages:', e);
         return null;
@@ -9215,7 +9239,8 @@ async function loadProfileMediaForChat(chatId) {
 
     // Если эта же группа открыта в чате — рисуем сразу, не дожидаясь сети
     if (typeof currentChat !== 'undefined' && currentChat && String(currentChat.id) === String(chatId)) {
-        paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), target);
+        paintProfileMediaSections(_profileMediaFilter(typeof currentMessages !== 'undefined' ? currentMessages : []), target,
+                                  _profileFilesFilter(typeof currentMessages !== 'undefined' ? currentMessages : []));
     } else {
         clearProfileMediaUi();
     }
@@ -24965,12 +24990,20 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-viewer-body {
     flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
     padding: calc(env(safe-area-inset-top, 0px) + 72px) 12px calc(env(safe-area-inset-bottom, 0px) + 84px);
+    touch-action: pan-x pan-y;            /* щипок обрабатываем сами — страница не масштабируется */
+}
+/* «Сцена» с содержимым: её и масштабируем (CSS zoom), а прокрутка .vg-viewer-body
+   сама даёт перемещение по увеличенному файлу — как в «Просмотре» на iPhone */
+.vg-zoom {
+    margin: 0 auto; min-height: 100%;
     display: flex; flex-direction: column; align-items: center; gap: 10px;
 }
-.vg-viewer-body.is-center { justify-content: center; }
-.vg-viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
-.vg-viewer-page { width: 100%; max-width: 900px; height: auto; background: #fff; border-radius: 4px;
-                  box-shadow: 0 2px 14px rgba(0,0,0,.5); }
+/* центрируем отступами auto, а не justify-content: так увеличенная картинка не уезжает вверх за край прокрутки */
+.vg-viewer-body.is-center .vg-zoom > * { margin-top: auto; margin-bottom: auto; }
+.vg-viewer-img { display: block; border-radius: 4px; -webkit-user-drag: none; user-select: none; }
+.vg-viewer-pdfpage { position: relative; flex: 0 0 auto; background: #fff; border-radius: 4px;
+                     box-shadow: 0 2px 14px rgba(0,0,0,.5); overflow: hidden; }
+.vg-viewer-pdfpage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .vg-viewer-code {
     width: 100%; max-width: 980px; margin: 0; padding: 16px; border-radius: 12px; background: #141414;
     color: #e8e8e8; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -24998,6 +25031,47 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-viewer-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,.2);
                      border-top-color: #fff; animation: vgSpin .8s linear infinite; }
 @keyframes vgSpin { to { transform: rotate(360deg); } }
+
+/* ================= Профиль → «Файлы» (как в Telegram) ================= */
+.vg-pf-list { padding: 4px 0 8px; }
+.vg-pf-month {
+    position: sticky; top: 6px; z-index: 1; width: max-content; margin: 8px auto 4px;
+    padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    color: var(--telegram-text, #000); background: var(--telegram-bg, #fff);
+    box-shadow: 0 1px 6px rgba(0,0,0,.12);
+}
+.vg-pf-item {
+    display: flex; align-items: center; gap: 12px; padding: 8px 16px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; transition: background .15s ease;
+}
+.vg-pf-item:active { background: var(--telegram-secondary-bg, rgba(0,0,0,.05)); }
+.vg-pf-thumb {
+    position: relative; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 10px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    background: var(--vg-file-color, #0a84ff);
+    /* «лист с загнутым уголком», как иконки файлов в Telegram */
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+.vg-pf-thumb::after {
+    content: ''; position: absolute; top: 0; right: 0; width: 14px; height: 14px;
+    background: rgba(255,255,255,.45); border-bottom-left-radius: 4px;
+}
+.vg-pf-thumb.has-img { clip-path: none; background: var(--telegram-secondary-bg, #eee); }
+.vg-pf-thumb.has-img::after { display: none; }
+.vg-pf-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vg-pf-ext { font-size: 15px; font-weight: 700; letter-spacing: .2px; text-transform: lowercase; }
+.vg-pf-thumb .vg-file-ring { position: absolute; inset: 4px; width: 44px; height: 44px; opacity: 0;
+                             transform: rotate(-90deg); background: rgba(0,0,0,.45); border-radius: 50%;
+                             transition: opacity .18s ease; }
+.vg-pf-item.is-loading .vg-file-ring { opacity: 1; }
+.vg-pf-info { min-width: 0; flex: 1; }
+.vg-pf-name { font-size: 16px; font-weight: 600; color: var(--telegram-text, #000);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vg-pf-meta { margin-top: 2px; font-size: 14px; color: var(--telegram-hint, #8e8e93);
+              display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; }
+.vg-pf-meta .vg-pf-down { color: var(--telegram-blue, #0a84ff); font-size: 13px; display: none; }
+.vg-pf-item.is-remote .vg-pf-down, .vg-pf-item.is-loading .vg-pf-down { display: inline; }
+.vg-pf-meta .vg-file-size { margin: 0; padding: 0; font-size: inherit; opacity: 1; }
 </style>
 
 <script id="vg-files-script">
@@ -25156,6 +25230,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     // ---------------------------------------------------- просмотр на весь экран
     // Слева вверху ✕, слева внизу «Поделиться» (иконка как в iOS), справа внизу «Сохранить».
+    // Щипок двумя пальцами — увеличить/уменьшить, одним пальцем — двигать,
+    // двойной тап — увеличить в точку / вернуть. На компьютере: Ctrl/⌘ + колесо, двойной клик.
     const ICONS = {
         close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11"/><path d="M8.2 7.3L12 3.5l3.8 3.8"/><path d="M8.5 10H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1.5"/></svg>',
@@ -25183,6 +25259,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     const TEXT_EXT = ['txt', 'py', 'js', 'css'];
     const IMG_EXT = ['png', 'jpg', 'jpeg', 'webp'];
+    const ZOOM_MAX = 6;
 
     function fileFromBlob(blob, message) {
         return new File([blob], message.file_name || 'file',
@@ -25217,25 +25294,114 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         setTimeout(() => URL.revokeObjectURL(url), 60000);
     }
 
-    function noPreview(body, message, text) {
-        const [color, label] = metaOf(message.file_name);
-        body.classList.add('is-center');
-        body.innerHTML = `
+    function noPreview(ctx, text) {
+        const [color, label] = metaOf(ctx.message.file_name);
+        ctx.body.classList.add('is-center');
+        ctx.stage.innerHTML = `
             <div class="vg-viewer-empty">
                 <div class="vg-big-icon" style="--vg-file-color:${color}">${label}</div>
-                <div class="vg-viewer-name">${escapeHtml(message.file_name || 'file')}</div>
+                <div class="vg-viewer-name">${escapeHtml(ctx.message.file_name || 'file')}</div>
                 <p>${text || 'Предпросмотр этого формата недоступен. Нажмите «Поделиться», чтобы открыть файл в другом приложении, или «Сохранить».'}</p>
             </div>`;
     }
 
-    async function renderPreview(body, blob, message, urls, isAlive) {
-        const ext = extOf(message.file_name);
+    // Свободное место внутри области просмотра (без отступов под кнопки)
+    function viewport(body) {
+        const cs = getComputedStyle(body);
+        return {
+            w: body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+            h: body.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+        };
+    }
+
+    // ---- PDF: страницы рисуются только рядом с экраном и в чёткости под текущий зум
+    async function renderPdf(ctx) {
+        await loadLib(LIBS.pdf);
+        const lib = window.pdfjsLib;
+        lib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+        const pdf = await lib.getDocument({ data: await ctx.blob.arrayBuffer() }).promise;
+        if (!ctx.alive) { pdf.destroy(); return; }
+        ctx.onClose.push(() => pdf.destroy());
+
+        const width = Math.min(ctx.view.w, 900);
+        const first = await pdf.getPage(1);
+        const v1 = first.getViewport({ scale: 1 });
+        const ratio = v1.height / v1.width;
+
+        ctx.body.classList.remove('is-center');
+        ctx.stage.innerHTML = '';
+        const pages = [];
+        for (let n = 1; n <= pdf.numPages; n++) {
+            const box = document.createElement('div');
+            box.className = 'vg-viewer-pdfpage';
+            box.style.width = width + 'px';
+            box.style.height = Math.round(width * ratio) + 'px';
+            ctx.stage.appendChild(box);
+            pages.push({ n, box, canvas: null, res: 0, cssW: width, sized: n === 1 });
+        }
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        let busy = false, again = false;
+
+        async function update() {
+            if (busy) { again = true; return; }
+            busy = true;
+            try {
+                do {
+                    again = false;
+                    const vh = ctx.body.clientHeight;
+                    for (const p of pages) {
+                        if (!ctx.alive) return;
+                        const r = p.box.getBoundingClientRect();
+                        const near = r.bottom > -vh && r.top < vh * 2;      // экран + запас
+                        if (!near) {
+                            if (p.canvas) { p.canvas.width = p.canvas.height = 0; p.canvas.remove(); p.canvas = null; p.res = 0; }
+                            continue;
+                        }
+                        const cssH = parseFloat(p.box.style.height);
+                        // Ограничение размера холста (iPhone не тянет больше ~16 Мп)
+                        const cap = Math.sqrt(16e6 / (p.cssW * cssH * dpr * dpr));
+                        const target = Math.max(0.5, Math.min(ctx.zoom, ZOOM_MAX, cap));
+                        if (p.canvas && Math.abs(target - p.res) < 0.35) continue;
+
+                        const page = await pdf.getPage(p.n);
+                        if (!ctx.alive) return;
+                        const base = page.getViewport({ scale: 1 });
+                        if (!p.sized) {                                     // точная высота страницы
+                            p.box.style.height = Math.round(p.cssW * base.height / base.width) + 'px';
+                            p.sized = true;
+                        }
+                        const vp = page.getViewport({ scale: (p.cssW / base.width) * dpr * target });
+                        const c = document.createElement('canvas');
+                        c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+                        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+                        if (!ctx.alive) return;
+                        if (p.canvas) { p.canvas.width = p.canvas.height = 0; p.canvas.remove(); }
+                        p.box.appendChild(c);
+                        p.canvas = c; p.res = target;
+                    }
+                } while (again && ctx.alive);
+            } finally { busy = false; }
+        }
+        ctx.onSettle.push(update);
+        update();
+    }
+
+    async function renderPreview(ctx) {
+        const ext = extOf(ctx.message.file_name);
+        const { body, stage, blob } = ctx;
         const top = () => body.classList.remove('is-center');   // документы — от верха, не по центру
 
         if (IMG_EXT.includes(ext)) {
-            const u = URL.createObjectURL(blob); urls.push(u);
-            body.classList.add('is-center');
-            body.innerHTML = `<img class="vg-viewer-img" alt="" src="${u}">`;
+            const u = URL.createObjectURL(blob); ctx.urls.push(u);
+            const img = new Image();
+            img.className = 'vg-viewer-img'; img.alt = ''; img.draggable = false;
+            await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = u; });
+            // Вписываем картинку в экран; дальше её размер меняет только зум
+            const k = Math.min(1, ctx.view.w / img.naturalWidth, ctx.view.h / img.naturalHeight);
+            img.style.width = Math.round(img.naturalWidth * k) + 'px';
+            img.style.height = Math.round(img.naturalHeight * k) + 'px';
+            stage.innerHTML = ''; stage.appendChild(img);
             return;
         }
 
@@ -25244,7 +25410,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             const cut = text.length > 400000;
             if (cut) text = text.slice(0, 400000);
             top();
-            body.innerHTML = `<pre class="vg-viewer-code">${escapeHtml(text)}${cut ? '\n\n… (файл обрезан для просмотра)' : ''}</pre>`;
+            stage.innerHTML = `<pre class="vg-viewer-code">${escapeHtml(text)}${cut ? '\n\n… (файл обрезан для просмотра)' : ''}</pre>`;
             return;
         }
 
@@ -25255,38 +25421,17 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             fr.setAttribute('sandbox', '');
             fr.srcdoc = await blob.text();
             top();
-            body.innerHTML = ''; body.appendChild(fr);
+            stage.innerHTML = ''; stage.appendChild(fr);
             return;
         }
 
-        if (ext === 'pdf') {
-            await loadLib(LIBS.pdf);
-            const lib = window.pdfjsLib;
-            lib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
-            const pdf = await lib.getDocument({ data: await blob.arrayBuffer() }).promise;
-            top();
-            body.innerHTML = '';
-            const width = Math.min(body.clientWidth - 24, 900);
-            const dpr = Math.min(window.devicePixelRatio || 1, 2);
-            for (let n = 1; n <= pdf.numPages; n++) {
-                if (!isAlive()) return;                         // просмотр уже закрыли
-                const page = await pdf.getPage(n);
-                const vp1 = page.getViewport({ scale: 1 });
-                const vp = page.getViewport({ scale: (width / vp1.width) * dpr });
-                const c = document.createElement('canvas');
-                c.className = 'vg-viewer-page';
-                c.width = vp.width; c.height = vp.height;
-                body.appendChild(c);
-                await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-            }
-            return;
-        }
+        if (ext === 'pdf') return renderPdf(ctx);
 
         if (ext === 'docx') {
             await loadLib(LIBS.docx);
             const r = await window.mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
             top();
-            body.innerHTML = `<div class="vg-viewer-doc">${r.value || '<p>(пустой документ)</p>'}</div>`;
+            stage.innerHTML = `<div class="vg-viewer-doc">${r.value || '<p>(пустой документ)</p>'}</div>`;
             return;
         }
 
@@ -25294,25 +25439,105 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             await loadLib(LIBS.xlsx);
             const wb = window.XLSX.read(await blob.arrayBuffer(), { type: 'array' });
             top();
-            body.innerHTML = '';
+            stage.innerHTML = '';
             wb.SheetNames.forEach(name => {
                 const box = document.createElement('div');
                 box.className = 'vg-viewer-sheet';
                 box.innerHTML = `<h4>${escapeHtml(name)}</h4><div class="vg-sheet-wrap">${
                     window.XLSX.utils.sheet_to_html(wb.Sheets[name], { header: '', footer: '' })}</div>`;
-                body.appendChild(box);
+                stage.appendChild(box);
             });
             return;
         }
 
-        noPreview(body, message);   // doc, odt, ppt, pptx
+        noPreview(ctx);   // doc, odt, ppt, pptx
     }
+
+    // ---- масштаб: щипок, двойной тап, Ctrl+колесо
+    function setupZoom(ctx) {
+        const { body, stage } = ctx;
+        let settleT = 0;
+        const settle = () => { clearTimeout(settleT); settleT = setTimeout(() => ctx.onSettle.forEach(f => f()), 180); };
+
+        // Меняем масштаб так, чтобы точка (cx, cy) экрана осталась под пальцами
+        function zoomAt(z, cx, cy) {
+            z = Math.max(1, Math.min(ZOOM_MAX, z));
+            const r = stage.getBoundingClientRect();
+            const px = (cx - r.left) / ctx.zoom, py = (cy - r.top) / ctx.zoom;
+            ctx.zoom = z;
+            stage.style.zoom = z;
+            const r2 = stage.getBoundingClientRect();
+            body.scrollLeft += r2.left + px * z - cx;
+            body.scrollTop += r2.top + py * z - cy;
+            settle();
+        }
+        function animateTo(z, cx, cy) {
+            const from = ctx.zoom, t0 = performance.now();
+            const step = (t) => {
+                const k = Math.min(1, (t - t0) / 220), e = 1 - Math.pow(1 - k, 3);
+                zoomAt(from + (z - from) * e, cx, cy);
+                if (k < 1 && ctx.alive) requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+        }
+        const toggle = (cx, cy) => animateTo(ctx.zoom > 1.05 ? 1 : 2.5, cx, cy);
+
+        let pinch = null, lastTap = null;
+        const mid = (t) => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+        const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+        body.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const [x, y] = mid(e.touches);
+                pinch = { d0: dist(e.touches) || 1, z0: ctx.zoom, x, y };
+                lastTap = null;
+            }
+        }, { passive: false });
+
+        body.addEventListener('touchmove', (e) => {
+            if (!pinch || e.touches.length !== 2) return;
+            e.preventDefault();
+            const [x, y] = mid(e.touches);
+            zoomAt(pinch.z0 * dist(e.touches) / pinch.d0, x, y);
+            body.scrollLeft -= x - pinch.x;            // двигаем двумя пальцами одновременно
+            body.scrollTop -= y - pinch.y;
+            pinch.x = x; pinch.y = y;
+        }, { passive: false });
+
+        body.addEventListener('touchend', (e) => {
+            if (pinch) { if (e.touches.length < 2) pinch = null; return; }
+            if (e.touches.length || e.changedTouches.length !== 1) return;
+            const t = e.changedTouches[0], now = Date.now();
+            if (lastTap && now - lastTap.t < 300 && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < 30) {
+                e.preventDefault();
+                toggle(t.clientX, t.clientY);
+                lastTap = null;
+            } else {
+                lastTap = { t: now, x: t.clientX, y: t.clientY };
+            }
+        }, { passive: false });
+
+        body.addEventListener('dblclick', (e) => {
+            if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;  // уже обработали тапом
+            toggle(e.clientX, e.clientY);
+        });
+
+        body.addEventListener('wheel', (e) => {
+            if (!e.ctrlKey && !e.metaKey) return;      // щипок на тачпаде Mac приходит как Ctrl+колесо
+            e.preventDefault();
+            zoomAt(ctx.zoom * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+        }, { passive: false });
+
+        body.addEventListener('scroll', settle, { passive: true });
+    }
+
+    // iOS Safari масштабирует всю страницу жестом, даже при user-scalable=no — гасим, пока открыт просмотр
+    const stopGesture = (e) => e.preventDefault();
 
     function openViewer(blob, message) {
         document.querySelectorAll('.vg-viewer').forEach(v => v.remove());
         const file = fileFromBlob(blob, message);
-        const urls = [];
-        let alive = true;
 
         const v = document.createElement('div');
         v.className = 'vg-viewer';
@@ -25325,24 +25550,32 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                     <div class="vg-viewer-sub">${fmtSize(blob.size)}</div>
                 </div>
             </div>
-            <div class="vg-viewer-body is-center"><div class="vg-viewer-spinner"></div></div>
+            <div class="vg-viewer-body is-center"><div class="vg-zoom"><div class="vg-viewer-spinner"></div></div></div>
             <div class="vg-viewer-bottom">
                 <button type="button" class="vg-viewer-btn" data-v="share" aria-label="Поделиться">${ICONS.share}</button>
                 <button type="button" class="vg-viewer-btn" data-v="save" aria-label="Сохранить">${ICONS.save}</button>
             </div>`;
         document.body.appendChild(v);
         document.documentElement.classList.add('vg-viewer-lock');
+        document.addEventListener('gesturestart', stopGesture);
         requestAnimationFrame(() => v.classList.add('is-open'));
 
         const body = v.querySelector('.vg-viewer-body');
+        const stage = v.querySelector('.vg-zoom');
+        const ctx = { blob, message, body, stage, zoom: 1, alive: true, urls: [], onSettle: [], onClose: [], view: null };
+        ctx.view = viewport(body);
+        stage.style.width = ctx.view.w + 'px';       // фиксируем ширину: при зуме текст не переносится заново
+        stage.style.minHeight = ctx.view.h + 'px';   // в px, а не %: тогда зум масштабирует сцену целиком и точка под пальцами не «плывёт»
 
         const close = () => {
-            if (!alive) return;
-            alive = false;
+            if (!ctx.alive) return;
+            ctx.alive = false;
             document.removeEventListener('keydown', onKey);
+            document.removeEventListener('gesturestart', stopGesture);
             v.classList.remove('is-open');
             document.documentElement.classList.remove('vg-viewer-lock');
-            setTimeout(() => { v.remove(); urls.forEach(u => URL.revokeObjectURL(u)); }, 220);
+            ctx.onClose.forEach(f => { try { f(); } catch (e) {} });
+            setTimeout(() => { v.remove(); ctx.urls.forEach(u => URL.revokeObjectURL(u)); }, 220);
         };
         const onKey = (e) => { if (e.key === 'Escape') close(); };
         document.addEventListener('keydown', onKey);
@@ -25355,13 +25588,73 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             else if (b.dataset.v === 'save') saveFile(file);
         });
 
+        setupZoom(ctx);
         requestAnimationFrame(() => {
-            renderPreview(body, blob, message, urls, () => alive).catch(() => {
-                if (alive) { body.innerHTML = ''; noPreview(body, message,
-                    'Не удалось показать файл. Нажмите «Поделиться», чтобы открыть его в другом приложении, или «Сохранить».'); }
+            renderPreview(ctx).catch(() => {
+                if (ctx.alive) noPreview(ctx,
+                    'Не удалось показать файл. Нажмите «Поделиться», чтобы открыть его в другом приложении, или «Сохранить».');
             });
         });
     }
+
+    // ---------------------------------------------------- профиль → вкладка «Файлы»
+    const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+    const MONTHS_SHORT = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    window.vgRenderProfileFiles = function (listEl, messages) {
+        const items = messages.slice().sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
+        listEl.innerHTML = '';
+        let lastMonth = '';
+        for (const m of items) {
+            const d = new Date(m.sent_at);
+            const ok = !isNaN(d);
+            const monthKey = ok ? `${MONTHS[d.getMonth()]} ${d.getFullYear()}` : '';
+            if (monthKey && monthKey !== lastMonth) {
+                const h = document.createElement('div');
+                h.className = 'vg-pf-month';
+                h.textContent = monthKey;
+                listEl.appendChild(h);
+                lastMonth = monthKey;
+            }
+            const id = String(m.id);
+            const ext = extOf(m.file_name) || 'file';
+            const [color] = metaOf(m.file_name);
+            const when = ok ? `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()} в ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : '';
+
+            const row = document.createElement('div');
+            row.className = 'vg-file vg-pf-item is-remote';
+            row.dataset.fileId = id;
+            row.dataset.fileSize = Number(m.file_size) || 0;
+            row.style.setProperty('--vg-file-color', color);
+            row.innerHTML = `
+                <div class="vg-pf-thumb"><span class="vg-pf-ext">${escapeHtml(ext === 'jpeg' ? 'jpg' : ext)}</span>
+                    <svg class="vg-file-ring" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23"></circle></svg></div>
+                <div class="vg-pf-info">
+                    <div class="vg-pf-name">${escapeHtml(m.file_name || 'file')}</div>
+                    <div class="vg-pf-meta"><i class="fa-solid fa-arrow-down vg-pf-down"></i><span class="vg-file-size">${fmtSize(m.file_size)}</span>${when ? ` • ${when}` : ''}</div>
+                </div>`;
+            row.addEventListener('click', (e) => { e.stopPropagation(); vgFileTap(m); });
+            listEl.appendChild(row);
+
+            // Уже скачан на это устройство: убираем стрелку, а у картинок показываем миниатюру
+            const thumb = row.querySelector('.vg-pf-thumb');
+            if (fileJobs.has(id)) paint(id, 'loading', 0);
+            cacheGet(id).then(blob => {
+                if (!blob) return;
+                paint(id, 'ready');
+                if (IMG_EXT.includes(ext)) {
+                    const u = URL.createObjectURL(blob);
+                    const img = new Image();
+                    img.onload = () => setTimeout(() => URL.revokeObjectURL(u), 1000);
+                    img.src = u; img.alt = '';
+                    thumb.classList.add('has-img');
+                    thumb.prepend(img);
+                    thumb.querySelector('.vg-pf-ext').remove();
+                }
+            });
+        }
+    };
 
     // ---------------------------------------------------- если чат ещё temp_ — создаём
     async function ensureRealChat() {
