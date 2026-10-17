@@ -26760,13 +26760,17 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-voice.is-playing .vg-voice-play .i-pause { opacity: 1; transform: none; }
 .vg-voice.is-uploading .vg-voice-play .i-play { opacity: 0; transform: scale(.4); }
 .vg-voice.is-uploading .vg-voice-play .i-x { opacity: 1; transform: none; width: 16px; height: 16px; }
-.vg-voice-ring { position: absolute; inset: 0; width: 44px; height: 44px; transform: rotate(-90deg); opacity: 0; transition: opacity .2s; }
-.vg-voice-ring circle { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round;
-                        stroke-dasharray: 125.7; stroke-dashoffset: 125.7; transition: stroke-dashoffset .2s linear; }
-.vg-voice.is-uploading .vg-voice-ring, .vg-voice.is-buffering .vg-voice-ring { opacity: 1; }
-.vg-voice.is-buffering .vg-voice-ring { animation: vgSpinRing .9s linear infinite; }
-.vg-voice.is-buffering .vg-voice-ring circle { stroke-dashoffset: 90; }
-@keyframes vgSpinRing { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+.vg-voice-play > svg.vg-voice-ring {          /* перебиваем общее правило иконок (20×20) — кольцо на всю кнопку */
+    position: absolute; left: 0; top: 0; width: 44px; height: 44px; margin: 0;
+    transform: rotate(-90deg); transform-origin: 50% 50%; opacity: 0; transition: opacity .2s ease;
+}
+.vg-voice-ring circle { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round;
+                        stroke-dasharray: 113.1; stroke-dashoffset: 113.1; transition: stroke-dashoffset .25s linear; }
+.vg-voice.is-uploading .vg-voice-play > svg.vg-voice-ring,
+.vg-voice.is-buffering .vg-voice-play > svg.vg-voice-ring { opacity: 1; animation: vgSpinRing 1.6s linear infinite; }
+.vg-voice.is-buffering .vg-voice-ring circle { stroke-dashoffset: 80; }
+/* как в Telegram: кольцо прогресса ещё и медленно вращается */
+@keyframes vgSpinRing { from { rotate: 0deg; } to { rotate: 360deg; } }
 
 .vg-voice-body { min-width: 0; flex: 1; padding-right: 2px; }
 .vg-voice-wave { position: relative; height: 22px; cursor: pointer; touch-action: none; overflow: hidden; --p: 0%; }
@@ -26868,6 +26872,36 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // ====================================================================
     let R = null;   // текущая запись (одна на всё приложение)
 
+    // Разрешение на микрофон уже дано? Тогда интерфейс записи показываем сразу
+    // по нажатию, не дожидаясь, пока браузер откроет микрофон (это 0,2–1 с).
+    let micGranted = false;
+    let sharedAC = null;
+    // Готовим AudioContext заранее — при первом любом касании страницы (микрофон
+    // при этом НЕ включается), чтобы и самое первое нажатие на микрофон было мгновенным.
+    function warmAudio() {
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (AC && !sharedAC) { sharedAC = new AC(); sharedAC.suspend && sharedAC.suspend().catch(() => {}); }
+        } catch (e) {}
+    }
+    document.addEventListener('touchend', warmAudio, { once: true, capture: true, passive: true });
+    document.addEventListener('click', warmAudio, { once: true, capture: true });
+    try {
+        navigator.permissions && navigator.permissions.query({ name: 'microphone' }).then((st) => {
+            micGranted = st.state === 'granted';
+            st.onchange = () => { micGranted = st.state === 'granted'; };
+        }).catch(() => {});
+    } catch (e) {}
+
+    function showRecUi(my) {
+        if (my.layer) return;
+        my.layer = buildLayer(my.row, my.btn);
+        my.row.classList.add('vg-rec-anim', 'vg-recording');
+        vibrate(12);
+        cancelAnimationFrame(my.raf);
+        loop();
+    }
+
     function pickMime() {
         if (typeof MediaRecorder === 'undefined') return null;
         const list = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/aac'];
@@ -26962,39 +26996,49 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             pointerId: ev.pointerId, sx: ev.clientX, sy: ev.clientY, downAt: performance.now(),
             pressed: true, started: false, locked: false, paused: false, done: false,
             chunks: [], levels: [], elapsed: 0, segStart: 0, lastLevelAt: 0, lv: 0, raf: 0,
-            stream: null, rec: null, ac: null, analyser: null, buf: null, preview: null
+            stream: null, rec: null, ac: null, analyser: null, buf: null, preview: null, upAt: 0
         };
+        if (micGranted) showRecUi(R);    // круг и панель — в тот же кадр, что и нажатие
         // AudioContext — строго внутри жеста (иначе iOS оставит его «на паузе»)
+        // Один общий на всё приложение: создавать новый на каждое нажатие — лишние десятки мс
         try {
             const AC = window.AudioContext || window.webkitAudioContext;
-            if (AC) { R.ac = new AC(); R.ac.resume && R.ac.resume(); }
+            if (AC && (!sharedAC || sharedAC.state === 'closed')) sharedAC = new AC();
+            R.ac = sharedAC || null;
+            if (R.ac && R.ac.state !== 'running') R.ac.resume().catch(() => {});
         } catch (e) { R.ac = null; }
 
         const my = R;
         let stream;
         try {
             stream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                // Эхо-/шумоподавление выключено: на iPhone оно включает «телефонный»
+                // режим обработки голоса — звук становится глухим, как в трубке.
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true,
+                         channelCount: 1, sampleRate: 48000 }
             });
         } catch (e) {
-            if (R === my) { cleanupAudio(my); R = null; }
+            micGranted = false;
+            if (R === my) { if (my.layer) cancelRec(false); else { cleanupAudio(my); R = null; } }
             showMessage(e && e.name === 'NotAllowedError'
                 ? 'Нет доступа к микрофону — разрешите его в настройках браузера'
                 : 'Не удалось включить микрофон', 'error');
             return;
         }
+        micGranted = true;
         if (R !== my || my.done) { stream.getTracks().forEach(t => t.stop()); return; }
         my.stream = stream;
 
-        // Пока спрашивали разрешение, палец уже отпустили — запись не начинаем
-        if (!my.pressed) {
-            cleanupAudio(my); R = null;
-            showTip(btn, 'Удерживайте, чтобы записать голосовое, отпустите — чтобы отправить');
+        // Пока открывался микрофон, палец уже отпустили — запись не начинаем
+        if (!my.pressed && !my.locked) {
+            const held = ((my.upAt || performance.now()) - my.downAt) / 1000;
+            if (my.layer) cancelRec(false); else { cleanupAudio(my); R = null; }
+            if (held < 0.6) showTip(btn, 'Удерживайте, чтобы записать голосовое, отпустите — чтобы отправить');
             return;
         }
 
         try {
-            my.rec = mime ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 })
+            my.rec = mime ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 96000 })
                           : new MediaRecorder(stream);
         } catch (e) {
             try { my.rec = new MediaRecorder(stream); } catch (e2) {
@@ -27011,6 +27055,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             try {
                 if (my.ac.state !== 'running' && my.ac.resume) my.ac.resume().catch(() => {});
                 const src = my.ac.createMediaStreamSource(stream);
+                my.src = src;
                 my.analyser = my.ac.createAnalyser();
                 my.analyser.fftSize = 1024;
                 src.connect(my.analyser);
@@ -27020,10 +27065,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
         my.started = true;
         my.segStart = performance.now();
-        my.layer = buildLayer(row, btn);
-        row.classList.add('vg-rec-anim', 'vg-recording');
-        vibrate(12);
-        loop();
+        my.lastLevelAt = 0;
+        showRecUi(my);
     }
 
     function curElapsed() {
@@ -27042,7 +27085,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (timeEl) timeEl.textContent = fmtRec(t);
 
         let level = 0;
-        if (my.analyser && !my.paused && my.ac.state === 'running') {
+        if (!my.started) {
+            level = 0.12;                          // микрофон ещё открывается — круг уже на месте
+        } else if (my.analyser && !my.paused && my.ac.state === 'running') {
             my.analyser.getFloatTimeDomainData(my.buf);
             let sum = 0;
             for (let i = 0; i < my.buf.length; i++) sum += my.buf[i] * my.buf[i];
@@ -27051,7 +27096,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             level = 0.25 + Math.random() * 0.2;   // нет анализатора — «живое» дыхание круга
         }
         const now = performance.now();
-        if (!my.paused && now - my.lastLevelAt >= 50) { my.levels.push(level); my.lastLevelAt = now; }
+        if (my.started && !my.paused && now - my.lastLevelAt >= 50) { my.levels.push(level); my.lastLevelAt = now; }
         my.lv += (level - my.lv) * 0.3;
         my.layer.style.setProperty('--lv', (1 + my.lv * 0.55).toFixed(3));
         my.layer.style.setProperty('--lv2', (1 + my.lv * 0.3).toFixed(3));
@@ -27062,7 +27107,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     function onMove(e) {
         const my = R;
-        if (!my || !my.started || my.locked || my.done || e.pointerId !== my.pointerId) return;
+        if (!my || !my.layer || my.locked || my.done || e.pointerId !== my.pointerId) return;
         const dx = Math.min(0, e.clientX - my.sx);
         const dy = Math.min(0, e.clientY - my.sy);
         const horizontal = -dx > -dy;
@@ -27096,7 +27141,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         const my = R;
         if (!my || e.pointerId !== my.pointerId) return;
         my.pressed = false;
-        if (!my.started) return;                     // ещё ждём микрофон — startRec сам всё уберёт
+        my.upAt = performance.now();
+        if (!my.started) return;                     // микрофон ещё открывается — startRec сам решит
         if (my.locked || my.done) return;
         if (e.type === 'pointercancel') { lockRec(); return; }   // система перехватила жест — не теряем запись
         const held = (performance.now() - my.downAt) / 1000;
@@ -27173,7 +27219,10 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     function cleanupAudio(my) {
         cancelAnimationFrame(my.raf);
         try { my.stream && my.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
-        try { my.ac && my.ac.close(); } catch (e) {}
+        // общий AudioContext не закрываем — только отключаем микрофон и усыпляем
+        try { my.src && my.src.disconnect(); } catch (e) {}
+        my.src = null;
+        try { my.ac && my.ac.state === 'running' && my.ac.suspend(); } catch (e) {}
     }
 
     function teardown(my, cls, delay) {
@@ -27262,7 +27311,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // ====================================================================
     function paintUpload(id, p) {
         document.querySelectorAll(`.vg-voice[data-voice-id="${CSS.escape(String(id))}"] .vg-voice-ring circle`)
-            .forEach(c => { c.style.strokeDashoffset = 125.7 * (1 - clamp(p || 0, 0.04, 1)); });
+            .forEach(c => { c.style.strokeDashoffset = 113.1 * (1 - clamp(p || 0, 0.06, 1)); });
     }
 
     function uploadVoice(sig, blob, onProgress, setAbort) {
@@ -27569,7 +27618,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                  data-voice-id="${escapeHtml(id)}" data-duration="${dur}">
                 <button type="button" class="vg-voice-play" aria-label="Воспроизвести">
                     ${I.play.replace('<svg', '<svg class="i-play"')}${I.pause.replace('<svg', '<svg class="i-pause"')}${I.x.replace('<svg', '<svg class="i-x"')}
-                    <svg class="vg-voice-ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20"></circle></svg>
+                    <svg class="vg-voice-ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18"></circle></svg>
                 </button>
                 <div class="vg-voice-body">
                     <div class="vg-voice-wave">
