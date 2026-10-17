@@ -9042,6 +9042,23 @@ function _profileMediaOpenPartnerId() {
     return other ? String(other.platform_user_id) : null;
 }
 
+// Ключ «новизны» сообщения: время отправки (с надёжным разбором — Safari не
+// понимает дату с 6 знаками после секунд, которую отдаёт сервер), а если его
+// нет — числовой id (он растёт с каждым новым сообщением).
+function vgParseDate(v) {
+    if (!v) return NaN;
+    const t = Date.parse(String(v).replace(/(\.\d{3})\d+/, '$1'));
+    return isNaN(t) ? Date.parse(v) : t;
+}
+function vgMsgOrderKey(msg) {
+    const t = vgParseDate(msg && msg.sent_at);
+    if (!isNaN(t)) return t;
+    const n = Number(msg && msg.id);
+    return isNaN(n) ? 0 : n;
+}
+window.vgParseDate = vgParseDate;
+window.vgMsgOrderKey = vgMsgOrderKey;
+
 function _profileMediaFilter(list) {
     return (list || []).filter(msg => msg && !msg.is_file && (msg.is_image || (msg.content && isImageUrl(msg.content))));
 }
@@ -9131,10 +9148,15 @@ function paintProfileMediaSections(photoMessages, target, fileMessages) {
     if (hasMedia) {
         activeElements.modalPhotosGrid.style.display = '';
         if (emptyEl) emptyEl.style.display = 'none';
-        activeElements.modalPhotosGrid.innerHTML = photoMessages.map((msg, idx) => {
-            const url = msg.content;
-            return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
-        }).join('');
+        // Сначала новые фото, старые — внизу (как в Telegram). idx — номер фото
+        // в хронологическом порядке: по нему просмотрщик листает фото.
+        activeElements.modalPhotosGrid.innerHTML = photoMessages
+            .map((msg, idx) => ({ msg, idx }))
+            .sort((a, b) => vgMsgOrderKey(b.msg) - vgMsgOrderKey(a.msg) || b.idx - a.idx)
+            .map(({ msg, idx }) => {
+                const url = msg.content;
+                return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
+            }).join('');
     } else {
         activeElements.modalPhotosGrid.innerHTML = '';
         activeElements.modalPhotosGrid.style.display = 'none';
@@ -26063,11 +26085,13 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     const pad2 = (n) => String(n).padStart(2, '0');
 
     window.vgRenderProfileFiles = function (listEl, messages) {
-        const items = messages.slice().sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
+        // Сначала новые файлы, старые — внизу
+        const key = window.vgMsgOrderKey || ((m) => Number(m.id) || 0);
+        const items = messages.slice().sort((a, b) => key(b) - key(a) || (Number(b.id) || 0) - (Number(a.id) || 0));
         listEl.innerHTML = '';
         let lastMonth = '';
         for (const m of items) {
-            const d = new Date(m.sent_at);
+            const d = new Date(window.vgParseDate ? window.vgParseDate(m.sent_at) : m.sent_at);
             const ok = !isNaN(d);
             const monthKey = ok ? `${MONTHS[d.getMonth()]} ${d.getFullYear()}` : '';
             if (monthKey && monthKey !== lastMonth) {
@@ -26400,6 +26424,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
    и имя/статус на время анимации уезжали вправо. translate складывается с ним. */
 @keyframes vgSelFade  { from { opacity: 0; translate: 0 -4px; } to { opacity: 1; translate: 0 0; } }
 @keyframes vgSelBarIn { from { opacity: 0; translate: 0 100%; } to { opacity: 1; translate: 0 0; } }
+
+/* --- Кнопка отправки не поворачивается: в старых стилях на :hover был
+       rotate(15deg), а на телефоне :hover «залипает» после касания --- */
+.send-button:hover, .send-button:active, .send-button:focus { transform: none !important; }
+.send-button i, .send-button svg { transform: none !important; rotate: none !important; }
+@media (hover: hover) and (pointer: fine) {
+    .send-button:hover { scale: 1.06; }
+}
 
 /* --- Отправка: кнопка «пружинит», статус сообщения как в Telegram --- */
 .vg-send-pop { animation: vgSendPop .32s cubic-bezier(.2, .9, .3, 1.4); }
