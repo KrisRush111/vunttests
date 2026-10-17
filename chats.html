@@ -26605,6 +26605,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-rec-dot {
     flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: #ff3b30;
     margin: 0 10px 0 16px; animation: vgRecBlink 1s ease-in-out infinite;
+    scale: calc(1 - var(--hp, 0) * .7);          /* тает по мере свайпа влево */
 }
 @keyframes vgRecBlink { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
 .vg-rec-time {
@@ -26746,6 +26747,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     86%, 100% { opacity: 0; transform: translateY(4px) scale(.4) rotate(-360deg); }
 }
 .vg-rec.is-cancel .vg-rec-panel > *, .vg-rec.is-cancel .vg-rec-pplay { opacity: 0; transition: opacity .12s ease; }
+/* красная точка «превращается» в падающий микрофон: исчезает сразу, без мигания
+   (анимация мигания сильнее opacity, поэтому её снимаем) */
+.vg-rec.is-cancel .vg-rec-dot { animation: none !important; opacity: 0 !important; visibility: hidden; transition: none; }
 .vg-rec.is-cancel .vg-rec-panel { opacity: 0; transition: opacity .3s ease .32s; }
 .vg-rec.is-cancel .vg-rec-orb, .vg-rec.is-send .vg-rec-orb { animation: vgOrbOut .22s ease-in both; }
 .vg-rec.is-cancel .vg-rec-lock, .vg-rec.is-send .vg-rec-lock { opacity: 0 !important; transition: opacity .15s; animation: none; }
@@ -27197,6 +27201,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         // «‹ Влево — отмена» уезжает за пальцем и гаснет
         const hp = clamp(-ox / cancelDist, 0, 1);
         L.style.setProperty('--hx', (ox * 0.55) + 'px');
+        L.style.setProperty('--hp', hp.toFixed(3));
         L.style.setProperty('--ho', (1 - hp * 0.9).toFixed(3));
 
         // замок: поднимается, дужка закрывается, стрелка гаснет
@@ -27555,6 +27560,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         a.addEventListener('ended', onEnded);
         a.addEventListener('waiting', () => { P.buffering = true; paintPlayer(); });
         a.addEventListener('playing', () => { P.buffering = false; paintPlayer(); });
+        a.addEventListener('seeking', resetClock);       // перемотка — начинаем отсчёт заново
         a.addEventListener('play', startTick);
         a.addEventListener('pause', () => paintPlayer());
         a.addEventListener('error', () => {
@@ -27594,10 +27600,34 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         return P.els.plain;
     }
 
+    // Длительность берём из сообщения (её посчитали при записи): у mp3, который ещё
+    // грузится, браузер постоянно уточняет audio.duration — и линия от этого прыгала.
     function durOf(m) {
+        const known = Number(m && m.voice_duration) || 0;
+        if (known > 0) return known;
         const a = P.audio;
-        if (a && P.id === String(m.id) && isFinite(a.duration) && a.duration > 0) return a.duration;
-        return Number(m.voice_duration) || 0;
+        if (a && m && P.id === String(m.id) && isFinite(a.duration) && a.duration > 0) return a.duration;
+        return 0;
+    }
+
+    // Плавные «часы» плеера. audio.currentTime обновляется не каждый кадр, а ступеньками
+    // (~4 раза в секунду, на iPhone и при потоковой загрузке — ещё реже). Между
+    // обновлениями досчитываем время сами по системным часам, а назад не откатываемся.
+    const clock = { raw: -1, at: 0, shown: null };
+    function resetClock() { clock.raw = -1; clock.at = 0; clock.shown = null; }
+    function playerTime() {
+        const a = P.audio;
+        if (!a) return 0;
+        const now = performance.now(), ct = a.currentTime || 0;
+        if (ct !== clock.raw) { clock.raw = ct; clock.at = now; }
+        let t = ct;
+        if (!a.paused && !P.buffering && !a.seeking) {
+            t = ct + Math.min(0.5, (now - clock.at) / 1000) * (a.playbackRate || 1);
+        }
+        // мелкий откат назад (поправка браузера) не показываем; перемотку — показываем
+        if (clock.shown != null && t < clock.shown && clock.shown - t < 0.6 && !a.seeking) t = clock.shown;
+        clock.shown = t;
+        return t;
     }
 
     function playVoice(message, frac) {
@@ -27614,6 +27644,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             if (P.url) { URL.revokeObjectURL(P.url); P.url = null; }
             const local = voiceMem.get(id);
             P.refreshed = null;
+            resetClock();
             if (local) { P.url = URL.createObjectURL(local); a.src = P.url; }
             else if (message.file_url && (!window.vgMediaUrlFresh || window.vgMediaUrlFresh(message.file_url))) a.src = message.file_url;
             else if (message.file_url && window.vgRefreshMediaUrl) {
@@ -27632,7 +27663,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
         if (frac != null) {
             const d = durOf(message);
-            const seek = () => { try { a.currentTime = clamp(frac, 0, 0.999) * (isFinite(a.duration) && a.duration ? a.duration : d); } catch (e) {} };
+            const seek = () => { resetClock(); try { a.currentTime = clamp(frac, 0, 0.999) * (d || (isFinite(a.duration) ? a.duration : 0)); } catch (e) {} };
             if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true });
         }
         a.playbackRate = speed;
@@ -27685,7 +27716,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     function paintPlayer() {
         if (!P.id || !P.audio) return;
         const d = durOf(P.msg);
-        const frac = d ? P.audio.currentTime / d : 0;
+        const frac = d ? Math.min(1, playerTime() / d) : 0;
         paintVoice(P.id, frac, !P.audio.paused, true);
     }
 
@@ -27718,6 +27749,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             const f = fracAt(e);
             if (P.id === String(message.id)) {
                 const d = durOf(message);
+                resetClock();
                 try { P.audio.currentTime = f * d; } catch (err) {}
                 paintPlayer();
             } else playVoice(message, f);
@@ -27725,6 +27757,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         wave.addEventListener('pointermove', (e) => {
             if (!drag || P.id !== String(message.id)) return;
             const d = durOf(message);
+            resetClock();
             try { P.audio.currentTime = fracAt(e) * d; } catch (err) {}
             paintPlayer();
         });
