@@ -3538,6 +3538,10 @@ body {
                 last_online: payload.last_online
             };
             updateContactsUI();
+            vgSaveActivityCache();
+            if (typeof _profileViewedUserId !== 'undefined' && _profileViewedUserId === userId) {
+                updateProfileModalStatus(userId);
+            }
         }
 
         // Пришла новая заявка в друзья -- сразу перезапрашиваем список
@@ -3710,7 +3714,39 @@ let activityUpdateInterval; // Объявление переменной для 
 
 // Добавьте глобальные переменные
 let allContactIds = new Set();
-let currentActivityData = {};
+// Статусы «в сети / был(а) …» запоминаются на устройстве: при следующем
+// открытии страницы они показываются СРАЗУ, без «Загрузка...», а свежие
+// данные с сервера подменяют их через долю секунды (как в Telegram).
+const VG_ACTIVITY_CACHE_KEY = 'vg_contacts_activity_v1';
+let currentActivityData = (function () {
+    try {
+        const raw = JSON.parse(localStorage.getItem(VG_ACTIVITY_CACHE_KEY) || 'null');
+        if (!raw || !raw.data || !raw.saved_at) return {};
+        const ageMs = Date.now() - raw.saved_at;
+        if (ageMs > 7 * 24 * 3600 * 1000) return {};
+        const out = {};
+        Object.entries(raw.data).forEach(([id, a]) => {
+            if (!a) return;
+            // «В сети» из старого кэша не показываем: человек мог уже уйти.
+            // Он точно был в сети в момент сохранения — от этого и считаем.
+            if (a.is_online && ageMs > 90 * 1000) {
+                out[id] = { is_online: false, last_online: new Date(raw.saved_at).toISOString(), last_seen_hidden: !!a.last_seen_hidden };
+            } else {
+                out[id] = a;
+            }
+        });
+        return out;
+    } catch (e) { return {}; }
+})();
+let _vgActivitySaveT = 0;
+function vgSaveActivityCache() {
+    clearTimeout(_vgActivitySaveT);
+    _vgActivitySaveT = setTimeout(() => {
+        try {
+            localStorage.setItem(VG_ACTIVITY_CACHE_KEY, JSON.stringify({ saved_at: Date.now(), data: currentActivityData }));
+        } catch (e) {}
+    }, 400);
+}
 // В contacts.html добавьте
 let activityPollInterval;
 
@@ -4660,26 +4696,48 @@ if (!isDesktop) {
             // считаем, что пользователь ещё не выходил из сети — иначе тут
             // и в chats.html текст статуса расходился.
             if (!lastOnline) return 'в сети';
-            const now = new Date();
-            const lastSeen = new Date(lastOnline);
-            const diffMs = now - lastSeen;
+            // Время захода всегда по МОСКВЕ (Europe/Moscow), независимо от часового
+            // пояса телефона. Сервер отдаёт время в UTC; если пришло без пояса
+            // (старые события WebSocket), это тоже UTC — раньше такое время
+            // читалось как местное, и сначала показывалось на 3 часа раньше.
+            const lastMs = vgParseUtc(lastOnline);
+            if (isNaN(lastMs)) return 'был(а) недавно';
+            const diffMs = Date.now() - lastMs;
             const diffMins = Math.floor(diffMs / 60000);
             const diffHours = Math.floor(diffMs / 3600000);
             const diffDays = Math.floor(diffMs / 86400000);
+            const p = vgMskParts(lastMs);
+            const hhmm = `${p.hour}:${p.minute}`;
 
-            if (diffMins < 1) {
-                return 'только что';
-            } else if (diffMins < 60) {
-                return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
-            } else if (diffHours < 10) {
-                return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
-            } else if (diffHours < 24) {
-                return `был(а) в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
-            } else if (diffDays < 2) {
-                return `был(а) вчера в ${lastSeen.getHours().toString().padStart(2, '0')}:${lastSeen.getMinutes().toString().padStart(2, '0')}`;
-            } else {
-                return `был(а) ${lastSeen.getDate().toString().padStart(2, '0')}.${(lastSeen.getMonth() + 1).toString().padStart(2, '0')}.${lastSeen.getFullYear()}`;
-            }
+            if (diffMins < 1) return 'только что';
+            if (diffMins < 60) return `был(а) ${diffMins} ${getRussianNoun(diffMins, ['минуту', 'минуты', 'минут'])} назад`;
+            if (diffHours < 10) return `был(а) ${diffHours} ${getRussianNoun(diffHours, ['час', 'часа', 'часов'])} назад`;
+            if (diffHours < 24) return `был(а) в ${hhmm}`;
+            if (diffDays < 2) return `был(а) вчера в ${hhmm}`;
+            return `был(а) ${p.day}.${p.month}.${p.year}`;
+        }
+
+        // Строка времени от сервера -> миллисекунды. Без пояса = UTC.
+        // Лишние знаки после секунд отрезаем (Safari не понимает 6 знаков).
+        function vgParseUtc(v) {
+            if (v == null || v === '') return NaN;
+            if (typeof v === 'number') return v;
+            let s = String(v).trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
+            if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';
+            const t = Date.parse(s);
+            return isNaN(t) ? Date.parse(v) : t;
+        }
+
+        // Части даты по московскому времени: { day, month, year, hour, minute }
+        const _vgMskFmt = new Intl.DateTimeFormat('ru-RU', {
+            timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        });
+        function vgMskParts(ms) {
+            const p = {};
+            _vgMskFmt.formatToParts(new Date(ms)).forEach(x => { p[x.type] = x.value; });
+            if (p.hour === '24') p.hour = '00';
+            return p;
         }
 
         // Функция для склонения русских существительных
@@ -4802,8 +4860,11 @@ async function sendOfflineStatus() {
                     const data = await response.json();
 
                     if (data.status === 'success') {
-                        currentActivityData = data.activity_data;
+                        // Сливаем, а не заменяем: статусы людей не из этого запроса
+                        // (например, найденных поиском) не должны пропадать
+                        currentActivityData = Object.assign({}, currentActivityData, data.activity_data);
                         updateContactsUI();
+                        vgSaveActivityCache();
                     }
                 } catch (error) {
                     console.error('Error updating contacts activity:', error);
