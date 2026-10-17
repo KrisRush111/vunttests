@@ -9148,15 +9148,17 @@ function paintProfileMediaSections(photoMessages, target, fileMessages) {
     if (hasMedia) {
         activeElements.modalPhotosGrid.style.display = '';
         if (emptyEl) emptyEl.style.display = 'none';
-        // Сначала новые фото, старые — внизу (как в Telegram). idx — номер фото
-        // в хронологическом порядке: по нему просмотрщик листает фото.
-        activeElements.modalPhotosGrid.innerHTML = photoMessages
+        // Сначала новые фото, старые — внизу (как в Telegram). Просмотрщику
+        // передаём этот же список: свайп влево ведёт от нового фото к более старым.
+        const sortedPhotos = photoMessages
             .map((msg, idx) => ({ msg, idx }))
             .sort((a, b) => vgMsgOrderKey(b.msg) - vgMsgOrderKey(a.msg) || b.idx - a.idx)
-            .map(({ msg, idx }) => {
-                const url = msg.content;
-                return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${idx})"><img src="${url}" alt="Фото" loading="lazy"></div>`;
-            }).join('');
+            .map(x => x.msg);
+        window.__vgProfilePhotoList = sortedPhotos;
+        activeElements.modalPhotosGrid.innerHTML = sortedPhotos.map((msg, i) => {
+            const url = msg.content;
+            return `<div class="profile-photo-item" onclick="openImageModal('${url.replace(/'/g, "\\'")}', ${i}, window.__vgProfilePhotoList)"><img src="${url}" alt="Фото" loading="lazy"></div>`;
+        }).join('');
     } else {
         activeElements.modalPhotosGrid.innerHTML = '';
         activeElements.modalPhotosGrid.style.display = 'none';
@@ -13088,8 +13090,12 @@ function getActiveElements() {
         }
         window.saveImageToGallery = saveImageToGallery;
 
-        window.openImageModal = function(imageUrl, messageIndex = 0) {
-            const imageMessages = currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
+        // imageList (необязательно) — свой список фото и порядок листания.
+        // Профиль передаёт фото в том же порядке, что и в сетке: от новых к старым.
+        window.openImageModal = function(imageUrl, messageIndex = 0, imageList = null) {
+            const imageMessages = Array.isArray(imageList) && imageList.length
+                ? imageList
+                : currentMessages.filter(msg => msg.is_image || (msg.content && isImageUrl(msg.content)));
             const currentIndex = messageIndex;
             const totalImages = imageMessages.length;
 
@@ -26424,6 +26430,33 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
    и имя/статус на время анимации уезжали вправо. translate складывается с ним. */
 @keyframes vgSelFade  { from { opacity: 0; translate: 0 -4px; } to { opacity: 1; translate: 0 0; } }
 @keyframes vgSelBarIn { from { opacity: 0; translate: 0 100%; } to { opacity: 1; translate: 0 0; } }
+
+/* --- Поиск в списке чатов: при нажатии фон не белеет, курсор слева,
+       подсказка «Поиск чатов...» исчезает --- */
+.chats-header-sticky .search-input-container:focus-within,
+.desktop-sidebar .search-input-container:focus-within,
+.search-container .search-input-container:focus-within {
+    background-color: var(--telegram-secondary-bg) !important;
+    box-shadow: none !important;
+}
+.chats-header-sticky .search-input:focus,
+.chats-header-sticky .search-input:not(:placeholder-shown),
+.desktop-sidebar .search-input:focus,
+.desktop-sidebar .search-input:not(:placeholder-shown),
+.search-container .search-input:focus,
+.search-container .search-input:not(:placeholder-shown) {
+    text-align: left !important;
+    padding-left: 8px !important;
+}
+.chats-header-sticky .search-input:focus::placeholder,
+.desktop-sidebar .search-input:focus::placeholder,
+.search-container .search-input:focus::placeholder { color: transparent !important; }
+@media (prefers-color-scheme: dark) {
+    /* в тёмной теме пилюля поиска #2C2C2E — такой же она остаётся и при вводе */
+    .chats-header-sticky .search-input-container:focus-within,
+    .desktop-sidebar .search-input-container:focus-within,
+    .search-container .search-input-container:focus-within { background-color: #2C2C2E !important; }
+}
 
 /* --- Кнопка отправки не поворачивается: в старых стилях на :hover был
        rotate(15deg), а на телефоне :hover «залипает» после касания --- */
