@@ -6350,8 +6350,27 @@ function setupSearchHandlers() {
             if (grid) grid.innerHTML = '';
             if (ps) ps.style.display = 'none';
             if (fs) fs.style.display = 'none';
+            const fl = document.getElementById(`modal-files-list-${suffix}`);
+            if (fl) { fl.className = 'profile-files-empty'; fl.textContent = 'Файлов пока нет'; }
         });
         mediaItems = [];
+    }
+
+    // Время сообщения в мс. Safari не понимает дату с 6 знаками после секунд
+    // (так её отдаёт сервер) — отрезаем лишнее; нет даты — порядок по id.
+    function orderKey(m) {
+        const raw = m && m.sent_at ? String(m.sent_at) : '';
+        let t = Date.parse(raw.replace(/(\.\d{3})\d+/, '$1'));
+        if (isNaN(t)) t = Date.parse(raw);
+        if (!isNaN(t)) return t;
+        const n = Number(m && m.id);
+        return isNaN(n) ? 0 : n;
+    }
+    function newestFirst(list) {
+        return list
+            .map((m, i) => ({ m, i }))
+            .sort((a, b) => orderKey(b.m) - orderKey(a.m) || b.i - a.i)
+            .map(x => x.m);
     }
 
     // ПОЧЕМУ ПРОПАДАЛИ "МЕДИА | ФАЙЛЫ":
@@ -6446,11 +6465,25 @@ function setupSearchHandlers() {
         }
     };
 
-    function render(items) {
+    function render(items, files) {
         const { suffix, tabs, grid, photosSection, filesSection } = els();
         if (!grid || !photosSection || !filesSection) return;
 
+        // Порядок сетки = порядок листания в просмотрщике: от новых к старым
         mediaItems = items || [];
+        files = files || [];
+
+        // Вкладка «Файлы»: список как в Telegram (сначала новые)
+        const filesList = document.getElementById(`modal-files-list-${suffix}`);
+        if (filesList) {
+            if (files.length && typeof window.vgRenderProfileFiles === 'function') {
+                filesList.className = 'vg-pf-list';
+                window.vgRenderProfileFiles(filesList, files);
+            } else {
+                filesList.className = 'profile-files-empty';
+                filesList.textContent = 'Файлов пока нет';
+            }
+        }
 
         const hasMedia = mediaItems.length > 0;
         const emptyEl = ensureMediaEmptyEl(photosSection);
@@ -6474,9 +6507,7 @@ function setupSearchHandlers() {
             )).join('');
         }
 
-        // Файлов в переписке пока не бывает, но вкладку "Файлы" всё равно
-        // показываем — внутри неё заглушка "Файлов пока нет".
-        applyTabsVisibility(suffix, hasMedia, false);
+        applyTabsVisibility(suffix, hasMedia, files.length > 0);
     }
 
     // Загружает фото переписки с контактом и строит разделы
@@ -6524,11 +6555,13 @@ function setupSearchHandlers() {
             if (token !== mediaToken) return;
             if (msgData.status !== 'success' || !Array.isArray(msgData.messages)) return;
 
-            const items = msgData.messages
-                .filter(m => (m.is_image || isImageUrl(m.content)) && m.content)
+            const sorted = newestFirst(msgData.messages);
+            const items = sorted
+                .filter(m => !m.is_file && (m.is_image || isImageUrl(m.content)) && m.content)
                 .map(m => ({ url: m.content, sent_at: m.sent_at }));
+            const files = sorted.filter(m => m.is_file && m.file_url);
 
-            render(items);
+            render(items, files);
         } catch (e) {
             console.error('[PROFILE MEDIA] ', e);
         }
@@ -9920,5 +9953,1064 @@ vgResolveBadgeSrc();
             }
         })();
     </script>
+<!-- =========================================================================
+     ФАЙЛЫ В ПРОФИЛЕ КОНТАКТА (как в chats.html): вкладка «Файлы», скачивание
+     с прогрессом, хранение на устройстве и просмотр на весь экран
+     ========================================================================= -->
+<style id="vg-files-style">
+.vg-file-msg { padding: 7px 12px 7px 8px !important; min-width: 240px; }
+.vg-file-msg .message-content.vg-file-content {
+    display: flex !important; flex-wrap: nowrap !important; align-items: center !important;
+    gap: 12px; width: 100%;
+}
+.vg-file-msg .message-time { position: absolute; right: 11px; bottom: 6px; margin: 0; }
+
+.vg-file-icon {
+    position: relative; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 50%;
+    border: none; padding: 0; cursor: pointer; color: #fff;
+    background: var(--vg-file-color, #0a84ff);
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent; transition: transform .15s ease;
+}
+.vg-file-icon:active { transform: scale(.93); }
+.message-outgoing .vg-file-icon { background: rgba(255,255,255,.24); }
+
+.vg-file-icon > * { position: absolute; transition: opacity .18s ease, transform .18s ease; }
+.vg-file-ext  { font-size: 11px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; }
+.vg-file-arrow, .vg-file-cancel { font-size: 19px; opacity: 0; transform: scale(.6); }
+.vg-file-ring { inset: 0; width: 52px; height: 52px; opacity: 0; transform: rotate(-90deg); }
+.vg-file-ring circle { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round;
+                       stroke-dasharray: 144.5; stroke-dashoffset: 144.5;
+                       transition: stroke-dashoffset .2s linear; }
+
+/* remote — есть в облаке, на устройстве нет: стрелка вниз */
+.vg-file.is-remote .vg-file-ext   { opacity: 0; transform: scale(.6); }
+.vg-file.is-remote .vg-file-arrow { opacity: 1; transform: scale(1); }
+/* loading / uploading — кольцо прогресса + крестик отмены */
+.vg-file.is-loading .vg-file-ext, .vg-file.is-uploading .vg-file-ext { opacity: 0; }
+.vg-file.is-loading .vg-file-cancel, .vg-file.is-uploading .vg-file-cancel,
+.vg-file.is-loading .vg-file-ring,   .vg-file.is-uploading .vg-file-ring { opacity: 1; transform: none; }
+.vg-file.is-loading .vg-file-ring, .vg-file.is-uploading .vg-file-ring { transform: rotate(-90deg); }
+.vg-file.is-loading .vg-file-cancel, .vg-file.is-uploading .vg-file-cancel { transform: scale(1); }
+/* ready — уже на устройстве: подпись расширения */
+
+.vg-file-info { min-width: 0; flex: 1; cursor: pointer; }
+.vg-file-name { font-weight: 600; font-size: 15.5px; line-height: 1.3;
+                overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+                -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
+.message-incoming .vg-file-name { color: var(--vg-file-color, #0a84ff); }
+/* время стоит в одной строке с размером (как в Telegram) — оставляем ему место справа */
+.vg-file-size { margin-top: 1px; font-size: 13px; opacity: .7; white-space: nowrap; padding-right: 62px; }
+
+/* ================= Просмотр файла на весь экран ================= */
+html.vg-viewer-lock, html.vg-viewer-lock body { overflow: hidden !important; }
+html.vg-viewer-lock .message-box { z-index: 100020 !important; }
+.vg-viewer {
+    position: fixed; inset: 0; z-index: 100010; background: #000; color: #fff;
+    display: flex; flex-direction: column; opacity: 0; transition: opacity .2s ease;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+}
+.vg-viewer.is-open { opacity: 1; }
+.vg-viewer, .vg-viewer * { box-sizing: border-box; }
+.vg-viewer-top, .vg-viewer-bottom {
+    position: absolute; left: 0; right: 0; z-index: 2; display: flex; align-items: center;
+    gap: 12px; padding: 0 14px; pointer-events: none;
+}
+.vg-viewer-top    { top: 0;    padding-top: calc(env(safe-area-inset-top, 0px) + 10px); padding-bottom: 10px;
+                    background: linear-gradient(rgba(0,0,0,.75), rgba(0,0,0,0)); }
+.vg-viewer-bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); padding-top: 14px;
+                    justify-content: space-between;
+                    background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.75)); }
+.vg-viewer-btn {
+    pointer-events: auto; flex: 0 0 44px; width: 44px; height: 44px; border-radius: 50%;
+    border: none; padding: 0; color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.14); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent; transition: transform .15s ease, background .15s ease;
+}
+.vg-viewer-btn:active { transform: scale(.9); background: rgba(255,255,255,.26); }
+.vg-viewer-btn svg { width: 24px; height: 24px; }
+.vg-viewer-title { min-width: 0; flex: 1; text-align: center; padding-right: 44px; }
+.vg-viewer-name { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vg-viewer-sub  { font-size: 12px; opacity: .6; margin-top: 1px; }
+.vg-viewer-body {
+    flex: 1; position: relative; overflow: hidden;
+    touch-action: none;                  /* все жесты обрабатываем сами (щипок, перемещение, инерция) */
+    -webkit-user-select: none; user-select: none; cursor: grab;
+}
+.vg-viewer-body:active { cursor: grabbing; }
+/* «Сцена» с содержимым: двигаем и масштабируем её только через transform —
+   это делает видеокарта, без пересчёта вёрстки, поэтому без лагов */
+.vg-zoom {
+    position: absolute; left: 0; top: 0; transform-origin: 0 0;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    backface-visibility: hidden;
+}
+.vg-viewer-img { display: block; border-radius: 4px; -webkit-user-drag: none; user-select: none; }
+.vg-viewer-pdfpage { position: relative; flex: 0 0 auto; background: #fff; border-radius: 4px;
+                     box-shadow: 0 2px 14px rgba(0,0,0,.5); overflow: hidden; }
+.vg-viewer-pdfpage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.vg-viewer-code {
+    width: 100%; max-width: 980px; margin: 0; padding: 16px; border-radius: 12px; background: #141414;
+    color: #e8e8e8; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word; tab-size: 4;
+}
+.vg-viewer-doc {
+    width: 100%; max-width: 820px; background: #fff; color: #111; padding: 28px 24px; border-radius: 6px;
+    font: 15px/1.55 Georgia, "Times New Roman", serif; overflow-wrap: anywhere;
+}
+.vg-viewer-doc img { max-width: 100%; height: auto; }
+.vg-viewer-doc table { border-collapse: collapse; margin: 10px 0; }
+.vg-viewer-doc td, .vg-viewer-doc th { border: 1px solid #ccc; padding: 4px 8px; vertical-align: top; }
+.vg-viewer-sheet { width: max-content; min-width: 100%; }
+.vg-viewer-sheet h4 { margin: 6px 2px 8px; font-size: 13px; font-weight: 600; opacity: .7; }
+.vg-viewer-sheet .vg-sheet-wrap { background: #fff; border-radius: 6px; }
+.vg-viewer-sheet table { border-collapse: collapse; color: #111; font-size: 13px; }
+.vg-viewer-sheet td, .vg-viewer-sheet th { border: 1px solid #d9d9d9; padding: 4px 8px; white-space: nowrap; }
+.vg-viewer-frame { width: 100%; border: none; background: #fff; border-radius: 6px; }
+.vg-viewer-empty { text-align: center; max-width: 320px; }
+.vg-viewer-empty .vg-big-icon {
+    width: 96px; height: 96px; border-radius: 50%; margin: 0 auto 16px; background: var(--vg-file-color, #0a84ff);
+    display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800;
+}
+.vg-viewer-empty p { margin: 6px 0 0; font-size: 14px; opacity: .65; line-height: 1.4; }
+.vg-viewer-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,.2);
+                     border-top-color: #fff; animation: vgSpin .8s linear infinite; }
+@keyframes vgSpin { to { transform: rotate(360deg); } }
+
+/* ================= Профиль → «Файлы» (как в Telegram) ================= */
+.vg-pf-list { padding: 4px 0 8px; }
+.vg-pf-month {
+    position: sticky; top: 6px; z-index: 1; width: max-content; margin: 8px auto 4px;
+    padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    color: var(--telegram-text, #000); background: var(--telegram-bg, #fff);
+    box-shadow: 0 1px 6px rgba(0,0,0,.12);
+}
+.vg-pf-item {
+    display: flex; align-items: center; gap: 12px; padding: 8px 16px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; transition: background .15s ease;
+}
+.vg-pf-item:active { background: var(--telegram-secondary-bg, rgba(0,0,0,.05)); }
+.vg-pf-thumb {
+    position: relative; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 10px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    background: var(--vg-file-color, #0a84ff);
+    /* «лист с загнутым уголком», как иконки файлов в Telegram */
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+.vg-pf-thumb::after {
+    content: ''; position: absolute; top: 0; right: 0; width: 14px; height: 14px;
+    background: rgba(255,255,255,.45); border-bottom-left-radius: 4px;
+}
+.vg-pf-thumb.has-img { clip-path: none; background: var(--telegram-secondary-bg, #eee); }
+.vg-pf-thumb.has-img::after { display: none; }
+.vg-pf-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vg-pf-ext { font-size: 15px; font-weight: 700; letter-spacing: .2px; text-transform: lowercase; }
+.vg-pf-thumb .vg-file-ring { position: absolute; inset: 4px; width: 44px; height: 44px; opacity: 0;
+                             transform: rotate(-90deg); background: rgba(0,0,0,.45); border-radius: 50%;
+                             transition: opacity .18s ease; }
+.vg-pf-item.is-loading .vg-file-ring { opacity: 1; }
+.vg-pf-info { min-width: 0; flex: 1; }
+.vg-pf-name { font-size: 16px; font-weight: 600; color: var(--telegram-text, #000);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vg-pf-meta { margin-top: 2px; font-size: 14px; color: var(--telegram-hint, #8e8e93);
+              display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; }
+.vg-pf-meta .vg-pf-down { color: var(--telegram-blue, #0a84ff); font-size: 13px; display: none; }
+.vg-pf-item.is-remote .vg-pf-down, .vg-pf-item.is-loading .vg-pf-down { display: inline; }
+.vg-pf-meta .vg-file-size { margin: 0; padding: 0; font-size: inherit; opacity: 1; }
+</style>
+<script id="vg-files-script">
+(function () {
+    'use strict';
+
+    // В contacts.html нет общих helper-ов chats.html — свои минимальные версии
+    function escapeHtml(t) {
+        return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+    function showMessage(text, type) {
+        try {
+            if (typeof window.showMessage === 'function' && window.showMessage !== showMessage) return window.showMessage(text, type);
+            const box = document.getElementById('messageBox');
+            if (box) {
+                box.textContent = text;
+                box.className = `message-box ${type || 'error'}`;
+                box.style.display = 'block';
+                clearTimeout(showMessage._t);
+                showMessage._t = setTimeout(() => { box.style.display = 'none'; }, 3000);
+                return;
+            }
+        } catch (e) {}
+        console.warn(text);
+    }
+
+    // Тип файла -> цвет кружка и подпись (как разноцветные иконки в Telegram)
+    const VG_FILE_TYPES = {
+        doc:  ['#2b5797', 'DOC'],  docx: ['#2b5797', 'DOC'], odt: ['#2b5797', 'ODT'],
+        pdf:  ['#e5252a', 'PDF'],
+        ppt:  ['#d24726', 'PPT'],  pptx: ['#d24726', 'PPT'],
+        xls:  ['#1d7044', 'XLS'],  xlsx: ['#1d7044', 'XLS'],
+        html: ['#e44d26', 'HTML'], htm:  ['#e44d26', 'HTML'],
+        css:  ['#264de4', 'CSS'],  js:   ['#c9a400', 'JS'],  py: ['#3776ab', 'PY'],
+        txt:  ['#7a7f87', 'TXT'],
+        png:  ['#8e44ad', 'PNG'],  jpg:  ['#8e44ad', 'JPG'], jpeg: ['#8e44ad', 'JPG'],
+        webp: ['#8e44ad', 'WEBP']
+    };
+    const VG_FILE_MAX_BYTES = 10 * 1024 * 1024;   // = CHAT_FILE_MAX_MB на сервере
+    const VG_FILE_CACHE = 'vg-files-v1';          // локальное хранилище скачанных файлов
+
+    const fileJobs = new Map();   // id -> {abort()}  (идущие загрузки/скачивания)
+    const fileMem = new Map();    // id -> Blob       (только что отправленные/скачанные)
+
+    const extOf = (n) => { const m = /\.([a-z0-9]+)$/i.exec(n || ''); return m ? m[1].toLowerCase() : ''; };
+    const metaOf = (n) => VG_FILE_TYPES[extOf(n)] || ['#0a84ff', 'FILE'];
+
+    function fmtSize(b) {
+        b = Number(b) || 0;
+        const u = [['ГБ', 1 << 30], ['МБ', 1 << 20], ['КБ', 1 << 10]];
+        for (const [name, s] of u) if (b >= s) return (b / s).toFixed(1).replace('.', ',').replace(',0', '') + ' ' + name;
+        return b + ' Б';
+    }
+
+    // ---------------------------------------------------- локальный кэш (как у Telegram)
+    const cacheKey = (id) => '/vgfile/' + encodeURIComponent(id);
+    async function cacheGet(id) {
+        if (fileMem.has(String(id))) return fileMem.get(String(id));
+        try {
+            const r = await (await caches.open(VG_FILE_CACHE)).match(cacheKey(id));
+            return r ? await r.blob() : null;
+        } catch (e) { return null; }
+    }
+    async function cachePut(id, blob) {
+        fileMem.set(String(id), blob);
+        try {
+            await (await caches.open(VG_FILE_CACHE)).put(cacheKey(id),
+                new Response(blob, { headers: { 'Content-Type': blob.type || 'application/octet-stream' } }));
+            if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+        } catch (e) { /* приватный режим / переполнено — останется только в памяти */ }
+    }
+
+    // ---------------------------------------------------- состояние кружка
+    function paint(id, state, progress, doneBytes) {
+        document.querySelectorAll(`.vg-file[data-file-id="${CSS.escape(String(id))}"]`).forEach(el => {
+            el.classList.remove('is-remote', 'is-loading', 'is-uploading', 'is-ready');
+            el.classList.add('is-' + state);
+            const ring = el.querySelector('.vg-file-ring circle');
+            if (ring) ring.style.strokeDashoffset = 144.5 * (1 - Math.max(0.03, Math.min(1, progress || 0)));
+            const sizeEl = el.querySelector('.vg-file-size');
+            const total = Number(el.dataset.fileSize) || 0;
+            if (sizeEl) sizeEl.textContent = (state === 'loading' || state === 'uploading')
+                ? `${fmtSize(doneBytes || (progress || 0) * total)} / ${fmtSize(total)}`
+                : fmtSize(total);
+        });
+    }
+
+    // ---------------------------------------------------- отрисовка пузыря
+    window.vgRenderFileMessage = function (message, runInfo) {
+        const el = document.createElement('div');
+        el.className = `message ${message.is_me ? 'message-outgoing' : 'message-incoming'} vg-file-msg`;
+        el.setAttribute('data-message-id', message.id);
+
+        const [color, label] = metaOf(message.file_name);
+        const isRead = message.is_read;
+        const status = message.is_me
+            ? `<div class="message-status"><div class="status-icons"><i class="fas fa-check${isRead ? '-double' : ''} status-icon ${isRead ? 'read' : 'sent'}"></i></div></div>` : '';
+        const id = String(message.id);
+
+        el.innerHTML = `
+            <div class="message-content vg-file-content vg-file ${message.is_uploading ? 'is-uploading' : 'is-remote'}"
+                 data-file-id="${escapeHtml(id)}" data-file-size="${Number(message.file_size) || 0}"
+                 style="--vg-file-color:${color}">
+                <button type="button" class="vg-file-icon" aria-label="Файл">
+                    <span class="vg-file-ext">${label}</span>
+                    <i class="fa-solid fa-arrow-down vg-file-arrow"></i>
+                    <i class="fa-solid fa-xmark vg-file-cancel"></i>
+                    <svg class="vg-file-ring" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23"></circle></svg>
+                </button>
+                <div class="vg-file-info">
+                    <div class="vg-file-name">${escapeHtml(message.file_name || 'file')}</div>
+                    <div class="vg-file-size">${fmtSize(message.file_size)}</div>
+                </div>
+                <span class="message-time">${formatChatMessageTime(message.sent_at)}${status}</span>
+            </div>`;
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+
+        const onTap = (e) => { e.stopPropagation(); vgFileTap(message); };
+        el.querySelector('.vg-file-icon').addEventListener('click', onTap);
+        el.querySelector('.vg-file-info').addEventListener('click', onTap);
+
+        vgApplyForwardedHeader(el, message);
+        renderReactionsOnElement(el, message.reactions);
+        attachMessageLongPress(el, message);
+        vgApplyGroupSenderUi(el, message, runInfo);
+
+        // Уже скачан на это устройство? -> сразу показываем «готов»
+        if (!message.is_uploading) {
+            if (fileJobs.has(id)) paint(id, 'loading', 0);
+            else cacheGet(id).then(b => { if (b) paint(id, 'ready'); });
+        }
+        return el;
+    };
+
+    function vgFileTap(message) {
+        const id = String(message.id);
+        if (fileJobs.has(id)) { fileJobs.get(id).abort(); return; }   // отмена
+        cacheGet(id).then(async (blob) => {
+            if (!blob) blob = await download(message);       // сначала скачиваем…
+            if (blob) openViewer(blob, message);              // …и сразу открываем
+        });
+    }
+
+    // ---------------------------------------------------- скачивание с прогрессом
+    async function download(message) {
+        const id = String(message.id);
+        if (!message.file_url) return;
+        const ctrl = new AbortController();
+        fileJobs.set(id, { abort: () => ctrl.abort() });
+        paint(id, 'loading', 0);
+        try {
+            const resp = await fetch(message.file_url, { signal: ctrl.signal, mode: 'cors' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const total = Number(resp.headers.get('Content-Length')) || Number(message.file_size) || 0;
+            const reader = resp.body.getReader();
+            const chunks = []; let got = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value); got += value.length;
+                paint(id, 'loading', total ? got / total : 0, got);
+            }
+            const blob = new Blob(chunks, { type: message.file_mime || '' });
+            await cachePut(id, blob);
+            paint(id, 'ready');
+            return blob;
+        } catch (e) {
+            paint(id, 'remote');
+            if (e.name !== 'AbortError') showMessage('Не удалось скачать файл', 'error');
+            return null;
+        } finally {
+            fileJobs.delete(id);
+        }
+    }
+
+    // ---------------------------------------------------- просмотр на весь экран
+    // Слева вверху ✕, слева внизу «Поделиться» (иконка как в iOS), справа внизу «Сохранить».
+    //
+    // Масштаб и перемещение — как в Telegram: во время жеста меняется только
+    // transform (translate + scale) на видеокарте, без пересчёта вёрстки, поэтому
+    // 60 кадров/с даже на длинных PDF. Есть «резинка» за краями и при щипке
+    // за пределы масштаба, инерция после броска пальцем, двойной тап с анимацией.
+    // Чёткость восстанавливается после окончания жеста (PDF перерисовывается).
+    const ICONS = {
+        close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+        share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11"/><path d="M8.2 7.3L12 3.5l3.8 3.8"/><path d="M8.5 10H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1.5"/></svg>',
+        save:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 20.5h14"/></svg>'
+    };
+
+    // Библиотеки для предпросмотра грузятся только когда впервые нужны
+    const LIBS = {
+        pdf:  'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+        pdfWorker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+        docx: 'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js',
+        xlsx: 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
+    };
+    const libPromises = {};
+    function loadLib(url) {
+        if (!libPromises[url]) libPromises[url] = new Promise((res, rej) => {
+            const sc = document.createElement('script');
+            sc.src = url; sc.async = true;
+            sc.onload = res;
+            sc.onerror = () => { delete libPromises[url]; rej(new Error('lib')); };
+            document.head.appendChild(sc);
+        });
+        return libPromises[url];
+    }
+
+    const TEXT_EXT = ['txt', 'py', 'js', 'css'];
+    const IMG_EXT = ['png', 'jpg', 'jpeg', 'webp'];
+    const ZOOM_MAX = 5;
+
+    function fileFromBlob(blob, message) {
+        return new File([blob], message.file_name || 'file',
+            { type: blob.type || message.file_mime || 'application/octet-stream' });
+    }
+
+    async function shareFile(file, message) {
+        // 1) сам файл через системное меню (Android и iPhone)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try { await navigator.share({ files: [file], title: file.name }); return; }
+            catch (e) { if (e.name === 'AbortError') return; }
+        }
+        // 2) браузер не умеет делиться таким файлом — делимся ссылкой
+        if (navigator.share && message.file_url) {
+            try { await navigator.share({ title: file.name, url: message.file_url }); return; }
+            catch (e) { if (e.name === 'AbortError') return; }
+        }
+        // 3) компьютер без меню «Поделиться» — копируем ссылку
+        try {
+            await navigator.clipboard.writeText(message.file_url);
+            showMessage('Ссылка на файл скопирована', 'success');
+        } catch (e) {
+            showMessage('Этот браузер не умеет делиться файлами', 'error');
+        }
+    }
+
+    function saveFile(file) {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url; a.download = file.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+
+    function noPreview(ctx, text) {
+        const [color, label] = metaOf(ctx.message.file_name);
+        ctx.stage.innerHTML = `
+            <div class="vg-viewer-empty">
+                <div class="vg-big-icon" style="--vg-file-color:${color}">${label}</div>
+                <div class="vg-viewer-name">${escapeHtml(ctx.message.file_name || 'file')}</div>
+                <p>${text || 'Предпросмотр этого формата недоступен. Нажмите «Поделиться», чтобы открыть файл в другом приложении, или «Сохранить».'}</p>
+            </div>`;
+        ctx.cam.reset();
+    }
+
+    // ---- PDF: страницы рисуются только рядом с экраном и в чёткости под текущий зум
+    async function renderPdf(ctx) {
+        await loadLib(LIBS.pdf);
+        const lib = window.pdfjsLib;
+        lib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+        const pdf = await lib.getDocument({ data: await ctx.blob.arrayBuffer() }).promise;
+        if (!ctx.alive) { pdf.destroy(); return; }
+        ctx.onClose.push(() => pdf.destroy());
+
+        const width = Math.min(ctx.cam.region().w, 900);
+        // Размеры ВСЕХ страниц узнаём до показа: если досчитывать их по ходу,
+        // высота страниц выше экрана меняется и документ сам «съезжает»
+        const N = pdf.numPages;
+        const ratios = new Array(N).fill(0);
+        const known = Math.min(N, 600);
+        await Promise.all(Array.from({ length: known }, (_, i) => pdf.getPage(i + 1).then(pg => {
+            const v = pg.getViewport({ scale: 1 });
+            ratios[i] = v.height / v.width;
+        })));
+        if (!ctx.alive) return;
+        const fallback = ratios[0] || 1.414;
+
+        ctx.stage.innerHTML = '';
+        const pages = [];
+        for (let n = 1; n <= N; n++) {
+            const box = document.createElement('div');
+            box.className = 'vg-viewer-pdfpage';
+            box.style.width = width + 'px';
+            box.style.height = Math.round(width * (ratios[n - 1] || fallback)) + 'px';
+            ctx.stage.appendChild(box);
+            pages.push({ n, box, canvas: null, res: 0, cssW: width, sized: !!ratios[n - 1] });
+        }
+        ctx.cam.reset();
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        let busy = false, again = false;
+
+        async function update() {
+            if (busy) { again = true; return; }
+            busy = true;
+            try {
+                do {
+                    again = false;
+                    const vh = ctx.body.clientHeight;
+                    for (const p of pages) {
+                        if (!ctx.alive) return;
+                        if (ctx.cam.moving()) { again = true; break; }   // палец на экране — не мешаем жесту
+                        const r = p.box.getBoundingClientRect();
+                        const near = r.bottom > -vh && r.top < vh * 2;      // экран + запас
+                        if (!near) {
+                            if (p.canvas) { p.canvas.width = p.canvas.height = 0; p.canvas.remove(); p.canvas = null; p.res = 0; }
+                            continue;
+                        }
+                        const cssH = parseFloat(p.box.style.height);
+                        // Ограничение размера холста (iPhone не тянет больше ~16 Мп)
+                        const cap = Math.sqrt(16e6 / (p.cssW * cssH * dpr * dpr));
+                        const target = Math.max(0.5, Math.min(ctx.cam.scale(), ZOOM_MAX, cap));
+                        if (p.canvas && Math.abs(target - p.res) < 0.35) continue;
+
+                        const page = await pdf.getPage(p.n);
+                        if (!ctx.alive) return;
+                        const base = page.getViewport({ scale: 1 });
+                        if (!p.sized) {                                     // точная высота страницы
+                            p.box.style.height = Math.round(p.cssW * base.height / base.width) + 'px';
+                            p.sized = true;
+                        }
+                        const vp = page.getViewport({ scale: (p.cssW / base.width) * dpr * target });
+                        const c = document.createElement('canvas');
+                        c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+                        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+                        if (!ctx.alive) return;
+                        if (p.canvas) { p.canvas.width = p.canvas.height = 0; p.canvas.remove(); }
+                        p.box.appendChild(c);
+                        p.canvas = c; p.res = target;
+                    }
+                    if (again) await new Promise(r => setTimeout(r, 120));
+                } while (again && ctx.alive);
+            } finally { busy = false; }
+        }
+        ctx.onSettle.push(update);
+        update();
+    }
+
+    async function renderPreview(ctx) {
+        const ext = extOf(ctx.message.file_name);
+        const { stage, blob, cam } = ctx;
+
+        if (IMG_EXT.includes(ext)) {
+            const u = URL.createObjectURL(blob); ctx.urls.push(u);
+            const img = new Image();
+            img.className = 'vg-viewer-img'; img.alt = ''; img.draggable = false;
+            await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = u; });
+            // Вписываем картинку в экран; дальше её размер меняет только зум
+            const R = cam.region();
+            const k = Math.min(1, R.w / img.naturalWidth, R.h / img.naturalHeight);
+            img.style.width = Math.round(img.naturalWidth * k) + 'px';
+            img.style.height = Math.round(img.naturalHeight * k) + 'px';
+            stage.style.width = 'auto';
+            stage.innerHTML = ''; stage.appendChild(img);
+            // Мелкую картинку разрешаем увеличить до её реального размера ×2
+            cam.setMax(Math.max(ZOOM_MAX, 2 / k));
+            cam.reset();
+            return;
+        }
+
+        if (TEXT_EXT.includes(ext)) {
+            let text = await blob.text();
+            const cut = text.length > 400000;
+            if (cut) text = text.slice(0, 400000);
+            stage.innerHTML = `<pre class="vg-viewer-code">${escapeHtml(text)}${cut ? '\n\n… (файл обрезан для просмотра)' : ''}</pre>`;
+            cam.reset();
+            return;
+        }
+
+        if (ext === 'html' || ext === 'htm') {
+            // Показываем страницу без выполнения её скриптов (sandbox без allow-scripts)
+            const fr = document.createElement('iframe');
+            fr.className = 'vg-viewer-frame';
+            fr.setAttribute('sandbox', '');
+            fr.style.height = cam.region().h + 'px';
+            fr.srcdoc = await blob.text();
+            stage.innerHTML = ''; stage.appendChild(fr);
+            cam.reset();
+            return;
+        }
+
+        if (ext === 'pdf') return renderPdf(ctx);
+
+        if (ext === 'docx') {
+            await loadLib(LIBS.docx);
+            const r = await window.mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
+            stage.innerHTML = `<div class="vg-viewer-doc">${r.value || '<p>(пустой документ)</p>'}</div>`;
+            cam.reset();
+            return;
+        }
+
+        if (ext === 'xlsx' || ext === 'xls') {
+            await loadLib(LIBS.xlsx);
+            const wb = window.XLSX.read(await blob.arrayBuffer(), { type: 'array' });
+            stage.innerHTML = '';
+            wb.SheetNames.forEach(name => {
+                const box = document.createElement('div');
+                box.className = 'vg-viewer-sheet';
+                box.innerHTML = `<h4>${escapeHtml(name)}</h4><div class="vg-sheet-wrap">${
+                    window.XLSX.utils.sheet_to_html(wb.Sheets[name], { header: '', footer: '' })}</div>`;
+                stage.appendChild(box);
+            });
+            // Широкая таблица: сцена шириной с таблицу, двигаем её пальцем
+            stage.style.width = Math.max(cam.region().w, stage.scrollWidth) + 'px';
+            cam.reset();
+            return;
+        }
+
+        noPreview(ctx);   // doc, odt, ppt, pptx
+    }
+
+    // ---- «камера»: положение (x, y) и масштаб s сцены, жесты и анимации
+    function createCamera(ctx) {
+        const { body, stage } = ctx;
+        let s = 1, x = 0, y = 0;             // то, что на экране
+        let maxS = ZOOM_MAX;
+        let W = 1, H = 1;                    // размер сцены без масштаба
+        let raf = 0, anim = null;            // текущая анимация / инерция
+        let touching = false;
+        let settleT = 0, crispScale = 1;
+
+        // Видимая область: под верхней и над нижней панелью кнопок
+        function region() {
+            const top = ctx.topBar.offsetHeight + 4;
+            const bottom = ctx.bottomBar.offsetHeight + 4;
+            const l = 12, t = top, r = body.clientWidth - 12, b = body.clientHeight - bottom;
+            return { l, t, r, b, w: r - l, h: b - t };
+        }
+        function measure() { W = stage.offsetWidth || 1; H = stage.offsetHeight || 1; }
+
+        // Допустимые x/y при масштабе sc: сцена уже экрана — строго по центру,
+        // шире/выше — можно двигать, но не дальше краёв
+        function bounds(sc) {
+            const R = region(), sw = W * sc, sh = H * sc;
+            const fitX = sw <= R.w, fitY = sh <= R.h;
+            const cx = R.l + (R.w - sw) / 2, cy = R.t + (R.h - sh) / 2;
+            return {
+                fitX, fitY, R,
+                x0: fitX ? cx : R.r - sw, x1: fitX ? cx : R.l,
+                y0: fitY ? cy : R.b - sh, y1: fitY ? cy : R.t
+            };
+        }
+        const clampTo = (v, a, b) => Math.min(b, Math.max(a, v));
+
+        // «Резинка» как в iOS: чем дальше за край, тем сильнее сопротивление
+        function rubber(over, size) {
+            const c = 0.55;
+            return (over * size * c) / (size + c * Math.abs(over));
+        }
+        function rubberClamp(v, a, b, size) {
+            if (v < a) return a + rubber(v - a, size);
+            if (v > b) return b + rubber(v - b, size);
+            return v;
+        }
+        // Масштаб за пределами [1, max] тоже «тянется» с сопротивлением
+        function rubberScale(raw) {
+            if (raw > maxS) return maxS * (1 + rubber(raw / maxS - 1, 0.25));   // не больше ~+25%
+            if (raw < 1) return 1 - rubber(1 - raw, 0.35);                      // не меньше ~0,65
+            return raw;
+        }
+
+        function apply() {
+            stage.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
+        }
+
+        // Слой всегда на видеокарте; после увеличения просим браузер перерисовать
+        // его чётко в новом масштабе (один раз, когда жест закончился)
+        stage.style.willChange = 'transform';
+        function startMoving() {
+            if (stage.style.willChange !== 'transform') stage.style.willChange = 'transform';
+        }
+        function settle() {
+            clearTimeout(settleT);
+            settleT = setTimeout(() => {
+                if (touching || anim) return;
+                if (Math.abs(s - crispScale) > 0.05) {
+                    crispScale = s;
+                    if (s > 1.01) stage.style.willChange = 'auto';   // перерастеризация в чёткость
+                }
+                ctx.onSettle.forEach(f => f());
+            }, 140);
+        }
+
+        function stop() { cancelAnimationFrame(raf); raf = 0; anim = null; }
+
+        // Пружина (как в iOS/Telegram): быстро стартует и мягко «доезжает», без рывка в конце
+        function animateTo(ts, tx, ty) {
+            stop(); startMoving();
+            anim = 'spring';
+            const st = { s: [s, 0, ts], x: [x, 0, tx], y: [y, 0, ty] };   // [значение, скорость, цель]
+            const K = 0.00028, D = 0.032;    // жёсткость и затухание (критическое ≈ без отскока)
+            let last = performance.now();
+            const step = (t) => {
+                let dt = Math.min(32, t - last); last = t;
+                let done = true;
+                // интегрируем мелкими шагами — устойчиво на 60/120 Гц
+                while (dt > 0) {
+                    const h = Math.min(4, dt); dt -= h;
+                    for (const k in st) {
+                        const v = st[k];
+                        const f = -K * (v[0] - v[2]) - D * v[1];
+                        v[1] += f * h; v[0] += v[1] * h;
+                    }
+                }
+                for (const k in st) {
+                    const v = st[k], tol = k === 's' ? 0.0005 : 0.3;
+                    if (Math.abs(v[0] - v[2]) > tol || Math.abs(v[1]) > tol / 50) done = false;
+                }
+                s = st.s[0]; x = st.x[0]; y = st.y[0];
+                if (done) { s = ts; x = tx; y = ty; }
+                apply();
+                if (!done) raf = requestAnimationFrame(step);
+                else { anim = null; raf = 0; settle(); }
+            };
+            raf = requestAnimationFrame(step);
+        }
+
+        // Масштаб ts вокруг точки экрана (ax, ay), с приведением к границам
+        function zoomTarget(ts, ax, ay) {
+            ts = clampTo(ts, 1, maxS);
+            const cx = (ax - x) / s, cy = (ay - y) / s;
+            const B = bounds(ts);
+            return [ts, clampTo(ax - cx * ts, B.x0, B.x1), clampTo(ay - cy * ts, B.y0, B.y1)];
+        }
+
+        // Вернуться в допустимые границы (после щипка/перетаскивания за край)
+        function snapBack(ax, ay) {
+            const R = region();
+            const [ts, tx, ty] = zoomTarget(s, ax == null ? R.l + R.w / 2 : ax, ay == null ? R.t + R.h / 2 : ay);
+            if (Math.abs(ts - s) > 0.001 || Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) animateTo(ts, tx, ty);
+            else settle();
+        }
+
+        // Инерция после броска (как UIScrollView: замедление 0.998 за мс),
+        // упёрлись в край — мягкий отскок пружиной
+        function fling(vx, vy) {
+            stop(); startMoving();
+            anim = 'fling';
+            let last = performance.now();
+            const B = bounds(s);
+            if (B.fitX) vx = 0;
+            if (B.fitY) vy = 0;
+            const step = (t) => {
+                const dt = Math.min(32, t - last); last = t;
+                const decay = Math.pow(0.998, dt);
+                x += vx * dt; y += vy * dt;
+                vx *= decay; vy *= decay;
+                const out = x < B.x0 || x > B.x1 || y < B.y0 || y > B.y1;
+                apply();
+                if (out || Math.abs(vx) + Math.abs(vy) < 0.02) {
+                    anim = null; raf = 0;
+                    if (out) {                       // вылетели за край — пружиной назад
+                        animateTo(s, clampTo(x, B.x0, B.x1), clampTo(y, B.y0, B.y1));
+                    } else settle();
+                    return;
+                }
+                raf = requestAnimationFrame(step);
+            };
+            raf = requestAnimationFrame(step);
+        }
+
+        // ---------- жесты (Pointer Events: и пальцы, и мышь)
+        const pts = new Map();
+        let pinch = null, drag = null, lastTap = null, samples = [];
+        const local = (e) => { const r = body.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+        const two = () => { const v = [...pts.values()]; return v.length >= 2 ? [v[0], v[1]] : null; };
+        const midOf = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const distOf = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) || 1;
+
+        // Начать перетаскивание одним пальцем из текущего положения
+        function beginDrag(px, py, fromPinch) {
+            const B = bounds(s);
+            // «сырые» координаты без резинки — чтобы она не накапливалась
+            drag = { px, py, rx: x, ry: y, moved: !!fromPinch, sx: px, sy: py, fromPinch: !!fromPinch };
+            if (x < B.x0 || x > B.x1) drag.rx = x;  // уже за краем — продолжаем оттуда
+            samples = [[performance.now(), x, y]];
+        }
+
+        body.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 && e.pointerType === 'mouse') return;
+            try { body.setPointerCapture(e.pointerId); } catch (err) {}
+            pts.set(e.pointerId, local(e));
+            touching = true;
+            stop(); startMoving();
+            if (pts.size === 2) {
+                const [a, b] = two();
+                const m = midOf(a, b);
+                pinch = { d: distOf(a, b), m, raw: s };
+                drag = null; lastTap = null;
+            } else if (pts.size === 1) {
+                const [px, py] = local(e);
+                beginDrag(px, py, false);
+            }
+        });
+
+        body.addEventListener('pointermove', (e) => {
+            if (!pts.has(e.pointerId)) return;
+            pts.set(e.pointerId, local(e));
+            if (pinch && pts.size >= 2) {
+                const [a, b] = two();
+                const m = midOf(a, b), d = distOf(a, b);
+                // Пошагово: масштаб относительно прошлого кадра, вокруг точки между пальцами
+                pinch.raw *= d / pinch.d;
+                const ns = rubberScale(pinch.raw);
+                const k = ns / s;
+                let nx = m[0] - (pinch.m[0] - x) * k;
+                let ny = m[1] - (pinch.m[1] - y) * k;
+                s = ns;
+                // Пока файл уже экрана — он стоит по центру и никуда не «уезжает» вбок;
+                // шире экрана — за край пускаем только с сопротивлением
+                const B = bounds(s);
+                x = B.fitX ? B.x0 : rubberClamp(nx, B.x0, B.x1, B.R.w);
+                y = B.fitY ? B.y0 : rubberClamp(ny, B.y0, B.y1, B.R.h);
+                pinch.d = d; pinch.m = m;
+                apply();
+            } else if (drag && pts.size === 1) {
+                const [px, py] = local(e);
+                if (!drag.moved && Math.hypot(px - drag.sx, py - drag.sy) > 6) {
+                    drag.moved = true; drag.px = px; drag.py = py;   // без скачка на величину порога
+                }
+                if (!drag.moved) return;
+                drag.rx += px - drag.px; drag.ry += py - drag.py;
+                drag.px = px; drag.py = py;
+                const B = bounds(s);
+                x = B.fitX ? B.x0 : rubberClamp(drag.rx, B.x0, B.x1, B.R.w);
+                y = B.fitY ? B.y0 : rubberClamp(drag.ry, B.y0, B.y1, B.R.h);
+                apply();
+                const now = performance.now();
+                samples.push([now, x, y]);
+                while (samples.length > 2 && now - samples[0][0] > 80) samples.shift();
+            }
+        });
+
+        function onUp(e) {
+            if (!pts.has(e.pointerId)) return;
+            pts.delete(e.pointerId);
+            if (pinch) {
+                if (pts.size < 2) {
+                    const m = pinch.m;
+                    pinch = null;
+                    if (pts.size === 1) {
+                        // Один палец остался — двигаем им, но без инерции после щипка
+                        const [px, py] = [...pts.values()][0];
+                        beginDrag(px, py, true);
+                    } else {
+                        touching = false;
+                        snapBack(m[0], m[1]);
+                    }
+                }
+                return;
+            }
+            if (pts.size) return;
+            touching = false;
+            const d = drag; drag = null;
+            if (!d) { snapBack(); return; }
+
+            if (!d.moved && e.type === 'pointerup') {
+                // Двойной тап / двойной клик: увеличить в точку или вернуть как было
+                const now = performance.now(), [px, py] = local(e);
+                if (lastTap && now - lastTap.t < 300 && Math.hypot(px - lastTap.x, py - lastTap.y) < 40) {
+                    lastTap = null;
+                    const [ts, tx, ty] = zoomTarget(s > 1.05 ? 1 : 2.5, px, py);
+                    animateTo(ts, tx, ty);
+                } else {
+                    lastTap = { t: now, x: px, y: py };
+                    settle();
+                }
+                return;
+            }
+            const B = bounds(s);
+            const outside = x < B.x0 - 0.5 || x > B.x1 + 0.5 || y < B.y0 - 0.5 || y > B.y1 + 0.5;
+            if (d.fromPinch || outside) { snapBack(); return; }
+
+            // Скорость за последние ~80 мс → инерция (только если палец ещё двигался при отпускании)
+            const now = performance.now();
+            const first = samples[0], lastS = samples[samples.length - 1];
+            const dt = Math.max(16, lastS[0] - first[0]);
+            const fresh = now - lastS[0] < 50;
+            let vx = fresh ? (lastS[1] - first[1]) / dt : 0, vy = fresh ? (lastS[2] - first[2]) / dt : 0;
+            const sp = Math.hypot(vx, vy);
+            if (sp > 6) { vx *= 6 / sp; vy *= 6 / sp; }          // не улетать от случайного рывка
+            if (sp > 0.12) fling(vx, vy);
+            else settle();
+        }
+        body.addEventListener('pointerup', onUp);
+        body.addEventListener('pointercancel', onUp);
+
+        // Колесо/тачпад: плавно «догоняем» цель, а не прыгаем на каждый щелчок колеса
+        let wheelT = null;
+        function wheelLoop() {
+            if (!wheelT) return;
+            const a = 0.28;
+            s += (wheelT.s - s) * a; x += (wheelT.x - x) * a; y += (wheelT.y - y) * a;
+            apply();
+            if (Math.abs(wheelT.s - s) < 0.001 && Math.abs(wheelT.x - x) < 0.3 && Math.abs(wheelT.y - y) < 0.3) {
+                s = wheelT.s; x = wheelT.x; y = wheelT.y; apply();
+                wheelT = null; anim = null; raf = 0; settle();
+                return;
+            }
+            raf = requestAnimationFrame(wheelLoop);
+        }
+        body.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (anim !== 'wheel') { stop(); wheelT = { s, x, y }; }
+            startMoving();
+            const [px, py] = local(e);
+            const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? body.clientHeight : 1;
+            const dx = e.deltaX * unit, dy = e.deltaY * unit;
+            if (e.ctrlKey || e.metaKey) {
+                const ts = clampTo(wheelT.s * Math.exp(-dy * 0.01), 1, maxS);
+                const cx = (px - wheelT.x) / wheelT.s, cy = (py - wheelT.y) / wheelT.s;
+                const B = bounds(ts);
+                wheelT = { s: ts, x: clampTo(px - cx * ts, B.x0, B.x1), y: clampTo(py - cy * ts, B.y0, B.y1) };
+            } else {
+                const B = bounds(wheelT.s);
+                wheelT.x = clampTo(wheelT.x - dx, B.x0, B.x1);
+                wheelT.y = clampTo(wheelT.y - dy, B.y0, B.y1);
+            }
+            if (anim !== 'wheel') { anim = 'wheel'; raf = requestAnimationFrame(wheelLoop); }
+        }, { passive: false });
+
+        // Размер сцены изменился (подгрузились картинки в docx и т.п.) — без рывков:
+        // поправляем положение, только если сцена реально вышла за допустимые границы
+        const ro = new ResizeObserver(() => {
+            measure();
+            if (touching || anim) return;
+            const B = bounds(s);
+            const tx = clampTo(x, B.x0, B.x1), ty = clampTo(y, B.y0, B.y1);
+            if (Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) { x = tx; y = ty; apply(); }
+        });
+        ro.observe(stage);
+        ctx.onClose.push(() => { ro.disconnect(); stop(); clearTimeout(settleT); });
+
+        return {
+            region,
+            scale: () => s,
+            moving: () => touching || !!anim,
+            setMax: (m) => { maxS = m; },
+            // Начальное положение: по ширине по центру, сверху — начало документа
+            reset() {
+                stop(); measure();
+                s = 1; crispScale = 1;
+                stage.style.willChange = 'transform';
+                const B = bounds(1);
+                x = B.x1; y = B.y1;
+                apply(); settle();
+            }
+        };
+    }
+
+    // iOS Safari масштабирует всю страницу жестом, даже при user-scalable=no — гасим, пока открыт просмотр
+    const stopGesture = (e) => e.preventDefault();
+
+    function openViewer(blob, message) {
+        document.querySelectorAll('.vg-viewer').forEach(v => v.remove());
+        const file = fileFromBlob(blob, message);
+
+        const v = document.createElement('div');
+        v.className = 'vg-viewer';
+        v.setAttribute('role', 'dialog');
+        v.innerHTML = `
+            <div class="vg-viewer-top">
+                <button type="button" class="vg-viewer-btn" data-v="close" aria-label="Закрыть">${ICONS.close}</button>
+                <div class="vg-viewer-title">
+                    <div class="vg-viewer-name">${escapeHtml(file.name)}</div>
+                    <div class="vg-viewer-sub">${fmtSize(blob.size)}</div>
+                </div>
+            </div>
+            <div class="vg-viewer-body"><div class="vg-zoom"><div class="vg-viewer-spinner"></div></div></div>
+            <div class="vg-viewer-bottom">
+                <button type="button" class="vg-viewer-btn" data-v="share" aria-label="Поделиться">${ICONS.share}</button>
+                <button type="button" class="vg-viewer-btn" data-v="save" aria-label="Сохранить">${ICONS.save}</button>
+            </div>`;
+        document.body.appendChild(v);
+        document.documentElement.classList.add('vg-viewer-lock');
+        document.addEventListener('gesturestart', stopGesture);
+        requestAnimationFrame(() => v.classList.add('is-open'));
+
+        const ctx = {
+            blob, message, alive: true, urls: [], onSettle: [], onClose: [],
+            body: v.querySelector('.vg-viewer-body'), stage: v.querySelector('.vg-zoom'),
+            topBar: v.querySelector('.vg-viewer-top'), bottomBar: v.querySelector('.vg-viewer-bottom')
+        };
+        ctx.cam = createCamera(ctx);
+        // Ширина сцены = ширина экрана: при зуме текст не переносится заново, а просто увеличивается
+        ctx.stage.style.width = ctx.cam.region().w + 'px';
+        ctx.cam.reset();
+
+        const close = () => {
+            if (!ctx.alive) return;
+            ctx.alive = false;
+            document.removeEventListener('keydown', onKey);
+            document.removeEventListener('gesturestart', stopGesture);
+            v.classList.remove('is-open');
+            document.documentElement.classList.remove('vg-viewer-lock');
+            ctx.onClose.forEach(f => { try { f(); } catch (e) {} });
+            setTimeout(() => { v.remove(); ctx.urls.forEach(u => URL.revokeObjectURL(u)); }, 220);
+        };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        document.addEventListener('keydown', onKey);
+
+        v.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-v]'); if (!b) return;
+            e.stopPropagation();
+            if (b.dataset.v === 'close') close();
+            else if (b.dataset.v === 'share') shareFile(file, message);
+            else if (b.dataset.v === 'save') saveFile(file);
+        });
+
+        requestAnimationFrame(() => {
+            renderPreview(ctx).catch(() => {
+                if (ctx.alive) noPreview(ctx,
+                    'Не удалось показать файл. Нажмите «Поделиться», чтобы открыть его в другом приложении, или «Сохранить».');
+            });
+        });
+    }
+
+    // ---------------------------------------------------- профиль → вкладка «Файлы»
+    const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+    const MONTHS_SHORT = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    window.vgRenderProfileFiles = function (listEl, messages) {
+        // Сначала новые файлы, старые — внизу
+        const key = window.vgMsgOrderKey || ((m) => Number(m.id) || 0);
+        const items = messages.slice().sort((a, b) => key(b) - key(a) || (Number(b.id) || 0) - (Number(a.id) || 0));
+        listEl.innerHTML = '';
+        let lastMonth = '';
+        for (const m of items) {
+            const d = new Date(window.vgParseDate ? window.vgParseDate(m.sent_at) : m.sent_at);
+            const ok = !isNaN(d);
+            const monthKey = ok ? `${MONTHS[d.getMonth()]} ${d.getFullYear()}` : '';
+            if (monthKey && monthKey !== lastMonth) {
+                const h = document.createElement('div');
+                h.className = 'vg-pf-month';
+                h.textContent = monthKey;
+                listEl.appendChild(h);
+                lastMonth = monthKey;
+            }
+            const id = String(m.id);
+            const ext = extOf(m.file_name) || 'file';
+            const [color] = metaOf(m.file_name);
+            const when = ok ? `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()} в ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : '';
+
+            const row = document.createElement('div');
+            row.className = 'vg-file vg-pf-item is-remote';
+            row.dataset.fileId = id;
+            row.dataset.fileSize = Number(m.file_size) || 0;
+            row.style.setProperty('--vg-file-color', color);
+            row.innerHTML = `
+                <div class="vg-pf-thumb"><span class="vg-pf-ext">${escapeHtml(ext === 'jpeg' ? 'jpg' : ext)}</span>
+                    <svg class="vg-file-ring" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23"></circle></svg></div>
+                <div class="vg-pf-info">
+                    <div class="vg-pf-name">${escapeHtml(m.file_name || 'file')}</div>
+                    <div class="vg-pf-meta"><i class="fa-solid fa-arrow-down vg-pf-down"></i><span class="vg-file-size">${fmtSize(m.file_size)}</span>${when ? ` • ${when}` : ''}</div>
+                </div>`;
+            row.addEventListener('click', (e) => { e.stopPropagation(); vgFileTap(m); });
+            listEl.appendChild(row);
+
+            // Уже скачан на это устройство: убираем стрелку, а у картинок показываем миниатюру
+            const thumb = row.querySelector('.vg-pf-thumb');
+            if (fileJobs.has(id)) paint(id, 'loading', 0);
+            cacheGet(id).then(blob => {
+                if (!blob) return;
+                paint(id, 'ready');
+                if (IMG_EXT.includes(ext)) {
+                    const u = URL.createObjectURL(blob);
+                    const img = new Image();
+                    img.onload = () => setTimeout(() => URL.revokeObjectURL(u), 1000);
+                    img.src = u; img.alt = '';
+                    thumb.classList.add('has-img');
+                    thumb.prepend(img);
+                    thumb.querySelector('.vg-pf-ext').remove();
+                }
+            });
+        }
+    };
+
+})();
+</script>
+
+<style id="vg-search-style">
+/* Поиск: при нажатии фон не меняется, курсор и текст — слева от пользователя,
+   а не по центру (подсказка прячется скриптом bindPlaceholderHide ниже) */
+.search-input-container:focus-within { box-shadow: none !important; }
+.search-input:focus,
+.search-input:not(:placeholder-shown) {
+    text-align: left !important;
+    padding-left: 8px !important;
+}
+.search-input:focus::placeholder { color: transparent !important; }
+</style>
+
 </body>
 </html>
