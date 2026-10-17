@@ -26825,10 +26825,57 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     background: rgba(149, 1, 255, .14); color: #9501ff; -webkit-tap-highlight-color: transparent;
 }
 .message-outgoing .vg-voice-speed { background: rgba(255, 255, 255, .25); color: #fff; }
-.vg-voice.is-active .vg-voice-speed { display: inline-block; }
+/* скорость теперь меняется в плашке под шапкой чата */
+
+
+/* ================= плашка плеера под шапкой чата (как в Telegram) ================= */
+.vg-voice-bar {
+    position: fixed; z-index: 101; height: 52px; border-radius: 26px; overflow: hidden;
+    display: flex; align-items: center; gap: 4px; padding: 0 6px 0 8px;
+    background: rgba(255, 255, 255, .82); color: #000;
+    -webkit-backdrop-filter: blur(22px) saturate(160%); backdrop-filter: blur(22px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, .35); box-shadow: 0 4px 18px rgba(0, 0, 0, .14);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    opacity: 0; transform: translateY(-10px) scale(.98); pointer-events: none;
+    transition: opacity .22s ease, transform .3s cubic-bezier(.2, 1, .3, 1);
+}
+.vg-voice-bar.is-open { opacity: 1; transform: none; pointer-events: auto; }
+@media (prefers-color-scheme: dark) {
+    .vg-voice-bar { background: rgba(28, 28, 30, .82); color: #fff; border-color: rgba(255, 255, 255, .1); }
+}
+.vg-voice-bar button {
+    flex: 0 0 auto; border: none; background: none; color: inherit; padding: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent;
+    border-radius: 50%; transition: transform .15s ease, background .15s ease;
+}
+.vg-voice-bar button:active { transform: scale(.88); background: rgba(127, 127, 127, .15); }
+.vg-vb-play { position: relative; width: 40px; height: 40px; }
+.vg-vb-play svg { position: absolute; inset: 0; margin: auto; width: 24px; height: 24px;
+                  transition: opacity .15s ease, transform .2s cubic-bezier(.2, 1.3, .4, 1); }
+.vg-vb-play .i-pause { opacity: 0; transform: scale(.4); width: 22px; height: 22px; }
+.vg-voice-bar.is-playing .vg-vb-play .i-play { opacity: 0; transform: scale(.4); }
+.vg-voice-bar.is-playing .vg-vb-play .i-pause { opacity: 1; transform: none; }
+.vg-vb-info { flex: 1; min-width: 0; text-align: center; cursor: pointer; line-height: 1.2; padding: 0 4px; }
+.vg-vb-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vg-vb-sub  { font-size: 13px; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+/* скорость: «1.5X» между двумя пунктирами, как в Telegram */
+.vg-vb-speed { position: relative; height: 40px; min-width: 44px; padding: 0 4px !important; border-radius: 10px !important;
+               font-size: 13.5px; font-weight: 700; letter-spacing: .2px; font-variant-numeric: tabular-nums; }
+.vg-vb-speed::before, .vg-vb-speed::after {
+    content: ''; position: absolute; left: 9px; right: 9px; height: 0; border-top: 2px dashed currentColor; opacity: .55;
+}
+.vg-vb-speed::before { top: 9px; } .vg-vb-speed::after { bottom: 9px; }
+.vg-vb-speed.is-fast { color: #9501ff; }
+@media (prefers-color-scheme: dark) { .vg-vb-speed.is-fast { color: #c48bff; } }
+.vg-vb-speed .vg-vb-sp { display: inline-block; animation: vgSpeedPop .25s cubic-bezier(.2, 1.4, .4, 1); }
+@keyframes vgSpeedPop { from { transform: scale(.6); opacity: .3; } }
+.vg-vb-close { width: 40px; height: 40px; }
+.vg-vb-close svg { width: 20px; height: 20px; }
+.vg-vb-progress { position: absolute; left: 0; bottom: 0; height: 2.5px; width: 100%;
+                  background: currentColor; opacity: .9; transform-origin: 0 50%; transform: scaleX(0); }
 
 @media (prefers-reduced-motion: reduce) {
-    .vg-rec *, .vg-voice * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    .vg-rec *, .vg-voice *, .vg-voice-bar, .vg-voice-bar * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 </style>
 
@@ -26859,7 +26906,95 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     const WAVE_BARS = 48;
     const WAVE_ABC = '0123456789abcdefghijklmnopqrstuv';   // 32 уровня -> 1 символ
 
-    const voiceMem = new Map();           // id -> Blob (только что записанные — играем без сети)
+    const voiceMem = new Map();           // id -> Blob (уже на устройстве — играем без сети)
+
+    // ------------------------------------------------------------ локальный кэш (как в Telegram)
+    // Голосовое скачивается один раз и хранится на устройстве (Cache API): повтор,
+    // перемотка и прослушивание после перезагрузки — мгновенно и без интернета.
+    // Скачивать по ссылке каждый раз нельзя: подписанная ссылка /media/... меняется
+    // при каждом обновлении сообщений, и HTTP-кэш браузера её не узнаёт.
+    const VOICE_CACHE = 'vg-voice-v1';
+    const VOICE_CACHE_MAX = 400;          // столько последних голосовых держим на устройстве
+    const VOICE_MEM_MAX = 80;             // и столько — в памяти вкладки
+    const vKey = (id) => '/vgvoice/' + encodeURIComponent(id);
+
+    function memPut(id, blob) {
+        voiceMem.delete(id); voiceMem.set(id, blob);          // свежие — в конец очереди
+        for (const key of [...voiceMem.keys()]) {
+            if (voiceMem.size <= VOICE_MEM_MAX) break;
+            if (key === P.id || key === id || String(key).startsWith('temp_')) continue;   // играющее/неотправленное не трогаем
+            voiceMem.delete(key);                              // из памяти; на устройстве (Cache API) остаётся
+        }
+    }
+    async function vCacheGet(id) {
+        id = String(id);
+        if (voiceMem.has(id)) return voiceMem.get(id);
+        try {
+            const r = await (await caches.open(VOICE_CACHE)).match(vKey(id));
+            if (r) { const b = await r.blob(); if (b.size) { memPut(id, b); return b; } }
+        } catch (e) {}
+        return null;
+    }
+    async function vCachePut(id, blob) {
+        id = String(id);
+        memPut(id, blob);
+        try {
+            const c = await caches.open(VOICE_CACHE);
+            await c.put(vKey(id), new Response(blob, { headers: { 'Content-Type': blob.type || 'audio/mpeg' } }));
+            const keys = await c.keys();                       // старые — удаляем
+            for (let i = 0; i < keys.length - VOICE_CACHE_MAX; i++) await c.delete(keys[i]);
+            if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+        } catch (e) { /* приватный режим / нет места — останется только в памяти */ }
+    }
+
+    // Скачивание в кэш: не больше двух одновременно, одно и то же — один раз
+    const dlJobs = new Map(), dlQueue = [];
+    let dlActive = 0;
+    function downloadVoice(message) {
+        const id = String(message.id);
+        if (voiceMem.has(id)) return Promise.resolve(voiceMem.get(id));
+        if (dlJobs.has(id)) return dlJobs.get(id);
+        const job = new Promise((resolve, reject) => dlQueue.push({ message, resolve, reject }));
+        dlJobs.set(id, job);
+        job.catch(() => {}).finally(() => dlJobs.delete(id));
+        pumpDownloads();
+        return job;
+    }
+    function pumpDownloads() {
+        while (dlActive < 2 && dlQueue.length) {
+            const { message, resolve, reject } = dlQueue.shift();
+            dlActive++;
+            (async () => {
+                const id = String(message.id);
+                const cached = await vCacheGet(id);
+                if (cached) return cached;
+                if (!message.file_url) throw new Error('no url');
+                const url = window.vgMediaUrl ? await window.vgMediaUrl(message) : message.file_url;
+                let r = await fetch(url, { mode: 'cors' });
+                if (!r.ok && r.status !== 404 && window.vgRefreshMediaUrl) {
+                    r = await fetch(await window.vgRefreshMediaUrl(message), { mode: 'cors' });
+                }
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const raw = await r.blob();
+                const blob = raw.type ? raw : new Blob([raw], { type: 'audio/mpeg' });
+                await vCachePut(id, blob);
+                return blob;
+            })().then(resolve, reject).finally(() => { dlActive--; pumpDownloads(); });
+        }
+    }
+
+    // Входящие голосовые, попавшие на экран, тихо скачиваем заранее (как автозагрузка
+    // голосовых в Telegram) — тогда и первое нажатие играет сразу, без ожидания сети.
+    const voiceSeen = ('IntersectionObserver' in window) ? new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+            if (!en.isIntersecting) return;
+            voiceSeen.unobserve(en.target);
+            const msg = en.target.__vgVoiceMsg;
+            if (msg && !msg.is_uploading && msg.file_url && !voiceMem.has(String(msg.id))) {
+                downloadVoice(msg).catch(() => {});
+            }
+        });
+    }, { rootMargin: '200px 0px' }) : null;
     const voiceJobs = new Map();          // id -> {abort()}
 
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -27487,7 +27622,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                 file_mime: d.file_mime, file_size: d.file_size
             });
             delete temp.is_uploading; delete temp.is_temp;
-            voiceMem.set(realId, blob); voiceMem.delete(tempId);
+            voiceMem.delete(tempId);
+            vCachePut(realId, blob);              // своё голосовое уже на устройстве — сеть не нужна
             if (P.id === tempId) { P.id = realId; P.chatId = currentChatId; }
             document.querySelectorAll(`[data-message-id="${tempId}"]`).forEach(n => n.setAttribute('data-message-id', realId));
             document.querySelectorAll(`.vg-voice[data-voice-id="${tempId}"]`).forEach(n => {
@@ -27671,7 +27807,125 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             if (e && e.name === 'NotAllowedError') return;   // браузер запретил автозапуск следующего
         });
         if (!message.is_me) markListened(id);
+        showBar();
+        // ещё не на устройстве — пока играет из сети, параллельно кладём в кэш на будущее
+        if (!voiceMem.has(id) && !message.is_uploading) downloadVoice(message).catch(() => {});
         startTick();
+    }
+
+
+    // ====================================================================
+    //          ПЛАШКА ПЛЕЕРА ПОД ШАПКОЙ ЧАТА (пауза, скорость, закрыть)
+    // ====================================================================
+    let bar = null, barHideT = 0, barWatch = 0;
+    const speedLabel = (v) => (v === 1.5 ? '1.5' : String(v)) + 'X';
+
+    function buildBar() {
+        bar = document.createElement('div');
+        bar.className = 'vg-voice-bar';
+        bar.innerHTML = `
+            <button type="button" class="vg-vb-play" aria-label="Пауза">
+                ${I.play.replace('<svg', '<svg class="i-play"')}${I.pause.replace('<svg', '<svg class="i-pause"')}
+            </button>
+            <div class="vg-vb-info"><div class="vg-vb-name"></div><div class="vg-vb-sub"></div></div>
+            <button type="button" class="vg-vb-speed" aria-label="Скорость"><span class="vg-vb-sp">1X</span></button>
+            <button type="button" class="vg-vb-close" aria-label="Закрыть">${I.x}</button>
+            <div class="vg-vb-progress"></div>`;
+        document.body.appendChild(bar);
+        bar.querySelector('.vg-vb-play').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!P.id || !P.audio) return;
+            if (P.audio.paused) playVoice(P.msg); else { P.audio.pause(); paintPlayer(); }
+        });
+        bar.querySelector('.vg-vb-speed').addEventListener('click', (e) => { e.stopPropagation(); cycleSpeed(); });
+        bar.querySelector('.vg-vb-close').addEventListener('click', (e) => { e.stopPropagation(); stopPlayer(); });
+        // тап по имени — прокрутить к этому голосовому
+        bar.querySelector('.vg-vb-info').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!P.id) return;
+            const el = document.querySelector(`.vg-voice[data-voice-id="${CSS.escape(P.id)}"]`);
+            if (el) el.closest('.message').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        window.addEventListener('resize', placeBar);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', placeBar);
+    }
+
+    function activeHeader() {
+        const { chatModal } = getActiveElements();
+        const h = chatModal && chatModal.querySelector('.chat-header');
+        if (!h) return null;
+        const r = h.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 ? r : null;
+    }
+
+    // Ставим ровно под шапку открытого чата (на телефоне и на компьютере она разная)
+    function placeBar() {
+        if (!bar || !bar.classList.contains('is-open')) return;
+        const r = activeHeader();
+        if (!r) return;
+        const side = r.width > 600 ? 16 : 10;
+        bar.style.left = (r.left + side) + 'px';
+        bar.style.width = (r.width - side * 2) + 'px';
+        bar.style.top = (r.bottom + 6) + 'px';
+    }
+
+    function fillBar() {
+        if (!bar || !P.msg) return;
+        const m = P.msg;
+        const me = (typeof userData !== 'undefined' && userData) || {};
+        const name = m.is_me ? (me.nickname || me.name || 'Вы') : (m.sender_name || 'Голосовое сообщение');
+        const { chatTitle } = getActiveElements();
+        bar.querySelector('.vg-vb-name').textContent = name;
+        bar.querySelector('.vg-vb-sub').textContent = (chatTitle && chatTitle.textContent.trim()) || 'Голосовое сообщение';
+        paintSpeed(false);
+    }
+
+    function paintSpeed(pop) {
+        if (!bar) return;
+        const btn = bar.querySelector('.vg-vb-speed');
+        btn.classList.toggle('is-fast', speed !== 1);
+        btn.innerHTML = `<span class="vg-vb-sp"${pop ? '' : ' style="animation:none"'}>${speedLabel(speed)}</span>`;
+    }
+
+    function showBar() {
+        if (!bar) buildBar();
+        clearTimeout(barHideT);
+        fillBar();
+        bar.classList.add('is-open');
+        placeBar();
+        // закрыли чат (кнопкой «назад» и т.п.) — плашка и звук уходят вместе с ним
+        clearInterval(barWatch);
+        barWatch = setInterval(() => {
+            if (!P.id) return;
+            if (!activeHeader() || String(currentChatId) !== String(P.chatId)) stopPlayer();
+            else placeBar();
+        }, 400);
+    }
+
+    function hideBar() {
+        if (!bar) return;
+        clearTimeout(barHideT);
+        // небольшая задержка: при переходе к следующему голосовому плашка не мигает
+        barHideT = setTimeout(() => {
+            if (P.id) return;
+            bar.classList.remove('is-open', 'is-playing');
+            clearInterval(barWatch);
+        }, 180);
+    }
+
+    function paintBar(frac, playing) {
+        if (!bar || !bar.classList.contains('is-open')) return;
+        bar.classList.toggle('is-playing', !!playing);
+        bar.querySelector('.vg-vb-play').setAttribute('aria-label', playing ? 'Пауза' : 'Продолжить');
+        bar.querySelector('.vg-vb-progress').style.transform = `scaleX(${clamp(frac, 0, 1).toFixed(4)})`;
+    }
+
+    function cycleSpeed() {
+        speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+        try { localStorage.setItem('vg-voice-speed', String(speed)); } catch (err) {}
+        if (P.audio) P.audio.playbackRate = speed;
+        paintSpeed(true);
+        paintPlayer();
     }
 
     function stopPlayer() {
@@ -27682,6 +27936,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (!R) audioSession('auto');                 // отпускаем звук другим приложениям
         cancelAnimationFrame(P.raf);
         if (old) paintVoice(old, 0, false, false);
+        hideBar();
     }
 
     function onEnded() {
@@ -27718,6 +27973,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         const d = durOf(P.msg);
         const frac = d ? Math.min(1, playerTime() / d) : 0;
         paintVoice(P.id, frac, !P.audio.paused, true);
+        paintBar(frac, !P.audio.paused);
     }
 
     // кадры крутим только пока звук идёт
@@ -27821,6 +28077,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (typeof renderReactionsOnElement === 'function') renderReactionsOnElement(el, message.reactions);
         if (typeof attachMessageLongPress === 'function') attachMessageLongPress(el, message);
         if (typeof vgApplyGroupSenderUi === 'function') vgApplyGroupSenderUi(el, message, runInfo);
+
+        // Уже скачано раньше? Достаём из кэша в память, чтобы нажатие сработало мгновенно.
+        // Нет — скачаем, когда пузырь появится на экране.
+        if (!uploading && message.file_url && !voiceMem.has(id)) {
+            const box = el.querySelector('.vg-voice');
+            box.__vgVoiceMsg = message;
+            vCacheGet(id).then((b) => { if (!b && voiceSeen) voiceSeen.observe(box); });
+        }
 
         // этот пузырь сейчас играет (список сообщений перерисовался) — восстанавливаем состояние
         if (P.id === id) {
