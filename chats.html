@@ -26820,6 +26820,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-voice-dur { opacity: .75; font-variant-numeric: tabular-nums; }
 .vg-voice-unread { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .75; display: none; }
 .message-incoming .vg-voice.is-unread .vg-voice-unread { display: inline-block; color: #9501ff; opacity: 1; }
+/* у отправителя: точка горит, пока собеседник не прослушал (как в Telegram) */
+.message-outgoing .vg-voice.is-unread .vg-voice-unread { display: inline-block; color: #fff; opacity: .9; }
+.vg-voice-unread { transition: opacity .25s ease, transform .25s ease; }
 .vg-voice-speed {
     display: none; border: none; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer;
     background: rgba(149, 1, 255, .14); color: #9501ff; -webkit-tap-highlight-color: transparent;
@@ -26862,7 +26865,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-vb-speed { position: relative; height: 40px; min-width: 44px; padding: 0 4px !important; border-radius: 10px !important;
                font-size: 13.5px; font-weight: 700; letter-spacing: .2px; font-variant-numeric: tabular-nums; }
 .vg-vb-speed::before, .vg-vb-speed::after {
-    content: ''; position: absolute; left: 9px; right: 9px; height: 0; border-top: 2px dashed currentColor; opacity: .55;
+    content: ''; position: absolute; left: 10px; right: 10px; height: 0; border-top: 1px dashed currentColor; opacity: .5;
 }
 .vg-vb-speed::before { top: 9px; } .vg-vb-speed::after { bottom: 9px; }
 .vg-vb-speed.is-fast { color: #9501ff; }
@@ -27470,11 +27473,28 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         teardown(my, animated ? 'is-cancel' : 'is-send', animated ? 1080 : 230);
     }
 
+    // Точная длительность — из самого аудиофайла. Таймер записи всегда чуть больше
+    // реального звука (микрофон начинает писать с задержкой), и из-за этого линия
+    // воспроизведения отставала, а звук кончался раньше, чем доходила линия.
+    function exactDuration(blob) {
+        return new Promise((resolve) => {
+            const ac = sharedAC;
+            if (!ac || !ac.decodeAudioData) return resolve(0);
+            const done = (buf) => resolve(buf && isFinite(buf.duration) ? buf.duration : 0);
+            const t = setTimeout(() => resolve(0), 2000);
+            blob.arrayBuffer().then((ab) => {
+                try {
+                    const pr = ac.decodeAudioData(ab, (b) => { clearTimeout(t); done(b); }, () => { clearTimeout(t); resolve(0); });
+                    if (pr && pr.then) pr.then((b) => { clearTimeout(t); done(b); }, () => { clearTimeout(t); resolve(0); });
+                } catch (e) { clearTimeout(t); resolve(0); }
+            }).catch(() => { clearTimeout(t); resolve(0); });
+        });
+    }
+
     function finishRec() {
         const my = R;
         if (!my || my.done || !my.rec) return;
         const duration = curElapsed();
-        const waveform = encodeWave(my.levels);
         const rec = my.rec;
         const stopped = new Promise((res) => {
             rec.addEventListener('stop', res, { once: true });
@@ -27488,7 +27508,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             cleanupAudio(my);
             const blob = new Blob(my.chunks, { type: (my.mime || 'audio/webm').split(';')[0] });
             if (duration < MIN_SECONDS || !blob.size) return;
-            sendVoice(blob, duration, waveform, my.chat);
+            exactDuration(blob).then((real) => {
+                const dur = real > 0.2 ? real : duration;
+                // волну выравниваем по реальному звуку: «лишнее» в начале — тишина до старта микрофона
+                const gap = Math.max(0, duration - dur);
+                const skip = Math.min(my.levels.length - 1, Math.round(gap / 0.05));
+                const waveform = encodeWave(skip > 0 ? my.levels.slice(skip) : my.levels);
+                sendVoice(blob, dur, waveform, my.chat);
+            });
         });
     }
 
@@ -27629,6 +27656,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             document.querySelectorAll(`.vg-voice[data-voice-id="${tempId}"]`).forEach(n => {
                 n.setAttribute('data-voice-id', realId);
                 n.classList.remove('is-uploading');
+                if (!temp.voice_listened) n.classList.add('is-unread');   // точка до прослушивания собеседником
             });
             saveMessagesToDB(chatId, currentMessages);
 
@@ -27666,6 +27694,41 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     let listened = new Set();
     try { listened = new Set(JSON.parse(localStorage.getItem('vg-voice-listened') || '[]')); } catch (e) {}
+    // Сообщаем серверу «прослушано» — у отправителя гаснет точка
+    const reported = new Set();
+    function reportListened(message) {
+        const id = String(message.id);
+        if (message.is_me || message.voice_listened_me || reported.has(id) || id.startsWith('temp_')) return;
+        reported.add(id);
+        message.voice_listened_me = true;
+        fetch(`${SERVER_URL}/voice_listened`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({ message_id: message.id, platform_user_id: userData.platform_user_id })
+        }).then(r => { if (!r.ok) reported.delete(id); }).catch(() => reported.delete(id));
+    }
+
+    // Пришло событие «прослушано» (собеседник послушал моё голосовое / я сам — на другом устройстве)
+    function applyListened(p) {
+        if (!p || p.message_id == null) return;
+        const id = String(p.message_id);
+        const meId = String(userData && userData.platform_user_id);
+        (currentMessages || []).forEach((m) => {
+            if (String(m.id) !== id) return;
+            if (String(p.user_id) === meId) m.voice_listened_me = true;
+            else if (String(m.sender_id) !== String(p.user_id)) m.voice_listened = true;
+        });
+        const m = (currentMessages || []).find(x => String(x.id) === id);
+        if (!m) return;
+        const off = m.is_me ? m.voice_listened : (m.voice_listened_me || listened.has(id));
+        if (off) document.querySelectorAll(`.vg-voice[data-voice-id="${CSS.escape(id)}"]`).forEach(n => n.classList.remove('is-unread'));
+    }
+    // appSocket создаётся лениво и может пересоздаваться — подписываемся на каждый новый
+    setInterval(() => {
+        if (typeof appSocket === 'undefined' || !appSocket || appSocket.__vgVoice) return;
+        appSocket.__vgVoice = true;
+        appSocket.on('voice_listened', applyListened);
+    }, 1000);
+
     function markListened(id) {
         if (listened.has(id)) return;
         listened.add(id);
@@ -27697,6 +27760,18 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         a.addEventListener('waiting', () => { P.buffering = true; paintPlayer(); });
         a.addEventListener('playing', () => { P.buffering = false; paintPlayer(); });
         a.addEventListener('seeking', resetClock);       // перемотка — начинаем отсчёт заново
+        // Файл целиком на устройстве — знаем точную длительность: поправляем и подпись
+        // в пузыре (у старых голосовых она была чуть длиннее реального звука)
+        a.addEventListener('loadedmetadata', () => {
+            if (!P.fromBlob || !P.msg || P.audio !== a || !isFinite(a.duration) || a.duration <= 0) return;
+            const real = a.duration, m = P.msg;
+            if (Math.abs((Number(m.voice_duration) || 0) - real) > 0.05) {
+                m.voice_duration = real;
+                (currentMessages || []).forEach(x => { if (String(x.id) === String(m.id)) x.voice_duration = real; });
+                document.querySelectorAll(`.vg-voice[data-voice-id="${CSS.escape(String(m.id))}"]`)
+                    .forEach(n => { n.dataset.duration = real; });
+            }
+        });
         a.addEventListener('play', startTick);
         a.addEventListener('pause', () => paintPlayer());
         a.addEventListener('error', () => {
@@ -27780,6 +27855,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             if (P.url) { URL.revokeObjectURL(P.url); P.url = null; }
             const local = voiceMem.get(id);
             P.refreshed = null;
+            P.fromBlob = !!local;
             resetClock();
             if (local) { P.url = URL.createObjectURL(local); a.src = P.url; }
             else if (message.file_url && (!window.vgMediaUrlFresh || window.vgMediaUrlFresh(message.file_url))) a.src = message.file_url;
@@ -27806,7 +27882,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         a.play().then(() => { a.playbackRate = speed; }).catch((e) => {
             if (e && e.name === 'NotAllowedError') return;   // браузер запретил автозапуск следующего
         });
-        if (!message.is_me) markListened(id);
+        if (!message.is_me) { markListened(id); reportListened(message); }
         showBar();
         // ещё не на устройстве — пока играет из сети, параллельно кладём в кэш на будущее
         if (!voiceMem.has(id) && !message.is_uploading) downloadVoice(message).catch(() => {});
@@ -28038,8 +28114,11 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         const vals = decodeWave(message.voice_waveform, id);
         const bars = barsHtml(vals);
         const dur = Number(message.voice_duration) || 0;
-        const unread = !message.is_me && !listened.has(id);
+        // У получателя: пока сам не послушал. У отправителя: пока не послушал собеседник.
         const uploading = !!message.is_uploading || voiceJobs.has(id);
+        const unread = message.is_me
+            ? (!message.voice_listened && !uploading)
+            : !(message.voice_listened_me || listened.has(id));
 
         el.innerHTML = `
             <div class="message-content vg-voice${uploading ? ' is-uploading' : ''}${unread ? ' is-unread' : ''}"
