@@ -25448,6 +25448,34 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         });
     }
 
+    // ---------------------------------------------------- временные ссылки на файлы
+    // Сервер отдаёт файлы/голосовые только по подписанной ссылке /media/<id>?e=<срок>&s=<подпись>.
+    // Сообщения живут в кэше дольше ссылки — тогда берём новую через /media_link.
+    function mediaUrlFresh(url) {
+        const m = /[?&]e=(\d+)/.exec(url || '');
+        return !!m && Number(m[1]) * 1000 - Date.now() > 120000;
+    }
+    const linkJobs = new Map();
+    function refreshMediaUrl(message) {
+        const id = String(message.id);
+        if (linkJobs.has(id)) return linkJobs.get(id);
+        const job = fetch(`${SERVER_URL}/media_link`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({ message_id: message.id, platform_user_id: userData.platform_user_id })
+        }).then(r => r.json()).then(d => {
+            if (d.status !== 'success' || !d.url) throw new Error(d.error || 'link');
+            message.file_url = d.url;
+            (currentMessages || []).forEach(m => { if (String(m.id) === id) m.file_url = d.url; });
+            return d.url;
+        }).finally(() => linkJobs.delete(id));
+        linkJobs.set(id, job);
+        return job;
+    }
+    window.vgMediaUrlFresh = mediaUrlFresh;
+    window.vgRefreshMediaUrl = refreshMediaUrl;
+    window.vgMediaUrl = (message) => mediaUrlFresh(message.file_url)
+        ? Promise.resolve(message.file_url) : refreshMediaUrl(message);
+
     // ---------------------------------------------------- скачивание с прогрессом
     async function download(message) {
         const id = String(message.id);
@@ -25456,7 +25484,10 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         fileJobs.set(id, { abort: () => ctrl.abort() });
         paint(id, 'loading', 0);
         try {
-            const resp = await fetch(message.file_url, { signal: ctrl.signal, mode: 'cors' });
+            let resp = await fetch(await window.vgMediaUrl(message), { signal: ctrl.signal, mode: 'cors' });
+            if (!resp.ok && resp.status !== 404) {      // ссылка истекла — одна попытка с новой
+                resp = await fetch(await refreshMediaUrl(message), { signal: ctrl.signal, mode: 'cors' });
+            }
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const total = Number(resp.headers.get('Content-Length')) || Number(message.file_size) || 0;
             const reader = resp.body.getReader();
@@ -25528,18 +25559,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             try { await navigator.share({ files: [file], title: file.name }); return; }
             catch (e) { if (e.name === 'AbortError') return; }
         }
-        // 2) браузер не умеет делиться таким файлом — делимся ссылкой
-        if (navigator.share && message.file_url) {
-            try { await navigator.share({ title: file.name, url: message.file_url }); return; }
-            catch (e) { if (e.name === 'AbortError') return; }
-        }
-        // 3) компьютер без меню «Поделиться» — копируем ссылку
-        try {
-            await navigator.clipboard.writeText(message.file_url);
-            showMessage('Ссылка на файл скопирована', 'success');
-        } catch (e) {
-            showMessage('Этот браузер не умеет делиться файлами', 'error');
-        }
+        // 2) Ссылкой больше не делимся: файлы закрытые, ссылка временная и
+        //    открывала бы файл любому, кому её перешлют.
+        showMessage('Этот браузер не умеет делиться файлами — нажмите «Сохранить»', 'error');
     }
 
     function saveFile(file) {
@@ -26218,6 +26240,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             fd.append('signature', sig.signature);
             if (sig.folder) fd.append('folder', sig.folder);
             fd.append('public_id', sig.public_id);
+            if (sig.type) fd.append('type', sig.type);   // authenticated — закрытый файл
             const xhr = new XMLHttpRequest();
             xhr.open('POST', `https://api.cloudinary.com/v1_1/${sig.cloud_name}/raw/upload`);
             xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total, e.loaded); };
@@ -26628,7 +26651,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 }
 .vg-rec-pplay { flex: 0 0 24px; width: 24px; height: 24px; border-radius: 50%; border: none; padding: 0;
                 background: #fff; color: #9501ff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-.vg-rec-pplay svg { width: 12px; height: 12px; }
+.vg-rec-pplay svg { width: 15px; height: 15px; }
 .vg-rec-pwave { flex: 1; min-width: 0; height: 18px; position: relative; overflow: hidden; }
 .vg-rec-pdur { flex: 0 0 auto; font-size: 13px; font-variant-numeric: tabular-nums; }
 .vg-rec.is-paused .vg-rec-dot, .vg-rec.is-paused .vg-rec-time, .vg-rec.is-paused .vg-rec-center { display: none; }
@@ -26753,13 +26776,17 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 }
 .message-outgoing .vg-voice-play { background: #fff; color: #9501ff; }
 .vg-voice-play:active { transform: scale(.92); }
-.vg-voice-play > svg { position: absolute; width: 20px; height: 20px; transition: opacity .18s ease, transform .22s cubic-bezier(.2, 1.3, .4, 1); }
-.vg-voice-play .i-play { margin-left: 2px; }
+/* inset:0 + margin:auto — иконка строго в геометрическом центре кружка */
+.vg-voice-play > svg { position: absolute; inset: 0; margin: auto; width: 24px; height: 24px;
+                       transition: opacity .18s ease, transform .22s cubic-bezier(.2, 1.3, .4, 1); }
+.vg-voice-play > svg.i-play { width: 26px; height: 26px; }
+.vg-voice-play > svg.i-pause { width: 22px; height: 22px; }
 .vg-voice-play .i-pause, .vg-voice-play .i-x { opacity: 0; transform: scale(.4); }
 .vg-voice.is-playing .vg-voice-play .i-play { opacity: 0; transform: scale(.4); }
 .vg-voice.is-playing .vg-voice-play .i-pause { opacity: 1; transform: none; }
 .vg-voice.is-uploading .vg-voice-play .i-play { opacity: 0; transform: scale(.4); }
-.vg-voice.is-uploading .vg-voice-play .i-x { opacity: 1; transform: none; width: 16px; height: 16px; }
+.vg-voice.is-uploading .vg-voice-play .i-x { opacity: 1; transform: none; }
+.vg-voice-play > svg.i-x { width: 16px; height: 16px; }
 .vg-voice-play > svg.vg-voice-ring {          /* перебиваем общее правило иконок (20×20) — кольцо на всю кнопку */
     position: absolute; left: 0; top: 0; width: 44px; height: 44px; margin: 0;
     transform: rotate(-90deg); transform-origin: 50% 50%; opacity: 0; transition: opacity .2s ease;
@@ -26814,7 +26841,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         lockBody: '<svg viewBox="0 0 20 22" fill="currentColor"><rect x="3" y="9.5" width="14" height="11" rx="3"/></svg>',
         lockShackle: '<svg class="lk-shackle" viewBox="0 0 20 22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 10V6.5a4 4 0 0 1 8 0V10"/></svg>',
         pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4.5" width="4.2" height="15" rx="1.4"/><rect x="13.8" y="4.5" width="4.2" height="15" rx="1.4"/></svg>',
-        play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.6v12.8a1 1 0 0 0 1.53.85l10.1-6.4a1 1 0 0 0 0-1.7L9.53 4.75A1 1 0 0 0 8 5.6z"/></svg>',
+        // треугольник нарисован так, что его рамка стоит по центру (x 6.1…18.7) с лёгким
+        // оптическим сдвигом вправо — как в Telegram, на глаз ровно по центру кружка
+        play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.1 5.2v13.6a1.1 1.1 0 0 0 1.68.93l10.4-6.8a1.1 1.1 0 0 0 0-1.86L7.78 4.27A1.1 1.1 0 0 0 6.1 5.2z"/></svg>',
         x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/><path d="M6 6.5l1 13.4a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l1-13.4"/><path d="M10 10.5v7M14 10.5v7"/></svg>',
         bin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="bin-lid"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/></g><path d="M6 6.5l1 13.4a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l1-13.4"/><path d="M10 10.5v7M14 10.5v7"/></svg>'
@@ -26878,14 +26907,23 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     let sharedAC = null;
     // Готовим AudioContext заранее — при первом любом касании страницы (микрофон
     // при этом НЕ включается), чтобы и самое первое нажатие на микрофон было мгновенным.
+    // iOS разрешает запускать звук только на touchend/click, а запись начинается
+    // на pointerdown — поэтому держим контекст «проснувшимся» заранее.
     function warmAudio() {
         try {
             const AC = window.AudioContext || window.webkitAudioContext;
-            if (AC && !sharedAC) { sharedAC = new AC(); sharedAC.suspend && sharedAC.suspend().catch(() => {}); }
+            if (AC && (!sharedAC || sharedAC.state === 'closed')) sharedAC = new AC({ latencyHint: 'interactive' });
+            if (sharedAC && sharedAC.state !== 'running') sharedAC.resume().catch(() => {});
         } catch (e) {}
     }
-    document.addEventListener('touchend', warmAudio, { once: true, capture: true, passive: true });
-    document.addEventListener('click', warmAudio, { once: true, capture: true });
+    document.addEventListener('touchend', warmAudio, { capture: true, passive: true });
+    document.addEventListener('click', warmAudio, { capture: true });
+
+    // iPhone: после работы микрофона Safari может оставить звук в «режиме разговора»
+    // (тихо, как в трубке). Перед воспроизведением явно включаем обычный режим.
+    function audioSession(type) {
+        try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
+    }
     try {
         navigator.permissions && navigator.permissions.query({ name: 'microphone' }).then((st) => {
             micGranted = st.state === 'granted';
@@ -27010,6 +27048,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
         const my = R;
         let stream;
+        audioSession('play-and-record');
         try {
             stream = await navigator.mediaDevices.getUserMedia({
                 // Эхо-/шумоподавление выключено: на iPhone оно включает «телефонный»
@@ -27037,11 +27076,43 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             return;
         }
 
+        // Обработка как в Telegram: срез гула < 80 Гц, компрессор выравнивает тихие
+        // и громкие слова, затем усиление и лимитер (без хрипа на пиках).
+        // Пишем уже обработанный звук. Если AudioContext не запущен — пишем как есть.
+        let recStream = stream;
+        my.nodes = [];
+        if (my.ac && my.ac.state === 'running' && my.ac.createMediaStreamDestination) {
+            try {
+                const ac = my.ac;
+                const src = ac.createMediaStreamSource(stream);
+                const hp = ac.createBiquadFilter();
+                hp.type = 'highpass'; hp.frequency.value = 80; hp.Q.value = 0.7;
+                const comp = ac.createDynamicsCompressor();
+                comp.threshold.value = -30; comp.knee.value = 12; comp.ratio.value = 4;
+                comp.attack.value = 0.004; comp.release.value = 0.22;
+                const gain = ac.createGain();
+                gain.gain.value = 2.2;                      // ≈ +7 дБ после сжатия
+                const lim = ac.createDynamicsCompressor();
+                lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
+                lim.attack.value = 0.001; lim.release.value = 0.08;
+                const dest = ac.createMediaStreamDestination();
+                dest.channelCount = 1;
+                src.connect(hp); hp.connect(comp); comp.connect(gain); gain.connect(lim); lim.connect(dest);
+                my.nodes = [src, hp, comp, gain, lim, dest];
+                my.levelNode = lim;
+                my.destStream = dest.stream;
+                recStream = dest.stream;
+            } catch (e) {
+                my.nodes.forEach(n => { try { n.disconnect(); } catch (err) {} });
+                my.nodes = []; recStream = stream;
+            }
+        }
+
         try {
-            my.rec = mime ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 96000 })
-                          : new MediaRecorder(stream);
+            my.rec = mime ? new MediaRecorder(recStream, { mimeType: mime, audioBitsPerSecond: 96000 })
+                          : new MediaRecorder(recStream);
         } catch (e) {
-            try { my.rec = new MediaRecorder(stream); } catch (e2) {
+            try { my.rec = new MediaRecorder(recStream); } catch (e2) {
                 cleanupAudio(my); R = null;
                 showMessage('Не удалось начать запись', 'error');
                 return;
@@ -27054,11 +27125,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (my.ac) {
             try {
                 if (my.ac.state !== 'running' && my.ac.resume) my.ac.resume().catch(() => {});
-                const src = my.ac.createMediaStreamSource(stream);
-                my.src = src;
+                let from = my.levelNode;
+                if (!from) { from = my.ac.createMediaStreamSource(stream); my.nodes.push(from); }
                 my.analyser = my.ac.createAnalyser();
                 my.analyser.fftSize = 1024;
-                src.connect(my.analyser);
+                from.connect(my.analyser);
+                my.nodes.push(my.analyser);
                 my.buf = new Float32Array(my.analyser.fftSize);
             } catch (e) { my.analyser = null; }
         }
@@ -27091,7 +27163,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             my.analyser.getFloatTimeDomainData(my.buf);
             let sum = 0;
             for (let i = 0; i < my.buf.length; i++) sum += my.buf[i] * my.buf[i];
-            level = clamp(Math.sqrt(sum / my.buf.length) * 4.5, 0, 1);
+            level = clamp(Math.sqrt(sum / my.buf.length) * (my.levelNode ? 3 : 4.5), 0, 1);
         } else if (!my.paused) {
             level = 0.25 + Math.random() * 0.2;   // нет анализатора — «живое» дыхание круга
         }
@@ -27219,10 +27291,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     function cleanupAudio(my) {
         cancelAnimationFrame(my.raf);
         try { my.stream && my.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
-        // общий AudioContext не закрываем — только отключаем микрофон и усыпляем
-        try { my.src && my.src.disconnect(); } catch (e) {}
-        my.src = null;
-        try { my.ac && my.ac.state === 'running' && my.ac.suspend(); } catch (e) {}
+        try { my.destStream && my.destStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+        // общий AudioContext не закрываем и не усыпляем (iOS не даст разбудить его на
+        // следующем pointerdown) — только отключаем узлы этой записи
+        (my.nodes || []).forEach(n => { try { n.disconnect(); } catch (e) {} });
+        my.nodes = []; my.levelNode = null;
+        audioSession('auto');
     }
 
     function teardown(my, cls, delay) {
@@ -27323,6 +27397,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             fd.append('timestamp', sig.timestamp);
             fd.append('signature', sig.signature);
             fd.append('public_id', sig.public_id);
+            if (sig.type) fd.append('type', sig.type);   // authenticated — закрытый файл
             const xhr = new XMLHttpRequest();
             // аудио в Cloudinary хранится как resource_type=video
             xhr.open('POST', `https://api.cloudinary.com/v1_1/${sig.cloud_name}/video/upload`);
@@ -27444,7 +27519,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     let speed = 1;
     try { speed = SPEEDS.includes(+localStorage.getItem('vg-voice-speed')) ? +localStorage.getItem('vg-voice-speed') : 1; } catch (e) {}
 
-    const P = { audio: null, id: null, msg: null, chatId: null, url: null, raf: 0, buffering: false };
+    const P = { audio: null, id: null, msg: null, chatId: null, url: null, raf: 0, buffering: false,
+                els: { boost: null, plain: null }, noBoost: false };
+    const PLAY_GAIN = 1.9;   // ≈ +5,5 дБ громче системного максимума, лимитер не даёт хрипеть
 
     let listened = new Set();
     try { listened = new Set(JSON.parse(localStorage.getItem('vg-voice-listened') || '[]')); } catch (e) {}
@@ -27455,22 +27532,66 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         document.querySelectorAll(`.vg-voice[data-voice-id="${CSS.escape(id)}"]`).forEach(n => n.classList.remove('is-unread'));
     }
 
-    function audioEl() {
-        if (P.audio) return P.audio;
+    // Два плеера: «усиленный» идёт через Web Audio (компрессор → усиление → лимитер),
+    // «обычный» — запасной, если Web Audio не запущен или ссылка без CORS.
+    function makeEl(boost) {
         const a = new Audio();
         a.preload = 'auto';
+        if (boost) {
+            a.crossOrigin = 'anonymous';             // без CORS Web Audio отдал бы тишину
+            try {
+                const ac = sharedAC;
+                const src = ac.createMediaElementSource(a);
+                const comp = ac.createDynamicsCompressor();
+                comp.threshold.value = -26; comp.knee.value = 10; comp.ratio.value = 3;
+                comp.attack.value = 0.005; comp.release.value = 0.25;
+                const gain = ac.createGain(); gain.gain.value = PLAY_GAIN;
+                const lim = ac.createDynamicsCompressor();
+                lim.threshold.value = -1.5; lim.knee.value = 0; lim.ratio.value = 20;
+                lim.attack.value = 0.001; lim.release.value = 0.06;
+                src.connect(comp); comp.connect(gain); gain.connect(lim); lim.connect(ac.destination);
+            } catch (e) { return null; }
+        }
         a.addEventListener('ended', onEnded);
         a.addEventListener('waiting', () => { P.buffering = true; paintPlayer(); });
         a.addEventListener('playing', () => { P.buffering = false; paintPlayer(); });
         a.addEventListener('play', startTick);
         a.addEventListener('pause', () => paintPlayer());
         a.addEventListener('error', () => {
-            if (!P.id || !a.getAttribute('src')) return;
+            if (!P.id || !a.getAttribute('src') || P.audio !== a) return;
+            // ссылка могла истечь — одна попытка с новой
+            if (P.refreshed !== P.id && P.msg && !voiceMem.has(P.id) && window.vgRefreshMediaUrl) {
+                const msg = P.msg, id = P.id, t = a.currentTime || 0, d = durOf(msg);
+                P.refreshed = id;
+                window.vgRefreshMediaUrl(msg).then((url) => {
+                    if (P.id !== id) return;
+                    a.src = url;
+                    playVoice(msg, d ? t / d : 0);
+                }).catch(() => { if (P.id === id) { showMessage('Не удалось воспроизвести голосовое', 'error'); stopPlayer(); } });
+                return;
+            }
+            if (boost) {                              // CORS/Web Audio не сработал — играем обычным
+                const msg = P.msg, t = a.currentTime || 0, d = durOf(msg);
+                P.noBoost = true;
+                P.id = null;
+                playVoice(msg, d ? t / d : 0);
+                return;
+            }
             showMessage('Не удалось воспроизвести голосовое', 'error');
             stopPlayer();
         });
-        P.audio = a;
         return a;
+    }
+    function audioEl() {
+        const ac = sharedAC;
+        if (!P.noBoost && ac && ac.state === 'running') {
+            if (!P.els.boost) P.els.boost = makeEl(true) || null;
+            if (P.els.boost) return P.els.boost;
+            P.noBoost = true;
+        }
+        if (ac && ac.state !== 'running') ac.resume().catch(() => {});   // к следующему разу будет усиление
+        if (!P.els.plain) P.els.plain = makeEl(false);
+        return P.els.plain;
     }
 
     function durOf(m) {
@@ -27481,14 +27602,31 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     function playVoice(message, frac) {
         const id = String(message.id);
-        const a = audioEl();
         if (R && R.preview) stopPreview();
+        // iOS усыпляет Web Audio после звонка/блокировки — будим (мы внутри нажатия)
+        if (sharedAC && sharedAC.state !== 'running') sharedAC.resume().catch(() => {});
+        audioSession('playback');                     // iPhone: полная громкость, через динамик
+        const a = (P.id === id && P.audio) ? P.audio : audioEl();
+        if (P.audio && P.audio !== a) { try { P.audio.pause(); } catch (e) {} }
+        P.audio = a;
         if (P.id !== id) {
             if (P.id) { try { a.pause(); } catch (e) {} paintVoice(P.id, 0, false, false); }
             if (P.url) { URL.revokeObjectURL(P.url); P.url = null; }
             const local = voiceMem.get(id);
+            P.refreshed = null;
             if (local) { P.url = URL.createObjectURL(local); a.src = P.url; }
-            else if (message.file_url) a.src = message.file_url;
+            else if (message.file_url && (!window.vgMediaUrlFresh || window.vgMediaUrlFresh(message.file_url))) a.src = message.file_url;
+            else if (message.file_url && window.vgRefreshMediaUrl) {
+                // ссылка из кэша истекла — берём новую и запускаем
+                P.id = id; P.msg = message; P.chatId = currentChatId; P.refreshed = id;
+                P.buffering = true; paintVoice(id, 0, true, true);
+                window.vgRefreshMediaUrl(message).then((url) => {
+                    if (P.id !== id) return;
+                    a.src = url;
+                    playVoice(message, frac);
+                }).catch(() => { if (P.id === id) { showMessage('Не удалось загрузить голосовое', 'error'); stopPlayer(); } });
+                return;
+            }
             else return;
             P.id = id; P.msg = message; P.chatId = currentChatId;
         }
@@ -27510,6 +27648,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (P.url) { URL.revokeObjectURL(P.url); P.url = null; }
         const old = P.id;
         P.id = null; P.msg = null; P.buffering = false;
+        if (!R) audioSession('auto');                 // отпускаем звук другим приложениям
         cancelAnimationFrame(P.raf);
         if (old) paintVoice(old, 0, false, false);
     }
