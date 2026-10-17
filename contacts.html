@@ -3517,7 +3517,7 @@ body {
                 delete _presenceRefreshTimers[userId];
                 const data = await getUsersActivityStatus([userId]);
                 if (data && data[userId]) {
-                    currentActivityData[userId] = data[userId];
+                    vgMergeActivity(userId, data[userId]);
                     updateContactsUI();
                     if (typeof _profileViewedUserId !== 'undefined' && _profileViewedUserId === userId) {
                         updateProfileModalStatus(userId);
@@ -3533,10 +3533,10 @@ body {
                 refreshRestrictedPresence(userId);
                 return;
             }
-            currentActivityData[userId] = {
+            if (!vgMergeActivity(userId, {
                 is_online: !!payload.is_online,
                 last_online: payload.last_online
-            };
+            })) return;                                   // старый снимок — не трогаем свежий статус
             updateContactsUI();
             vgSaveActivityCache();
             if (typeof _profileViewedUserId !== 'undefined' && _profileViewedUserId === userId) {
@@ -3738,6 +3738,66 @@ let currentActivityData = (function () {
         return out;
     } catch (e) { return {}; }
 })();
+// Время статуса в мс (сервер шлёт UTC; без пояса — тоже UTC)
+function vgActivityTime(a) {
+    if (!a || !a.last_online) return NaN;
+    let s = String(a.last_online).trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';
+    return Date.parse(s);
+}
+
+// Статус приходит из трёх мест: REST, WebSocket и снимок, который сервер
+// сокетов держит в памяти. Снимок бывает старым (например, «был(а) 13.10»),
+// и раньше он перетирал свежие данные — время захода «прыгало» между
+// «23 минуты назад» и старой датой. Теперь более старое время никогда не
+// заменяет более новое: время захода может только расти.
+function vgMergeActivity(userId, incoming) {
+    if (!userId || !incoming) return false;
+    const id = String(userId);
+    const cur = currentActivityData[id];
+    if (!cur || incoming.last_seen_hidden || cur.last_seen_hidden || incoming.is_online) {
+        currentActivityData[id] = incoming;
+        return true;
+    }
+    const ti = vgActivityTime(incoming), tc = vgActivityTime(cur);
+    if (!isNaN(tc) && (isNaN(ti) || ti < tc - 5000)) return false;   // пришло старее — игнорируем
+    currentActivityData[id] = incoming;
+    return true;
+}
+
+// Порядок в списке: сначала «в сети», затем кто вышел позже всех, внизу — кто давно
+function vgActivitySortKey(userId) {
+    const a = currentActivityData[String(userId)];
+    if (!a) return -Infinity;
+    if (a.is_online) return Infinity;
+    if (a.last_seen_hidden) return Date.now() - 2 * 24 * 3600 * 1000;   // «недавно» ≈ последние дни
+    const t = vgActivityTime(a);
+    return isNaN(t) ? -Infinity : t;
+}
+
+// Переставляет друзей в списке по времени захода (без перерисовки элементов)
+let _vgSortContactsRaf = 0;
+function vgSortContactsByActivity() {
+    cancelAnimationFrame(_vgSortContactsRaf);
+    _vgSortContactsRaf = requestAnimationFrame(() => {
+        try {
+            const { searchResults } = getActiveElements();
+            if (!searchResults) return;
+            const friends = Array.from(searchResults.querySelectorAll(':scope > .user-result[data-vg-friend="1"]'));
+            if (friends.length < 2) return;
+            const sorted = friends
+                .map((el, i) => ({ el, i, k: vgActivitySortKey(el.dataset.userId) }))
+                .sort((a, b) => (b.k - a.k) || (a.i - b.i))
+                .map(x => x.el);
+            if (sorted.every((el, i) => el === friends[i])) return;          // порядок не изменился
+            const anchor = friends[0].previousSibling;
+            const frag = document.createDocumentFragment();
+            sorted.forEach(el => frag.appendChild(el));
+            searchResults.insertBefore(frag, anchor ? anchor.nextSibling : searchResults.firstChild);
+        } catch (e) { console.warn('[CONTACTS SORT]', e); }
+    });
+}
+
 let _vgActivitySaveT = 0;
 function vgSaveActivityCache() {
     clearTimeout(_vgActivitySaveT);
@@ -4862,7 +4922,7 @@ async function sendOfflineStatus() {
                     if (data.status === 'success') {
                         // Сливаем, а не заменяем: статусы людей не из этого запроса
                         // (например, найденных поиском) не должны пропадать
-                        currentActivityData = Object.assign({}, currentActivityData, data.activity_data);
+                        Object.entries(data.activity_data || {}).forEach(([id, a]) => vgMergeActivity(id, a));
                         updateContactsUI();
                         vgSaveActivityCache();
                     }
@@ -4878,6 +4938,7 @@ async function sendOfflineStatus() {
 
         // Функция для обновления UI контактов
         function updateContactsUI() {
+            vgSortContactsByActivity();
             const userElements = document.querySelectorAll('.user-result');
             
             userElements.forEach(element => {
@@ -4963,7 +5024,7 @@ function startProfileStatusPolling(userId) {
             const d = await r.json();
             if (d.status === 'success' && d.activity_data && _profileViewedUserId === userId) {
                 Object.entries(d.activity_data).forEach(([id, status]) => {
-                    currentActivityData[id] = status;
+                    vgMergeActivity(id, status);
                 });
                 updateProfileModalStatus(userId);
             }
@@ -5214,6 +5275,9 @@ async function updateProfileModalUI(user) {
             // chats.html, а не одновременное появление всех элементов разом.
             let animationIndex = 0;
 
+            // Сразу в нужном порядке: сначала «в сети» и кто вышел позже всех
+            friends.sort((a, b) => vgActivitySortKey(b.platform_user_id) - vgActivitySortKey(a.platform_user_id));
+
             if (friends.length > 0) {
                 for (const user of friends) {
                     await displayUserResult(user, 'added', animationIndex++);
@@ -5358,6 +5422,7 @@ async function updateProfileModalUI(user) {
             const userElement = document.createElement('div');
             userElement.className = 'user-result';
             userElement.setAttribute('data-user-id', user.platform_user_id); // Добавляем data-атрибут
+            if (status === 'added') userElement.dataset.vgFriend = '1';    // участвует в сортировке по времени захода
             // Каскадная задержка появления — но ограничена первыми 12
             // элементами (максимум 0.36с). Раньше делали animationIndex * 0.05
             // без потолка: при 500 друзьях последний контакт оставался
