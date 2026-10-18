@@ -18788,6 +18788,7 @@ function stopProfileDataPolling() {
          статуса/присутствия каждые 2-3с давал лишнюю нагрузку на сервер -->
     <script src="avatar-cache.js"></script>
     <script src="push-notifications.js"></script>
+    <script src="mic-permission.js"></script>
     <!-- ===== Жалоба на пользователя (меню «ещё» → Пожаловаться) ===== -->
     <style>
         /* Меню, всплывающее по кнопке «ещё» в профиле контакта.
@@ -26899,6 +26900,38 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-vb-progress { height: 2px; }
 </style>
 
+<style id="vg-voice-bar-center">
+/* Имя и подпись — строго по центру всей рамки плеера */
+.vg-voice-bar .vg-vb-info {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    /* одинаковые отступы с обеих сторон = ширина самой широкой стороны
+       (справа: скорость 38px + крестик 30px + зазоры и паддинг) */
+    left: 78px;
+    right: 78px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+
+/* Кнопки скорости и закрытия прижимаем вправо
+   (раньше их туда выталкивал растянутый блок с именем) */
+.vg-voice-bar .vg-vb-speed { margin-left: auto; }
+
+/* Кнопки поверх блока с именем, чтобы оставались кликабельными */
+.vg-voice-bar .vg-vb-play,
+.vg-voice-bar .vg-vb-speed,
+.vg-voice-bar .vg-vb-close { position: relative; z-index: 1; }
+
+/* Многоточие для длинных имён работает и в центрированном блоке */
+.vg-voice-bar .vg-vb-name,
+.vg-voice-bar .vg-vb-sub { max-width: 100%; }
+</style>
+
 <script id="vg-voice-script">
 (function () {
     'use strict';
@@ -27083,12 +27116,47 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     function audioSession(type) {
         try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
     }
+    // ---- Разрешение на микрофон: спрашиваем только один раз ----
+    // Ответ запоминаем на устройстве. «Нет» — больше НЕ вызываем getUserMedia
+    // (иначе iPhone показывал бы рамку снова), а подсказываем, где включить
+    // в настройках. Как только система сообщит, что доступ включён, флаг снимается.
+    const MIC_KEY = 'vg_mic_permission';          // 'granted' | 'denied'
+    const micSaved = () => { try { return localStorage.getItem(MIC_KEY); } catch (e) { return null; } };
+    const micSave = (v) => { try { v ? localStorage.setItem(MIC_KEY, v) : localStorage.removeItem(MIC_KEY); } catch (e) {} };
+    let micPermState = null;                      // что говорит браузер: granted / denied / prompt
+    function applyMicState(state) {
+        micPermState = state;
+        micGranted = state === 'granted';
+        if (state === 'granted') micSave('granted');            // включили в настройках — снимаем запрет
+        else if (state === 'denied') micSave('denied');
+    }
+    micGranted = micSaved() === 'granted';
     try {
         navigator.permissions && navigator.permissions.query({ name: 'microphone' }).then((st) => {
-            micGranted = st.state === 'granted';
-            st.onchange = () => { micGranted = st.state === 'granted'; };
+            applyMicState(st.state);
+            st.onchange = () => applyMicState(st.state);
         }).catch(() => {});
     } catch (e) {}
+
+    function micSettingsHint() {
+        const ua = navigator.userAgent || '';
+        const ios = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (ios) return 'Доступ к микрофону запрещён. Включите его: Настройки → Приложения → Safari → Микрофон → «Разрешить»';
+        if (/Android/i.test(ua)) return 'Доступ к микрофону запрещён. Включите его: Настройки → Приложения → Vuntgram (или Chrome) → Разрешения → Микрофон';
+        return 'Доступ к микрофону запрещён. Разрешите его в настройках сайта (значок замка в адресной строке)';
+    }
+    // Записывать нельзя? Возвращает текст подсказки или null.
+    // Основной источник — mic-permission.js (переключатель «Микрофон» в настройках:
+    // выключено в Vuntgram / запрещено системой). Без него — запасная логика выше.
+    function micBlockedMessage() {
+        if (window.vgMic) return window.vgMic.blockedMessage();
+        if (micPermState === 'granted') return null;
+        return (micPermState === 'denied' || micSaved() === 'denied') ? micSettingsHint() : null;
+    }
+    if (window.vgMic) {
+        micGranted = window.vgMic.state() === 'granted';
+        window.vgMic.onChange((s) => { micGranted = s === 'granted'; });
+    }
 
     function showRecUi(my) {
         if (my.layer) return;
@@ -27187,6 +27255,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             showMessage('Этот браузер не умеет записывать голосовые', 'error');
             return;
         }
+        // Уже отказали — рамку системы больше не вызываем, только подсказка
+        const blockedMsg = micBlockedMessage();
+        if (blockedMsg) {
+            showMessage(blockedMsg, 'error');
+            return;
+        }
         const row = btn.closest('.message-input-row');
         R = {
             btn, row, mime, chat: currentChat, chatId: currentChatId,
@@ -27218,12 +27292,17 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         } catch (e) {
             micGranted = false;
             if (R === my) { if (my.layer) cancelRec(false); else { cleanupAudio(my); R = null; } }
-            showMessage(e && e.name === 'NotAllowedError'
-                ? 'Нет доступа к микрофону — разрешите его в настройках браузера'
-                : 'Не удалось включить микрофон', 'error');
+            const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+            if (denied) {                         // «Нет» — больше не спрашиваем
+                micSave('denied');
+                if (window.vgMic) window.vgMic.markDenied();
+            }
+            showMessage(denied ? (micBlockedMessage() || micSettingsHint()) : 'Не удалось включить микрофон', 'error');
             return;
         }
         micGranted = true;
+        micSave('granted');
+        if (window.vgMic) window.vgMic.markGranted();
         if (R !== my || my.done) { stream.getTracks().forEach(t => t.stop()); return; }
         my.stream = stream;
 
