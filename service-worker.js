@@ -1,7 +1,7 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.2.8';
+const CACHE_NAME = 'vuntgram-v2.2.9';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
@@ -17,6 +17,7 @@ const STATIC_RESOURCES = [
   '/tailwind.js',
   '/fontawesome-free-6.7.2-web/css/all.min.css',
   '/activity-tracker.js',
+  '/mic-permission.js',
   'https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
