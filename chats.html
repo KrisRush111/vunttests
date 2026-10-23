@@ -8411,10 +8411,14 @@
 
         function preloadAllWallpapers() {
             const selected = WALLPAPERS.find(w => w.id === wallpaperState.selectedWallpaper) || WALLPAPERS[0];
-            // Сначала выбранные обои, остальные — в фоне, чтобы переключение было без мигания.
-            preloadWallpaper(selected.url).then(() => {
-                WALLPAPERS.forEach(w => { if (w.url !== selected.url) preloadWallpaper(w.url); });
-            });
+            // Грузим ТОЛЬКО выбранные обои. Раньше здесь в фоне качались все 8
+            // картинок при каждом открытии страницы — это забивало канал
+            // (особенно через VPN и на мобильном интернете), и из-за этого
+            // тормозило всё остальное, включая сами выбранные обои. Выбора
+            // обоев на этой странице нет, остальные просто не нужны: после
+            // выбора в профиле нужная картинка подгрузится и закэшируется.
+            if (!wallpaperState.enabled) return;
+            preloadWallpaper(selected.url);
         }
 
         function setCookie(name, value, days = 7) {
