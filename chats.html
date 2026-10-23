@@ -8383,8 +8383,20 @@
 
         // Имена файлов обоев кириллицей ('фон.jpg') — часть серверов/браузеров
         // отдают 404 на неэкранированный путь, поэтому всегда кодируем.
+        //
+        // Обои грузятся с НАШЕГО сервера (vuntserverrr.site — он в России
+        // открывается без VPN), а копия на Vercel — запасной вариант.
+        // Причина: провайдеры «душат» Vercel, и картинка на 100+ КБ оттуда
+        // без VPN просто не докачивается — обоев не было видно вообще.
+        const WALLPAPER_SERVER_BASE = 'https://vuntserverrr.site/wallpapers/';
+        const _wallpaperWorkingSrc = new Map(); // имя файла -> адрес, который реально загрузился
+
+        function wallpaperSources(url) {
+            return [WALLPAPER_SERVER_BASE + encodeURIComponent(url), encodeURI(url)];
+        }
+
         function wallpaperCssUrl(url) {
-            return `url("${encodeURI(url)}")`;
+            return `url("${_wallpaperWorkingSrc.get(url) || wallpaperSources(url)[0]}")`;
         }
 
         // Держим Image-объекты живыми: браузер не выбрасывает декодированную
@@ -8392,21 +8404,42 @@
         // а не «дорисовываются» при открытии чата.
         const _wallpaperPreloadCache = new Map();
 
+        function loadWallpaperImage(src) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.decoding = 'sync';
+                img.onload = () => {
+                    if (img.decode) img.decode().catch(() => {}).finally(() => resolve(img));
+                    else resolve(img);
+                };
+                img.onerror = () => resolve(null);
+                img.src = src;
+            });
+        }
+
+        // Пробуем источники по очереди: сначала наш сервер, потом Vercel.
+        // Если сработал запасной — перерисовываем фон уже с него.
         function preloadWallpaper(url) {
             if (!url) return Promise.resolve(false);
             if (_wallpaperPreloadCache.has(url)) return _wallpaperPreloadCache.get(url).promise;
-            const img = new Image();
-            img.decoding = 'sync';
-            const promise = new Promise((resolve) => {
-                img.onload = () => {
-                    if (img.decode) img.decode().catch(() => {}).finally(() => resolve(true));
-                    else resolve(true);
-                };
-                img.onerror = () => resolve(false);
-            });
-            _wallpaperPreloadCache.set(url, { img, promise });
-            img.src = encodeURI(url);
-            return promise;
+            const entry = { img: null, promise: null };
+            entry.promise = (async () => {
+                const sources = wallpaperSources(url);
+                for (let i = 0; i < sources.length; i++) {
+                    const img = await loadWallpaperImage(sources[i]);
+                    if (!img) continue;
+                    entry.img = img; // держим, чтобы браузер не выбросил декодированную картинку
+                    const changed = _wallpaperWorkingSrc.get(url) !== sources[i];
+                    _wallpaperWorkingSrc.set(url, sources[i]);
+                    if (changed && i > 0) {
+                        try { applyWallpaper(); } catch (e) {}
+                    }
+                    return true;
+                }
+                return false;
+            })();
+            _wallpaperPreloadCache.set(url, entry);
+            return entry.promise;
         }
 
         function preloadAllWallpapers() {
