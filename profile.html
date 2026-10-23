@@ -4764,8 +4764,14 @@ function setWallpaperBackground(el, value) {
 
 // Предзагрузка всех обоев: плитки и превью обновляются по мере готовности,
 // поэтому переключение обоев дальше происходит уже без сетевых запросов.
+// ВАЖНО: раньше все 8 картинок качались ОДНОВРЕМЕННО — на медленной сети
+// они делили канал, и даже выбранные обои грузились в 8 раз дольше.
+// Теперь: сначала выбранные, потом остальные строго по одной.
+let _wallpaperPreloadRun = null;
 function preloadAllWallpapers() {
-    return Promise.all(WALLPAPERS.map(wallpaper => resolveWallpaper(wallpaper).then(bg => {
+    if (_wallpaperPreloadRun) return _wallpaperPreloadRun;
+
+    const showOne = (wallpaper) => resolveWallpaper(wallpaper).then(bg => {
         document
             .querySelectorAll(`.wallpaper-item[data-wallpaper-id="${wallpaper.id}"] .wallpaper-preview`)
             .forEach(el => setWallpaperBackground(el, bg));
@@ -4773,7 +4779,17 @@ function preloadAllWallpapers() {
         if (wallpaper.id === wallpaperState.selectedWallpaper) {
             applyWallpaper();
         }
-    })));
+    });
+
+    const selected = getWallpaperById(wallpaperState.selectedWallpaper);
+    _wallpaperPreloadRun = (async () => {
+        await showOne(selected);
+        for (const w of WALLPAPERS) {
+            if (w.id !== selected.id) await showOne(w);
+        }
+    })();
+    _wallpaperPreloadRun.finally(() => { _wallpaperPreloadRun = null; });
+    return _wallpaperPreloadRun;
 }
 
 // Инициализация обоев - ОДНА основная функция
