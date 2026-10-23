@@ -26,6 +26,7 @@ const STATIC_RESOURCES = [
   '/assets/animate/animate.min.css',
   '/assets/js/socket.io.min.js',
   '/assets/js/qrcode.min.js',
+  '/assets/js/jsQR.js',
   '/shader-background.bundle.js',
   '/push-notifications.js',
   '/avatar-cache.js',
