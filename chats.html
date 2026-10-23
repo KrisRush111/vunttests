@@ -7327,7 +7327,9 @@
     // Если страница сама Socket.IO не поднимает (например profile.html), поднимем
     // отдельное лёгкое соединение только под баны — иначе бан доходил бы туда
     // лишь фолбэк-опросом раз в 20-60 секунд, а не мгновенно.
-    var SOCKET_CDN = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+    // Сначала локальная копия (на Vercel), CDN — только запасной вариант
+    var SOCKET_CDN = '/assets/js/socket.io.min.js';
+    var SOCKET_CDN_FALLBACK = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
     var ownSocketTried = false;
     // Сколько раз мы уже отложили создание своего сокета в ожидании сокета
     // страницы (см. ensureOwnSocket).
@@ -7386,6 +7388,12 @@
         tag.src = SOCKET_CDN;
         tag.async = true;
         tag.onload = start;
+        tag.onerror = function () {
+            if (tag.src.indexOf(SOCKET_CDN_FALLBACK) === 0) return;
+            var t2 = document.createElement('script');
+            t2.src = SOCKET_CDN_FALLBACK; t2.async = true; t2.onload = start;
+            (document.head || document.documentElement).appendChild(t2);
+        };
         (document.head || document.documentElement).appendChild(tag);
     }
 
@@ -7926,7 +7934,8 @@
         });
     };
     </script>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="/assets/js/socket.io.min.js"></script>
+    <script>window.io||document.write('<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/script>')</script>
     <script>
         const SERVER_URL = 'https://vuntserverrr.site';
         // WS-сервер (socket_server.py) запускается отдельным процессом, подставьте сюда его реальный адрес (порт 9001 за тем же nginx). Если оставить пустым или неверным -- WS просто не подключится, всё продолжит работать через polling.
