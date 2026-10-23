@@ -1,7 +1,7 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.3.0';
+const CACHE_NAME = 'vuntgram-v2.3.1';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования.
@@ -34,9 +34,10 @@ const STATIC_RESOURCES = [
   '/mic-permission.js'
 ];
 
-// Сколько ждать сеть, если в кэше ничего нет. В России соединение с
-// зарубежными хостингами часто не рвётся, а «замирает» — без таймаута
-// страница висела бы бесконечно.
+// Сколько секунд ТИШИНЫ терпеть (ни одного байта от сервера), прежде чем
+// считать соединение «замершим». В России соединение с зарубежными
+// хостингами часто не рвётся, а замирает — без этого страница висела бы
+// бесконечно. Медленная, но живая загрузка этим не обрывается.
 const NETWORK_TIMEOUT_MS = 8000;
 
 // Внешние CDN, чьи скрипты/стили можно кэшировать даже как opaque-ответ
@@ -57,19 +58,35 @@ function isCacheableCdn(request) {
   }
 }
 
-// fetch с таймаутом НА ВЕСЬ ОТВЕТ, а не только на заголовки: при
-// «замирании» соединения заголовки могут прийти, а тело — нет. Поэтому
-// дочитываем тело внутри таймаута и отдаём уже готовый Response.
-async function fetchWithTimeout(request, timeoutMs = NETWORK_TIMEOUT_MS) {
+// fetch с таймаутом «на тишину»: обрываем загрузку, только если сеть
+// молчит NETWORK_TIMEOUT_MS подряд (соединение «замерло»). Пока данные
+// идут — ждём сколько нужно. Раньше здесь был общий лимит 8 с на весь
+// файл, и большие картинки (обои!) на медленной сети или через VPN не
+// успевали скачаться, обрывались и никогда не попадали в кэш.
+async function fetchWithTimeout(request, idleMs = NETWORK_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer = null;
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), idleMs);
+  };
+  arm();
   try {
     const response = await fetch(request, { signal: controller.signal });
-    if (response.type === 'opaque' || response.status === 204 || response.status === 304) {
+    if (response.type === 'opaque' || !response.body ||
+        response.status === 204 || response.status === 304) {
       return response;
     }
-    const body = await response.blob();
-    return new Response(body, {
+    arm();
+    const reader = response.body.getReader();
+    const chunks = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      arm(); // пришла очередная порция данных — соединение живо
+    }
+    return new Response(new Blob(chunks), {
       status: response.status,
       statusText: response.statusText,
       headers: response.headers
