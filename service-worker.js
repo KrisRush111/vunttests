@@ -1,27 +1,96 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.2.9';
+const CACHE_NAME = 'vuntgram-v2.3.0';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
-// Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования
+// Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования.
+// Это «оболочка» приложения: после первой успешной загрузки всё отсюда
+// открывается с телефона, без единого запроса к vuntgram.vercel.app.
+// (Ресурс, которого нет на сервере, просто пропускается — см. install.)
 const STATIC_RESOURCES = [
   '/',
+  '/index.html',
   '/chats.html',
-  '/contacts.html', 
+  '/contacts.html',
   '/profile.html',
-  '/offline.html',  
+  '/offline.html',
+  '/manifest.json',
   '/icon-192x192.png',
   '/icon-512x512.png',
+  '/vuntt.png',
+  '/vunt.png',
   '/фон.webp',
-  '/tailwind.js',
-  '/fontawesome-free-6.7.2-web/css/all.min.css',
+  '/assets/css/tailwind.css',
+  '/assets/fontawesome/css/all.min.css',
+  '/assets/animate/animate.min.css',
+  '/assets/js/socket.io.min.js',
+  '/assets/js/qrcode.min.js',
+  '/shader-background.bundle.js',
+  '/push-notifications.js',
+  '/avatar-cache.js',
   '/activity-tracker.js',
-  '/mic-permission.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
+  '/mic-permission.js'
 ];
+
+// Сколько ждать сеть, если в кэше ничего нет. В России соединение с
+// зарубежными хостингами часто не рвётся, а «замирает» — без таймаута
+// страница висела бы бесконечно.
+const NETWORK_TIMEOUT_MS = 8000;
+
+// Внешние CDN, чьи скрипты/стили можно кэшировать даже как opaque-ответ
+// (подключены без crossorigin). Без этого socket.io и прочее с CDN
+// никогда не попадали в кэш и каждый раз качались заново.
+const CACHEABLE_CDN_HOSTS = [
+  'cdn.socket.io',
+  'cdnjs.cloudflare.com',
+  'cdn.jsdelivr.net'
+];
+
+function isCacheableCdn(request) {
+  try {
+    const href = typeof request === 'string' ? request : request.url;
+    return CACHEABLE_CDN_HOSTS.includes(new URL(href, self.location.origin).hostname);
+  } catch (e) {
+    return false;
+  }
+}
+
+// fetch с таймаутом НА ВЕСЬ ОТВЕТ, а не только на заголовки: при
+// «замирании» соединения заголовки могут прийти, а тело — нет. Поэтому
+// дочитываем тело внутри таймаута и отдаём уже готовый Response.
+async function fetchWithTimeout(request, timeoutMs = NETWORK_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(request, { signal: controller.signal });
+    if (response.type === 'opaque' || response.status === 204 || response.status === 304) {
+      return response;
+    }
+    const body = await response.blob();
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Ответ, полученный через редирект (например, Vercel cleanUrls:
+// /chats.html → /chats), нельзя отдавать на навигацию — браузер выдаст
+// ошибку. Пересобираем его в «чистый» Response.
+async function cleanResponse(response) {
+  if (!response || !response.redirected) return response;
+  const body = await response.blob();
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers
+  });
+}
+
 
 // Страховка: любой промис, который мы всё же не поймали, логируем как
 // warning вместо красного "Uncaught (in promise)" и не даём ему всплыть.
@@ -48,7 +117,11 @@ self.addEventListener('install', (event) => {
         // недоступный ресурс не блокировал всю установку.
         return Promise.allSettled(
           STATIC_RESOURCES.map((url) =>
-            cache.add(url).catch((err) => {
+            // fetchWithTimeout вместо cache.add: при «замершем» соединении
+            // cache.add висел бы вечно, и установка не завершалась бы никогда
+            fetchWithTimeout(url, 20000)
+              .then((res) => safeCachePut(cache, url, res))
+              .catch((err) => {
               console.warn('⚠️ TheVuntgram: не удалось закэшировать', url, err);
             })
           )
@@ -249,8 +322,10 @@ async function tryFallbackFromLocalStorage(request) {
 // всплывал как unhandled rejection.
 async function safeCachePut(cache, request, response) {
   try {
-    if (request.method !== 'GET') return;
-    if (!response || !response.ok || response.status === 206) return;
+    const method = typeof request === 'string' ? 'GET' : request.method;
+    if (method !== 'GET' || !response) return;
+    const opaqueCdn = response.type === 'opaque' && isCacheableCdn(request);
+    if (!opaqueCdn && (!response.ok || response.status === 206)) return;
     await cache.put(request, response);
   } catch (err) {
     console.warn('⚠️ TheVuntgram: cache.put failed', request.url, err);
@@ -269,9 +344,9 @@ async function handleStaticRequest(request) {
     return cachedResponse;
   }
 
-  // Загружаем и кэшируем статический ресурс
+  // Загружаем и кэшируем статический ресурс (с таймаутом — см. fetchWithTimeout)
   try {
-    const networkResponse = await fetch(request);
+    const networkResponse = await fetchWithTimeout(request);
     await safeCachePut(cache, request, networkResponse.clone());
     return networkResponse;
   } catch (error) {
@@ -283,34 +358,80 @@ async function handleStaticRequest(request) {
   }
 }
 
+// HTML-страницы: СНАЧАЛА КЭШ, обновление — в фоне.
+//
+// Раньше было Network First: при каждом открытии приложение ждало ответа
+// vuntgram.vercel.app. В России этот домен то открывается, то «замирает»,
+// и установленное приложение висело на белом экране, хотя всё нужное уже
+// лежало на телефоне. Теперь страница открывается мгновенно из кэша, а
+// свежая версия тихо скачивается в фоне и будет показана при следующем
+// открытии. Данные (чаты, сообщения) это не задерживает: они идут на
+// vuntserverrr.site напрямую, мимо кэша.
 async function handleHtmlRequest(request) {
   const cache = await caches.open(CACHE_NAME);
+  const cached = await matchPage(cache, request);
 
+  if (cached) {
+    refreshPageInBackground(cache, request).catch(() => {});
+    return cleanResponse(cached);
+  }
+
+  // Первый заход на этом устройстве — без сети никак, но с таймаутом
   try {
-    const networkResponse = await fetch(request);
-
+    const networkResponse = await fetchWithTimeout(request);
     if (networkResponse.ok) {
-      // Обновляем кэш HTML страниц
-      await safeCachePut(cache, request, networkResponse.clone());
-      return networkResponse;
+      await safeCachePut(cache, pageCacheKey(request), networkResponse.clone());
     }
-
-    // Не-2xx (404/500) — пробуем кэш, иначе отдаём ответ сервера как есть
-    const cachedFallback = await cache.match(request);
-    return cachedFallback || networkResponse;
+    return networkResponse;
   } catch (error) {
-    // Реальный сетевой сбой — fallback на кэш, затем на offline.html
-    const cachedResponse = await cache.match(request);
-    if (cachedResponse) return cachedResponse;
-
-    // Раньше здесь был throw error → белый экран + Failed to fetch в консоли
     return showOfflinePage();
+  }
+}
+
+// Ключ кэша страницы без query-параметров (?chat_id=... и т.п.),
+// чтобы /chats.html?chat_id=5 брался из того же кэша, что и /chats.html
+function pageCacheKey(request) {
+  const url = new URL(request.url);
+  url.search = '';
+  url.hash = '';
+  if (url.pathname === '/index.html') url.pathname = '/';
+  return url.toString();
+}
+
+async function matchPage(cache, request) {
+  const key = pageCacheKey(request);
+  const variants = [key];
+  const u = new URL(key);
+  // Vercel cleanUrls: /chats и /chats.html — одна и та же страница
+  if (u.pathname.endsWith('.html')) variants.push(key.replace(/\.html$/, ''));
+  else if (u.pathname !== '/') variants.push(key + '.html');
+  if (u.pathname === '/') variants.push(new URL('/index.html', u).toString());
+
+  for (const v of variants) {
+    const hit = await cache.match(v, { ignoreSearch: true });
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// Не чаще раза в минуту на страницу — чтобы не дёргать Vercel при каждом переходе
+const lastPageRefresh = new Map();
+async function refreshPageInBackground(cache, request) {
+  const key = pageCacheKey(request);
+  const now = Date.now();
+  if (now - (lastPageRefresh.get(key) || 0) < 60000) return;
+  lastPageRefresh.set(key, now);
+  try {
+    const fresh = await fetchWithTimeout(new Request(key, { credentials: 'same-origin' }), 30000);
+    if (fresh.ok) await safeCachePut(cache, key, fresh);
+  } catch (e) {
+    // Нет связи с Vercel — не страшно, работаем на сохранённой версии
   }
 }
 
 async function updateStaticCacheInBackground(request, cache) {
   try {
-    const networkResponse = await fetch(request);
+    const networkResponse = await fetchWithTimeout(request, 30000);
     await safeCachePut(cache, request, networkResponse);
   } catch (error) {
     // Игнорируем ошибки фонового обновления
