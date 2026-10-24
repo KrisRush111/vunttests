@@ -7935,7 +7935,17 @@
     };
     </script>
     <script src="/assets/js/socket.io.min.js"></script>
-    <script>window.io||document.write('<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/script>')</script>
+    <script>
+    // Запасной Socket.IO с CDN, если локальная копия не загрузилась.
+    // БЕЗ document.write — он хрупкий, и хвост строки ("');") вылезал на страницу.
+    // connectAppSocket сам ждёт появления io() (до ~10 с), так что этого достаточно.
+    (function () {
+        if (window.io) return;
+        var s = document.createElement('script');
+        s.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+        document.head.appendChild(s);
+    })();
+    </script>
     <script>
         const SERVER_URL = 'https://vuntserverrr.site';
         // WS-сервер (socket_server.py) запускается отдельным процессом, подставьте сюда его реальный адрес (порт 9001 за тем же nginx). Если оставить пустым или неверным -- WS просто не подключится, всё продолжит работать через polling.
@@ -10149,15 +10159,124 @@ function getActiveElements() {
             loadChatAvatar(avatarElement, userId, initials, bgColor);
         }
 
+        // ================= ОТПРАВКА ФОТО: надёжность =================
+        // Почему фото иногда «не отправлялось»:
+        //  1) Фото проверяло общий флаг isSendingMessage. Его держит и очередь
+        //     текстовых сообщений — пока хоть одно текстовое сообщение
+        //     отправлялось/повторялось (до ~1,5 минуты при плохой сети), нажатие
+        //     «Отправить» у фото молча НИЧЕГО не делало: окно закрывалось, фото
+        //     пропадало. Теперь у фото свой счётчик, и оно не ждёт текст.
+        //  2) Фото с камеры (3–12 МБ) уходили как есть — долго по мобильной сети
+        //     и упирались в лимиты сервера. Теперь большие фото ужимаются на
+        //     устройстве до 2560 px (как в Telegram) — в 5–10 раз меньше.
+        //  3) У запроса не было таймаута: если соединение «замирало», фото
+        //     крутилось вечно. Теперь — понятная ошибка через 2 минуты.
+        //  4) Ответ не-JSON (413 «слишком большой», 502/504 от прокси)
+        //     превращался в непонятное «Unexpected token <».
+        //  5) Если за время загрузки открыть другой чат, сообщения ЭТОГО чата
+        //     сохранялись в кэш под id ДРУГОГО чата. Теперь проверяем, где мы.
+        let _vgPhotoUploads = 0;
+        const VG_PHOTO_COMPRESS_FROM = 1.5 * 1024 * 1024;   // меньше — шлём как есть
+        const VG_PHOTO_MAX_SIDE = 2560;
+        const VG_PHOTO_QUALITY = 0.85;
+        const VG_PHOTO_UPLOAD_TIMEOUT = 120000;
+
+        function vgPhotoUploadStart() {
+            _vgPhotoUploads++;
+            isSendingMessage = true;          // пауза поллинга сообщений, как и раньше
+        }
+
+        function vgPhotoUploadEnd() {
+            _vgPhotoUploads = Math.max(0, _vgPhotoUploads - 1);
+            isSendingMessage = _vgPendingSends > 0 || _vgPhotoUploads > 0;
+        }
+
+        function vgLoadImageForCanvas(file) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                const timer = setTimeout(() => { URL.revokeObjectURL(url); reject(new Error('decode timeout')); }, 15000);
+                img.onload = () => { clearTimeout(timer); resolve({ img, url }); };
+                img.onerror = () => { clearTimeout(timer); URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+                img.src = url;
+            });
+        }
+
+        // Ужимает большое фото на устройстве. При ЛЮБОЙ ошибке возвращает
+        // исходный файл — сервер сам ужмёт его, если он больше 10 МБ.
+        async function vgPrepareChatImage(file) {
+            try {
+                if (!file || !file.type || !/^image\//i.test(file.type)) return file;
+                if (/gif|svg/i.test(file.type)) return file;             // анимация / вектор — как есть
+                const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name || '');
+                if (file.size <= VG_PHOTO_COMPRESS_FROM && !isHeic) return file;
+
+                const { img, url } = await vgLoadImageForCanvas(file);
+                try {
+                    const w0 = img.naturalWidth, h0 = img.naturalHeight;
+                    if (!w0 || !h0) return file;
+                    const k = Math.min(1, VG_PHOTO_MAX_SIDE / Math.max(w0, h0));
+                    const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';                            // JPEG без прозрачности
+                    ctx.fillRect(0, 0, w, h);
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', VG_PHOTO_QUALITY));
+                    canvas.width = canvas.height = 0;                     // освобождаем память (iOS)
+                    if (!blob || !blob.size) return file;
+                    if (blob.size >= file.size && !isHeic) return file;   // не выиграли — шлём оригинал
+                    const base = String(file.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
+                    return new File([blob], `${base}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+                } finally {
+                    URL.revokeObjectURL(url);
+                }
+            } catch (e) {
+                console.warn('[PHOTO] не удалось ужать фото, отправляю оригинал:', e);
+                return file;
+            }
+        }
+
+        // POST multipart с таймаутом и понятными ошибками
+        async function vgUploadForm(path, formData, timeoutMs = VG_PHOTO_UPLOAD_TIMEOUT) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+            let r;
+            try {
+                r = await fetch(`${SERVER_URL}${path}`, {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include',
+                    signal: ctrl.signal
+                });
+            } catch (e) {
+                throw new Error(e && e.name === 'AbortError'
+                    ? 'сервер слишком долго не отвечает, попробуйте ещё раз'
+                    : 'нет соединения с сервером');
+            } finally {
+                clearTimeout(timer);
+            }
+            let data = null;
+            try { data = await r.json(); } catch (e) { /* не JSON: 413/502/504 от прокси */ }
+            if (r.ok && data && data.status === 'success') return data;
+            if (data && data.error) throw new Error(data.error);
+            if (r.status === 413) throw new Error('фото слишком большое');
+            throw new Error(r.status >= 500 ? 'сервер временно недоступен, попробуйте ещё раз'
+                                            : `ошибка ${r.status}`);
+        }
+
         async function sendImageMessage(file, caption = '') {
-            if (!currentChat || isSendingMessage) return;
+            if (!currentChat || !file) return;
             
-            isSendingMessage = true;
+            vgPhotoUploadStart();
             const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
             let localPreviewUrl = null;
+            const tempMessageId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            let actualChatId = currentChat.id;
             
             try {
-                const tempMessageId = `temp_${Date.now()}`;
                 localPreviewUrl = URL.createObjectURL(file);
                 const tempMessage = {
                     id: tempMessageId,
@@ -10175,7 +10294,6 @@ function getActiveElements() {
                 noMessages.style.display = 'none';
                 renderMessages(currentMessages);
                 
-                let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
                     const oldTempChatId = currentChat.id;
                     const response = await fetch(`${SERVER_URL}/create_chat`, {
@@ -10217,21 +10335,21 @@ function getActiveElements() {
                 // FormData собираем только ПОСЛЕ того, как actualChatId уже точно
                 // настоящий id чата (а не временный temp_...) — иначе для первого
                 // фото в новом чате на сервер уходил бы старый temp id.
+                // Большие фото ужимаем на устройстве (превью в чате — из оригинала)
+                const uploadFile = await vgPrepareChatImage(file);
+
                 const formData = new FormData();
                 formData.append('chat_id', actualChatId);
                 formData.append('sender_id', userData.platform_user_id);
-                formData.append('image', file);
+                formData.append('image', uploadFile, uploadFile.name || 'photo.jpg');
                 if (caption) formData.append('caption', caption);
                 
-                const messageResponse = await fetch(`${SERVER_URL}/send_image_message`, {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
-                
-                const messageData = await messageResponse.json();
-                if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить изображение');
+                const messageData = await vgUploadForm('/send_image_message', formData);
                 handleModerationResult(messageData.moderation);
+
+                // Пока фото грузилось, пользователь мог открыть другой чат —
+                // тогда ленту и кэш сообщений ТЕКУЩЕГО (чужого) чата не трогаем.
+                const stillInChat = !!currentChat && String(currentChat.id) === String(actualChatId);
 
                 // Пользователь уже попросил удалить это сообщение, пока оно отправлялось —
                 // тихо удаляем его на сервере, ничего не показывая в UI.
@@ -10267,9 +10385,12 @@ function getActiveElements() {
                     is_image: true
                 };
 
+                URL.revokeObjectURL(localPreviewUrl);
+                localPreviewUrl = null;
+
+                if (stillInChat) {
                 // Сразу меняем temp на реальное в массиве — до любых DOM-манипуляций
                 currentMessages = currentMessages.map(msg => msg.id === tempMessageId ? newMessage : msg);
-                URL.revokeObjectURL(localPreviewUrl);
                 saveMessagesToDB(actualChatId, currentMessages);
 
                 // Обновляем DOM прямо на месте — без перерисовки
@@ -10300,12 +10421,13 @@ function getActiveElements() {
                         if (spinner) spinner.remove();
                     }
                 }
+                }
                 
                 const lastMessagePreview = caption ? `📷 ${caption}` : '📷 Фото';
-                if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image', last_message_is_me: true, last_message_is_read: false });
+                {
+                    updateChatItemInDOM(actualChatId, { last_message: lastMessagePreview, last_message_time: newMessage.sent_at, unread_count: 0, last_message_type: 'image', last_message_is_me: true, last_message_is_read: false });
                     
-                    const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+                    const chatIndex = currentChatsList.findIndex(chat => String(chat.id) === String(actualChatId));
                     if (chatIndex !== -1) {
                         currentChatsList[chatIndex].last_message = lastMessagePreview;
                         currentChatsList[chatIndex].last_message_time = newMessage.sent_at;
@@ -10317,21 +10439,25 @@ function getActiveElements() {
                         
                         const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                         currentChatsList.unshift(updatedChat);
-                        moveChatToTop(currentChat.id);
+                        moveChatToTop(actualChatId);
                         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                     }
                 }
                 
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                if (stillInChat && messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 
             } catch (error) {
                 showMessage('Ошибка отправки изображения: ' + error.message, 'error');
-                currentMessages = currentMessages.filter(msg => !msg.is_uploading);
-                renderMessages(currentMessages);
+                // Убираем только СВОЁ временное фото (параллельно может грузиться другое)
+                const hadTemp = currentMessages.some(msg => msg.id === tempMessageId);
+                if (hadTemp) {
+                    currentMessages = currentMessages.filter(msg => msg.id !== tempMessageId);
+                    renderMessages(currentMessages);
+                }
                 if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
             } finally {
-                isSendingMessage = false;
-                sendMessageButton.disabled = false;
+                vgPhotoUploadEnd();
+                if (sendMessageButton) sendMessageButton.disabled = false;
             }
         }
 
@@ -10339,16 +10465,18 @@ function getActiveElements() {
         // сообщений в БД (по одному на фото), но на клиенте они рендерятся как
         // единая сетка в одном пузыре сообщения — как в Telegram.
         async function sendMediaGroupMessage(files, caption = '') {
-            if (!currentChat || isSendingMessage) return;
+            if (!currentChat) return;
             if (!files || files.length < 2) return;
 
-            isSendingMessage = true;
+            vgPhotoUploadStart();
             const { messagesContainer, noMessages, sendMessageButton } = getActiveElements();
             const localPreviewUrls = [];
+            const tempGroupId = `temp_group_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            let tempMessages = [];
+            let actualChatId = currentChat.id;
 
             try {
-                const tempGroupId = `temp_group_${Date.now()}`;
-                const tempMessages = files.map((file, idx) => {
+                tempMessages = files.map((file, idx) => {
                     const url = URL.createObjectURL(file);
                     localPreviewUrls.push(url);
                     return {
@@ -10369,7 +10497,6 @@ function getActiveElements() {
                 noMessages.style.display = 'none';
                 renderMessages(currentMessages);
 
-                let actualChatId = currentChat.id;
                 if (currentChat.is_temp) {
                     const oldTempChatId = currentChat.id;
                     const response = await fetch(`${SERVER_URL}/create_chat`, {
@@ -10408,21 +10535,23 @@ function getActiveElements() {
                     setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                 }
 
+                // Большие фото ужимаем на устройстве (все сразу, параллельно)
+                const uploadFiles = await Promise.all(files.map(f => vgPrepareChatImage(f)));
+
                 const formData = new FormData();
                 formData.append('chat_id', actualChatId);
                 formData.append('sender_id', userData.platform_user_id);
                 if (caption) formData.append('caption', caption);
-                files.forEach(file => formData.append('images', file));
+                uploadFiles.forEach(file => formData.append('images', file, file.name || 'photo.jpg'));
 
-                const messageResponse = await fetch(`${SERVER_URL}/send_media_group`, {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
-
-                const messageData = await messageResponse.json();
-                if (messageData.status !== 'success') throw new Error(messageData.error || 'Не удалось отправить фотографии');
+                const messageData = await vgUploadForm('/send_media_group', formData);
+                if (!Array.isArray(messageData.messages) || !messageData.messages.length) {
+                    throw new Error('Не удалось отправить фотографии');
+                }
                 handleModerationResult(messageData.moderation);
+
+                // Пока фото грузились, пользователь мог открыть другой чат
+                const stillInChat = !!currentChat && String(currentChat.id) === String(actualChatId);
 
                 const newMessages = messageData.messages.map((m) => ({
                     id: m.message_id,
@@ -10436,6 +10565,10 @@ function getActiveElements() {
                     media_group_id: messageData.media_group_id
                 }));
 
+                localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+                localPreviewUrls.length = 0;
+
+                if (stillInChat) {
                 // Меняем temp-сообщения на реальные в массиве — до любых DOM-манипуляций
                 const tempIds = new Set(tempMessages.map(m => m.id));
                 currentMessages = currentMessages.filter(msg => !tempIds.has(msg.id));
@@ -10445,7 +10578,6 @@ function getActiveElements() {
                     const tb = new Date(b.sent_at).getTime();
                     return ta - tb;
                 });
-                localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
                 saveMessagesToDB(actualChatId, currentMessages);
 
                 // Обновляем DOM на месте: заменяем временный альбом на реальный,
@@ -10483,12 +10615,13 @@ function getActiveElements() {
                         }
                     });
                 }
+                }
 
                 const lastMessagePreview = caption ? `📷 ${caption}` : `📷 ${files.length} фото`;
-                if (!currentChat.is_temp) {
-                    updateChatItemInDOM(currentChat.id, { last_message: lastMessagePreview, last_message_time: newMessages[newMessages.length - 1].sent_at, unread_count: 0, last_message_type: 'image', last_message_is_me: true, last_message_is_read: false });
+                {
+                    updateChatItemInDOM(actualChatId, { last_message: lastMessagePreview, last_message_time: newMessages[newMessages.length - 1].sent_at, unread_count: 0, last_message_type: 'image', last_message_is_me: true, last_message_is_read: false });
 
-                    const chatIndex = currentChatsList.findIndex(chat => chat.id === currentChat.id);
+                    const chatIndex = currentChatsList.findIndex(chat => String(chat.id) === String(actualChatId));
                     if (chatIndex !== -1) {
                         currentChatsList[chatIndex].last_message = lastMessagePreview;
                         currentChatsList[chatIndex].last_message_time = newMessages[newMessages.length - 1].sent_at;
@@ -10500,21 +10633,25 @@ function getActiveElements() {
 
                         const updatedChat = currentChatsList.splice(chatIndex, 1)[0];
                         currentChatsList.unshift(updatedChat);
-                        moveChatToTop(currentChat.id);
+                        moveChatToTop(actualChatId);
                         setCacheItem('chats_list', currentChatsList, CACHE.CHATS_TTL);
                     }
                 }
 
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                if (stillInChat && messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
             } catch (error) {
                 showMessage('Ошибка отправки фотографий: ' + error.message, 'error');
-                currentMessages = currentMessages.filter(msg => !msg.is_uploading);
-                renderMessages(currentMessages);
+                // Убираем только СВОИ временные фото (параллельно может грузиться другое)
+                const tempIds = new Set(tempMessages.map(m => m.id));
+                if (currentMessages.some(msg => tempIds.has(msg.id))) {
+                    currentMessages = currentMessages.filter(msg => !tempIds.has(msg.id));
+                    renderMessages(currentMessages);
+                }
                 localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
             } finally {
-                isSendingMessage = false;
-                sendMessageButton.disabled = false;
+                vgPhotoUploadEnd();
+                if (sendMessageButton) sendMessageButton.disabled = false;
             }
         }
 
@@ -15834,7 +15971,8 @@ function getActiveElements() {
                 .catch(e => console.error('[SEND]', e))
                 .finally(() => {
                     _vgPendingSends = Math.max(0, _vgPendingSends - 1);
-                    isSendingMessage = _vgPendingSends > 0;
+                    // фото грузятся параллельно — пока они идут, флаг тоже держим
+                    isSendingMessage = _vgPendingSends > 0 || _vgPhotoUploads > 0;
                 });
         }
 
