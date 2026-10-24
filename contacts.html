@@ -3993,7 +3993,7 @@ function createRecommendationUserElement(user) {
     // Обработчик клика для открытия профиля
     userElement.addEventListener('click', (e) => {
         if (!e.target.classList.contains('recommendation-add-btn')) {
-            openProfileModal(user.platform_user_id);
+            openProfileModal(user.platform_user_id, user);
         }
     });
 
@@ -4049,8 +4049,10 @@ function createRecommendationUserElement(user) {
     addButton.className = 'recommendation-add-btn';
     addButton.innerHTML = '<i class="fas fa-user-plus"></i>';
     
-    // Проверяем статус дружбы
-    updateRecommendationButtonStatus(addButton, user.platform_user_id);
+    // Статус дружбы НЕ запрашиваем: сервер и так исключает из рекомендаций
+    // друзей и тех, кому уже отправлена заявка. Раньше здесь уходил отдельный
+    // /check_friendship на КАЖДУЮ рекомендацию (10 запросов при открытии
+    // страницы), и они занимали сервер как раз тогда, когда открывали профиль.
 
     addButton.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -4184,8 +4186,10 @@ async function openChatWithContact(user) {
         return;
     }
     
-    // Проверяем статус дружбы
-    const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
+    // Статус дружбы уже известен из профиля — не спрашиваем сервер повторно
+    const friendshipStatus = user.friendship_status === 'accepted'
+        ? 'accepted'
+        : await checkFriendshipStatus(user.platform_user_id);
     if (friendshipStatus !== 'accepted') {
         showMessage('Чат доступен только для друзей', 'error');
         return;
@@ -4640,9 +4644,40 @@ function getActiveElements() {
             }
         }
 
-// В функции openProfileModal для мобильных устройств:
-function openProfileModal(userId) {
-    showLoading('Загрузка профиля...');
+// Профили, которые уже открывали: при повторном открытии показываем сразу,
+// а свежие данные с сервера подменяют их тихо, когда придут.
+const profileCache = new Map();          // platform_user_id -> данные /get_user_data
+let profileLoadToken = 0;                // защита от «старый ответ перезаписал новый профиль»
+
+// Мгновенно рисуем шапку (ник, ID, аватар, галочка) из того, что уже есть
+// в строке списка, — не дожидаясь ответа сервера.
+function prefillProfileHeader(user) {
+    if (!user || !user.platform_user_id) return;
+    const el = getActiveElements();
+    const initial = (user.nickname || '?').charAt(0).toUpperCase();
+    try {
+        if (window.vgSetTitle) {
+            window.vgSetTitle(el.modalProfileNickname, user.nickname || '',
+                window.vgIsVerified && window.vgIsVerified(user));
+        } else {
+            el.modalProfileNickname.textContent = user.nickname || '';
+        }
+        el.modalProfileId.textContent = `ID: ${user.platform_user_id}`;
+        AvatarCache.render(SERVER_URL, el.modalProfileAvatar, user.platform_user_id, initial,
+            user.avatar_background, !!(user.has_avatar_photo || user.has_avatar));
+        updateProfileModalStatus(user.platform_user_id);
+        // Поля «О себе» прошлого контакта не должны мелькать у нового
+        ['modalMainSchool', 'modalUserClass', 'modalUserRole', 'modalAdditionalSchool',
+         'modalUserSpecialization', 'modalUserCourse', 'modalUserSubject'].forEach((k) => {
+            if (el[k]) el[k].textContent = 'Загрузка...';
+        });
+        currentViewedUser = null;
+    } catch (e) {
+        console.warn('prefillProfileHeader:', e);
+    }
+}
+
+function openProfileModal(userId, preview) {
     const { profileModal } = getActiveElements();
 
     // На кого будет жалоба — этот же id читает блок жалоб внизу страницы.
@@ -4667,9 +4702,22 @@ function openProfileModal(userId) {
         modalOverlay.classList.add('active');
     }
 
-    loadUserProfile(userId);
-    // Медиа и файлы из переписки с этим контактом (как в chats.html)
-    if (window.renderProfileMediaSections) window.renderProfileMediaSections(userId);
+    // 1) Сразу: из кэша прошлого открытия или из строки списка.
+    const cachedProfile = profileCache.get(String(userId));
+    if (cachedProfile) {
+        updateProfileModalUI(cachedProfile);
+    } else if (preview) {
+        prefillProfileHeader(preview);
+    } else {
+        showLoading('Загрузка профиля...');   // открыли по ID без данных — как раньше
+    }
+
+    // 2) Свежие данные с сервера, 3) медиа — только ПОСЛЕ профиля, чтобы
+    // тяжёлые /get_or_create_chat + /get_messages не стояли с ним в одной очереди.
+    loadUserProfile(userId).finally(() => {
+        if (window.__reportTargetUserId !== userId) return;   // уже открыт другой профиль
+        if (window.renderProfileMediaSections) window.renderProfileMediaSections(userId);
+    });
     // Подписываемся на realtime presence именно этого пользователя (он может
     // быть не в текущем списке контактов) и запускаем прямой live-поллинг
     // статуса, пока профиль открыт — иначе текст "был(а) в сети" тут мог
@@ -4729,6 +4777,7 @@ if (!isDesktop) {
                 modalProfileStatus
             } = getActiveElements();
 
+            const myToken = ++profileLoadToken;
             try {
                 const response = await fetch(`${SERVER_URL}/get_user_data`, {
                     method: 'POST',
@@ -4743,13 +4792,15 @@ if (!isDesktop) {
                 });
 
                 const data = await response.json();
-                console.log('User data from server:', data);
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Ошибка загрузки профиля');
                 }
+                // Пока ждали ответ, пользователь открыл другой профиль — не затираем его
+                if (myToken !== profileLoadToken) return;
 
                 if (data.status === 'success' && data.user) {
+                    profileCache.set(String(userId), data.user);
                     updateProfileModalUI(data.user);
                 } else {
                     throw new Error('Пользователь не найден');
@@ -5215,8 +5266,12 @@ async function updateProfileModalUI(user) {
         }
     }
 
-    // Проверяем статус дружбы асинхронно и управляем кнопками чата и «ещё»
-    const friendshipStatus = await checkFriendshipStatus(user.platform_user_id);
+    // Статус дружбы теперь приходит прямо в /get_user_data (friendship_status) —
+    // отдельный /check_friendship нужен только со старым сервером.
+    const friendshipStatus = user.friendship_status
+        ? user.friendship_status
+        : await checkFriendshipStatus(user.platform_user_id);
+    if (currentViewedUser !== user) return;   // пока ждали — открыли другой профиль
     
     if (friendshipStatus === 'accepted') {
         // Кнопка активна для друзей
@@ -5462,7 +5517,7 @@ async function updateProfileModalUI(user) {
                         userElement.style.opacity = '1';
 
                     
-                        openProfileModal(user.platform_user_id);
+                        openProfileModal(user.platform_user_id, user);
 
                       
                         if (isDesktop) {
@@ -5582,7 +5637,7 @@ async function updateProfileModalUI(user) {
             requestElement.addEventListener('click', (e) => {
                 // Убедимся, что клик не был по кнопкам действий или по аватарке
                 if (!e.target.closest('.friend-request-actions') && e.target.tagName !== 'BUTTON') {
-                    openProfileModal(user.platform_user_id);
+                    openProfileModal(user.platform_user_id, user);
                 }
             });
 
@@ -6086,7 +6141,20 @@ function setupSearchHandlers() {
       
       <script src="avatar-cache.js"></script>
       <script src="/assets/js/socket.io.min.js"></script>
-    <script>window.io||document.write('<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/script>')</script>
+    <script>
+    // Запасной Socket.IO с CDN, если локальная копия не загрузилась.
+    // БЕЗ document.write: он хрупкий (браузеры его блокируют, а при любой
+    // ошибке экранирования хвост строки — "');" — вылезал текстом на страницу).
+    (function () {
+        if (window.io) return;
+        var s = document.createElement('script');
+        s.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+        s.onload = function () {
+            try { if (typeof connectRealtimeSocket === 'function') connectRealtimeSocket(); } catch (e) {}
+        };
+        document.head.appendChild(s);
+    })();
+    </script>
 
     <!-- Блокировка масштабирования страницы -->
     <script>
