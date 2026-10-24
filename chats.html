@@ -13759,12 +13759,52 @@ function getActiveElements() {
             }
         }
 
+        // ФОНОВАЯ ПРЕДЗАГРУЗКА СООБЩЕНИЙ — В ОЧЕРЕДИ.
+        // Раньше сразу при открытии страницы для КАЖДОГО чата одновременно
+        // уходили запросы версии/сообщений (20 чатов = 20–40 запросов разом),
+        // причём ещё ДО ответа /get_chats. Они занимали сервер и базу, и сам
+        // список чатов с новыми сообщениями приходил с большой задержкой.
+        // Теперь: старт через 2 с после загрузки списка, не больше 2 запросов
+        // одновременно, только первые 15 чатов (остальные — при открытии).
+        const VG_PRELOAD_LIMIT = 15;
+        const VG_PRELOAD_PARALLEL = 2;
+        const VG_PRELOAD_DELAY = 2000;
+        const _vgPreloadQueue = [];
+        const _vgPreloadQueued = new Set();
+        let _vgPreloadActive = 0;
+        let _vgPreloadTimer = null;
+
         function preloadAllMessages(chats) {
             if (!chats || chats.length === 0) return;
+            chats.slice(0, VG_PRELOAD_LIMIT).forEach(chat => {
+                if (!chat || chat.id == null) return;
+                const key = String(chat.id);
+                if (key.startsWith('temp_') || _vgPreloadQueued.has(key)) return;
+                _vgPreloadQueued.add(key);
+                _vgPreloadQueue.push(chat);
+            });
+            if (!_vgPreloadTimer) {
+                _vgPreloadTimer = setTimeout(() => { _vgPreloadTimer = null; _vgPreloadPump(); }, VG_PRELOAD_DELAY);
+            }
+        }
+
+        function _vgPreloadPump() {
+            while (_vgPreloadActive < VG_PRELOAD_PARALLEL && _vgPreloadQueue.length) {
+                const chat = _vgPreloadQueue.shift();
+                _vgPreloadActive++;
+                _vgPreloadOne(chat).catch(() => {}).finally(() => {
+                    _vgPreloadActive--;
+                    _vgPreloadQueued.delete(String(chat.id));
+                    _vgPreloadPump();
+                });
+            }
+        }
+
+        async function _vgPreloadOne(chat) {
             // Фоновая синхронизация: только для чатов где мета устарела (>30 сек) —
             // и даже тогда сперва дешёвая проверка версии, полный /get_messages
             // только если версия реально отличается от локально сохранённой.
-            chats.forEach(async (chat) => {
+            await (async (chat) => {
                 try {
                     const meta = await getChatMeta(chat.id);
                     const stale = !meta || (Date.now() - (meta.updated_at || 0) > 30000);
@@ -13808,7 +13848,7 @@ function getActiveElements() {
                         }
                     }
                 } catch (e) {}
-            });
+            })(chat);
         }
 
         async function loadChats() {
@@ -13826,7 +13866,8 @@ function getActiveElements() {
                 const sortedChats = sortChats(cachedChats);
                 currentChatsList = sortedChats;
                 renderChats(sortedChats);
-                preloadAllMessages(sortedChats);
+                // предзагрузку сообщений НЕ запускаем по кэшу: сначала пусть
+                // придёт свежий список (ниже), иначе запросы мешают ему
             }
 
             // ── 2. Фоновая сверка с сервером — всегда ─────────────────────
@@ -14020,9 +14061,22 @@ function getActiveElements() {
         async function renderChats(chats) {
             vgSanitizeUnreadList(chats);
             const { chatsList, noChats } = getActiveElements();
-            chatsList.innerHTML = '';
+
+            // ТОЧЕЧНОЕ ОБНОВЛЕНИЕ. Раньше список каждый раз стирался целиком
+            // (innerHTML = '') и строился заново с анимацией появления каждой
+            // строки — поэтому при любом новом сообщении «обновлялась вся
+            // страница». Теперь строки, у которых ничего не изменилось, остаются
+            // на месте (только переставляются по порядку), а пересоздаются лишь
+            // изменившиеся — без анимации. Анимация — только при самой первой
+            // отрисовке, когда список ещё пуст.
+            const prevNodes = new Map();
+            chatsList.querySelectorAll(':scope > .chat-item-swipe[data-chat-id]').forEach(w => {
+                prevNodes.set(String(w.getAttribute('data-chat-id')), w);
+            });
+            const isFirstRender = prevNodes.size === 0;
 
             if (!chats || chats.length === 0) {
+                chatsList.innerHTML = '';
                 noChats.style.display = 'block';
                 return;
             }
@@ -14044,7 +14098,7 @@ function getActiveElements() {
             // и точечно обновятся в фоне через refreshChatStatusesInBackground.
             const activityData = getCachedActivityStatusSync(userIds);
             
-            const fragment = document.createDocumentFragment();
+            const desiredNodes = [];
             
             chats.forEach((chat, index) => {
                 const chatSwipeWrapper = document.createElement('div');
@@ -14054,7 +14108,13 @@ function getActiveElements() {
                 const chatItem = document.createElement('div');
                 chatItem.className = 'chat-item' + (chat.is_pinned ? ' is-pinned' : '');
                 chatItem.setAttribute('data-chat-id', chat.id);
-                chatItem.style.animationDelay = `${index * 0.05}s`;
+                if (isFirstRender) {
+                    // Каскад только у первых строк (раньше index * 0.05 без
+                    // потолка: при 30 чатах последний появлялся через 1,5 с)
+                    chatItem.style.animationDelay = `${Math.min(index, 10) * 0.03}s`;
+                } else {
+                    chatItem.style.animation = 'none';
+                }
                 
                 // Группа: инициалы из названия заглавными (Telegram так же),
                 // аватар — фото группы (group_photo_url), а не аватар участника.
@@ -14126,6 +14186,24 @@ function getActiveElements() {
 
                 const timeLabel = formatChatListDate(chat.last_message_time);
                 const readStatusIcon = getChatReadStatusIcon(chat);
+
+                // «Отпечаток» строки: всё, от чего зависит её вид. Совпал с тем,
+                // что уже на экране, — оставляем старую строку как есть.
+                let vgSig = '';
+                try {
+                    vgSig = JSON.stringify([chat, pinnedCount, statusText, isOnline, lastMessageText,
+                        timeLabel, readStatusIcon, isChatVerified, isBotChat]);
+                } catch (e) { vgSig = ''; }
+                const prevWrapper = prevNodes.get(String(chat.id));
+                if (vgSig && prevWrapper && prevWrapper.dataset.vgSig === vgSig) {
+                    const prevItem = prevWrapper.querySelector('.chat-item');
+                    // перестановка узла в DOM перезапускает CSS-анимацию — гасим её
+                    if (prevItem) prevItem.style.animation = 'none';
+                    prevNodes.delete(String(chat.id));       // один узел — одна строка
+                    desiredNodes.push(prevWrapper);
+                    return;
+                }
+                if (vgSig) chatSwipeWrapper.dataset.vgSig = vgSig;
 
                 chatItem.innerHTML = `
                     <div class="chat-avatar ${isOnline ? 'is-online' : ''}" style="background: ${avatarStyle}">${initials}</div>
@@ -14245,10 +14323,19 @@ function getActiveElements() {
                     (swipeBtnCount * 76 + (swipeBtnCount - 1) * 8 + 16) + 'px'
                 );
 
-                fragment.appendChild(chatSwipeWrapper);
+                desiredNodes.push(chatSwipeWrapper);
             });
             
-            chatsList.appendChild(fragment);
+            // Применяем: лишнее убираем, нужное ставим по порядку. Узлы, которые
+            // уже стоят на своём месте, не трогаем вовсе (ни мигания, ни прыжка
+            // прокрутки).
+            const keepNodes = new Set(desiredNodes);
+            Array.from(chatsList.childNodes).forEach(ch => { if (!keepNodes.has(ch)) ch.remove(); });
+            let refNode = chatsList.firstChild;
+            desiredNodes.forEach(node => {
+                if (node === refNode) { refNode = node.nextSibling; return; }
+                chatsList.insertBefore(node, refNode);
+            });
 
             // Значок "без звука" у имени и цвет кнопки "Звук" — по локальному списку мьюта
             if (window.vgRefreshChatsMuteUi) window.vgRefreshChatsMuteUi();
@@ -17229,6 +17316,10 @@ function stopProfileDataPolling() {
                 
                 const chatItem = list.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
                 if (chatItem) {
+                    // Строку меняем вручную — следующая полная сверка должна её
+                    // пересобрать, а не считать «неизменившейся»
+                    const vgWrap = chatItem.closest('.chat-item-swipe');
+                    if (vgWrap) delete vgWrap.dataset.vgSig;
                     const lastMessageEl = chatItem.querySelector('.last-message');
                     
                     if (lastMessageEl && chatData.last_message !== undefined) {
