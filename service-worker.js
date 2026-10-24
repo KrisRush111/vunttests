@@ -1,7 +1,7 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.3.4';
+const CACHE_NAME = 'vuntgram-v2.3.5';
 const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования.
@@ -926,7 +926,7 @@ self.addEventListener('pushsubscriptionchange', (event) => {
       })
       .catch((err) => console.error('❌ TheVuntgram: pushsubscriptionchange resubscribe failed', err))
   );
-});    
+});
 
 
 // Офлайн страница
@@ -939,4 +939,4 @@ async function showOfflinePage() {
   }
   
   return new Response('Offline', { status: 503 });
-}
+}  
