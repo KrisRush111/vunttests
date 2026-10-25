@@ -29309,5 +29309,140 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 })();
 </script>
 
+<!-- ===== Раскрытое фото аватарки "до самого верха", как в Telegram =====
+     Браузер не даёт сайту рисовать под статус-баром iPhone, но Safari красит эту
+     полосу в цвет фиксированного элемента у верхнего края экрана (iOS 26) или
+     в theme-color (iOS 15–18, Android). Пока фото раскрыто, берём цвет верхнего
+     края снимка и красим им полосу — фото визуально продолжается до самого верха,
+     без серой полосы. В приложении с домашнего экрана фото и так под статус-баром. -->
+<style id="vg-hero-statusbar-style">
+.vg-hero-statusbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: max(2px, env(safe-area-inset-top, 0px));
+    z-index: 2002;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .25s ease, background-color .25s ease;
+}
+.vg-hero-statusbar.on { opacity: 1; }
+@media (min-width: 768px) { .vg-hero-statusbar { display: none; } }
+</style>
+<script id="vg-hero-statusbar-script">
+(function () {
+    var PH = window.ProfileHero;
+    if (!PH) return;
+
+    var strip = null;
+    var themeMeta = document.querySelector('meta[name="theme-color"]');
+    var origTheme = themeMeta ? themeMeta.getAttribute('content') : null;
+    var origHtmlBg = null;
+    var colorCache = {};
+    var token = 0;
+
+    function getStrip() {
+        if (!strip) {
+            strip = document.createElement('div');
+            strip.className = 'vg-hero-statusbar';
+            document.body.appendChild(strip);
+        }
+        return strip;
+    }
+
+    function avatarUrl(header) {
+        var av = header && header.querySelector('.profile-avatar');
+        if (!av) return null;
+        var img = av.querySelector('img');
+        if (img && img.src) return img.src;
+        var bg = getComputedStyle(av).backgroundImage || '';
+        var m = bg.match(/url\(["']?(.*?)["']?\)/);
+        return m ? m[1] : null;
+    }
+
+    // Средний цвет верхней полоски снимка (с учётом того, как фото обрезается по cover)
+    function sampleTopColor(url, boxW, boxH) {
+        if (colorCache[url]) return Promise.resolve(colorCache[url]);
+        return new Promise(function (resolve) {
+            var img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = function () {
+                try {
+                    var iw = img.naturalWidth, ih = img.naturalHeight;
+                    if (!iw || !ih) return resolve(null);
+                    // какая часть картинки видна в шапке при background-size: cover
+                    var scale = Math.max(boxW / iw, boxH / ih);
+                    var visH = boxH / scale;
+                    var srcY = Math.max(0, (ih - visH) / 2);
+                    var c = document.createElement('canvas');
+                    c.width = 24; c.height = 2;
+                    var ctx = c.getContext('2d', { willReadFrequently: true });
+                    ctx.drawImage(img, 0, srcY, iw, Math.max(1, visH * 0.03), 0, 0, 24, 2);
+                    var d = ctx.getImageData(0, 0, 24, 2).data;
+                    var r = 0, g = 0, b = 0, n = d.length / 4;
+                    for (var i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+                    var col = 'rgb(' + Math.round(r / n) + ',' + Math.round(g / n) + ',' + Math.round(b / n) + ')';
+                    colorCache[url] = col;
+                    resolve(col);
+                } catch (e) {
+                    resolve(null); // сервер не отдал CORS — цвет не прочитать
+                }
+            };
+            img.onerror = function () { resolve(null); };
+            img.src = url;
+        });
+    }
+
+    function tintOn(header) {
+        if (!window.matchMedia('(max-width: 767px)').matches) return;
+        var my = ++token;
+        var url = avatarUrl(header);
+        var w = window.innerWidth;
+        var h = header.offsetHeight || w;
+        var apply = function (col) {
+            if (my !== token) return;
+            col = col || '#000000';
+            var s = getStrip();
+            s.style.backgroundColor = col;
+            s.classList.add('on');
+            if (themeMeta) themeMeta.setAttribute('content', col);
+            if (origHtmlBg === null) origHtmlBg = document.documentElement.style.backgroundColor || '';
+            document.documentElement.style.backgroundColor = col;
+        };
+        if (url) sampleTopColor(url, w, Math.max(h, w)).then(apply);
+        else apply(null);
+    }
+
+    function tintOff() {
+        token++;
+        if (strip) strip.classList.remove('on');
+        if (themeMeta && origTheme !== null) themeMeta.setAttribute('content', origTheme);
+        if (origHtmlBg !== null) {
+            document.documentElement.style.backgroundColor = origHtmlBg;
+            origHtmlBg = null;
+        }
+    }
+
+    var origExpand = PH.expand, origCollapse = PH.collapse, origReset = PH.reset;
+    PH.expand = function (header) {
+        var r = origExpand.apply(this, arguments);
+        if (PH.isExpanded(header)) tintOn(header);
+        return r;
+    };
+    PH.collapse = function () { tintOff(); return origCollapse.apply(this, arguments); };
+    PH.reset = function () { tintOff(); return origReset.apply(this, arguments); };
+
+    // Профиль закрыли любым способом — возвращаем обычный цвет полосы
+    ['profileModalMobile'].forEach(function (id) {
+        var m = document.getElementById(id);
+        if (!m) return;
+        new MutationObserver(function () {
+            if (!m.classList.contains('active')) tintOff();
+        }).observe(m, { attributes: true, attributeFilter: ['class'] });
+    });
+})();
+</script>
+
 </body>
 </html>
