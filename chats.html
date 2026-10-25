@@ -11494,6 +11494,11 @@ function getActiveElements() {
         }
 
         function quickReact(messageElement, message) {
+            // На iPhone двойной тап вызывает и наш обработчик touchend, и нативный dblclick —
+            // реакция ставилась и тут же снималась. Принимаем только первый вызов.
+            const now = Date.now();
+            if (messageElement._lastQuickReact && now - messageElement._lastQuickReact < 700) return;
+            messageElement._lastQuickReact = now;
             closeReactionPicker();
             if (navigator.vibrate) navigator.vibrate([10, 30, 10]);
             toggleReaction(messageElement.getAttribute('data-message-id'), QUICK_REACTION_EMOJI);
@@ -13360,8 +13365,75 @@ function getActiveElements() {
             positionMessageContextStack(activeContextOverlay);
         }
 
+        // ===== Мгновенная (оптимистичная) реакция =====
+        // Плашку рисуем сразу по нажатию, не дожидаясь сервера; ответ сервера потом
+        // просто сверяет данные. Пока запрос в пути — поллинг не может откатить реакцию.
+        const reactionLocks = new Map(); // messageId -> число запросов в пути
+        const reactionLockUntil = new Map(); // messageId -> время, до которого игнорируем поллинг
+        function isReactionLocked(messageId) {
+            const id = String(messageId);
+            return (reactionLocks.get(id) || 0) > 0 || (reactionLockUntil.get(id) || 0) > Date.now();
+        }
+
+        // Пытаемся узнать, как выглядит "я" в списке поставивших (для аватарки в плашке)
+        function getMyReactionUser() {
+            try {
+                const saved = localStorage.getItem('vg_my_reaction_user');
+                if (saved) return JSON.parse(saved);
+            } catch (e) {}
+            return null;
+        }
+        function rememberMyReactionUser(reactions) {
+            // Если моя реакция единственная в плашке — этот пользователь точно я
+            (reactions || []).forEach(r => {
+                if (r.reacted_by_me && r.count === 1 && r.users && r.users.length === 1) {
+                    try { localStorage.setItem('vg_my_reaction_user', JSON.stringify(r.users[0])); } catch (e) {}
+                }
+            });
+        }
+
+        function buildOptimisticReactions(reactions, emoji) {
+            const list = (reactions || []).map(r => Object.assign({}, r, { users: (r.users || []).slice() }));
+            const me = getMyReactionUser() || { avatar_background: '#0088cc', first_name: 'Я' };
+            const idx = list.findIndex(r => r.emoji === emoji);
+            if (idx >= 0 && list[idx].reacted_by_me) {
+                // снимаем свою реакцию
+                const r = list[idx];
+                r.count = Math.max(0, (r.count || 1) - 1);
+                r.reacted_by_me = false;
+                const meIdx = r.users.findIndex(u => me && (
+                    (me.platform_user_id != null && String(u.platform_user_id) === String(me.platform_user_id)) ||
+                    (me.id != null && String(u.id) === String(me.id))));
+                if (meIdx >= 0) r.users.splice(meIdx, 1);
+                else if (r.users.length > r.count) r.users.pop();
+                if (r.count === 0) list.splice(idx, 1);
+            } else if (idx >= 0) {
+                const r = list[idx];
+                r.count = (r.count || 0) + 1;
+                r.reacted_by_me = true;
+                r.users.unshift(me);
+            } else {
+                list.push({ emoji, count: 1, reacted_by_me: true, users: [me] });
+            }
+            return list;
+        }
+
         async function toggleReaction(messageId, emoji) {
             if (!messageId || !currentChat) return;
+            const id = String(messageId);
+            const msgObj = currentMessages.find(m => String(m.id) === id);
+            const prevReactions = msgObj ? (msgObj.reactions || []) : null;
+            reactionLocks.set(id, (reactionLocks.get(id) || 0) + 1);
+
+            // Рисуем результат сразу
+            if (msgObj) {
+                const optimistic = buildOptimisticReactions(prevReactions, emoji);
+                msgObj.reactions = optimistic;
+                const el0 = document.querySelector(`.message[data-message-id="${messageId}"]`);
+                if (el0) renderReactionsOnElement(el0, optimistic);
+            }
+
+            let ok = false;
             try {
                 const response = await fetch(`${SERVER_URL}/toggle_reaction`, {
                     method: 'POST',
@@ -13376,10 +13448,15 @@ function getActiveElements() {
                 });
                 const data = await response.json();
                 if (data.status === 'success') {
+                    ok = true;
+                    rememberMyReactionUser(data.reactions);
+                    // Если пользователь успел нажать ещё раз — ждём ответ на последний запрос,
+                    // чтобы промежуточный ответ не "дёргал" плашку туда-обратно
+                    const stillPending = (reactionLocks.get(id) || 0) > 1;
                     const msg = currentMessages.find(m => String(m.id) === String(messageId));
-                    if (msg) msg.reactions = data.reactions;
+                    if (msg && !stillPending) msg.reactions = data.reactions;
                     const el = document.querySelector(`.message[data-message-id="${messageId}"]`);
-                    if (el) renderReactionsOnElement(el, data.reactions);
+                    if (el && !stillPending) renderReactionsOnElement(el, data.reactions);
 
                     // Сохраняем обновлённые реакции в локальный кэш (IndexedDB),
                     // иначе при следующем открытии чата подгрузятся старые данные
@@ -13393,6 +13470,16 @@ function getActiveElements() {
             } catch (e) {
                 console.error('toggleReaction error', e);
             } finally {
+                const left = Math.max(0, (reactionLocks.get(id) || 1) - 1);
+                if (left) reactionLocks.set(id, left); else reactionLocks.delete(id);
+                // Ещё немного не даём поллингу (который мог уйти до нажатия) откатить реакцию
+                reactionLockUntil.set(id, Date.now() + 2500);
+                if (!ok && !left && msgObj && prevReactions) {
+                    // Сервер не принял — возвращаем как было
+                    msgObj.reactions = prevReactions;
+                    const elBack = document.querySelector(`.message[data-message-id="${messageId}"]`);
+                    if (elBack) renderReactionsOnElement(elBack, prevReactions);
+                }
                 // Если плашка так и не появилась (ошибка, сообщение вне экрана) — убираем
                 // "зависший" летящий эмодзи плавным исчезновением
                 setTimeout(() => {
@@ -18017,6 +18104,12 @@ function stopProfileDataPolling() {
 
                         newMessages.forEach(nm => {
                             const cached = currentMessages.find(m => String(m.id) === String(nm.id));
+                            // Пока наша реакция на это сообщение ещё летит на сервер, ответ поллинга
+                            // может быть "старым" (снят до нажатия) — не даём ему откатить реакцию,
+                            // иначе плашка мигает: появилась → пропала → появилась.
+                            if (cached && typeof isReactionLocked === 'function' && isReactionLocked(nm.id)) {
+                                nm.reactions = cached.reactions;
+                            }
                             // Рендерим (и трогаем DOM/аватарки) только если реакции реально изменились —
                             // иначе на каждом тике поллинга аватарки будут мигать и перезагружаться зря.
                             const changed = !cached || JSON.stringify(cached.reactions || []) !== JSON.stringify(nm.reactions || []);
