@@ -2128,6 +2128,98 @@
             padding: 6px;
         }
 
+        /* ===== Реакции как в Telegram: плашка в отдельной строке под содержимым,
+           время — справа на той же строке, что и плашки ===== */
+        .message.has-reactions:not(.message-with-image) .message-content > .message-text {
+            flex: 1 1 100%;
+        }
+        .message.has-reactions:not(.message-with-image):not(.vg-voice-msg) .message-content > .message-reactions-row {
+            flex: 1 1 auto;
+            min-width: 0;
+            margin: 6px 8px 0 0;
+        }
+
+        /* Голосовое: плеер (кнопка + волна) остаётся одной строкой, реакции — строкой ниже,
+           время прижато к правому нижнему углу на уровне плашек */
+        .vg-voice-msg.has-reactions .message-content.vg-voice {
+            flex-wrap: wrap !important;
+            row-gap: 6px;
+        }
+        .vg-voice-msg .message-content.vg-voice > .message-reactions-row {
+            order: 10;
+            flex: 0 0 auto;
+            width: calc(100% - 62px);
+            margin: 0;
+            min-height: 30px;
+            align-items: center;
+        }
+        .vg-voice-msg.has-reactions .message-time {
+            bottom: 8px;
+        }
+
+        /* Появление/исчезновение строки реакций: пузырь плавно растёт */
+        .message-reactions-row.reactions-row-anim {
+            overflow: visible;
+        }
+
+        /* Плашка, в которую «прилетает» эмодзи */
+        .reaction-pill.reaction-pill-enter {
+            animation: reactionPillEnter 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        .reaction-pill.reaction-pill-waiting .reaction-pill-emoji {
+            visibility: hidden;
+        }
+        .reaction-pill-emoji.reaction-emoji-land {
+            display: inline-block;
+            animation: reactionEmojiLand 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        @keyframes reactionPillEnter {
+            0%   { transform: scale(0.4); opacity: 0; }
+            60%  { transform: scale(1.08); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes reactionEmojiLand {
+            0%   { transform: scale(1.6); }
+            45%  { transform: scale(0.82); }
+            75%  { transform: scale(1.12); }
+            100% { transform: scale(1); }
+        }
+
+        /* Слой эффекта поверх всего (летящий эмодзи, кольцо, частицы) */
+        .reaction-fx-layer {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 7000;
+            overflow: hidden;
+        }
+        .reaction-fly {
+            position: fixed;
+            left: 0;
+            top: 0;
+            font-size: 24px;
+            line-height: 1;
+            pointer-events: none;
+            z-index: 7001;
+            will-change: transform;
+            filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.25));
+        }
+        .reaction-fx-ring {
+            position: fixed;
+            border-radius: 50%;
+            border: 2px solid currentColor;
+            pointer-events: none;
+            will-change: transform, opacity;
+        }
+        .reaction-fx-particle {
+            position: fixed;
+            left: 0;
+            top: 0;
+            line-height: 1;
+            pointer-events: none;
+            will-change: transform, opacity;
+        }
+
         /* ===== Контекстное меню сообщения (Скопировать / Удалить) ===== */
         .message-action-menu {
             position: fixed;
@@ -11043,18 +11135,254 @@ function getActiveElements() {
             return letters.toUpperCase();
         }
 
+        // ===== Анимация реакций (как в Telegram) =====
+        // Эмодзи, выбранный в панели, "зависает" на месте кнопки, пока сервер не ответит,
+        // а затем перелетает в свою плашку под сообщением; плашка пружинит, вокруг неё
+        // расходится кольцо и разлетаются копии эмодзи.
+        const pendingReactionFly = new Map(); // key: messageId|emoji -> { el, timer }
+        const REACTION_FX_COLORS = {
+            '🩵': '#5ac8fa', '❤️': '#ff3b30', '❤': '#ff3b30', '🔥': '#ff9500', '👍': '#ffcc00',
+            '😁': '#ffcc00', '🥰': '#ff6b81', '😱': '#ffcc00', '🫡': '#ffcc00', '❤️‍🔥': '#ff3b30',
+            '🎉': '#ff9500', '💔': '#ff3b30', '💋': '#ff2d55', '😢': '#5ac8fa', '😭': '#5ac8fa', '🐳': '#5ac8fa'
+        };
+        const prefersReducedMotion = () => {
+            try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+        };
+
+        function getReactionFxLayer() {
+            let layer = document.getElementById('reactionFxLayer');
+            if (!layer) {
+                layer = document.createElement('div');
+                layer.id = 'reactionFxLayer';
+                layer.className = 'reaction-fx-layer';
+                document.body.appendChild(layer);
+            }
+            return layer;
+        }
+
+        function isHeartEmoji(emoji) {
+            return /^(🩵|❤️?|💙|💚|💛|🧡|💜|🩷|🤍|🖤|🤎)$/u.test(emoji);
+        }
+
+        // Запоминаем стартовую точку полёта: эмодзи остаётся висеть над кнопкой панели
+        function startReactionFly(messageId, emoji, fromRect) {
+            if (!messageId || !fromRect || prefersReducedMotion()) return;
+            const key = `${messageId}|${emoji}`;
+            const prev = pendingReactionFly.get(key);
+            if (prev) { clearTimeout(prev.timer); prev.el.remove(); }
+
+            const el = document.createElement('div');
+            el.className = 'reaction-fly';
+            el.textContent = getDisplayEmoji(emoji);
+            const size = 24;
+            const x = fromRect.left + fromRect.width / 2 - size / 2;
+            const y = fromRect.top + fromRect.height / 2 - size / 2;
+            el.style.width = el.style.height = size + 'px';
+            el.style.transform = `translate(${x}px, ${y}px)`;
+            el.dataset.x = x;
+            el.dataset.y = y;
+            getReactionFxLayer().appendChild(el);
+            // Лёгкое "подпрыгивание" и увеличение, пока меню гаснет
+            el.animate([
+                { transform: `translate(${x}px, ${y}px) scale(1)` },
+                { transform: `translate(${x}px, ${y - 8}px) scale(1.7)` }
+            ], { duration: 260, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' });
+            el.dataset.scale = '1.7';
+            el.dataset.y = y - 8;
+
+            const timer = setTimeout(() => {
+                el.remove();
+                pendingReactionFly.delete(key);
+            }, 4000);
+            pendingReactionFly.set(key, { el, timer });
+        }
+
+        function takeReactionFly(messageId, emoji) {
+            const key = `${messageId}|${emoji}`;
+            const item = pendingReactionFly.get(key);
+            if (!item) return null;
+            clearTimeout(item.timer);
+            pendingReactionFly.delete(key);
+            return item.el;
+        }
+
+        function playReactionEffect(targetRect, emoji) {
+            if (prefersReducedMotion()) return;
+            const layer = getReactionFxLayer();
+            const cx = targetRect.left + targetRect.width / 2;
+            const cy = targetRect.top + targetRect.height / 2;
+            const color = REACTION_FX_COLORS[emoji] || '#ffb300';
+
+            // Кольцо-"ударная волна"
+            const ring = document.createElement('div');
+            ring.className = 'reaction-fx-ring';
+            ring.style.color = color;
+            const rs = 34;
+            ring.style.width = ring.style.height = rs + 'px';
+            ring.style.left = (cx - rs / 2) + 'px';
+            ring.style.top = (cy - rs / 2) + 'px';
+            layer.appendChild(ring);
+            ring.animate([
+                { transform: 'scale(0.4)', opacity: 0.9, borderWidth: '3px' },
+                { transform: 'scale(1.9)', opacity: 0, borderWidth: '1px' }
+            ], { duration: 520, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' })
+                .onfinish = () => ring.remove();
+
+            // Разлетающиеся копии эмодзи: сначала "взрыв" наружу, затем падают вниз и гаснут
+            const display = getDisplayEmoji(emoji);
+            const multicolor = isHeartEmoji(emoji);
+            const count = 22;
+            for (let i = 0; i < count; i++) {
+                const p = document.createElement('div');
+                p.className = 'reaction-fx-particle';
+                p.textContent = display;
+                const fs = 11 + Math.random() * 11;
+                p.style.fontSize = fs + 'px';
+                if (multicolor) {
+                    p.style.filter = `hue-rotate(${Math.floor(Math.random() * 360)}deg) saturate(1.4)`;
+                }
+                layer.appendChild(p);
+
+                const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.6;
+                const dist = 34 + Math.random() * 46;
+                const sx = cx - fs / 2;
+                const sy = cy - fs / 2;
+                const bx = sx + Math.cos(angle) * dist;
+                const by = sy + Math.sin(angle) * dist - 18;
+                const ex = bx + (Math.random() - 0.5) * 30;
+                const ey = by + 60 + Math.random() * 70;
+                const rot = (Math.random() - 0.5) * 70;
+                const delay = Math.random() * 60;
+                p.animate([
+                    { transform: `translate(${sx}px, ${sy}px) scale(0.2) rotate(0deg)`, opacity: 0 },
+                    { transform: `translate(${bx}px, ${by}px) scale(1) rotate(${rot / 2}deg)`, opacity: 1, offset: 0.3 },
+                    { transform: `translate(${(bx + ex) / 2}px, ${(by + ey) / 2 - 6}px) scale(0.95) rotate(${rot}deg)`, opacity: 0.95, offset: 0.65 },
+                    { transform: `translate(${ex}px, ${ey}px) scale(0.7) rotate(${rot * 1.4}deg)`, opacity: 0 }
+                ], { duration: 1150 + Math.random() * 400, delay, easing: 'cubic-bezier(0.25, 0.6, 0.4, 1)', fill: 'both' })
+                    .onfinish = () => p.remove();
+            }
+        }
+
+        // Плашка появилась: эмодзи перелетает в неё (если был выбран в панели), плашка пружинит, эффект
+        function animateNewReactionPill(messageElement, pill, emoji, isMine) {
+            if (prefersReducedMotion()) return;
+            const emojiSpan = pill.querySelector('.reaction-pill-emoji');
+            pill.classList.add('reaction-pill-enter');
+            pill.addEventListener('animationend', () => pill.classList.remove('reaction-pill-enter'), { once: true });
+            if (!isMine || !emojiSpan) return;
+
+            const messageId = messageElement.getAttribute('data-message-id');
+            const flyEl = takeReactionFly(messageId, emoji);
+
+            const land = () => {
+                pill.classList.remove('reaction-pill-waiting');
+                emojiSpan.classList.remove('reaction-emoji-land');
+                void emojiSpan.offsetWidth;
+                emojiSpan.classList.add('reaction-emoji-land');
+                emojiSpan.addEventListener('animationend', () => emojiSpan.classList.remove('reaction-emoji-land'), { once: true });
+                vibrateBubble();
+                playReactionEffect(emojiSpan.getBoundingClientRect(), emoji);
+            };
+
+            if (!flyEl) {
+                // Реакция поставлена не из панели (двойной тап и т.п.) — только эффект
+                requestAnimationFrame(() => requestAnimationFrame(land));
+                return;
+            }
+
+            pill.classList.add('reaction-pill-waiting');
+            // Ждём два кадра, чтобы пузырь уже начал расти и координаты плашки были реальными
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const to = emojiSpan.getBoundingClientRect();
+                const cs = flyEl.getBoundingClientRect();
+                const fromX = cs.left;
+                const fromY = cs.top;
+                const fromScale = cs.width / 24 || 1;
+                flyEl.getAnimations().forEach(a => a.cancel());
+                const size = 24;
+                const toScale = (to.height || 18) / size;
+                const toX = to.left + to.width / 2 - size / 2;
+                const toY = to.top + to.height / 2 - size / 2;
+                // Позиция с учётом масштаба относительно центра
+                const fx = fromX + (cs.width - size) / 2;
+                const fy = fromY + (cs.height - size) / 2;
+                const midX = (fx + toX) / 2 + (toX > fx ? -30 : 30);
+                const midY = Math.min(fy, toY) - 40;
+                flyEl.animate([
+                    { transform: `translate(${fx}px, ${fy}px) scale(${fromScale})` },
+                    { transform: `translate(${midX}px, ${midY}px) scale(${(fromScale + toScale) / 2 + 0.3})`, offset: 0.45 },
+                    { transform: `translate(${toX}px, ${toY}px) scale(${toScale})` }
+                ], { duration: 460, easing: 'cubic-bezier(0.45, 0, 0.25, 1)', fill: 'forwards' })
+                    .onfinish = () => { flyEl.remove(); land(); };
+            }));
+        }
+
+        // Пузырь плавно растёт/сжимается при появлении/исчезновении строки реакций
+        function animateReactionsRowHeight(row, show, done) {
+            if (prefersReducedMotion() || !row.isConnected) { if (done) done(); return; }
+            const h = row.getBoundingClientRect().height;
+            const cs = getComputedStyle(row);
+            const mt = cs.marginTop;
+            const frames = [
+                { height: '0px', marginTop: '0px', opacity: 0 },
+                { height: h + 'px', marginTop: mt, opacity: 1 }
+            ];
+            row.classList.add('reactions-row-anim');
+            const anim = row.animate(show ? frames : frames.slice().reverse(), {
+                duration: show ? 280 : 220,
+                easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+            });
+            anim.onfinish = anim.oncancel = () => {
+                row.classList.remove('reactions-row-anim');
+                if (done) done();
+            };
+        }
+
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
             if (!reactions || reactions.length === 0) {
-                if (row) row.remove();
+                messageElement.classList.remove('has-reactions');
+                if (row && !row.dataset.removing) {
+                    row.dataset.removing = '1';
+                    // Возвращаем класс на время анимации сжатия, чтобы раскладка не прыгала
+                    messageElement.classList.add('has-reactions');
+                    animateReactionsRowHeight(row, false, () => {
+                        if (row.dataset.removing) {
+                            row.remove();
+                            if (!messageElement.querySelector('.message-reactions-row')) {
+                                messageElement.classList.remove('has-reactions');
+                            }
+                        }
+                    });
+                }
                 return;
             }
+
+            let isNewRow = false;
+            let prevReactions = [];
+            if (row && row.dataset.removing) {
+                // Реакцию поставили снова, пока строка сворачивалась — оставляем её
+                delete row.dataset.removing;
+                row.getAnimations().forEach(a => a.cancel());
+            }
             if (!row) {
+                isNewRow = true;
                 row = document.createElement('div');
                 row.className = 'message-reactions-row';
                 const content = messageElement.querySelector('.message-content') || messageElement;
-                content.appendChild(row);
+                // Как в Telegram: строка реакций стоит ПЕРЕД временем, чтобы время
+                // оказалось справа на одной линии с плашками
+                const directTime = Array.from(content.children).find(c => c.classList.contains('message-time'));
+                const isVoice = messageElement.classList.contains('vg-voice-msg');
+                if (directTime && !isVoice) {
+                    content.insertBefore(row, directTime);
+                } else {
+                    content.appendChild(row);
+                }
+            } else {
+                try { prevReactions = JSON.parse(row.dataset.reactionsKey || '[]') || []; } catch (e) { prevReactions = []; }
             }
+            messageElement.classList.add('has-reactions');
 
             // Если набор реакций не поменялся с прошлого рендера — ничего не трогаем,
             // чтобы не пересоздавать <img> аватарок (это вызывало их мигание/перезагрузку
@@ -11065,10 +11393,18 @@ function getActiveElements() {
             }
             row.dataset.reactionsKey = reactionsKey;
 
+            // Анимируем только живые изменения (элемент уже на экране), а не первичную отрисовку
+            const canAnimate = messageElement.isConnected && !messageElement.closest('.message-context-overlay');
+            const newPills = [];
+
             row.innerHTML = '';
             reactions.forEach(r => {
+                const prev = prevReactions.find(p => p.emoji === r.emoji);
                 const pill = document.createElement('div');
                 pill.className = 'reaction-pill' + (r.reacted_by_me ? ' reaction-pill-mine' : '');
+                if (canAnimate && (!prev || (r.reacted_by_me && !prev.reacted_by_me))) {
+                    newPills.push({ pill, emoji: r.emoji, isMine: !!r.reacted_by_me && !(prev && prev.reacted_by_me), isNewPill: !prev });
+                }
 
                 const emojiSpan = document.createElement('span');
                 emojiSpan.className = 'reaction-pill-emoji';
@@ -11127,6 +11463,12 @@ function getActiveElements() {
                     toggleReaction(messageElement.getAttribute('data-message-id'), r.emoji);
                 });
                 row.appendChild(pill);
+            });
+
+            if (!canAnimate) return;
+            if (isNewRow) animateReactionsRowHeight(row, true);
+            newPills.forEach(({ pill, emoji, isMine, isNewPill }) => {
+                if (isNewPill || isMine) animateNewReactionPill(messageElement, pill, emoji, isMine);
             });
         }
 
@@ -12961,7 +13303,12 @@ function getActiveElements() {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 vibrateBubble();
-                toggleReaction(messageElement.getAttribute('data-message-id'), emoji);
+                const messageId = messageElement.getAttribute('data-message-id');
+                // Если это постановка (а не снятие) реакции — эмодзи полетит из панели в плашку
+                const msg = currentMessages.find(m => String(m.id) === String(messageId));
+                const alreadyMine = !!(msg && (msg.reactions || []).some(r => r.emoji === emoji && r.reacted_by_me));
+                if (!alreadyMine) startReactionFly(messageId, emoji, btn.getBoundingClientRect());
+                toggleReaction(messageId, emoji);
                 closeReactionPicker();
             });
             return btn;
@@ -13045,6 +13392,16 @@ function getActiveElements() {
                 }
             } catch (e) {
                 console.error('toggleReaction error', e);
+            } finally {
+                // Если плашка так и не появилась (ошибка, сообщение вне экрана) — убираем
+                // "зависший" летящий эмодзи плавным исчезновением
+                setTimeout(() => {
+                    const flyEl = takeReactionFly(messageId, emoji);
+                    if (flyEl) {
+                        flyEl.animate([{ opacity: 1 }, { opacity: 0, transform: getComputedStyle(flyEl).transform + ' scale(0.5)' }],
+                            { duration: 200, fill: 'forwards' }).onfinish = () => flyEl.remove();
+                    }
+                }, 120);
             }
         }
 
