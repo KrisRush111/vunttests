@@ -2164,14 +2164,14 @@
 
         /* Плашка, в которую «прилетает» эмодзи */
         .reaction-pill.reaction-pill-enter {
-            animation: reactionPillEnter 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+            animation: reactionPillEnter 0.34s cubic-bezier(0.34, 1.56, 0.64, 1) both;
         }
         .reaction-pill.reaction-pill-waiting .reaction-pill-emoji {
             visibility: hidden;
         }
         .reaction-pill-emoji.reaction-emoji-land {
             display: inline-block;
-            animation: reactionEmojiLand 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+            animation: reactionEmojiLand 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
         }
         @keyframes reactionPillEnter {
             0%   { transform: scale(0.4); opacity: 0; }
@@ -11263,7 +11263,9 @@ function getActiveElements() {
             }
         }
 
-        // Плашка появилась: эмодзи перелетает в неё (если был выбран в панели), плашка пружинит, эффект
+        // Плашка появилась: эмодзи перелетает в неё (если был выбран в панели), плашка пружинит, эффект.
+        // Координаты цели берём СРАЗУ (раскладка уже финальная, анимации роста её не меняют),
+        // поэтому полёт стартует в тот же кадр — без паузы и без промаха мимо плашки.
         function animateNewReactionPill(messageElement, pill, emoji, isMine) {
             if (prefersReducedMotion()) return;
             const emojiSpan = pill.querySelector('.reaction-pill-emoji');
@@ -11273,78 +11275,107 @@ function getActiveElements() {
 
             const messageId = messageElement.getAttribute('data-message-id');
             const flyEl = takeReactionFly(messageId, emoji);
+            const to = emojiSpan.getBoundingClientRect();
 
             const land = () => {
+                // Плашку уже перерисовали/убрали (быстро сняли реакцию) — эффект не нужен
+                if (!emojiSpan.isConnected) return;
                 pill.classList.remove('reaction-pill-waiting');
                 emojiSpan.classList.remove('reaction-emoji-land');
                 void emojiSpan.offsetWidth;
                 emojiSpan.classList.add('reaction-emoji-land');
                 emojiSpan.addEventListener('animationend', () => emojiSpan.classList.remove('reaction-emoji-land'), { once: true });
                 vibrateBubble();
-                playReactionEffect(emojiSpan.getBoundingClientRect(), emoji);
+                playReactionEffect(to, emoji);
             };
 
             if (!flyEl) {
-                // Реакция поставлена не из панели (двойной тап и т.п.) — только эффект
-                requestAnimationFrame(() => requestAnimationFrame(land));
+                // Реакция поставлена не из панели (двойной тап и т.п.) — сразу эффект
+                land();
                 return;
             }
 
             pill.classList.add('reaction-pill-waiting');
-            // Ждём два кадра, чтобы пузырь уже начал расти и координаты плашки были реальными
-            requestAnimationFrame(() => requestAnimationFrame(() => {
-                const to = emojiSpan.getBoundingClientRect();
-                const cs = flyEl.getBoundingClientRect();
-                const fromX = cs.left;
-                const fromY = cs.top;
-                const fromScale = cs.width / 24 || 1;
-                flyEl.getAnimations().forEach(a => a.cancel());
-                const size = 24;
-                const toScale = (to.height || 18) / size;
-                const toX = to.left + to.width / 2 - size / 2;
-                const toY = to.top + to.height / 2 - size / 2;
-                // Позиция с учётом масштаба относительно центра
-                const fx = fromX + (cs.width - size) / 2;
-                const fy = fromY + (cs.height - size) / 2;
-                const midX = (fx + toX) / 2 + (toX > fx ? -30 : 30);
-                const midY = Math.min(fy, toY) - 40;
-                flyEl.animate([
-                    { transform: `translate(${fx}px, ${fy}px) scale(${fromScale})` },
-                    { transform: `translate(${midX}px, ${midY}px) scale(${(fromScale + toScale) / 2 + 0.3})`, offset: 0.45 },
-                    { transform: `translate(${toX}px, ${toY}px) scale(${toScale})` }
-                ], { duration: 460, easing: 'cubic-bezier(0.45, 0, 0.25, 1)', fill: 'forwards' })
-                    .onfinish = () => { flyEl.remove(); land(); };
-            }));
+            const cs = flyEl.getBoundingClientRect();
+            flyEl.getAnimations().forEach(a => a.cancel());
+            const size = 24;
+            const fromScale = cs.width / size || 1;
+            const toScale = (to.height || 18) / size;
+            const fx = cs.left + (cs.width - size) / 2;
+            const fy = cs.top + (cs.height - size) / 2;
+            const toX = to.left + to.width / 2 - size / 2;
+            const toY = to.top + to.height / 2 - size / 2;
+            const midX = (fx + toX) / 2 + (toX > fx ? -24 : 24);
+            const midY = Math.min(fy, toY) - 30;
+            const anim = flyEl.animate([
+                { transform: `translate(${fx}px, ${fy}px) scale(${fromScale})` },
+                { transform: `translate(${midX}px, ${midY}px) scale(${Math.max(fromScale, toScale) * 1.35})`, offset: 0.45 },
+                { transform: `translate(${toX}px, ${toY}px) scale(${toScale})` }
+            ], { duration: 340, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' });
+            anim.onfinish = () => { flyEl.remove(); land(); };
         }
 
-        // Пузырь плавно растёт/сжимается при появлении/исчезновении строки реакций
-        function animateReactionsRowHeight(row, show, done) {
+        // Пузырь плавно растёт/сжимается при появлении/исчезновении строки реакций.
+        // Анимируем и высоту строки, и ширину самого пузыря — иначе он "прыгает" вширь.
+        function animateReactionsRowHeight(row, show, done, bubble, fromW, toW) {
             if (prefersReducedMotion() || !row.isConnected) { if (done) done(); return; }
             const h = row.getBoundingClientRect().height;
-            const cs = getComputedStyle(row);
-            const mt = cs.marginTop;
+            const mt = getComputedStyle(row).marginTop;
             const frames = [
                 { height: '0px', marginTop: '0px', opacity: 0 },
                 { height: h + 'px', marginTop: mt, opacity: 1 }
             ];
+            const opts = { duration: show ? 240 : 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' };
             row.classList.add('reactions-row-anim');
-            const anim = row.animate(show ? frames : frames.slice().reverse(), {
-                duration: show ? 280 : 220,
-                easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
-            });
+            const anim = row.animate(show ? frames : frames.slice().reverse(), opts);
+            if (bubble && fromW && toW && Math.abs(fromW - toW) > 1) {
+                bubble.animate([{ width: fromW + 'px' }, { width: toW + 'px' }],
+                    Object.assign({}, opts, { fill: show ? 'none' : 'forwards' }));
+            }
             anim.onfinish = anim.oncancel = () => {
                 row.classList.remove('reactions-row-anim');
                 if (done) done();
+                if (!show && bubble) bubble.getAnimations().forEach(a => { if (a.effect && a.effect.getKeyframes().some(k => k.width)) a.cancel(); });
             };
+        }
+
+        function reactionsSignature(reactions) {
+            return (reactions || []).map(r => `${r.emoji}:${r.count}:${r.reacted_by_me ? 1 : 0}`).join('|');
         }
 
         function renderReactionsOnElement(messageElement, reactions) {
             let row = messageElement.querySelector('.message-reactions-row');
+
+            // Пока идёт анимация (полёт эмодзи / рост пузыря), не пересоздаём плашки ради
+            // одного лишь обновления данных с сервера (аватарка и т.п.) — иначе анимация
+            // обрывается и всё "дёргается". Отрисуем это сразу после её окончания.
+            if (row && row._busyUntil > Date.now() &&
+                reactionsSignature(reactions) === reactionsSignature(row._lastReactions)) {
+                row._deferred = reactions;
+                if (!row._deferTimer) {
+                    row._deferTimer = setTimeout(() => {
+                        row._deferTimer = null;
+                        const d = row._deferred;
+                        row._deferred = null;
+                        row._busyUntil = 0;
+                        if (d && row.isConnected) renderReactionsOnElement(messageElement, d);
+                    }, row._busyUntil - Date.now() + 30);
+                }
+                return;
+            }
+
             if (!reactions || reactions.length === 0) {
-                messageElement.classList.remove('has-reactions');
                 if (row && !row.dataset.removing) {
                     row.dataset.removing = '1';
-                    // Возвращаем класс на время анимации сжатия, чтобы раскладка не прыгала
+                    let fromW = 0, toW = 0;
+                    if (messageElement.isConnected) {
+                        fromW = messageElement.getBoundingClientRect().width;
+                        row.style.display = 'none';
+                        messageElement.classList.remove('has-reactions');
+                        toW = messageElement.getBoundingClientRect().width;
+                        row.style.display = '';
+                    }
+                    // Класс оставляем на время анимации сжатия, чтобы раскладка не прыгала
                     messageElement.classList.add('has-reactions');
                     animateReactionsRowHeight(row, false, () => {
                         if (row.dataset.removing) {
@@ -11353,10 +11384,14 @@ function getActiveElements() {
                                 messageElement.classList.remove('has-reactions');
                             }
                         }
-                    });
+                    }, messageElement, fromW, toW);
+                } else if (!row) {
+                    messageElement.classList.remove('has-reactions');
                 }
                 return;
             }
+
+            const fromWidth = (!row && messageElement.isConnected) ? messageElement.getBoundingClientRect().width : 0;
 
             let isNewRow = false;
             let prevReactions = [];
@@ -11364,6 +11399,9 @@ function getActiveElements() {
                 // Реакцию поставили снова, пока строка сворачивалась — оставляем её
                 delete row.dataset.removing;
                 row.getAnimations().forEach(a => a.cancel());
+                messageElement.getAnimations().forEach(a => {
+                    if (a.effect && a.effect.getKeyframes().some(k => k.width)) a.cancel();
+                });
             }
             if (!row) {
                 isNewRow = true;
@@ -11392,6 +11430,7 @@ function getActiveElements() {
                 return;
             }
             row.dataset.reactionsKey = reactionsKey;
+            row._lastReactions = reactions;
 
             // Анимируем только живые изменения (элемент уже на экране), а не первичную отрисовку
             const canAnimate = messageElement.isConnected && !messageElement.closest('.message-context-overlay');
@@ -11465,11 +11504,18 @@ function getActiveElements() {
                 row.appendChild(pill);
             });
 
-            if (!canAnimate) return;
-            if (isNewRow) animateReactionsRowHeight(row, true);
+            if (!canAnimate || prefersReducedMotion()) return;
+            // Сначала полёт (меряет финальные координаты плашки), потом рост пузыря
+            let animated = false;
             newPills.forEach(({ pill, emoji, isMine, isNewPill }) => {
-                if (isNewPill || isMine) animateNewReactionPill(messageElement, pill, emoji, isMine);
+                if (isNewPill || isMine) { animateNewReactionPill(messageElement, pill, emoji, isMine); animated = true; }
             });
+            if (isNewRow) {
+                const toWidth = messageElement.getBoundingClientRect().width;
+                animateReactionsRowHeight(row, true, null, messageElement, fromWidth, toWidth);
+                animated = true;
+            }
+            if (animated) row._busyUntil = Date.now() + 450;
         }
 
         function vibrateBubble() {
@@ -29067,6 +29113,199 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
         return el;
     };
+})();
+</script>
+
+<!-- ===== Анимация открытия/закрытия профиля (мобильная версия), как в Telegram для iOS:
+     "таблетка" с названием чата в шапке раскрывается в карточку профиля на весь экран,
+     при закрытии карточка сжимается обратно в шапку. Сам дизайн профиля не меняется. ===== -->
+<style id="vg-profile-morph-style">
+@media (max-width: 767px) {
+    /* Отключаем старый выезд справа — его заменяет морфинг */
+    #profileModalMobile.vg-pm-morph {
+        transition: none !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+    #profileModalMobile.vg-pm-morph:not(.active):not(.vg-pm-closing) {
+        visibility: hidden;
+        pointer-events: none;
+    }
+    #profileModalMobile.vg-pm-morph.vg-pm-closing {
+        opacity: 1 !important;
+        pointer-events: none;
+    }
+    /* Чат под профилем больше не уезжает влево — карточка раскрывается поверх него */
+    body:has(#profileModalMobile.vg-pm-morph.active) #chatModalMobile.active:not(.vg-chat-closing),
+    body:has(#profileModalMobile.vg-pm-morph.vg-pm-closing) #chatModalMobile.active {
+        transform: none !important;
+    }
+    #profileModalMobile.vg-pm-animating {
+        will-change: clip-path;
+    }
+    #profileModalMobile.vg-pm-animating .profile-modal-content {
+        will-change: transform;
+    }
+    /* "Стеклянная" подложка, через которую проявляется содержимое карточки */
+    .vg-pm-glass {
+        position: fixed;
+        inset: 0;
+        z-index: 2001;
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        backdrop-filter: blur(14px) saturate(160%);
+        will-change: clip-path, opacity;
+    }
+}
+</style>
+<script id="vg-profile-morph-script">
+(function () {
+    var pm = document.getElementById('profileModalMobile');
+    if (!pm || !pm.animate) return;
+    pm.classList.add('vg-pm-morph');
+
+    var mq = window.matchMedia('(max-width: 767px)');
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var wasActive = pm.classList.contains('active');
+    var running = [];
+    var glass = null;
+    var hiddenPill = null;
+    var closingTimer = null;
+
+    function sourcePill() {
+        var chat = document.getElementById('chatModalMobile');
+        var t = chat && chat.classList.contains('active')
+            ? chat.querySelector('.chat-header .chat-title-container') : null;
+        if (t) {
+            var r = t.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                // Чуть "раздуваем" — у таблетки в шапке есть внутренние отступы
+                return { el: t, r: { left: r.left - 6, top: r.top - 3, width: r.width + 12, height: r.height + 6 } };
+            }
+        }
+        // Профиль открыли не из чата (список контактов, участник группы) —
+        // раскрываем из условной таблетки по центру шапки
+        var w = window.innerWidth;
+        return { el: null, r: { left: w / 2 - 80, top: 40, width: 160, height: 44 } };
+    }
+
+    function clipFor(r) {
+        var W = window.innerWidth, H = window.innerHeight;
+        var rad = Math.min(r.height / 2, 26);
+        return 'inset(' + r.top + 'px ' + Math.max(0, W - r.left - r.width) + 'px ' +
+            Math.max(0, H - r.top - r.height) + 'px ' + r.left + 'px round ' + rad + 'px)';
+    }
+    var FULL = 'inset(0px 0px 0px 0px round 0px)';
+    var MID = 'inset(0px 0px 0px 0px round 40px)';
+
+    function contentFrom(r) {
+        var W = window.innerWidth;
+        var s = Math.max(0.42, Math.min(0.8, r.width / W + 0.12));
+        var dx = (r.left + r.width / 2) - W / 2;
+        var dy = r.top - (pm.scrollTop > 0 ? 0 : 0);
+        return 'translate(' + dx + 'px, ' + dy + 'px) scale(' + s + ')';
+    }
+
+    function glassColor() {
+        var bg = getComputedStyle(pm).backgroundColor || 'rgb(240,240,245)';
+        var m = bg.match(/\d+(\.\d+)?/g);
+        if (!m) return 'rgba(242,242,247,.82)';
+        return 'rgba(' + m[0] + ',' + m[1] + ',' + m[2] + ',.82)';
+    }
+
+    function stopAll() {
+        running.forEach(function (a) { try { a.cancel(); } catch (e) {} });
+        running = [];
+        if (glass) { glass.remove(); glass = null; }
+        clearTimeout(closingTimer);
+        pm.classList.remove('vg-pm-animating');
+    }
+
+    function restorePill() {
+        if (hiddenPill) { hiddenPill.style.visibility = ''; hiddenPill = null; }
+    }
+
+    function makeGlass() {
+        glass = document.createElement('div');
+        glass.className = 'vg-pm-glass';
+        glass.style.background = glassColor();
+        document.body.appendChild(glass);
+        return glass;
+    }
+
+    function play(open) {
+        stopAll();
+        var src = sourcePill();
+        var content = pm.querySelector('.profile-modal-content');
+        var from = clipFor(src.r);
+        var dur = open ? 460 : 380;
+        var ease = open ? 'cubic-bezier(0.2, 0.9, 0.25, 1)' : 'cubic-bezier(0.32, 0.72, 0.2, 1)';
+        var opts = { duration: dur, easing: ease, fill: 'both' };
+
+        if (open && src.el) {
+            hiddenPill = src.el;
+            src.el.style.visibility = 'hidden';
+        }
+        pm.classList.add('vg-pm-animating');
+
+        var clipFrames = open
+            ? [{ clipPath: from }, { clipPath: MID, offset: 0.82 }, { clipPath: FULL }]
+            : [{ clipPath: FULL }, { clipPath: MID, offset: 0.18 }, { clipPath: from }];
+        // Профиль открыт не из чата — при закрытии ещё и растворяем карточку
+        if (!open && !src.el) {
+            clipFrames[2].opacity = 0;
+            clipFrames[0].opacity = 1;
+        }
+        running.push(pm.animate(clipFrames, opts));
+
+        if (content) {
+            var cFrom = contentFrom(src.r);
+            var cFrames = open
+                ? [{ transform: cFrom, transformOrigin: '50% 0' }, { transform: 'none', transformOrigin: '50% 0' }]
+                : [{ transform: 'none', transformOrigin: '50% 0' }, { transform: cFrom, transformOrigin: '50% 0' }];
+            running.push(content.animate(cFrames, opts));
+        }
+
+        var g = makeGlass();
+        var gFrames = open
+            ? [{ clipPath: from, opacity: 1 }, { clipPath: MID, opacity: 0.55, offset: 0.4 }, { clipPath: MID, opacity: 0, offset: 0.82 }, { clipPath: FULL, opacity: 0 }]
+            : [{ clipPath: FULL, opacity: 0 }, { clipPath: MID, opacity: 0.6, offset: 0.35 }, { clipPath: from, opacity: 1 }];
+        running.push(g.animate(gFrames, opts));
+
+        var main = running[0];
+        main.onfinish = function () {
+            stopAll();
+            if (!open) {
+                pm.classList.remove('vg-pm-closing');
+                restorePill();
+            }
+        };
+        // Страховка: если вкладку свернули и onfinish не пришёл
+        closingTimer = setTimeout(function () {
+            if (main.playState !== 'finished') return;
+        }, dur + 200);
+    }
+
+    new MutationObserver(function () {
+        var active = pm.classList.contains('active');
+        if (active === wasActive) return;
+        wasActive = active;
+
+        if (!mq.matches || reduce.matches) {
+            pm.classList.remove('vg-pm-closing');
+            stopAll();
+            restorePill();
+            return;
+        }
+        if (active) {
+            pm.classList.remove('vg-pm-closing');
+            play(true);
+        } else {
+            // Колбэк наблюдателя срабатывает до отрисовки кадра — профиль не успевает мигнуть
+            pm.classList.add('vg-pm-closing');
+            play(false);
+        }
+    }).observe(pm, { attributes: true, attributeFilter: ['class'] });
 })();
 </script>
 
