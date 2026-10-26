@@ -28396,8 +28396,16 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         // Пишем уже обработанный звук. Если AudioContext не запущен — пишем как есть.
         let recStream = stream;
         my.nodes = [];
-        // кружок пишем как есть (видео + звук одним потоком — без рассинхрона)
-        if (!round && my.ac && my.ac.state === 'running' && my.ac.createMediaStreamDestination) {
+        // кружок пишем как есть (видео + звук одним потоком — без рассинхрона).
+        // iPhone/Safari тоже пишем как есть: при включении микрофона iOS переключает
+        // звук в режим записи и «прерывает» AudioContext — обработанный через него
+        // звук записывался тишиной (собеседник видел голосовое, но ничего не слышал).
+        // Громкость там выравнивает сама система (autoGainControl), а при прослушивании
+        // голосовое и так усиливается.
+        const ua = navigator.userAgent || '';
+        const webkitRec = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+            || (/Safari/.test(ua) && !/Chrome|Chromium|CriOS|Android|Edg|OPR/.test(ua));
+        if (!round && !webkitRec && my.ac && my.ac.state === 'running' && my.ac.createMediaStreamDestination) {
             try {
                 const ac = my.ac;
                 const src = ac.createMediaStreamSource(stream);
@@ -29054,9 +29062,13 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         });
         return a;
     }
+    // Старые iPhone (без navigator.audioSession, iOS < 17): звук через Web Audio
+    // глушится беззвучным режимом (переключатель сбоку) — там играем обычным плеером.
+    const iosNoSession = (/iP(hone|ad|od)/.test(navigator.userAgent || '') ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && !navigator.audioSession;
     function audioEl() {
         const ac = sharedAC;
-        if (!P.noBoost && ac && ac.state === 'running') {
+        if (!P.noBoost && !iosNoSession && ac && ac.state === 'running') {
             if (!P.els.boost) P.els.boost = makeEl(true) || null;
             if (P.els.boost) return P.els.boost;
             P.noBoost = true;
