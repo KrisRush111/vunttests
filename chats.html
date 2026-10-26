@@ -27666,14 +27666,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
 /* во время записи кружка: большой круг с камерой над чатом, чат размыт */
 .vg-round-dim {
-    position: fixed; z-index: 100030; pointer-events: none;
+    position: fixed; z-index: 100; pointer-events: none;
     background: rgba(0, 0, 0, .22);
     -webkit-backdrop-filter: blur(12px) saturate(140%); backdrop-filter: blur(12px) saturate(140%);
     animation: vgRoundDimIn .22s ease both;
 }
 @keyframes vgRoundDimIn { from { opacity: 0; } }
 .vg-round-rec {
-    position: fixed; z-index: 100040; pointer-events: none;
+    position: fixed; z-index: 101; pointer-events: none;
     animation: vgRoundIn .34s cubic-bezier(.2, 1.25, .4, 1) both;
 }
 @keyframes vgRoundIn { from { opacity: 0; transform: scale(.55) translateY(40px); } }
@@ -27683,14 +27683,16 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     box-shadow: 0 12px 44px rgba(0, 0, 0, .35);
 }
 .vg-round-rec video.is-playback { transform: none; }      /* прослушивание записанного — как увидит собеседник */
-.vg-round-rec-ring { position: absolute; inset: -7px; width: calc(100% + 14px); height: calc(100% + 14px);
+.vg-round-rec-ring { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px);
                      transform: rotate(-90deg); overflow: visible; }
-.vg-round-rec-ring circle { fill: none; stroke-width: 3; stroke-linecap: round; }
+.vg-round-rec-ring circle { fill: none; stroke-width: 1.4; stroke-linecap: round; }
 .vg-round-rec-ring .trk { stroke: rgba(255, 255, 255, .28); }
 .vg-round-rec-ring .prg { stroke: #fff; stroke-dasharray: 314.16; stroke-dashoffset: 314.16; }
 .vg-round-rec.is-out, .vg-round-dim.is-out { animation: vgRoundOut .22s ease-in both; }
 @keyframes vgRoundOut { to { opacity: 0; transform: scale(.7); } }
 .vg-round-dim.is-out { animation-name: vgRoundDimOut; }
+/* строка ввода с панелью записи — поверх затемнения */
+.message-input-container.vg-round-recording { z-index: 102 !important; }
 @keyframes vgRoundDimOut { to { opacity: 0; } }
 
 /* ---------------- пузырь кружка ---------------- */
@@ -27712,7 +27714,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                   display: block; background: rgba(30, 30, 34, .55); pointer-events: none; }
 .vg-round-ring { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px);
                  transform: rotate(-90deg); pointer-events: none; overflow: visible; }
-.vg-round-ring circle { fill: none; stroke: #9501ff; stroke-width: 3; stroke-linecap: round;
+.vg-round-ring circle { fill: none; stroke: #9501ff; stroke-width: 1.6; stroke-linecap: round;
                         stroke-dasharray: 314.16; stroke-dashoffset: 314.16; opacity: 0; transition: opacity .2s ease; }
 .vg-round.is-active .vg-round-ring circle, .vg-round.is-uploading .vg-round-ring circle { opacity: 1; }
 .vg-round.is-uploading .vg-round-ring { animation: vgSpinRing 1.6s linear infinite; }
@@ -28168,33 +28170,48 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     // Большой круг с камерой над чатом (во время записи кружка)
     function buildRoundView(my) {
-        const { messagesContainer } = getActiveElements();
-        const area = (messagesContainer || document.body).getBoundingClientRect();
+        // Всё кладём внутрь окна чата: так затемнение закрывает чат целиком (до самого низа),
+        // а строку ввода с панелью записи поднимаем над ним.
+        const { chatModal } = getActiveElements();
+        const host = chatModal || document.body;
+        const box = host.getBoundingClientRect();
         const rowTop = my.row.getBoundingClientRect().top;
-        const bottom = Math.min(area.bottom, rowTop - 6);
-        const h = Math.max(120, bottom - area.top);
-        const size = Math.round(Math.max(140, Math.min(300, area.width * 0.74, h * 0.72)));
+        const avail = Math.max(160, rowTop - box.top);                    // от верха окна до строки ввода
+        const size = Math.round(Math.max(160, Math.min(380, box.width * 0.86, avail * 0.66)));
 
         const dim = document.createElement('div');
         dim.className = 'vg-round-dim';
-        Object.assign(dim.style, { left: area.left + 'px', top: area.top + 'px', width: area.width + 'px', height: h + 'px' });
-
         const view = document.createElement('div');
         view.className = 'vg-round-rec';
-        Object.assign(view.style, {
-            width: size + 'px', height: size + 'px',
-            left: Math.round(area.left + (area.width - size) / 2) + 'px',
-            top: Math.round(area.top + Math.max(12, (h - size) / 2)) + 'px'
-        });
         view.innerHTML = `
             <video playsinline muted autoplay></video>
             <svg class="vg-round-rec-ring" viewBox="0 0 100 100">
                 <circle class="trk" cx="50" cy="50" r="50"></circle><circle class="prg" cx="50" cy="50" r="50"></circle>
             </svg>`;
+        host.appendChild(dim);
+        host.appendChild(view);
+
+        // У окна чата бывает transform — тогда fixed считается от него, а не от экрана.
+        // Узнаём настоящее начало координат и ставим всё точно.
+        Object.assign(dim.style, { left: '0px', top: '0px', width: '0px', height: '0px' });
+        const o = dim.getBoundingClientRect();
+        const ox = o.left, oy = o.top;
+        Object.assign(dim.style, {
+            left: (box.left - ox) + 'px', top: (box.top - oy) + 'px',
+            width: box.width + 'px', height: box.height + 'px'
+        });
+        Object.assign(view.style, {
+            width: size + 'px', height: size + 'px',
+            left: Math.round(box.left - ox + (box.width - size) / 2) + 'px',
+            top: Math.round(box.top - oy + Math.max(16, (avail - size) * 0.36)) + 'px'   // чуть выше середины
+        });
+
+        const container = my.row.closest('.message-input-container');
+        if (container) container.classList.add('vg-round-recording');
+        my.inputBox = container;
+
         const v = view.querySelector('video');
         v.muted = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
-        document.body.appendChild(dim);
-        document.body.appendChild(view);
         my.view = view; my.dim = dim;
         if (my.stream) setViewStream(my);
     }
@@ -28208,8 +28225,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         v.play().catch(() => {});
     }
     function removeRoundView(my) {
-        const v = my.view, d = my.dim;
-        my.view = null; my.dim = null;
+        const v = my.view, d = my.dim, box = my.inputBox;
+        my.view = null; my.dim = null; my.inputBox = null;
+        if (box) setTimeout(() => box.classList.remove('vg-round-recording'), 240);
         if (v) { v.classList.add('is-out'); setTimeout(() => v.remove(), 240); }
         if (d) { d.classList.add('is-out'); setTimeout(() => d.remove(), 240); }
     }
@@ -29130,16 +29148,18 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         document.body.appendChild(bar);
         bar.querySelector('.vg-vb-play').addEventListener('click', (e) => {
             e.stopPropagation();
+            if (RP.id && RP.v) { roundPlayPause(); return; }
             if (!P.id || !P.audio) return;
             if (P.audio.paused) playVoice(P.msg); else { P.audio.pause(); paintPlayer(); }
         });
         bar.querySelector('.vg-vb-speed').addEventListener('click', (e) => { e.stopPropagation(); cycleSpeed(); });
-        bar.querySelector('.vg-vb-close').addEventListener('click', (e) => { e.stopPropagation(); stopPlayer(); });
+        bar.querySelector('.vg-vb-close').addEventListener('click', (e) => { e.stopPropagation(); stopRound(); stopPlayer(); });
         // тап по имени — прокрутить к этому голосовому
         bar.querySelector('.vg-vb-info').addEventListener('click', (e) => {
             e.stopPropagation();
-            if (!P.id) return;
-            const el = document.querySelector(`.vg-voice[data-voice-id="${CSS.escape(P.id)}"]`);
+            const cur = P.id || RP.id;
+            if (!cur) return;
+            const el = document.querySelector(`[data-voice-id="${CSS.escape(cur)}"]`);
             if (el) el.closest('.message').scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
         window.addEventListener('resize', placeBar);
@@ -29166,13 +29186,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     }
 
     function fillBar() {
-        if (!bar || !P.msg) return;
-        const m = P.msg;
+        const m = P.msg || RP.msg;
+        if (!bar || !m) return;
+        const kind = m.is_round ? 'Видеосообщение' : 'Голосовое сообщение';
         const me = (typeof userData !== 'undefined' && userData) || {};
-        const name = m.is_me ? (me.nickname || me.name || 'Вы') : (m.sender_name || 'Голосовое сообщение');
+        const name = m.is_me ? (me.nickname || me.name || 'Вы') : (m.sender_name || kind);
         const { chatTitle } = getActiveElements();
         bar.querySelector('.vg-vb-name').textContent = name;
-        bar.querySelector('.vg-vb-sub').textContent = (chatTitle && chatTitle.textContent.trim()) || 'Голосовое сообщение';
+        bar.querySelector('.vg-vb-sub').textContent = (chatTitle && chatTitle.textContent.trim()) || kind;
         paintSpeed(false);
     }
 
@@ -29192,8 +29213,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         // закрыли чат (кнопкой «назад» и т.п.) — плашка и звук уходят вместе с ним
         clearInterval(barWatch);
         barWatch = setInterval(() => {
-            if (!P.id) return;
-            if (!activeHeader() || String(currentChatId) !== String(P.chatId)) stopPlayer();
+            if (!P.id && !RP.id) return;
+            const chatId = P.id ? P.chatId : RP.chatId;
+            if (!activeHeader() || String(currentChatId) !== String(chatId)) { stopPlayer(); stopRound(); }
             else placeBar();
         }, 400);
     }
@@ -29203,7 +29225,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         clearTimeout(barHideT);
         // небольшая задержка: при переходе к следующему голосовому плашка не мигает
         barHideT = setTimeout(() => {
-            if (P.id) return;
+            if (P.id || RP.id) return;
             bar.classList.remove('is-open', 'is-playing');
             clearInterval(barWatch);
         }, 180);
@@ -29220,6 +29242,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
         try { localStorage.setItem('vg-voice-speed', String(speed)); } catch (err) {}
         if (P.audio) P.audio.playbackRate = speed;
+        if (RP.v) RP.v.playbackRate = speed;
         paintSpeed(true);
         paintPlayer();
     }
@@ -29348,6 +29371,29 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
         if (box) paintRound(box, 0, false);
         if (!R) audioSession('auto');
+        if (!P.id) hideBar();
+    }
+
+    function roundFrac() {
+        const v = RP.v;
+        if (!v) return 0;
+        const total = Number(RP.box && RP.box.dataset.duration) || (isFinite(v.duration) ? v.duration : 0);
+        return total ? clamp((v.currentTime || 0) / total, 0, 1) : 0;
+    }
+    // пауза/продолжить — и из пузыря, и из плашки сверху
+    function roundPlayPause() {
+        const v = RP.v;
+        if (!v) return;
+        if (v.paused) {
+            v.playbackRate = speed;
+            v.play().catch(() => {});
+            cancelAnimationFrame(RP.raf);
+            RP.raf = requestAnimationFrame(roundTick);
+        } else {
+            v.pause();
+            cancelAnimationFrame(RP.raf);
+        }
+        paintBar(roundFrac(), !v.paused);
     }
 
     function paintRound(box, frac, active) {
@@ -29362,9 +29408,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     function roundTick() {
         if (!RP.id || !RP.v) return;
         if (String(currentChatId) !== String(RP.chatId)) { stopRound(); return; }   // ушли из чата
-        const v = RP.v;
-        const total = Number(RP.box && RP.box.dataset.duration) || (isFinite(v.duration) ? v.duration : 0);
-        if (RP.box) paintRound(RP.box, total ? (v.currentTime || 0) / total : 0, true);
+        const f = roundFrac();
+        if (RP.box) paintRound(RP.box, f, true);
+        paintBar(f, !RP.v.paused);
         RP.raf = requestAnimationFrame(roundTick);
     }
 
@@ -29373,11 +29419,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (voiceJobs.has(id)) { voiceJobs.get(id).abort(); return; }      // отмена отправки
         const v = box.querySelector('.vg-round-video');
         if (!v) return;
-        if (RP.id === id) {                                                 // тот же кружок — пауза/продолжить
-            if (v.paused) { v.play().catch(() => {}); RP.raf = requestAnimationFrame(roundTick); }
-            else { v.pause(); cancelAnimationFrame(RP.raf); }
-            return;
-        }
+        if (RP.id === id) { roundPlayPause(); return; }                     // тот же кружок — пауза/продолжить
         stopRound();
         if (P.id) stopPlayer();                                             // голосовое замолкает
         if (sharedAC && sharedAC.state !== 'running') sharedAC.resume().catch(() => {});
@@ -29387,7 +29429,10 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             if (RP.id !== id) return;
             v.muted = false; v.loop = false;
             try { v.currentTime = 0; } catch (e) {}
-            v.play().catch((e) => {
+            v.playbackRate = speed;                                         // скорость — как у голосовых (1x / 1.5x / 2x)
+            v.onratechange = null;
+            showBar();
+            v.play().then(() => { v.playbackRate = speed; }).catch((e) => {
                 // звук запрещён браузером — играем без звука, чем не играть вовсе
                 if (e && e.name === 'NotAllowedError') { v.muted = true; v.play().catch(() => {}); }
             });
