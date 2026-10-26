@@ -29085,16 +29085,22 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                 const hp = ac.createBiquadFilter();           // убираем гул — он «съедает» громкость
                 hp.type = 'highpass'; hp.frequency.value = 70; hp.Q.value = 0.7;
                 const comp = ac.createDynamicsCompressor();   // мягко, без «качания»
-                comp.threshold.value = -20; comp.knee.value = 8; comp.ratio.value = 2.5;
+                comp.threshold.value = -24; comp.knee.value = 8; comp.ratio.value = 3;
                 comp.attack.value = 0.006; comp.release.value = 0.25;
                 const presence = ac.createBiquadFilter();     // голос чуть разборчивее
                 presence.type = 'peaking'; presence.frequency.value = 3000;
                 presence.Q.value = 0.9; presence.gain.value = 2;
+                const boost = ac.createGain();                // общее усиление: ×3 к прежнему уровню
+                boost.gain.value = 3;
                 const lim = ac.createDynamicsCompressor();    // защита от хрипа на пиках
-                lim.threshold.value = -1; lim.knee.value = 0; lim.ratio.value = 20;
+                lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20;
                 lim.attack.value = 0.001; lim.release.value = 0.05;
+                const soft = ac.createWaveShaper();           // мягкое ограничение: громко, но без треска
+                const N = 2048, curve = new Float32Array(N), k = Math.tanh(1.5);
+                for (let i = 0; i < N; i++) { const x = i / (N - 1) * 2 - 1; curve[i] = Math.tanh(1.5 * x) / k; }
+                soft.curve = curve; soft.oversample = '2x';
                 src.connect(norm); norm.connect(hp); hp.connect(comp); comp.connect(presence);
-                presence.connect(lim); lim.connect(ac.destination);
+                presence.connect(boost); boost.connect(lim); lim.connect(soft); soft.connect(ac.destination);
                 a._vgNorm = norm;
             } catch (e) { return null; }
         }
