@@ -27711,7 +27711,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 }
 .vg-round.is-active .vg-round-circle { width: min(290px, 74vw); height: min(290px, 74vw); }
 .vg-round-video { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
-                  display: block; background: rgba(30, 30, 34, .55); pointer-events: none; }
+                  display: block; background: #2a2a30; pointer-events: none; }
 .vg-round-ring { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px);
                  transform: rotate(-90deg); pointer-events: none; overflow: visible; }
 .vg-round-ring circle { fill: none; stroke: #9501ff; stroke-width: 1.6; stroke-linecap: round;
@@ -28224,6 +28224,19 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         v.muted = true;
         v.play().catch(() => {});
     }
+    // Обложка кружка: кадр с камеры (iPhone не рисует кадр видео, пока его не запустить)
+    function grabRoundFrame(my) {
+        try {
+            const v = my.view && my.view.querySelector('video');
+            if (!v || !v.videoWidth || !v.videoHeight) return null;
+            const side = Math.min(v.videoWidth, v.videoHeight);
+            const c = document.createElement('canvas');
+            c.width = c.height = 320;
+            c.getContext('2d').drawImage(v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, 0, 0, 320, 320);
+            return c.toDataURL('image/jpeg', 0.8);
+        } catch (e) { return null; }
+    }
+
     function removeRoundView(my) {
         const v = my.view, d = my.dim, box = my.inputBox;
         my.view = null; my.dim = null; my.inputBox = null;
@@ -28477,6 +28490,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         my.layer.style.setProperty('--lv', (1 + my.lv * 0.55).toFixed(3));
         my.layer.style.setProperty('--lv2', (1 + my.lv * 0.3).toFixed(3));
 
+        if (my.round && my.started && !my.thumb && t > 0.35 && !my.paused) my.thumb = grabRoundFrame(my);
         if (my.view) {
             const prg = my.view.querySelector('.prg');
             if (prg) prg.style.strokeDashoffset = (ROUND_RING * (1 - clamp(t / ROUND_MAX_SECONDS, 0, 1))).toFixed(2);
@@ -28697,7 +28711,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                 const gap = Math.max(0, duration - dur);
                 const skip = Math.min(my.levels.length - 1, Math.round(gap / 0.05));
                 const waveform = encodeWave(skip > 0 ? my.levels.slice(skip) : my.levels);
-                sendVoice(blob, dur, waveform, my.chat, my.round);
+                sendVoice(blob, dur, waveform, my.chat, my.round, my.thumb);
             });
         });
     }
@@ -28734,6 +28748,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             e.preventDefault();                       // поле ввода не теряет фокус, без выделения текста
             try { btn.setPointerCapture(e.pointerId); } catch (err) {}
             if (R || pendingPress || !currentChat) return;
+            warmAudio();                              // iOS: звук «будим» прямо в нажатии, а не через 0,2 с
             const press = { btn, ev: { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, downAt: performance.now() } };
             press.timer = setTimeout(() => {
                 if (pendingPress !== press) return;
@@ -28809,7 +28824,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         });
     }
 
-    async function sendVoice(blob, duration, waveform, chatRef, round) {
+    async function sendVoice(blob, duration, waveform, chatRef, round, thumb) {
         // пока шла остановка записи, пользователь мог уйти в другой чат
         if (!currentChat || currentChat !== chatRef) return;
         round = !!round;
@@ -28822,6 +28837,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             is_voice: true, is_round: round, is_uploading: true, file_size: blob.size, file_mime: blob.type,
             voice_duration: duration, voice_waveform: waveform
         };
+        if (round && thumb) roundThumbs.set(tempId, thumb);
         voiceMem.set(tempId, blob);
         currentMessages.push(temp);
         const { messagesContainer, noMessages } = getActiveElements();
@@ -28884,6 +28900,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             if (round) {                          // кружок: свой файл остаётся в памяти вкладки (в кэш устройства не кладём — тяжёлый)
                 memPut(realId, blob);
                 if (roundUrls.has(tempId)) { roundUrls.set(realId, roundUrls.get(tempId)); roundUrls.delete(tempId); }
+                if (roundThumbs.has(tempId)) { roundThumbs.set(realId, roundThumbs.get(tempId)); roundThumbs.delete(tempId); }
                 if (RP.id === tempId) RP.id = realId;
             } else vCachePut(realId, blob);       // своё голосовое уже на устройстве — сеть не нужна
             if (P.id === tempId) { P.id = realId; P.chatId = currentChatId; }
@@ -28911,6 +28928,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             currentMessages = currentMessages.filter(m => m.id !== tempId);
             voiceMem.delete(tempId);
             if (roundUrls.has(tempId)) { URL.revokeObjectURL(roundUrls.get(tempId)); roundUrls.delete(tempId); }
+            roundThumbs.delete(tempId);
             renderMessages(currentMessages);
             if (e.name !== 'AbortError') showMessage((round ? 'Ошибка отправки видеосообщения: ' : 'Ошибка отправки голосового: ') + e.message, 'error');
         } finally {
@@ -29349,6 +29367,17 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // ====================================================================
     const RP = { id: null, msg: null, box: null, v: null, chatId: null, raf: 0 };
     const roundUrls = new Map();          // id -> objectURL своего (ещё/уже) локального файла
+    const roundThumbs = new Map();        // id -> обложка (кадр), снятая при записи
+
+    // Обложка с сервера: та же подписанная ссылка /media/<id>, только &thumb=1 (первый кадр, jpg)
+    const thumbOf = (url) => url ? url.split('#')[0] + (url.includes('?') ? '&' : '?') + 'thumb=1' : '';
+    function roundPoster(message, v) {
+        const id = String(message.id);
+        if (roundThumbs.has(id)) { v.poster = roundThumbs.get(id); return; }
+        if (!message.file_url || message.is_uploading) return;
+        if (!window.vgMediaUrlFresh || window.vgMediaUrlFresh(message.file_url)) { v.poster = thumbOf(message.file_url); return; }
+        if (window.vgMediaUrl) window.vgMediaUrl(message).then((u) => { v.poster = thumbOf(u); }).catch(() => {});
+    }
 
     function roundSrc(message) {
         const id = String(message.id);
@@ -29466,7 +29495,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             <div class="message-content vg-round${uploading ? ' is-uploading' : ''}${unread ? ' is-unread' : ''}"
                  data-voice-id="${escapeHtml(id)}" data-duration="${dur}">
                 <div class="vg-round-circle" role="button" aria-label="Воспроизвести видеосообщение">
-                    <video class="vg-round-video" playsinline muted preload="metadata"></video>
+                    <video class="vg-round-video" playsinline muted preload="auto"></video>
                     <svg class="vg-round-ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50"></circle></svg>
                     <span class="vg-round-play">${I.play}</span>
                     <button type="button" class="vg-round-cancel" aria-label="Отменить отправку">${I.x}</button>
@@ -29481,6 +29510,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         const circle = el.querySelector('.vg-round-circle');
         let v = el.querySelector('.vg-round-video');
         v.muted = true;
+        roundPoster(message, v);
 
         if (RP.id === id && RP.v) {
             // этот кружок сейчас играет, а список перерисовался — переносим тот же <video>,
