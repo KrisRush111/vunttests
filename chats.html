@@ -27748,6 +27748,31 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 @media (prefers-reduced-motion: reduce) {
     .vg-round-rec, .vg-round-dim, .vg-round-circle { animation-duration: .01ms !important; transition: none !important; }
 }
+
+/* ===== кружок: крупнее, подписи под ним ===== */
+.vg-round-circle { width: 250px; height: 250px; }
+.vg-round.is-active .vg-round-circle { width: min(310px, 80vw); height: min(310px, 80vw); }
+
+.vg-round-msg .message-content.vg-round {
+    display: grid !important;
+    grid-template-columns: auto auto;
+    justify-content: space-between;
+    align-items: center;
+    row-gap: 7px;
+}
+.vg-round-msg .vg-round > .vg-round-circle { grid-column: 1 / -1; order: 0; }
+.vg-round-msg .vg-round > .vg-round-meta { order: 1; }
+.vg-round-msg .vg-round > .message-time { order: 2; }
+.vg-round-msg .vg-round > .message-reactions-row { grid-column: 1 / -1; order: 3; margin-top: 0; }
+
+/* плашки больше не лежат поверх видео */
+.vg-round-meta,
+.vg-round-msg .vg-round > .message-time {
+    position: static !important;
+    left: auto; right: auto; bottom: auto;
+    justify-self: start;
+}
+.vg-round-msg .vg-round > .message-time { justify-self: end; }
 </style>
 
 <style id="vg-voice-bar-slim">
@@ -27885,7 +27910,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.1 5.2v13.6a1.1 1.1 0 0 0 1.68.93l10.4-6.8a1.1 1.1 0 0 0 0-1.86L7.78 4.27A1.1 1.1 0 0 0 6.1 5.2z"/></svg>',
         x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/><path d="M6 6.5l1 13.4a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l1-13.4"/><path d="M10 10.5v7M14 10.5v7"/></svg>',
-        cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><rect x="7" y="9" width="7" height="6" rx="1.4"/><path d="M14 11.2l3-1.7v5l-3-1.7"/></svg>',
+        cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="13" height="12" rx="3.5"/><path d="M15.5 10.3l4.2-2.6c.6-.4 1.3.1 1.3.8v7c0 .7-.7 1.2-1.3.8l-4.2-2.6"/></svg>',
         muted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>',
         bin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="bin-lid"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/></g><path d="M6 6.5l1 13.4a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l1-13.4"/><path d="M10 10.5v7M14 10.5v7"/></svg>'
     };
@@ -28414,15 +28439,21 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                 const comp = ac.createDynamicsCompressor();
                 comp.threshold.value = -30; comp.knee.value = 12; comp.ratio.value = 4;
                 comp.attack.value = 0.004; comp.release.value = 0.22;
+                const presence = ac.createBiquadFilter();       // разборчивость: подъём 2–4 кГц
+                presence.type = 'peaking'; presence.frequency.value = 3000;
+                presence.Q.value = 0.9; presence.gain.value = 4;
+                const air = ac.createBiquadFilter();            // немного «воздуха», без шипения
+                air.type = 'highshelf'; air.frequency.value = 7000; air.gain.value = 2;
                 const gain = ac.createGain();
-                gain.gain.value = 2.2;                      // ≈ +7 дБ после сжатия
+                gain.gain.value = 2.7;                          // ≈ +8,5 дБ после сжатия
                 const lim = ac.createDynamicsCompressor();
-                lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
+                lim.threshold.value = -1.5; lim.knee.value = 0; lim.ratio.value = 20;
                 lim.attack.value = 0.001; lim.release.value = 0.08;
                 const dest = ac.createMediaStreamDestination();
                 dest.channelCount = 1;
-                src.connect(hp); hp.connect(comp); comp.connect(gain); gain.connect(lim); lim.connect(dest);
-                my.nodes = [src, hp, comp, gain, lim, dest];
+                src.connect(hp); hp.connect(comp); comp.connect(presence); presence.connect(air);
+                air.connect(gain); gain.connect(lim); lim.connect(dest);
+                my.nodes = [src, hp, comp, presence, air, gain, lim, dest];
                 my.levelNode = lim;
                 my.destStream = dest.stream;
                 recStream = dest.stream;
@@ -28433,7 +28464,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
 
         try {
-            const opts = round ? { videoBitsPerSecond: 1200000, audioBitsPerSecond: 96000 } : { audioBitsPerSecond: 96000 };
+            const opts = round ? { videoBitsPerSecond: 1200000, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 };
             if (mime) opts.mimeType = mime;
             my.rec = new MediaRecorder(recStream, opts);
         } catch (e) {
@@ -28953,7 +28984,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     const P = { audio: null, id: null, msg: null, chatId: null, url: null, raf: 0, buffering: false,
                 els: { boost: null, plain: null }, noBoost: false };
-    const PLAY_GAIN = 1.9;   // ≈ +5,5 дБ громче системного максимума, лимитер не даёт хрипеть
+    const PLAY_GAIN = 2.5;   // ≈ +8 дБ громче системного максимума, лимитер не даёт хрипеть
 
     let listened = new Set();
     try { listened = new Set(JSON.parse(localStorage.getItem('vg-voice-listened') || '[]')); } catch (e) {}
@@ -29003,20 +29034,27 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // «обычный» — запасной, если Web Audio не запущен или ссылка без CORS.
     function makeEl(boost) {
         const a = new Audio();
+        a.volume = 1;
         a.preload = 'auto';
         if (boost) {
             a.crossOrigin = 'anonymous';             // без CORS Web Audio отдал бы тишину
             try {
                 const ac = sharedAC;
                 const src = ac.createMediaElementSource(a);
+                const hp = ac.createBiquadFilter();           // убираем гул — он «съедает» громкость
+                hp.type = 'highpass'; hp.frequency.value = 75; hp.Q.value = 0.7;
                 const comp = ac.createDynamicsCompressor();
-                comp.threshold.value = -26; comp.knee.value = 10; comp.ratio.value = 3;
-                comp.attack.value = 0.005; comp.release.value = 0.25;
+                comp.threshold.value = -28; comp.knee.value = 10; comp.ratio.value = 3.5;
+                comp.attack.value = 0.004; comp.release.value = 0.22;
+                const presence = ac.createBiquadFilter();     // голос чётче
+                presence.type = 'peaking'; presence.frequency.value = 3000;
+                presence.Q.value = 0.9; presence.gain.value = 3.5;
                 const gain = ac.createGain(); gain.gain.value = PLAY_GAIN;
                 const lim = ac.createDynamicsCompressor();
-                lim.threshold.value = -1.5; lim.knee.value = 0; lim.ratio.value = 20;
-                lim.attack.value = 0.001; lim.release.value = 0.06;
-                src.connect(comp); comp.connect(gain); gain.connect(lim); lim.connect(ac.destination);
+                lim.threshold.value = -1.2; lim.knee.value = 0; lim.ratio.value = 20;
+                lim.attack.value = 0.001; lim.release.value = 0.05;
+                src.connect(hp); hp.connect(comp); comp.connect(presence);
+                presence.connect(gain); gain.connect(lim); lim.connect(ac.destination);
             } catch (e) { return null; }
         }
         a.addEventListener('ended', onEnded);
@@ -29807,7 +29845,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             stopAll();
             restorePill();
             return;
-        }
+        } 
         if (active) {
             pm.classList.remove('vg-pm-closing');
             play(true);
@@ -29821,4 +29859,4 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 </script>
 
 </body>
-</html>
+</html>  
