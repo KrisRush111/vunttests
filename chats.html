@@ -28984,17 +28984,22 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // Файл анализируем (средний уровень речи без пауз) и подбираем усиление:
     // тихая запись поднимается до +20 дБ, громкая — немного опускается. В итоге
     // любое голосовое звучит одинаково громко и чисто, без хрипа и «качания».
-    const LOUD_TARGET = -19;       // дБFS — уровень речи перед мягким компрессором (на выходе ≈ −15)
-    const LOUD_DEFAULT = 3;        // пока файл ещё не скачан и не измерен (≈ +9,5 дБ)
+    const LOUD_TARGET = -18;       // дБFS — уровень речи (моно-сумма L+R) перед компрессором; на выходе ≈ −16
+    const LOUD_DEFAULT = 1;        // пока файл ещё не скачан и не измерен
     const loudCache = new Map();   // id -> подобранное усиление
     function speechLevel(buf) {
         const n = Math.max(1, Math.floor(buf.sampleRate * 0.02)), ch = [];
         for (let c = 0; c < buf.numberOfChannels; c++) ch.push(buf.getChannelData(c));
+        // Меряем то же, что потом играет: сумму каналов L+R (плеер сводит в моно так же)
         const len = ch[0].length, e = [];
         for (let i = 0; i + n <= len; i += n) {
             let sum = 0;
-            for (const d of ch) for (let j = i; j < i + n; j++) sum += d[j] * d[j];
-            e.push(sum / (n * ch.length));
+            for (let j = i; j < i + n; j++) {
+                let v = 0;
+                for (const d of ch) v += d[j];
+                sum += v * v;
+            }
+            e.push(sum / n);
         }
         let mx = 0; for (const x of e) if (x > mx) mx = x;
         if (!(mx > 1e-9)) return null;
@@ -29015,7 +29020,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         })).then((buf) => {
             const L = speechLevel(buf);
             if (L == null) return null;
-            const g = Math.min(10, Math.max(0.6, Math.pow(10, (LOUD_TARGET - L) / 20)));
+            const g = Math.min(10, Math.max(0.25, Math.pow(10, (LOUD_TARGET - L) / 20)));
             loudCache.set(id, g);
             return g;
         }).catch(() => null);
@@ -29096,27 +29101,38 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             try {
                 const ac = sharedAC;
                 const src = ac.createMediaElementSource(a);
-                const norm = ac.createGain();                 // выравнивание громкости (см. loudGainOf)
+                // 1) В моно: левый и правый каналы складываем в один. Голосовые с iPhone
+                //    приходят «стерео» со звуком только слева — так они зазвучат в обоих
+                //    динамиках. Моно на выходе система сама раздаёт в оба динамика.
+                const split = ac.createChannelSplitter(2);
+                const mono = ac.createGain();
+                mono.channelCount = 1; mono.channelCountMode = 'explicit'; mono.channelInterpretation = 'discrete';
+                // 2) Выравнивание громкости под конкретный файл (см. loudGainOf)
+                const norm = ac.createGain();
                 norm.gain.value = LOUD_DEFAULT;
-                const hp = ac.createBiquadFilter();           // убираем гул — он «съедает» громкость
-                hp.type = 'highpass'; hp.frequency.value = 70; hp.Q.value = 0.7;
-                const comp = ac.createDynamicsCompressor();   // мягко, без «качания»
+                // 3) Срез гула и «бубнения» ниже ~110 Гц — из-за них голос глухой
+                const hp = ac.createBiquadFilter();
+                hp.type = 'highpass'; hp.frequency.value = 110; hp.Q.value = 0.7;
+                const mud = ac.createBiquadFilter();          // чуть убираем «бочку» 200–300 Гц
+                mud.type = 'peaking'; mud.frequency.value = 250; mud.Q.value = 1; mud.gain.value = -3;
+                // 4) Мягкий компрессор: тихие слова ближе к громким, без «качания»
+                const comp = ac.createDynamicsCompressor();
                 comp.threshold.value = -24; comp.knee.value = 8; comp.ratio.value = 3;
-                comp.attack.value = 0.006; comp.release.value = 0.25;
-                const presence = ac.createBiquadFilter();     // голос чуть разборчивее
-                presence.type = 'peaking'; presence.frequency.value = 3000;
-                presence.Q.value = 0.9; presence.gain.value = 2;
-                const boost = ac.createGain();                // общее усиление: ×3 к прежнему уровню
-                boost.gain.value = 3;
-                const lim = ac.createDynamicsCompressor();    // защита от хрипа на пиках
+                comp.attack.value = 0.005; comp.release.value = 0.2;
+                // 5) Разборчивость: лёгкий подъём 2,5–4 кГц
+                const presence = ac.createBiquadFilter();
+                presence.type = 'peaking'; presence.frequency.value = 3200;
+                presence.Q.value = 0.9; presence.gain.value = 2.5;
+                // 6) Возвращаем громкость после компрессора и страхуем пики (без искажений)
+                const makeup = ac.createGain();
+                makeup.gain.value = 1.5;
+                const lim = ac.createDynamicsCompressor();
                 lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20;
-                lim.attack.value = 0.001; lim.release.value = 0.05;
-                const soft = ac.createWaveShaper();           // мягкое ограничение: громко, но без треска
-                const N = 2048, curve = new Float32Array(N), k = Math.tanh(1.5);
-                for (let i = 0; i < N; i++) { const x = i / (N - 1) * 2 - 1; curve[i] = Math.tanh(1.5 * x) / k; }
-                soft.curve = curve; soft.oversample = '2x';
-                src.connect(norm); norm.connect(hp); hp.connect(comp); comp.connect(presence);
-                presence.connect(boost); boost.connect(lim); lim.connect(soft); soft.connect(ac.destination);
+                lim.attack.value = 0.001; lim.release.value = 0.06;
+                src.connect(split);
+                split.connect(mono, 0); split.connect(mono, 1);   // L + R → один канал
+                mono.connect(norm); norm.connect(hp); hp.connect(mud); mud.connect(comp);
+                comp.connect(presence); presence.connect(makeup); makeup.connect(lim); lim.connect(ac.destination);
                 a._vgNorm = norm;
             } catch (e) { return null; }
         }
@@ -29170,7 +29186,16 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // Голосовое играет обычным <audio> — ровно как кружок играет обычным <video>.
     // Громкость выравнивает только сервер (e_volume:auto), как у кружков.
     function audioEl() {
-        P.skipBoostOnce = false;
+        // Основной путь — через Web Audio: сведение в моно, срез гула, выравнивание
+        // громкости. Обычный плеер — только если Web Audio недоступен.
+        const ac = sharedAC;
+        const skip = P.skipBoostOnce; P.skipBoostOnce = false;
+        if (!P.noBoost && !skip && !iosNoSession && ac && ac.state !== 'closed') {
+            if (!P.els.boost) P.els.boost = makeEl(true) || null;
+            if (P.els.boost) return P.els.boost;
+            P.noBoost = true;
+        }
+        if (ac && ac.state !== 'running') ac.resume().catch(() => {});
         if (!P.els.plain) P.els.plain = makeEl(false);
         return P.els.plain;
     }
@@ -29268,7 +29293,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         // ещё не на устройстве — пока играет из сети, параллельно кладём в кэш на будущее
         // (и как только скачалось — измеряем громкость и подстраиваем усиление)
         if (!voiceMem.has(id) && !message.is_uploading) {
-            downloadVoice(message).catch(() => {});
+            downloadVoice(message).then(b => loudGainOf(id, b)).then(v => applyLoud(id, v)).catch(() => {});
         }
         startTick();
     }
