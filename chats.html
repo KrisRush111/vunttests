@@ -27693,7 +27693,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 @keyframes vgRoundOut { to { opacity: 0; transform: scale(.7); } }
 .vg-round-dim.is-out { animation-name: vgRoundDimOut; }
 /* задняя камера — без зеркала */
-.vg-round-rec.is-back video:not(.is-playback) { transform: none; }
+.vg-round-rec.is-back video:not(.is-playback), .vg-round-rec.no-mirror video { transform: none; }
 /* смена камеры: короткое размытие, как в Telegram */
 .vg-round-rec video { transition: filter .2s ease; }
 .vg-round-rec.is-flipping video { filter: blur(14px) brightness(.85); }
@@ -28371,7 +28371,11 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             const side = Math.min(v.videoWidth, v.videoHeight);
             const c = document.createElement('canvas');
             c.width = c.height = 320;
-            c.getContext('2d').drawImage(v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, 0, 0, 320, 320);
+            const cx = c.getContext('2d');
+            // обложка — так же, как записывается видео: фронтальная камера зеркально
+            // (если запись идёт напрямую с камеры, без холста, — как есть)
+            if (my.canvasStop && my.facing !== 'environment') cx.setTransform(-1, 0, 0, 1, 320, 0);
+            cx.drawImage(v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, 0, 0, 320, 320);
             return c.toDataURL('image/jpeg', 0.8);
         } catch (e) { return null; }
     }
@@ -28409,7 +28413,14 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                 const w = sv.videoWidth, h = sv.videoHeight;
                 if (!w || !h || sv.readyState < 2) return;
                 const side = Math.min(w, h);
-                try { ctx.drawImage(sv, (w - side) / 2, (h - side) / 2, side, side, 0, 0, 480, 480); } catch (e) {}
+                // фронтальная камера — пишем зеркально, как видно при записи (как в Telegram):
+                // иначе после отправки картинка «переворачивается» слева направо
+                const mirror = my.facing !== 'environment';
+                try {
+                    ctx.setTransform(mirror ? -1 : 1, 0, 0, 1, mirror ? 480 : 0, 0);
+                    ctx.drawImage(sv, (w - side) / 2, (h - side) / 2, side, side, 0, 0, 480, 480);
+                } catch (e) {}
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
             };
             const timer = setInterval(draw, 1000 / 30);
             my.srcVid = sv;
@@ -28431,7 +28442,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (!flipB || my.camsReady) return;
         if (!my.rec) return;                                    // запись ещё не началась — позовут ещё раз
         my.camsReady = true;
-        if (!my.canvasStop) { flipB.style.display = 'none'; applyFlash(my); return; }
+        if (!my.canvasStop) {
+            // запись идёт прямо с камеры (без холста) — зеркалить файл нельзя, поэтому и
+            // на экране показываем без зеркала: что видно, то и отправится
+            if (my.view) my.view.classList.add('no-mirror');
+            flipB.style.display = 'none'; applyFlash(my); return;
+        }
         const done = (n) => { if (R === my && !my.done) { if (n > 1) flipB.disabled = false; else flipB.style.display = 'none'; } };
         try {
             navigator.mediaDevices.enumerateDevices()
