@@ -8,7 +8,7 @@ const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 // Это «оболочка» приложения: после первой успешной загрузки всё отсюда
 // открывается с телефона, без единого запроса к vuntgram.vercel.app.
 // (Ресурс, которого нет на сервере, просто пропускается — см. install.)
-const STATIC_RESOURCES = [
+const STATIC_RESOURCES = [      
   '/',
   '/index.html',
   '/chats.html',
