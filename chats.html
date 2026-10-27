@@ -27793,6 +27793,17 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 /* ===== кружок: крупнее, подписи под ним ===== */
 .vg-round-circle { width: 250px; height: 250px; }
 .vg-round.is-active .vg-round-circle { width: min(310px, 80vw); height: min(310px, 80vw); }
+/* фигуры — крупнее на свой коэффициент, чтобы на глаз были как круг */
+.vg-round.vg-shaped .vg-round-circle { width: min(calc(250px * var(--vg-k, 1)), 86vw); height: min(calc(250px * var(--vg-k, 1)), 86vw); }
+.vg-round.vg-shaped.is-active .vg-round-circle { width: min(calc(310px * var(--vg-k, 1)), 90vw); height: min(calc(310px * var(--vg-k, 1)), 90vw); }
+/* отправка фигуры: прогресс — кольцом вокруг крестика (как у голосового), а не по контуру */
+.vg-round-cancel > svg.vg-round-cancel-ring { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%;
+                                               transform: rotate(-90deg); opacity: 0; pointer-events: none; overflow: visible; }
+.vg-round-cancel-ring circle { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round;
+                               stroke-dasharray: 131.95; stroke-dashoffset: 131.95; transition: stroke-dashoffset .25s linear; }
+.vg-round.vg-shaped.is-uploading .vg-round-cancel-ring { opacity: 1; animation: vgSpinRing 1.6s linear infinite; }
+.vg-round.vg-shaped.is-uploading .vg-round-ring { animation: none; }
+.vg-round.vg-shaped.is-uploading .vg-round-ring .rg { opacity: 0 !important; }
 
 .vg-round-msg .message-content.vg-round {
     display: grid !important;
@@ -27979,6 +27990,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         crown: 'M55 12L72 44L91.5 27.5Q96.5 24 96 30L90 86Q89 94 81 94L19 94Q11 94 10 86L4 30Q3.5 24 8.5 27.5L28 44L45 12Q50 4 55 12Z'
     };
     const shapeName = (v) => (v && Object.prototype.hasOwnProperty.call(ROUND_SHAPES, v)) ? v : 'circle';
+    // Фигуры занимают меньше места в квадрате, чем круг (звезда — почти вдвое), поэтому
+    // каждую увеличиваем так, чтобы на глаз она была такой же крупной, как кружок.
+    const SHAPE_SCALE = { circle: 1, star: 1.22, heart: 1.12, cat: 1.09, triangle: 1.24, crown: 1.13 };
     function myRoundShape() {
         try { return shapeName(localStorage.getItem(SHAPE_KEY)); } catch (e) { return 'circle'; }
     }
@@ -28298,7 +28312,9 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         const rowMid = rowR.top + rowR.height / 2;
         const bottomLimit = Math.min(rowR.top - 12 - 44 - 18, rowMid - 44 - 14 - 74 - 24 - 14);
         const avail = Math.max(160, bottomLimit - topLimit);
-        const size = Math.round(Math.max(150, Math.min(380, box.width * 0.86, avail * 0.94)));
+        const k = SHAPE_SCALE[my.shape || 'circle'] || 1;      // фигура — крупнее, чтобы на глаз была как круг
+        const size = Math.round(Math.max(150, Math.min(380 * k, Math.min(box.width * 0.86 * k, box.width * 0.96),
+                                                        avail * Math.min(0.94 * k, 1))));
         const topY = topLimit + Math.max(0, (avail - size) / 2);            // по центру свободного места
 
         const dim = document.createElement('div');
@@ -29097,6 +29113,8 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             .forEach(c => { c.style.strokeDashoffset = 113.1 * (1 - clamp(p || 0, 0.06, 1)); });
         document.querySelectorAll(`.vg-round[data-voice-id="${sel}"] .vg-round-ring .rg`)
             .forEach(c => { c.style.strokeDashoffset = ROUND_RING * (1 - clamp(p || 0, 0.06, 1)); });
+        document.querySelectorAll(`.vg-round[data-voice-id="${sel}"] .vg-round-cancel-ring circle`)
+            .forEach(c => { c.style.strokeDashoffset = 131.95 * (1 - clamp(p || 0, 0.06, 1)); });
     }
 
     function uploadVoice(sig, blob, onProgress, setAbort, round) {
@@ -30060,12 +30078,12 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
         el.innerHTML = `
             <div class="message-content vg-round${uploading ? ' is-uploading' : ''}${unread ? ' is-unread' : ''}${shape !== 'circle' ? ' vg-shaped vg-shape-' + shape : ''}"
-                 data-voice-id="${escapeHtml(id)}" data-duration="${dur}">
+                 data-voice-id="${escapeHtml(id)}" data-duration="${dur}" style="--vg-k:${SHAPE_SCALE[shape]}">
                 <div class="vg-round-circle" role="button" aria-label="Воспроизвести видеосообщение">
                     <video class="vg-round-video" playsinline muted preload="auto"></video>
                     <svg class="vg-round-ring" viewBox="0 0 100 100">${shapeRing(shape, 'rg')}</svg>
                     <span class="vg-round-play">${I.play}</span>
-                    <button type="button" class="vg-round-cancel" aria-label="Отменить отправку">${I.x}</button>
+                    <button type="button" class="vg-round-cancel" aria-label="Отменить отправку">${I.x}<svg class="vg-round-cancel-ring" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23" cy="23" r="21"></circle></svg></button>
                 </div>
                 <span class="vg-round-meta">${I.muted}<span class="vg-round-dur">${fmtDur(dur)}</span><span class="vg-voice-unread"></span></span>
                 <span class="message-time">${formatChatMessageTime(message.sent_at)}${status}</span>
