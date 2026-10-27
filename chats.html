@@ -29074,7 +29074,21 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // Два плеера: «усиленный» идёт через Web Audio (компрессор → усиление → лимитер),
     // «обычный» — запасной, если Web Audio не запущен или ссылка без CORS.
     function makeEl(boost) {
-        const a = new Audio();
+        // Обычный плеер голосового — такой же элемент, как у кружка: <video playsinline>
+        // в странице. На телефонах отдельный new Audio() система выводит иначе
+        // (тише и глуше), а у видео-элемента звук идёт тем же путём, что у кружков.
+        let a;
+        if (boost) a = new Audio();
+        else {
+            a = document.createElement('video');
+            a.playsInline = true;
+            a.setAttribute('playsinline', '');
+            a.setAttribute('webkit-playsinline', '');
+            a.muted = false;
+            a.setAttribute('aria-hidden', 'true');
+            a.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;';
+            (document.body || document.documentElement).appendChild(a);
+        }
         a.volume = 1;
         a.preload = 'auto';
         if (boost) {
