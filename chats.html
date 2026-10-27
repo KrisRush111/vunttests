@@ -27691,6 +27691,39 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .vg-round-rec.is-out, .vg-round-dim.is-out { animation: vgRoundOut .22s ease-in both; }
 @keyframes vgRoundOut { to { opacity: 0; transform: scale(.7); } }
 .vg-round-dim.is-out { animation-name: vgRoundDimOut; }
+/* задняя камера — без зеркала */
+.vg-round-rec.is-back video:not(.is-playback) { transform: none; }
+/* смена камеры: короткое размытие, как в Telegram */
+.vg-round-rec video { transition: filter .2s ease; }
+.vg-round-rec.is-flipping video { filter: blur(14px) brightness(.85); }
+/* вспышка фронтальной камеры: экран вокруг кружка светится тёплым белым */
+.vg-round-dim { transition: background-color .2s ease; }
+.vg-round-dim.is-flash { background: rgba(255, 250, 238, .97); }
+/* кнопки «перевернуть камеру» и «вспышка» — слева над строкой записи */
+.vg-rec-cams {
+    position: absolute; left: 4px; bottom: calc(100% + 12px); display: flex; gap: 12px;
+    pointer-events: none; animation: vgRecCamsIn .3s cubic-bezier(.2, 1.2, .4, 1) .05s both;
+    transition: opacity .2s ease;
+}
+@keyframes vgRecCamsIn { from { opacity: 0; transform: translateY(12px) scale(.8); } }
+.vg-rec-cams button {
+    position: relative; width: 44px; height: 44px; border-radius: 50%; border: none; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: auto;
+    color: #fff; background: rgba(40, 40, 44, .55);
+    -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .18); touch-action: manipulation;
+    transition: transform .15s ease, opacity .2s ease, background-color .2s ease;
+}
+.vg-rec-cams button:active { transform: scale(.88); }
+.vg-rec-cams button[disabled] { opacity: .4; pointer-events: none; }
+.vg-rec-cams svg { position: absolute; inset: 0; margin: auto; width: 24px; height: 24px;
+                   transition: opacity .15s ease, transform .25s cubic-bezier(.2, 1.3, .4, 1); }
+.vg-rec-flash .i-on { opacity: 0; transform: scale(.5); color: #ffd60a; }
+.vg-rec-flash.is-on .i-on { opacity: 1; transform: none; }
+.vg-rec-flash.is-on .i-off { opacity: 0; transform: scale(.5); }
+.vg-rec-flip.is-turning svg { animation: vgFlipSpin .45s cubic-bezier(.3, 1.2, .4, 1); }
+@keyframes vgFlipSpin { from { transform: rotate(-180deg) scale(.8); } }
+.vg-rec.is-cancel .vg-rec-cams, .vg-rec.is-send .vg-rec-cams { opacity: 0; }
 /* строка ввода с панелью записи — поверх затемнения */
 .message-input-container.vg-round-recording { z-index: 102 !important; }
 @keyframes vgRoundDimOut { to { opacity: 0; } }
@@ -27910,7 +27943,11 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.1 5.2v13.6a1.1 1.1 0 0 0 1.68.93l10.4-6.8a1.1 1.1 0 0 0 0-1.86L7.78 4.27A1.1 1.1 0 0 0 6.1 5.2z"/></svg>',
         x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/><path d="M6 6.5l1 13.4a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l1-13.4"/><path d="M10 10.5v7M14 10.5v7"/></svg>',
-        cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="13" height="12" rx="3.5"/><path d="M15.5 10.3l4.2-2.6c.6-.4 1.3.1 1.3.8v7c0 .7-.7 1.2-1.3.8l-4.2-2.6"/></svg>',
+        // камера — как значок приложения «Камера» на iPhone: корпус с выступом и объектив
+        cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8.6 6.1l1-1.5c.3-.5.8-.7 1.3-.7h2.2c.5 0 1 .2 1.3.7l1 1.5H18a2.6 2.6 0 0 1 2.6 2.6v8.6A2.6 2.6 0 0 1 18 19.9H6a2.6 2.6 0 0 1-2.6-2.6V8.7A2.6 2.6 0 0 1 6 6.1z"/><circle cx="12" cy="12.9" r="3.6"/></svg>',
+        flip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.6 6.1l1-1.5c.3-.5.8-.7 1.3-.7h2.2c.5 0 1 .2 1.3.7l1 1.5H18a2.6 2.6 0 0 1 2.6 2.6v8.6A2.6 2.6 0 0 1 18 19.9H6a2.6 2.6 0 0 1-2.6-2.6V8.7A2.6 2.6 0 0 1 6 6.1z"/><path d="M8.9 12.4a3.2 3.2 0 0 1 5.6-1.8"/><path d="M14.9 9.1v1.7h-1.7"/><path d="M15.1 13.4a3.2 3.2 0 0 1-5.6 1.8"/><path d="M9.1 16.7V15h1.7"/></svg>',
+        flashOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2.8L5.6 13.1h5.5l-1 8.1 7.8-10.3h-5.5z"/><path d="M4 4l16 16"/></svg>',
+        flashOn: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M13.4 2.8L5.6 13.1h5.5l-1 8.1 7.8-10.3h-5.5z"/></svg>',
         muted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>',
         bin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="bin-lid"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/></g><path d="M6 6.5l1 13.4a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l1-13.4"/><path d="M10 10.5v7M14 10.5v7"/></svg>'
     };
@@ -28136,6 +28173,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (my.layer) return;
         my.layer = buildLayer(my.row, my.btn, my.round);
         if (my.round) buildRoundView(my);
+        if (my.round && my.stream) setupCamButtons(my);       // запись уже идёт — включаем кнопки камеры
         my.row.classList.add('vg-rec-anim', 'vg-recording');
         vibrate(12);
         cancelAnimationFrame(my.raf);
@@ -28200,9 +28238,19 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         const { chatModal } = getActiveElements();
         const host = chatModal || document.body;
         const box = host.getBoundingClientRect();
-        const rowTop = my.row.getBoundingClientRect().top;
-        const avail = Math.max(160, rowTop - box.top);                    // от верха окна до строки ввода
-        const size = Math.round(Math.max(160, Math.min(380, box.width * 0.86, avail * 0.66)));
+        const rowR = my.row.getBoundingClientRect();
+        // Сверху — шапка чата (она висит поверх сообщений) и плашка плеера под ней:
+        // круг начинается ниже них, ни с чем не пересекаясь.
+        let topLimit = box.top + 12;
+        const head = activeHeader();
+        if (head) topLimit = Math.max(topLimit, head.bottom + 14);
+        if (bar && bar.classList.contains('is-open')) topLimit = Math.max(topLimit, bar.getBoundingClientRect().bottom + 14);
+        // Снизу — кнопки камеры/вспышки (44 px над строкой ввода) и поднимающийся замок
+        const rowMid = rowR.top + rowR.height / 2;
+        const bottomLimit = Math.min(rowR.top - 12 - 44 - 18, rowMid - 44 - 14 - 74 - 24 - 14);
+        const avail = Math.max(160, bottomLimit - topLimit);
+        const size = Math.round(Math.max(150, Math.min(380, box.width * 0.86, avail * 0.94)));
+        const topY = topLimit + Math.max(0, (avail - size) / 2);            // по центру свободного места
 
         const dim = document.createElement('div');
         dim.className = 'vg-round-dim';
@@ -28228,7 +28276,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         Object.assign(view.style, {
             width: size + 'px', height: size + 'px',
             left: Math.round(box.left - ox + (box.width - size) / 2) + 'px',
-            top: Math.round(box.top - oy + Math.max(16, (avail - size) * 0.36)) + 'px'   // чуть выше середины
+            top: Math.round(topY - oy) + 'px'
         });
 
         const container = my.row.closest('.message-input-container');
@@ -28245,6 +28293,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (!v || !my.stream) return;
         v.classList.remove('is-playback');
         v.removeAttribute('src');
+        v.srcObject = null;                       // сброс — иначе после смены камеры кадр может «застыть»
         v.srcObject = my.stream;
         v.muted = true;
         v.play().catch(() => {});
@@ -28268,6 +28317,140 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (box) setTimeout(() => box.classList.remove('vg-round-recording'), 240);
         if (v) { v.classList.add('is-out'); setTimeout(() => v.remove(), 240); }
         if (d) { d.classList.add('is-out'); setTimeout(() => d.remove(), 240); }
+    }
+
+    // ---- Запись кружка через холст: кадры камеры рисуются в квадрат 480×480 ----
+    function startRoundCanvas(my) {
+        try {
+            const c = document.createElement('canvas');
+            if (!c.captureStream || typeof MediaStream === 'undefined') return null;
+            c.width = c.height = 480;
+            const ctx = c.getContext('2d');
+            if (!ctx) return null;
+            ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 480, 480);
+            const hide = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none;z-index:-1;';
+            c.style.cssText = hide;
+            const sv = document.createElement('video');               // невидимый «источник» кадров
+            sv.muted = true; sv.playsInline = true;
+            sv.setAttribute('muted', ''); sv.setAttribute('playsinline', ''); sv.setAttribute('aria-hidden', 'true');
+            sv.style.cssText = hide;
+            document.body.appendChild(c); document.body.appendChild(sv);
+            sv.srcObject = my.stream;
+            sv.play().catch(() => {});
+            const track = c.captureStream(30).getVideoTracks()[0];
+            if (!track) { c.remove(); sv.remove(); return null; }
+            const draw = () => {
+                if (my.flipping) return;                               // пока меняется камера — последний кадр
+                const w = sv.videoWidth, h = sv.videoHeight;
+                if (!w || !h || sv.readyState < 2) return;
+                const side = Math.min(w, h);
+                try { ctx.drawImage(sv, (w - side) / 2, (h - side) / 2, side, side, 0, 0, 480, 480); } catch (e) {}
+            };
+            const timer = setInterval(draw, 1000 / 30);
+            my.srcVid = sv;
+            my.canvasStop = () => {
+                clearInterval(timer);
+                try { track.stop(); } catch (e) {}
+                sv.srcObject = null; sv.remove(); c.remove();
+                my.srcVid = null;
+            };
+            return track;
+        } catch (e) { return null; }
+    }
+
+    // Кнопки над строкой записи: «перевернуть» доступна, если камер больше одной
+    // и запись идёт через холст; «вспышка» — всегда (у фронтальной — свечение экрана).
+    function setupCamButtons(my) {
+        const L = my.layer;
+        const flipB = L && L.querySelector('.vg-rec-flip');
+        if (!flipB || my.camsReady) return;
+        if (!my.rec) return;                                    // запись ещё не началась — позовут ещё раз
+        my.camsReady = true;
+        if (!my.canvasStop) { flipB.style.display = 'none'; applyFlash(my); return; }
+        const done = (n) => { if (R === my && !my.done) { if (n > 1) flipB.disabled = false; else flipB.style.display = 'none'; } };
+        try {
+            navigator.mediaDevices.enumerateDevices()
+                .then(list => done(list.filter(d => d.kind === 'videoinput').length))
+                .catch(() => done(2));
+        } catch (e) { done(2); }
+        applyFlash(my);
+    }
+
+    function camTrack(my) {
+        return my && my.stream ? my.stream.getVideoTracks()[0] || null : null;
+    }
+    function torchSupported(t) {
+        try { return !!(t && t.getCapabilities && t.getCapabilities().torch); } catch (e) { return false; }
+    }
+    // Вспышка: у задней камеры — фонарик (если телефон даёт), у фронтальной — экран светится
+    function applyFlash(my) {
+        if (!my || !my.layer) return;
+        const btn = my.layer.querySelector('.vg-rec-flash');
+        if (!btn) return;
+        const back = my.facing === 'environment';
+        const t = camTrack(my);
+        const torch = back && torchSupported(t);
+        btn.disabled = back && !torch;                          // фонарика нет — вспышка недоступна
+        const on = !!my.flash && !btn.disabled;
+        btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (my.dim) my.dim.classList.toggle('is-flash', on && !back);
+        if (torch) { try { t.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {}); } catch (e) {} }
+    }
+    function toggleFlash() {
+        const my = R;
+        if (!my || !my.round || my.done) return;
+        my.flash = !my.flash;
+        applyFlash(my);
+        vibrate(8);
+    }
+
+    async function flipCamera() {
+        const my = R;
+        if (!my || !my.round || my.done || my.flipping || !my.stream || !my.canvasStop) return;
+        if (my.preview) stopPreview();
+        const btn = my.layer && my.layer.querySelector('.vg-rec-flip');
+        const next = my.facing === 'environment' ? 'user' : 'environment';
+        my.flipping = true;
+        if (my.view) my.view.classList.add('is-flipping');
+        if (btn) { btn.classList.remove('is-turning'); void btn.offsetWidth; btn.classList.add('is-turning'); }
+        vibrate(8);
+        // iPhone держит открытой только одну камеру: старую закрываем до открытия новой
+        my.stream.getVideoTracks().forEach(t => { my.stream.removeTrack(t); try { t.stop(); } catch (e) {} });
+        const want = (facing) => navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: facing }, width: { ideal: 480 }, height: { ideal: 480 },
+                     aspectRatio: { ideal: 1 }, frameRate: { ideal: 30, max: 30 } }
+        });
+        let s = null, got = next;
+        try { s = await want(next); }
+        catch (e) {
+            got = my.facing;
+            try { s = await want(my.facing); } catch (e2) { s = null; }
+            showMessage('Не удалось переключить камеру', 'error');
+        }
+        if (R !== my || my.done) { if (s) s.getTracks().forEach(t => t.stop()); return; }
+        const t = s && s.getVideoTracks()[0];
+        if (t) {
+            my.stream.addTrack(t);
+            const real = t.getSettings && t.getSettings().facingMode;
+            my.facing = real === 'environment' || real === 'user' ? real : got;
+        }
+        if (my.srcVid) { my.srcVid.srcObject = null; my.srcVid.srcObject = my.stream; my.srcVid.play().catch(() => {}); }
+        if (my.view) {
+            my.view.classList.toggle('is-back', my.facing === 'environment');
+            if (!my.preview) setViewStream(my);
+        }
+        // первый кадр новой камеры — и только тогда снова пишем и убираем размытие
+        const ready = () => new Promise((res) => {
+            const sv = my.srcVid, t0 = performance.now();
+            const chk = () => (!sv || (sv.videoWidth && sv.readyState >= 2) || performance.now() - t0 > 1500) ? res() : setTimeout(chk, 40);
+            chk();
+        });
+        await ready();
+        my.flipping = false;
+        if (my.view) my.view.classList.remove('is-flipping');
+        applyFlash(my);
     }
 
     function buildLayer(row, btn, round) {
@@ -28298,6 +28481,10 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
                     ${I.pause.replace('<svg', '<svg class="i-pause"')}${recIco.replace('<svg', '<svg class="i-resume"')}
                 </button>
             </div>
+            ${round ? `<div class="vg-rec-cams">
+                <button type="button" class="vg-rec-flip" aria-label="Перевернуть камеру" disabled>${I.flip}</button>
+                <button type="button" class="vg-rec-flash" aria-label="Вспышка" aria-pressed="false">${I.flashOff.replace('<svg', '<svg class="i-off"')}${I.flashOn.replace('<svg', '<svg class="i-on"')}</button>
+            </div>` : ''}
             <div class="vg-rec-orb">
                 <div class="vg-rec-blob"></div><div class="vg-rec-blob b2"></div>
                 <button type="button" class="vg-rec-orb-btn" aria-label="Отправить">
@@ -28327,6 +28514,13 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         layer.querySelector('.vg-rec-pause').addEventListener('click', (e) => { e.stopPropagation(); togglePause(); });
         layer.querySelector('.vg-rec-orb-btn').addEventListener('click', (e) => { e.stopPropagation(); if (R && R.locked) finishRec(); });
         layer.querySelector('.vg-rec-pplay').addEventListener('click', (e) => { e.stopPropagation(); togglePreview(); });
+        if (round) {
+            const flipB = layer.querySelector('.vg-rec-flip'), flashB = layer.querySelector('.vg-rec-flash');
+            // кнопки нажимаются вторым пальцем, пока первый держит запись — не мешаем ему
+            [flipB, flashB].forEach(b => b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); }));
+            flipB.addEventListener('click', (e) => { e.stopPropagation(); flipCamera(); });
+            flashB.addEventListener('click', (e) => { e.stopPropagation(); toggleFlash(); });
+        }
         // не даём долгому тапу по панели открыть системное меню/выделение
         layer.addEventListener('contextmenu', (e) => e.preventDefault());
         return layer;
@@ -28342,6 +28536,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             return;
         }
         stopRound();                      // играющий кружок замолкает, как и в Telegram
+        if (round && P.id) stopPlayer();  // и голосовое тоже — его плашка не висит над кругом
         // Уже отказали — рамку системы больше не вызываем, только подсказка
         const blockedMsg = micBlockedMessage();
         if (blockedMsg) {
@@ -28421,6 +28616,13 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         // Пишем уже обработанный звук. Если AudioContext не запущен — пишем как есть.
         let recStream = stream;
         my.nodes = [];
+        if (round) {
+            my.facing = 'user';
+            // Кружок пишем с «холста», куда рисуем кадры камеры: так камеру можно
+            // переворачивать прямо во время записи (сама запись при этом не прерывается).
+            const vt = startRoundCanvas(my);
+            if (vt) recStream = new MediaStream([vt].concat(stream.getAudioTracks()));
+        }
         // кружок пишем как есть (видео + звук одним потоком — без рассинхрона).
         // iPhone/Safari тоже пишем как есть: при включении микрофона iOS переключает
         // звук в режим записи и «прерывает» AudioContext — обработанный через него
@@ -28472,7 +28674,21 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         }
         my.mime = my.rec.mimeType || mime || (round ? 'video/webm' : 'audio/webm');
         my.rec.ondataavailable = (e) => { if (e.data && e.data.size) my.chunks.push(e.data); };
-        my.rec.start(250);
+        try { my.rec.start(250); }
+        catch (e) {
+            // запись с холста браузер не принял — пишем камеру напрямую (без смены камеры)
+            if (recStream === stream) { cleanupAudio(my); R = null; showMessage('Не удалось начать запись', 'error'); return; }
+            if (my.canvasStop) { try { my.canvasStop(); } catch (err) {} my.canvasStop = null; }
+            try {
+                const o = { videoBitsPerSecond: 1200000, audioBitsPerSecond: 96000 };
+                if (mime) o.mimeType = mime;
+                try { my.rec = new MediaRecorder(stream, o); } catch (err) { my.rec = new MediaRecorder(stream); }
+                my.mime = my.rec.mimeType || mime || 'video/webm';
+                my.rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) my.chunks.push(ev.data); };
+                my.rec.start(250);
+            } catch (err) { cleanupAudio(my); R = null; showMessage('Не удалось начать запись', 'error'); return; }
+        }
+        if (round) setupCamButtons(my);                       // кнопки «перевернуть»/«вспышка» оживают
 
         if (my.ac) {
             try {
@@ -28663,6 +28879,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     function cleanupAudio(my) {
         cancelAnimationFrame(my.raf);
+        if (my.canvasStop) { try { my.canvasStop(); } catch (e) {} my.canvasStop = null; }
         try { my.stream && my.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
         try { my.destStream && my.destStream.getTracks().forEach(t => t.stop()); } catch (e) {}
         // общий AudioContext не закрываем и не усыпляем (iOS не даст разбудить его на
