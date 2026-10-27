@@ -29032,6 +29032,126 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         try { a._vgNorm.gain.setTargetAtTime(g, sharedAC.currentTime, 0.08); } catch (e) { a._vgNorm.gain.value = g; }
     }
 
+    // ---- Подготовка голосового перед воспроизведением (на устройстве, один раз) ----
+    // Файл заранее обрабатывается целиком и превращается в готовый WAV, который играет
+    // ОБЫЧНЫЙ плеер — тот же путь, что у кружков. Поэтому результат не зависит от
+    // Web Audio, беззвучного режима, Telegram-браузера и версии iOS.
+    //  1) моно: каналы складываются — голосовые с iPhone (звук только слева)
+    //     звучат в обоих динамиках;
+    //  2) срез гула ниже 110 Гц и «бубнения» около 250 Гц — голос не глухой;
+    //  3) выравнивание громкости под каждый файл + мягкий компрессор;
+    //  4) лёгкий подъём разборчивости 3 кГц, защита пиков от хрипа.
+    const PREP_MAX_SECONDS = 8 * 60;      // длиннее — играем как есть (WAV был бы слишком большим)
+    const PREP_MEM_MAX = 40;
+    const procMem = new Map();            // id -> Blob (готовый WAV)
+    const procJobs = new Map();           // id -> Promise<Blob|null>
+    const procBad = new Set();            // обработать не удалось — играем исходный файл
+    const OAC_ = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+
+    function newOAC(ch, len, rate) {
+        for (const r of [rate, 44100, 48000]) {
+            try { return new OAC_(ch, Math.max(1, len), r); } catch (e) {}
+        }
+        return null;
+    }
+    function decodeIn(oc, ab) {
+        return new Promise((res, rej) => {
+            const pr = oc.decodeAudioData(ab, res, rej);         // старый Safari — только колбэки
+            if (pr && pr.then) pr.then(res, rej);
+        });
+    }
+    function renderOAC(oc) {
+        return new Promise((res, rej) => {
+            oc.oncomplete = (e) => res(e.renderedBuffer);
+            const pr = oc.startRendering();
+            if (pr && pr.then) pr.then(res, rej);
+        });
+    }
+    function wavOf(data, rate) {
+        const n = data.length, ab = new ArrayBuffer(44 + n * 2), v = new DataView(ab);
+        const s = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+        s(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); s(8, 'WAVE'); s(12, 'fmt ');
+        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+        v.setUint16(32, 2, true); v.setUint16(34, 16, true); s(36, 'data'); v.setUint32(40, n * 2, true);
+        for (let i = 0, o = 44; i < n; i++, o += 2) {
+            const x = Math.max(-1, Math.min(1, data[i]));
+            v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+        }
+        return new Blob([ab], { type: 'audio/wav' });
+    }
+    async function processVoiceBlob(blob) {
+        if (!OAC_ || !blob || !blob.size) return null;
+        const dec = newOAC(1, 1, 32000);
+        if (!dec) return null;
+        const ab = await (blob.arrayBuffer ? blob.arrayBuffer() : new Response(blob).arrayBuffer());
+        const buf = await decodeIn(dec, ab);
+        const rate = buf.sampleRate, len = buf.length;
+        if (!len || len / rate > PREP_MAX_SECONDS + 5) return null;
+        // 1) моно: сумма каналов
+        const oc = newOAC(1, len, rate);
+        if (!oc || oc.sampleRate !== rate) return null;
+        const mono = oc.createBuffer(1, len, rate), m = mono.getChannelData(0);
+        for (let c = 0; c < buf.numberOfChannels; c++) {
+            const d = buf.getChannelData(c);
+            for (let i = 0; i < len; i++) m[i] += d[i];
+        }
+        // 3) громкость под этот файл (меряем речь без пауз)
+        const L = speechLevel(mono);
+        if (L == null) return null;                          // тишина — нечего обрабатывать
+        const g = Math.min(10, Math.max(0.25, Math.pow(10, (LOUD_TARGET - L) / 20)));
+        const src = oc.createBufferSource(); src.buffer = mono;
+        const norm = oc.createGain(); norm.gain.value = g;
+        const hp = oc.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 110; hp.Q.value = 0.7;
+        const mud = oc.createBiquadFilter(); mud.type = 'peaking'; mud.frequency.value = 250; mud.Q.value = 1; mud.gain.value = -3;
+        const comp = oc.createDynamicsCompressor();
+        comp.threshold.value = -24; comp.knee.value = 8; comp.ratio.value = 3;
+        comp.attack.value = 0.005; comp.release.value = 0.2;
+        const presence = oc.createBiquadFilter();
+        presence.type = 'peaking'; presence.frequency.value = 3200; presence.Q.value = 0.9; presence.gain.value = 2.5;
+        const makeup = oc.createGain(); makeup.gain.value = 1.5;
+        const lim = oc.createDynamicsCompressor();
+        lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20;
+        lim.attack.value = 0.001; lim.release.value = 0.06;
+        src.connect(norm); norm.connect(hp); hp.connect(mud); mud.connect(comp);
+        comp.connect(presence); presence.connect(makeup); makeup.connect(lim); lim.connect(oc.destination);
+        src.start(0);
+        const out = (await renderOAC(oc)).getChannelData(0);
+        // страховка: пик не выше −0,5 дБ (без щелчков и хрипа)
+        let pk = 0;
+        for (let i = 0; i < out.length; i++) { const x = Math.abs(out[i]); if (x > pk) pk = x; }
+        if (!(pk > 0)) return null;
+        if (pk > 0.944) { const k = 0.944 / pk; for (let i = 0; i < out.length; i++) out[i] *= k; }
+        return wavOf(out, rate);
+    }
+    function prepVoice(message) {
+        const id = String(message.id);
+        if (procMem.has(id)) return Promise.resolve(procMem.get(id));
+        if (procBad.has(id)) return Promise.resolve(null);
+        if (procJobs.has(id)) return procJobs.get(id);
+        const job = (async () => {
+            const local = voiceMem.get(id) || (message.is_uploading ? null : await downloadVoice(message));
+            const out = await processVoiceBlob(local);
+            if (!out) { procBad.add(id); return null; }
+            procMem.delete(id); procMem.set(id, out);
+            for (const k of [...procMem.keys()]) {
+                if (procMem.size <= PREP_MEM_MAX) break;
+                if (k !== P.id && k !== id) procMem.delete(k);
+            }
+            return out;
+        })().catch(() => { procBad.add(id); return null; });
+        procJobs.set(id, job);
+        job.finally(() => procJobs.delete(id));
+        return job;
+    }
+    // можно ли готовить это голосовое (иначе — играем исходный файл, как раньше)
+    function canPrep(message) {
+        const id = String(message.id);
+        if (!OAC_ || procBad.has(id)) return false;
+        if ((Number(message.voice_duration) || 0) > PREP_MAX_SECONDS) return false;
+        return voiceMem.has(id) || (!message.is_uploading && !!message.file_url);
+    }
+
     let listened = new Set();
     try { listened = new Set(JSON.parse(localStorage.getItem('vg-voice-listened') || '[]')); } catch (e) {}
     // Сообщаем серверу «прослушано» — у отправителя гаснет точка
@@ -29079,21 +29199,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     // Два плеера: «усиленный» идёт через Web Audio (компрессор → усиление → лимитер),
     // «обычный» — запасной, если Web Audio не запущен или ссылка без CORS.
     function makeEl(boost) {
-        // Обычный плеер голосового — такой же элемент, как у кружка: <video playsinline>
-        // в странице. На телефонах отдельный new Audio() система выводит иначе
-        // (тише и глуше), а у видео-элемента звук идёт тем же путём, что у кружков.
-        let a;
-        if (boost) a = new Audio();
-        else {
-            a = document.createElement('video');
-            a.playsInline = true;
-            a.setAttribute('playsinline', '');
-            a.setAttribute('webkit-playsinline', '');
-            a.muted = false;
-            a.setAttribute('aria-hidden', 'true');
-            a.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;';
-            (document.body || document.documentElement).appendChild(a);
-        }
+        const a = new Audio();
         a.volume = 1;
         a.preload = 'auto';
         if (boost) {
@@ -29155,7 +29261,15 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         a.addEventListener('play', startTick);
         a.addEventListener('pause', () => paintPlayer());
         a.addEventListener('error', () => {
-            if (!P.id || !a.getAttribute('src') || P.audio !== a) return;
+            if (!P.id || P.prep || !a.getAttribute('src') || P.audio !== a) return;
+            // подготовленный WAV не открылся — больше его не используем, играем исходный файл
+            if (P.procUsed && P.msg) {
+                const msg = P.msg, t = a.currentTime || 0, d = durOf(msg);
+                procBad.add(P.id); procMem.delete(P.id);
+                P.procUsed = false; P.id = null;
+                playVoice(msg, d ? t / d : 0);
+                return;
+            }
             // ссылка могла истечь — одна попытка с новой
             if (P.refreshed !== P.id && P.msg && !voiceMem.has(P.id) && window.vgRefreshMediaUrl) {
                 const msg = P.msg, id = P.id, t = a.currentTime || 0, d = durOf(msg);
@@ -29185,17 +29299,11 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && !navigator.audioSession;
     // Голосовое играет обычным <audio> — ровно как кружок играет обычным <video>.
     // Громкость выравнивает только сервер (e_volume:auto), как у кружков.
+    // Голосовое всегда играет обычный плеер — как кружок. Вся обработка звука уже
+    // «вшита» в подготовленный WAV (см. prepVoice), поэтому Web Audio при
+    // воспроизведении не нужен и ничего не может «потерять».
     function audioEl() {
-        // Основной путь — через Web Audio: сведение в моно, срез гула, выравнивание
-        // громкости. Обычный плеер — только если Web Audio недоступен.
-        const ac = sharedAC;
-        const skip = P.skipBoostOnce; P.skipBoostOnce = false;
-        if (!P.noBoost && !skip && !iosNoSession && ac && ac.state !== 'closed') {
-            if (!P.els.boost) P.els.boost = makeEl(true) || null;
-            if (P.els.boost) return P.els.boost;
-            P.noBoost = true;
-        }
-        if (ac && ac.state !== 'running') ac.resume().catch(() => {});
+        P.skipBoostOnce = false;
         if (!P.els.plain) P.els.plain = makeEl(false);
         return P.els.plain;
     }
@@ -29232,6 +29340,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 
     function playVoice(message, frac) {
         const id = String(message.id);
+        if (P.prep && P.prep === id) return;           // уже готовим это голосовое — дождёмся
         if (R && R.preview) stopPreview();
         if (RP.id) stopRound();                       // кружок и голосовое одновременно не играют
         // iOS усыпляет Web Audio после звонка/блокировки — будим (мы внутри нажатия)
@@ -29243,7 +29352,23 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (P.id !== id) {
             if (P.id) { try { a.pause(); } catch (e) {} paintVoice(P.id, 0, false, false); }
             if (P.url) { URL.revokeObjectURL(P.url); P.url = null; }
-            const local = voiceMem.get(id);
+            P.prep = null;
+            // Сначала готовим звук (моно, без гула, ровная громкость) — обычно доли секунды.
+            // Пока готовится — на пузыре крутится загрузка, как при ожидании сети.
+            if (!procMem.has(id) && canPrep(message)) {
+                P.id = id; P.msg = message; P.chatId = currentChatId; P.prep = id;
+                P.buffering = true;
+                paintVoice(id, frac || 0, true, true);
+                showBar();
+                prepVoice(message).then(() => {
+                    if (P.prep !== id || P.id !== id) return;  // успели нажать другое / закрыть
+                    P.prep = null; P.id = null; P.buffering = false;
+                    playVoice(message, frac);                   // готовый WAV или, если не вышло, исходный файл
+                });
+                return;
+            }
+            const local = procMem.get(id) || voiceMem.get(id);
+            P.procUsed = procMem.has(id);
             P.refreshed = null;
             P.fromBlob = !!local;
             resetClock();
@@ -29293,7 +29418,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         // ещё не на устройстве — пока играет из сети, параллельно кладём в кэш на будущее
         // (и как только скачалось — измеряем громкость и подстраиваем усиление)
         if (!voiceMem.has(id) && !message.is_uploading) {
-            downloadVoice(message).then(b => loudGainOf(id, b)).then(v => applyLoud(id, v)).catch(() => {});
+            downloadVoice(message).catch(() => {});
         }
         startTick();
     }
@@ -29422,7 +29547,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
         if (P.audio) { try { P.audio.pause(); } catch (e) {} }
         if (P.url) { URL.revokeObjectURL(P.url); P.url = null; }
         const old = P.id;
-        P.id = null; P.msg = null; P.buffering = false;
+        P.id = null; P.msg = null; P.buffering = false; P.prep = null;
         if (!R) audioSession('auto');                 // отпускаем звук другим приложениям
         cancelAnimationFrame(P.raf);
         if (old) paintVoice(old, 0, false, false);
@@ -29459,7 +29584,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     }
 
     function paintPlayer() {
-        if (!P.id || !P.audio) return;
+        if (!P.id || !P.audio || P.prep) return;             // пока готовится — на пузыре загрузка
         const d = durOf(P.msg);
         const frac = d ? Math.min(1, playerTime() / d) : 0;
         paintVoice(P.id, frac, !P.audio.paused, true);
@@ -29479,6 +29604,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
     function togglePlay(message) {
         const id = String(message.id);
         if (voiceJobs.has(id)) { voiceJobs.get(id).abort(); return; }   // отмена отправки
+        if (P.prep === id) { stopPlayer(); return; }                     // нажали ещё раз, пока готовится — отмена
         if (P.id === id && P.audio && !P.audio.paused) { P.audio.pause(); paintPlayer(); return; }
         playVoice(message);
     }
@@ -29493,6 +29619,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             drag = true;
             try { wave.setPointerCapture(e.pointerId); } catch (err) {}
             const f = fracAt(e);
+            if (P.prep === String(message.id)) return;              // ещё готовится
             if (P.id === String(message.id)) {
                 const d = durOf(message);
                 resetClock();
@@ -29501,7 +29628,7 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
             } else playVoice(message, f);
         });
         wave.addEventListener('pointermove', (e) => {
-            if (!drag || P.id !== String(message.id)) return;
+            if (!drag || P.prep || P.id !== String(message.id)) return;
             const d = durOf(message);
             resetClock();
             try { P.audio.currentTime = fracAt(e) * d; } catch (err) {}
