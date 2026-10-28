@@ -9008,10 +9008,25 @@
         // Время/дата рядом с именем в списке чатов:
         // сегодня — время (ЧЧ:ММ), в течение последней недели — короткий день недели,
         // иначе — дата (дд.мм.гг).
+        // Время сообщения «по Москве» — одинаково в списке чатов и в самом чате.
+        // Сервер уже отдаёт московское время без часового пояса («2026-10-28T12:05:00») —
+        // его показываем как есть. Время с поясом («…Z», так пишет само приложение
+        // для только что отправленного) переводим в московское.
+        // (Раньше список прибавлял к серверному времени ещё +3 часа — и спешил на 3 часа.)
+        function vgMskDate(timestamp) {
+            if (timestamp instanceof Date || typeof timestamp === 'number') timestamp = new Date(timestamp).toISOString();
+            const str = String(timestamp);
+            let t = Date.parse(str.replace(/(\.\d{3})\d+/, '$1'));   // Safari не понимает 6 знаков после секунд
+            if (isNaN(t)) t = Date.parse(str);
+            if (isNaN(t)) return new Date(NaN);
+            if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(str)) return new Date(t);
+            return new Date(t + (180 + new Date(t).getTimezoneOffset()) * 60000);
+        }
+
         function formatChatListDate(timestamp) {
             if (!timestamp) return '';
-            const date = new Date(timestamp);
-            date.setHours(date.getHours() + 3);
+            const date = vgMskDate(timestamp);
+            if (isNaN(date.getTime())) return '';
 
             const now = new Date();
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -9063,7 +9078,7 @@
 
         function formatChatMessageTime(timestamp) {
             if (!timestamp) return 'только что';
-            const date = new Date(timestamp);
+            const date = vgMskDate(timestamp);
             return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         }
 
