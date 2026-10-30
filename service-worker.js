@@ -1,10 +1,10 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.3.6';
-const API_CACHE_NAME = 'vuntgram-api-v2.2.5';
+const CACHE_NAME = 'vuntgram-v2.4.0';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
 
-// Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования.    
+// Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования.
 // Это «оболочка» приложения: после первой успешной загрузки всё отсюда
 // открывается с телефона, без единого запроса к vuntgram.vercel.app.   
 // (Ресурс, которого нет на сервере, просто пропускается — см. install.)
@@ -14,6 +14,7 @@ const STATIC_RESOURCES = [
   '/chats.html',
   '/contacts.html',
   '/profile.html',
+  '/posts.html',
   '/offline.html',
   '/manifest.json',
   '/icon-192x192.png',
@@ -156,12 +157,14 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   console.log('🔄 TheVuntgram Service Worker: Activating...');
   
+  let wasUpdate = false;
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
           if (cacheName !== CACHE_NAME) { // УДАЛЯЕМ API_CACHE_NAME
             console.log('🗑️ TheVuntgram: Deleting old cache', cacheName);
+            if (cacheName.indexOf('vuntgram-v') === 0) wasUpdate = true;
             return caches.delete(cacheName);
           }
         })
@@ -169,6 +172,10 @@ self.addEventListener('activate', (event) => {
     }).then(() => {
       console.log('✅ TheVuntgram Service Worker: Activated');
       return self.clients.claim();
+    }).then(() => {
+      // Новая версия воркера (а с ней — новые страницы и скрипты): открытые
+      // вкладки сами перезагрузятся в безопасный момент (см. vg-app-updater на страницах)
+      if (wasUpdate) return notifyUpdated('sw', self.location.href);
     })
   );
 });
@@ -358,7 +365,9 @@ async function handleStaticRequest(request) {
     // Фоновая проверка обновления (только для статики).
     // event.waitUntil здесь недоступен, поэтому обязательно свой catch —
     // иначе висячий промис снова даст "Uncaught (in promise)".
-    updateStaticCacheInBackground(request, cache).catch(() => {});
+    // Если файл на сервере изменился — кэш обновляется СРАЗУ, а страница
+    // получает сообщение и перезагружается (а не «со второго-третьего раза»).
+    updateStaticCacheInBackground(request, cache, cachedResponse.clone()).catch(() => {});
     return cachedResponse;
   }
 
@@ -390,7 +399,7 @@ async function handleHtmlRequest(request) {
   const cached = await matchPage(cache, request);
 
   if (cached) {
-    refreshPageInBackground(cache, request).catch(() => {});
+    refreshPageInBackground(cache, request, cached.clone()).catch(() => {});
     return cleanResponse(cached);
   }
 
@@ -432,28 +441,73 @@ async function matchPage(cache, request) {
   return null;
 }
 
-// Не чаще раза в минуту на страницу — чтобы не дёргать Vercel при каждом переходе
+// Сверка страницы с сервером при КАЖДОМ открытии (раньше — не чаще раза в
+// минуту, а свежая версия показывалась только при СЛЕДУЮЩЕМ заходе, поэтому
+// изменения «доходили» лишь с N-го раза). Защита только от дублей: один и тот
+// же адрес не сверяем чаще раза в 5 секунд (переходы туда-обратно по футеру).
 const lastPageRefresh = new Map();
-async function refreshPageInBackground(cache, request) {
+async function refreshPageInBackground(cache, request, cachedCopy) {
   const key = pageCacheKey(request);
   const now = Date.now();
-  if (now - (lastPageRefresh.get(key) || 0) < 60000) return;
+  if (now - (lastPageRefresh.get(key) || 0) < 5000) return;
   lastPageRefresh.set(key, now);
   try {
-    const fresh = await fetchWithTimeout(new Request(key, { credentials: 'same-origin' }), 30000);
-    if (fresh.ok) await safeCachePut(cache, key, fresh);
+    // cache: 'no-cache' — браузер обязан спросить сервер, а не отдать копию из HTTP-кэша
+    const fresh = await fetchWithTimeout(new Request(key, { credentials: 'same-origin', cache: 'no-cache' }), 30000);
+    if (!fresh.ok) return;
+    const changed = cachedCopy ? !(await sameContent(cachedCopy, fresh.clone())) : false;
+    await safeCachePut(cache, key, fresh);
+    if (changed) {
+      console.log('🔄 TheVuntgram: страница обновилась на сервере', key);
+      await notifyUpdated('page', key);
+    }
   } catch (e) {
     // Нет связи с Vercel — не страшно, работаем на сохранённой версии
   }
 }
 
-async function updateStaticCacheInBackground(request, cache) {
+async function updateStaticCacheInBackground(request, cache, cachedCopy) {
   try {
-    const networkResponse = await fetchWithTimeout(request, 30000);
+    const req = new Request(request, { cache: 'no-cache' });
+    const networkResponse = await fetchWithTimeout(req, 30000);
+    if (!networkResponse || (!networkResponse.ok && networkResponse.type !== 'opaque')) return;
+    // opaque-ответы (CDN без CORS) сравнить нельзя — просто обновляем кэш молча
+    const comparable = cachedCopy && cachedCopy.type !== 'opaque' && networkResponse.type !== 'opaque';
+    const changed = comparable ? !(await sameContent(cachedCopy, networkResponse.clone())) : false;
     await safeCachePut(cache, request, networkResponse);
+    if (changed) {
+      console.log('🔄 TheVuntgram: файл обновился на сервере', request.url);
+      await notifyUpdated('asset', request.url);
+    }
   } catch (error) {
     // Игнорируем ошибки фонового обновления
   }
+}
+
+// Одинаковы ли две версии файла. Сначала по ETag (дёшево), иначе — побайтно.
+async function sameContent(a, b) {
+  try {
+    const ea = a.headers.get('ETag'), eb = b.headers.get('ETag');
+    if (ea && eb) return ea === eb;
+    const [ba, bb] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
+    if (ba.byteLength !== bb.byteLength) return false;
+    const x = new Uint8Array(ba), y = new Uint8Array(bb);
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  } catch (e) {
+    return true; // не удалось сравнить — лучше не дёргать пользователя перезагрузкой
+  }
+}
+
+// Сообщаем открытым вкладкам: «есть свежая версия». Сами они решают, когда
+// безопасно перезагрузиться (не посреди набора текста).
+async function notifyUpdated(kind, url) {
+  try {
+    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    list.forEach((client) => {
+      try { client.postMessage({ type: 'VG_UPDATED', kind, url }); } catch (e) {}
+    });
+  } catch (e) {}
 }
 
 
@@ -939,4 +993,4 @@ async function showOfflinePage() {
   }
   
   return new Response('Offline', { status: 503 });
-}  
+}
