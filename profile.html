@@ -12308,13 +12308,13 @@ html[data-theme="dark"] .vg-verified-tooltip {
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
         z-index: 1;
         pointer-events: none;
-        will-change: transform;
+        will-change: translate, scale;
         transition:
-            transform 0.52s cubic-bezier(0.32, 1.28, 0.5, 1),
-            width 0.4s cubic-bezier(0.3, 1.2, 0.5, 1),
+            translate 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+            width 0.35s cubic-bezier(0.22, 1, 0.36, 1),
             background-color 0.25s ease,
             box-shadow 0.25s ease,
-            scale 0.38s cubic-bezier(0.3, 1.55, 0.5, 1),
+            scale 0.3s cubic-bezier(0.22, 1, 0.36, 1),
             opacity 0.2s ease;
     }
     .vg-nav-pill.no-anim { transition: none !important; }
@@ -12326,7 +12326,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
             inset 0 -3px 8px rgba(160, 200, 255, 0.25),
             0 8px 22px rgba(0, 0, 0, 0.14),
             0 1px 3px rgba(0, 0, 0, 0.08);
-        scale: 1.14 1.24;
+        scale: 1.05 1.1;
         -webkit-backdrop-filter: blur(1.5px) saturate(170%) brightness(1.06);
         backdrop-filter: blur(1.5px) saturate(170%) brightness(1.06);
     }
@@ -12337,11 +12337,11 @@ html[data-theme="dark"] .vg-verified-tooltip {
             box-shadow 0.25s ease,
             scale 0.3s cubic-bezier(0.3, 1.55, 0.5, 1);
     }
-    .vg-nav-pill.jelly { animation: vgPillJelly 0.6s cubic-bezier(0.3, 0.9, 0.4, 1); }
+    .vg-nav-pill.jelly { animation: vgPillJelly 0.5s ease-out; }
     @keyframes vgPillJelly {
-        0%   { scale: 1.14 1.22; }
-        35%  { scale: 0.93 1.07; }
-        60%  { scale: 1.04 0.97; }
+        0%   { scale: 1.05 1.1; }
+        40%  { scale: 0.96 1.04; }
+        70%  { scale: 1.02 0.98; }
         100% { scale: 1 1; }
     }
 
@@ -12445,10 +12445,10 @@ html[data-theme="dark"] .vg-verified-tooltip {
     };
 
     // С какой вкладки пришли (записывается перед переходом, живёт 4 секунды)
-    var cameFrom = null;
+    var cameFrom = null, arrivedTo = null;
     try {
         var saved = JSON.parse(sessionStorage.getItem(KEY) || 'null');
-        if (saved && Date.now() - saved.t < 4000) cameFrom = saved.i;
+        if (saved && Date.now() - saved.t < 4000) { cameFrom = saved.i; arrivedTo = saved.to; }
         sessionStorage.removeItem(KEY);
     } catch (e) {}
 
@@ -12502,7 +12502,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
         function place(x, w, instant) {
             if (instant) pill.classList.add('no-anim');
             pill.style.width = w + 'px';
-            pill.style.transform = 'translate3d(' + x + 'px,0,0)';
+            pill.style.translate = x + 'px 0';
             if (instant) { void pill.offsetWidth; pill.classList.remove('no-anim'); }
         }
         function placeAt(i, instant) {
@@ -12545,21 +12545,28 @@ html[data-theme="dark"] .vg-verified-tooltip {
                 playIcon(items[i]);
                 return;
             }
-            try { sessionStorage.setItem(KEY, JSON.stringify({ i: cur, t: Date.now() })); } catch (e) {}
+            try { sessionStorage.setItem(KEY, JSON.stringify({ i: cur, to: i, t: Date.now() })); } catch (e) {}
             busy = true;
             pill.classList.remove('dragging');
             pill.classList.add('lens');
             setActiveVisual(i);
             placeAt(i);
-            playIcon(items[i]);
             var href = items[i].href;
-            setTimeout(function () { window.location.href = href; }, reduce ? 0 : 320);
+            setTimeout(function () { window.location.href = href; }, reduce ? 0 : 300);
         }
 
         // ----- Появление: линза едет с места прошлой вкладки -----
         function init() {
             if (cur < 0) { pill.style.opacity = '0'; return; }
-            if (cameFrom !== null && cameFrom !== cur && items[cameFrom] && !reduce && geom(cur).w) {
+            if (arrivedTo === cur && !reduce && geom(cur).w) {
+                // путь уже проехали на прошлой странице — только мягко «сдуваем» линзу
+                busy = true;
+                pill.classList.add('lens');
+                placeAt(cur, true);
+                requestAnimationFrame(function () {
+                    setTimeout(function () { settle(); playIcon(items[cur]); }, 140);
+                });
+            } else if (cameFrom !== null && cameFrom !== cur && items[cameFrom] && !reduce && geom(cur).w) {
                 busy = true;
                 placeAt(cameFrom, true);
                 pill.classList.add('lens');
@@ -12596,7 +12603,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
             var first = items[0], last = items[items.length - 1];
             var minX = first.offsetLeft;
             var maxX = last.offsetLeft + last.offsetWidth - w;
-            var x = Math.max(minX - 6, Math.min(maxX + 6, e.clientX - drag.left - w / 2));
+            var x = Math.max(minX, Math.min(maxX, e.clientX - drag.left - w / 2));
             place(x, w);
             var h = indexAt(e.clientX);
             prefetch(items[h].href);
