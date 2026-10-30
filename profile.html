@@ -12422,6 +12422,23 @@ html[data-theme="dark"] .vg-verified-tooltip {
         }
     }
 
+    /* ---------- Быстрые переходы между вкладками ---------- */
+    /* Плавная смена страниц силами браузера (Safari 18.2+, Chrome 126+;
+       в старых браузерах просто обычный переход) */
+    @view-transition { navigation: auto; }
+    ::view-transition-old(root),
+    ::view-transition-new(root) { animation-duration: 0.18s; }
+    /* Футер — один и тот же «объект» на обеих страницах, не моргает */
+    @media (max-width: 767px) {
+        body .bottom-nav.mobile-only-nav { view-transition-name: vg-nav; }
+    }
+    @media (min-width: 768px) {
+        body .bottom-nav.desktop-only-nav { view-transition-name: vg-nav; }
+    }
+    ::view-transition-group(vg-nav) { animation-duration: 0.18s; }
+    /* Убираем паузу проявления всей страницы — её заменяет переход выше */
+    html { animation: none !important; }
+
     @media (prefers-reduced-motion: reduce) {
         body .bottom-nav::after { animation: none; opacity: 0; }
         .vg-nav-pill, .vg-nav-pill.dragging { transition: none !important; }
@@ -12552,7 +12569,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
             setActiveVisual(i);
             placeAt(i);
             var href = items[i].href;
-            setTimeout(function () { window.location.href = href; }, reduce ? 0 : 300);
+            setTimeout(function () { window.location.href = href; }, reduce ? 0 : 120);
         }
 
         // ----- Появление: линза едет с места прошлой вкладки -----
@@ -12658,8 +12675,28 @@ html[data-theme="dark"] .vg-verified-tooltip {
         init();
     }
 
+    function prefetchTabs() {
+        var urls = [];
+        document.querySelectorAll('.bottom-nav .nav-item').forEach(function (a) {
+            if (!a.classList.contains('active') && urls.indexOf(a.href) < 0) urls.push(a.href);
+        });
+        // Chrome/Edge: правила предзагрузки; остальные — <link rel="prefetch">
+        try {
+            if (HTMLScriptElement.supports && HTMLScriptElement.supports('speculationrules')) {
+                var sr = document.createElement('script');
+                sr.type = 'speculationrules';
+                sr.textContent = JSON.stringify({ prefetch: [{ source: 'list', urls: urls }] });
+                document.head.appendChild(sr);
+            }
+        } catch (e) {}
+        urls.forEach(prefetch);
+    }
+
     function start() {
         document.querySelectorAll('.bottom-nav').forEach(setup);
+        var idle = window.requestIdleCallback || function (fn) { return setTimeout(fn, 1200); };
+        window.addEventListener('load', function () { idle(prefetchTabs, { timeout: 2500 }); });
+        if (document.readyState === 'complete') idle(prefetchTabs, { timeout: 2500 });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
