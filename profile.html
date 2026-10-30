@@ -2892,6 +2892,15 @@ input:checked + .toggle-slider:before {
         .bottom-nav .nav-item { padding-left: 4px; padding-right: 4px; }
         .bottom-nav .nav-icon-wrap { width: 46px; }
     </style>
+<script id="vg-page-in-head">
+/* Ранний флаг для плавного появления страницы (футер при этом не трогаем) */
+(function (d) {
+    var h = d.documentElement;
+    if ('onpagereveal' in window) h.classList.add('vg-vt');
+    h.classList.add('vg-page-in');
+    setTimeout(function () { h.classList.remove('vg-page-in'); }, 450);
+})(document);
+</script>
 </head>
 <body>
 
@@ -12271,6 +12280,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
             transparent 65%);
         background-size: 260% 100%;
         animation: vgNavWaterGlint 6s ease-in-out infinite;
+        animation-delay: var(--vg-glint-delay, 0s);
     }
     @keyframes vgNavWaterGlint {
         0%   { background-position: 130% 0; opacity: 0; }
@@ -12426,8 +12436,14 @@ html[data-theme="dark"] .vg-verified-tooltip {
     /* Плавная смена страниц силами браузера (Safari 18.2+, Chrome 126+;
        в старых браузерах просто обычный переход) */
     @view-transition { navigation: auto; }
-    ::view-transition-old(root),
-    ::view-transition-new(root) { animation-duration: 0.18s; }
+    /* Содержимое: старая страница быстро гаснет, новая мягко «всплывает» */
+    ::view-transition-old(root) { animation: vgPageOut 0.14s ease-out both; }
+    ::view-transition-new(root) { animation: vgPageIn 0.34s cubic-bezier(0.22, 1, 0.36, 1) both; }
+    @keyframes vgPageIn {
+        from { opacity: 0; transform: translateY(12px) scale(0.995); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes vgPageOut { to { opacity: 0; } }
     /* Футер — один и тот же «объект» на обеих страницах, не моргает */
     @media (max-width: 767px) {
         body .bottom-nav.mobile-only-nav { view-transition-name: vg-nav; }
@@ -12435,7 +12451,28 @@ html[data-theme="dark"] .vg-verified-tooltip {
     @media (min-width: 768px) {
         body .bottom-nav.desktop-only-nav { view-transition-name: vg-nav; }
     }
-    ::view-transition-group(vg-nav) { animation-duration: 0.18s; }
+    /* Футер не анимируется вовсе: новый сразу встаёт на место старого */
+    ::view-transition-group(vg-nav),
+    ::view-transition-new(vg-nav) { animation: none; }
+    ::view-transition-old(vg-nav) { display: none; }
+
+    /* Браузеры без плавной смены страниц: страницу на мгновение прикрывает
+       «шторка» цвета фона и растворяется. Футер лежит выше шторки и не меняется.
+       (Собственные анимации блоков страницы не трогаем.) */
+    html.vg-page-in:not(.vg-vt)::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: var(--telegram-secondary-bg, #f4f4f5);
+        pointer-events: none;
+        z-index: 99;                     /* футер — 100, он над шторкой */
+        animation: vgCurtainOut 0.32s ease-out both;
+    }
+    @media (min-width: 768px) {
+        html.vg-page-in:not(.vg-vt)::after { z-index: 9; }   /* под боковой панелью с футером */
+    }
+    @keyframes vgCurtainOut { from { opacity: 1; } to { opacity: 0; } }
+
     /* Убираем паузу проявления всей страницы — её заменяет переход выше */
     html { animation: none !important; }
 
@@ -12500,6 +12537,7 @@ html[data-theme="dark"] .vg-verified-tooltip {
     function setup(nav) {
         var items = [].slice.call(nav.querySelectorAll('.nav-item'));
         if (!items.length) return;
+        nav.style.setProperty('--vg-glint-delay', (-(Date.now() % 6000)) + 'ms');
         var startCur = items.findIndex(function (it) { return it.classList.contains('active'); });
         var cur = startCur;
 
