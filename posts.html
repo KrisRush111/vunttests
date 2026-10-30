@@ -4,6 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Посты - TheVuntgram</title>
+    <!-- Кто вошёл — так же, как на profile.html / chats.html: sessionStorage.userData,
+         запасной вариант localStorage.rememberedUser. Без входа — на страницу входа. -->
+    <script id="vg-posts-auth">
+        (function () {
+            try {
+                var raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                var u = raw ? JSON.parse(raw) : null;
+                if (!u || !u.platform_user_id) { window.location.replace('index.html'); return; }
+                if (!sessionStorage.getItem('userData')) sessionStorage.setItem('userData', raw);
+                localStorage.setItem('vg_last_user_id', String(u.platform_user_id));
+                window.__vgMe = u;
+            } catch (e) {
+                window.location.replace('index.html');
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="assets/animate/animate.min.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 
@@ -157,7 +173,7 @@
 
         /* ============ Мобильная страница ============ */
         .posts-container {
-            flex: 1;
+            flex: 0 0 auto;         /* ровно высота экрана: лента прокручивается внутри */
             width: 100%;
             max-width: 480px;
             margin: 0 auto;
@@ -198,6 +214,7 @@
 
         .posts-feed {
             flex: 1;
+            min-height: 0;          /* иначе лента растягивается и не прокручивается */
             overflow-y: auto;
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
@@ -677,6 +694,7 @@
 
             .posts-feed-desktop {
                 flex: 1;
+                min-height: 0;
                 position: relative;
                 overflow-y: auto;
                 padding: 20px;
@@ -804,6 +822,9 @@
             flex-shrink: 0;
         }
         .composer-author-name { font-weight: 600; font-size: 15px; line-height: 1.2; }
+        .composer-author-name.vg-has-badge,
+        .post-author.vg-has-badge { display: inline-flex; align-items: center; gap: 2px; }
+        .post-avatar { background-size: cover; background-position: center; overflow: hidden; }
         .composer-author-hint { font-size: 12.5px; color: var(--telegram-hint); line-height: 1.3; }
 
         /* Рамка для текста — как поле комментария */
@@ -1229,6 +1250,74 @@
         @keyframes vgLikePop { 0% { transform: scale(0.6); } 100% { transform: scale(1); } }
         .post-action.disabled { cursor: default; opacity: 0.7; font-size: 12.5px; }
 
+        .post-head-text { flex: 1; min-width: 0; }
+        .post-delete {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: none;
+            background: transparent;
+            color: var(--telegram-hint);
+            font-size: 14px;
+            padding: 7px 9px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: color 0.2s ease, background-color 0.2s ease;
+        }
+        .post-delete span { display: none; font-size: 13px; font-weight: 600; }
+        .post-delete.armed { color: #ff3b30; background: rgba(255, 59, 48, 0.1); }
+        .post-delete.armed span { display: inline; }
+        .post-card.removing { opacity: 0; transform: scale(0.97); transition: opacity 0.2s ease, transform 0.2s ease; }
+
+        .posts-footer { display: flex; justify-content: center; padding: 14px 0 6px; min-height: 1px; }
+        .posts-feed-desktop .posts-footer { max-width: 600px; margin: 0 auto; }
+        .posts-sentinel { display: block; width: 1px; height: 1px; }
+        .posts-first-load {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .posts-first-load[hidden] { display: none; }
+        .posts-spinner {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            border: 2.5px solid rgba(149, 1, 255, 0.18);
+            border-top-color: var(--vg-purple);
+            animation: postsSpin 0.8s linear infinite;
+            display: inline-block;
+        }
+        @keyframes postsSpin { to { transform: rotate(360deg); } }
+        .posts-retry {
+            border: none;
+            background: var(--rec-row-active);
+            color: var(--vg-purple);
+            font-weight: 600;
+            font-size: 14px;
+            padding: 9px 16px;
+            border-radius: 999px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .posts-error {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            text-align: center;
+            padding: 0 30px;
+            font-size: 15px;
+            pointer-events: auto;
+        }
+        .posts-empty .posts-error { color: var(--telegram-hint); }
+
+        .composer-publish.busy { filter: none; opacity: 0.75; }
+        .composer.is-publishing .composer-body { pointer-events: none; opacity: 0.6; transition: opacity 0.2s ease; }
+        .composer-draft-note.error { color: #ff3b30; font-weight: 500; font-size: 13px; }
+
         @media (min-width: 768px) {
             /* Окно занимает второй плейсхолдер — правую часть рядом с рекомендациями */
             .composer {
@@ -1305,7 +1394,9 @@
         </div>
         <div class="posts-feed-desktop">
             <div class="posts-list" id="postsListDesktop"></div>
-            <div class="posts-empty" id="postsEmptyDesktop">Пусто</div>
+            <div class="posts-footer" id="postsFooterDesktop"></div>
+            <div class="posts-empty" id="postsEmptyDesktop" hidden>Пусто</div>
+            <div class="posts-first-load" hidden><span class="posts-spinner"></span></div>
         </div>
     </div>
 
@@ -1333,8 +1424,10 @@
 
         <div class="posts-feed">
             <div class="posts-list" id="postsListMobile"></div>
+            <div class="posts-footer" id="postsFooterMobile"></div>
         </div>
-        <div class="posts-empty" id="postsEmptyMobile">Пусто</div>
+        <div class="posts-empty" id="postsEmptyMobile" hidden>Пусто</div>
+        <div class="posts-first-load" hidden><span class="posts-spinner"></span></div>
     </div>
 
     <!-- ===================== ОКНО «НОВЫЙ ПОСТ» ===================== -->
@@ -1350,9 +1443,9 @@
         <div class="composer-body">
             <div class="composer-inner">
                 <div class="composer-author">
-                    <div class="post-avatar">Я</div>
+                    <div class="post-avatar" id="composerAvatar"></div>
                     <div>
-                        <div class="composer-author-name">Вы</div>
+                        <div class="composer-author-name" id="composerName"></div>
                         <div class="composer-author-hint">Публикация будет видна всем</div>
                     </div>
                 </div>
@@ -1469,6 +1562,325 @@
         </a>
     </div>
 
+<style id="vg-verified-badge-styles">
+/* ==========================================================================
+   ГАЛОЧКА ВЕРИФИКАЦИИ (как в profile.html / chats.html)
+   ========================================================================== */
+.vg-nick-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.vg-verified-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6em;
+    height: 1.6em;
+    line-height: 0;
+    align-self: center;
+    transform: translateY(0.02em);
+    margin-left: -0.1em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.vg-verified-badge svg,
+.vg-verified-badge img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+.vg-verified-badge img { transform: scale(1.08); }
+
+/* Контейнеры имени, в которые вставляется галочка. Ник обрезается
+   многоточием, галочка всегда остаётся видимой справа. */
+.user-nickname.vg-has-badge,
+.recommendation-nickname.vg-has-badge,
+.profile-nickname.vg-has-badge,
+[id^="modal-profile-nickname"].vg-has-badge {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 0.1em;
+    max-width: 100%;
+    vertical-align: middle;
+    /* у inline-flex overflow:hidden на самом контейнере не нужен —
+       обрезкой занимается .vg-nick-text внутри */
+    overflow: visible;
+}
+
+/* В профиле ник центрируется родителем (text-align: center), поэтому
+   inline-flex не ломает выравнивание — но в развёрнутой шапке оно слева. */
+.hero-expanded .profile-nickname.vg-has-badge { max-width: 100%; }
+
+/* В списках ник мельче — размер галочки в em, точь в точь как в chats.html
+   (.chat-name.vg-has-badge .vg-verified-badge { 1.58em }). */
+.user-nickname.vg-has-badge .vg-verified-badge,
+.recommendation-nickname.vg-has-badge .vg-verified-badge {
+    width: 1.58em;
+    height: 1.58em;
+}
+
+/* В модалке профиля размер не переопределяем — работает базовый 1.6em,
+   как в chats.html. */
+
+/* ==========================================================================
+   ЗАЩИТА ГАЛОЧКИ ОТ СОХРАНЕНИЯ (долгое удержание / контекстное меню / drag)
+   Точь-в-точь как в profile.html.
+   ========================================================================== */
+.vg-verified-badge,
+.vg-verified-badge *,
+.vg-verified-badge img,
+.vg-verified-badge svg,
+.vg-verified-badge .vg-badge-img {
+    -webkit-touch-callout: none !important; /* iOS: убирает меню "Сохранить фото" */
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+    -webkit-user-drag: none !important;
+    -khtml-user-drag: none !important;
+    -moz-user-drag: none !important;
+    user-drag: none !important;
+}
+/* Внутренности бейджа не принимают события — долгое нажатие/правый клик
+   всегда попадают в сам <span>, где мы их и отменяем. */
+.vg-verified-badge img,
+.vg-verified-badge svg,
+.vg-verified-badge .vg-badge-img {
+    pointer-events: none !important;
+}
+
+/* ==========================================================================
+   ПОДСКАЗКА «Верифицирован Vuntgram» — по нажатию на галочку
+   ========================================================================== */
+.vg-verified-tooltip {
+    position: fixed;
+    z-index: 100000;
+    box-sizing: border-box;
+    padding: 8px 13px;
+    border-radius: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
+    color: rgba(0, 0, 0, 0.82);
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    letter-spacing: 0.1px;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+    transform-origin: 50% 100%;
+    transition: opacity 0.26s cubic-bezier(0.22, 0.61, 0.36, 1),
+                transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+}
+
+.vg-verified-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.vg-verified-tooltip.hiding {
+    transition: opacity 0.15s ease, transform 0.18s ease;
+}
+
+.vg-verified-tooltip.below {
+    transform-origin: 50% 0%;
+    transform: translateY(-8px) scale(0.94);
+}
+
+.vg-verified-tooltip.below.visible {
+    transform: translateY(0) scale(1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .vg-verified-tooltip {
+        border-color: rgba(255, 255, 255, 0.16);
+        background: rgba(28, 28, 30, 0.78);
+        color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+    }
+}
+
+body.dark-theme .vg-verified-tooltip,
+body.theme-dark .vg-verified-tooltip,
+html[data-theme="dark"] .vg-verified-tooltip {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(28, 28, 30, 0.78);
+    color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+</style>
+
+<script>
+/* ==========================================================================
+   Vuntgram: галочка верификации (перенесено из profile.html / chats.html)
+   ========================================================================== */
+window.VG_BOT_ID = 'vuntgram_bot';
+
+const VG_VERIFIED_BADGE_CANDIDATES = [
+    'gal.webp',
+    '/gal.webp',
+    './gal.webp',
+    '../gal.webp',
+    '/static/gal.webp',
+    '/images/gal.webp',
+    '/assets/gal.webp'
+];
+
+const VG_BADGE_SRC_LS_KEY = 'vgBadgeSrc';
+let VG_BADGE_RESOLVED_SRC = null;
+try { VG_BADGE_RESOLVED_SRC = localStorage.getItem(VG_BADGE_SRC_LS_KEY) || null; } catch (e) {}
+let VG_BADGE_RESOLVE_PROMISE = null;
+
+const VG_VERIFIED_BADGE_SVG = `
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M12 1.5l2.4 2.06 3.15-.3.9 3.04 2.85 1.4-1.2 2.93 1.2 2.93-2.85 1.4-.9 3.04-3.15-.3L12 19.76l-2.4-2.06-3.15.3-.9-3.04-2.85-1.4 1.2-2.93-1.2-2.93 2.85-1.4.9-3.04 3.15.3L12 1.5z" fill="#3390EC"/>
+  <path d="M7.9 10.9l2.7 2.7 5.1-5.1" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+/* Путь к картинке ищем один раз за сессию и кэшируем, иначе каждый новый
+   бейдж перебирал бы 7 путей через onerror и галочка мигала. */
+function vgResolveBadgeSrc() {
+    if (VG_BADGE_RESOLVED_SRC) return Promise.resolve(VG_BADGE_RESOLVED_SRC);
+    if (VG_BADGE_RESOLVE_PROMISE) return VG_BADGE_RESOLVE_PROMISE;
+
+    VG_BADGE_RESOLVE_PROMISE = new Promise(resolve => {
+        let i = 0;
+        const probe = new Image();
+        probe.decoding = 'async';
+        const tryNext = () => {
+            if (i >= VG_VERIFIED_BADGE_CANDIDATES.length) { resolve(null); return; }
+            probe.src = VG_VERIFIED_BADGE_CANDIDATES[i++];
+        };
+        probe.onerror = tryNext;
+        probe.onload = () => {
+            VG_BADGE_RESOLVED_SRC = probe.getAttribute('src');
+            try { localStorage.setItem(VG_BADGE_SRC_LS_KEY, VG_BADGE_RESOLVED_SRC); } catch (e) {}
+            resolve(VG_BADGE_RESOLVED_SRC);
+        };
+        tryNext();
+    });
+    return VG_BADGE_RESOLVE_PROMISE;
+}
+window.vgResolveBadgeSrc = vgResolveBadgeSrc;
+
+/* Идемпотентно наполняет бейдж: если содержимое уже нужное — не трогает. */
+function vgApplyBadgeImage(badge) {
+    if (!badge) return;
+
+    if (VG_BADGE_RESOLVED_SRC) {
+        const existing = badge.querySelector('img');
+        if (existing) {
+            if (existing.getAttribute('src') !== VG_BADGE_RESOLVED_SRC) {
+                existing.setAttribute('src', VG_BADGE_RESOLVED_SRC);
+            }
+            return;
+        }
+        const img = document.createElement('img');
+        img.alt = 'Подтверждён';
+        img.decoding = 'async';
+        img.src = VG_BADGE_RESOLVED_SRC;
+        badge.textContent = '';
+        badge.appendChild(img);
+        return;
+    }
+
+    if (!badge.querySelector('svg') && !badge.querySelector('img')) {
+        badge.innerHTML = VG_VERIFIED_BADGE_SVG;
+    }
+    vgResolveBadgeSrc().then(src => {
+        if (!src || !badge.isConnected) return;
+        if (badge.querySelector('img')) return;
+        const img = document.createElement('img');
+        img.alt = 'Подтверждён';
+        img.decoding = 'async';
+        img.src = src;
+        img.onload = () => { badge.textContent = ''; badge.appendChild(img); };
+    });
+}
+window.vgApplyBadgeImage = vgApplyBadgeImage;
+
+window.vgIsBotId = function (id) {
+    if (!id) return false;
+    return String(id) === String(window.VG_BOT_ID);
+};
+
+/* Верифицирован ли пользователь (объект из contacts / user_data) */
+window.vgIsVerified = function (obj) {
+    if (!obj) return false;
+    if (obj.is_bot === true || window.vgIsBotId(obj.platform_user_id)) return true;
+    const v = obj.is_verified;
+    return v === true || v === 'true' || v === 1 || v === '1';
+};
+
+/* Ставит имя + галочку в элемент. ИДЕМПОТЕНТНА: повторный вызов с теми же
+   данными не пересоздаёт ни имя, ни бейдж (иначе галочка мигает). */
+window.vgSetNameWithBadge = function (el, name, verified) {
+    if (!el) return;
+    const text = name || '';
+    verified = !!verified;
+
+    let nameSpan = el.querySelector(':scope > .vg-nick-text');
+    let badge = el.querySelector(':scope > .vg-verified-badge');
+
+    // Без галочки — ровно старое поведение: обычный текст, без обёртки
+    if (!verified) {
+        if (badge) badge.remove();
+        if (nameSpan) el.textContent = '';
+        if (el.textContent !== text) el.textContent = text;
+        el.classList.remove('vg-has-badge', 'is-verified');
+        return;
+    }
+
+    if (!nameSpan) {
+        el.textContent = '';
+        nameSpan = document.createElement('span');
+        nameSpan.className = 'vg-nick-text';
+        el.appendChild(nameSpan);
+        badge = null;
+    }
+
+    if (nameSpan.textContent !== text) nameSpan.textContent = text;
+
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'vg-verified-badge';
+        badge.setAttribute('aria-label', 'Верифицирован Vuntgram');
+        el.appendChild(badge);
+    }
+    vgApplyBadgeImage(badge);
+
+    el.classList.add('vg-has-badge', 'is-verified');
+};
+
+window.vgSetTitle = function (el, name, verified) {
+    if (!el) return;
+    window.vgSetNameWithBadge(el, name, !!verified);
+};
+
+/* Подставляет содержимое во все пустые бейджи внутри root */
+window.vgHydrateBadges = function (root) {
+    (root || document).querySelectorAll('.vg-verified-badge').forEach(vgApplyBadgeImage);
+};
+
+/* Прогреваем путь к картинке сразу, чтобы первая отрисовка была финальной */
+vgResolveBadgeSrc();
+</script>
+
+    <script src="avatar-cache.js"></script>
     <script>
     (function () {
         'use strict';
@@ -1485,8 +1897,210 @@
             { id: 'travel',       title: 'Путешествия' }
         ];
 
-        // Пока без сервера: постов нет. Позже сюда придут данные с бэкенда.
+        // Лента текущего раздела (данные приходят с сервера, база posts_db)
         var posts = [];
+        var feed = { loading: false, loaded: false, hasMore: false, nextBefore: null, error: '', seq: 0 };
+
+        // =====================================================================
+        // АККАУНТ: ник, аватар и галочка — те же данные, что в profile.html / chats.html
+        // =====================================================================
+        var SERVER_URL = 'https://vuntserverrr.site';
+        var me = window.__vgMe || {};
+
+        function initialOf(u) {
+            var n = (u && u.nickname ? String(u.nickname) : '').trim();
+            return (n.charAt(0) || '?').toUpperCase();
+        }
+        function lighten(hex, amt) {
+            var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+            if (!m) return hex;
+            var num = parseInt(m[1], 16);
+            var r = Math.min(255, (num >> 16) + amt), g = Math.min(255, ((num >> 8) & 255) + amt), b = Math.min(255, (num & 255) + amt);
+            return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+        }
+        function paintAvatar(el, u) {
+            if (!el || !u) return;
+            var ini = initialOf(u);
+            var hasPhoto = !!(u.has_avatar_photo || u.has_avatar);
+            if (window.AvatarCache && typeof window.AvatarCache.render === 'function' && u.platform_user_id) {
+                try { window.AvatarCache.render(SERVER_URL, el, u.platform_user_id, ini, u.avatar_background, hasPhoto); return; } catch (e) {}
+            }
+            el.textContent = ini;
+            el.style.background = u.avatar_background
+                ? 'linear-gradient(135deg, ' + u.avatar_background + ', ' + lighten(u.avatar_background, 20) + ')'
+                : '';
+        }
+        function paintName(el, u) {
+            if (!el || !u) return;
+            var name = u.nickname || 'Пользователь';
+            var verified = window.vgIsVerified ? window.vgIsVerified(u) : !!u.is_verified;
+            if (window.vgSetNameWithBadge) window.vgSetNameWithBadge(el, name, verified);
+            else el.textContent = name;
+        }
+        function authorSnapshot() {
+            return {
+                platform_user_id: me.platform_user_id,
+                nickname: me.nickname,
+                avatar_background: me.avatar_background,
+                has_avatar: me.has_avatar,
+                has_avatar_photo: me.has_avatar_photo,
+                is_verified: me.is_verified
+            };
+        }
+        // Свои посты всегда показываем с актуальными ником и аватаром
+        function authorOf(p) {
+            var a = p.author || {};
+            return String(a.platform_user_id) === String(me.platform_user_id) ? me : a;
+        }
+        function paintMe() {
+            paintAvatar(document.getElementById('composerAvatar'), me);
+            paintName(document.getElementById('composerName'), me);
+            if (posts.length) renderPosts();
+        }
+        function readStoredMe() {
+            try {
+                var raw = sessionStorage.getItem('userData') || localStorage.getItem('rememberedUser');
+                var u = raw ? JSON.parse(raw) : null;
+                if (u && u.platform_user_id) { me = u; return true; }
+            } catch (e) {}
+            return false;
+        }
+        function saveMe() {
+            try {
+                sessionStorage.setItem('userData', JSON.stringify(me));
+                if (localStorage.getItem('rememberedUser')) localStorage.setItem('rememberedUser', JSON.stringify(me));
+                localStorage.setItem('vg_last_user_id', String(me.platform_user_id));
+            } catch (e) {}
+        }
+        // Свежие данные с сервера (тот же запрос, что делает profile.html)
+        var refreshing = false;
+        function refreshMe() {
+            if (refreshing || !me.platform_user_id) return;
+            refreshing = true;
+            fetch(SERVER_URL + '/get_user_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform_user_id: me.platform_user_id, viewer_id: me.platform_user_id }),
+                credentials: 'include'
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (!data || data.status !== 'success' || !data.user) return;
+                me = Object.assign({}, me, data.user, { has_avatar: data.user.has_avatar });
+                saveMe();
+                try { if (window.AvatarCache && window.AvatarCache.setSelf) window.AvatarCache.setSelf(me.platform_user_id, me.avatar_url); } catch (e) {}
+                paintMe();
+            }).catch(function () {}).then(function () { refreshing = false; });
+        }
+        // ---------- Запросы к серверу (как на других страницах) ----------
+        function apiHeaders(json) {
+            var h = {};
+            if (json) h['Content-Type'] = 'application/json';
+            if (me.platform_user_id) h['X-Platform-User-Id'] = String(me.platform_user_id);
+            try { var tok = localStorage.getItem('vg_device_token'); if (tok) h['X-Device-Token'] = tok; } catch (e) {}
+            return h;
+        }
+        function api(path, body) {
+            var isForm = (typeof FormData !== 'undefined') && body instanceof FormData;
+            if (!isForm) body = Object.assign({ platform_user_id: me.platform_user_id }, body || {});
+            return fetch(SERVER_URL + path, {
+                method: 'POST',
+                headers: apiHeaders(!isForm),
+                credentials: 'include',
+                body: isForm ? body : JSON.stringify(body)
+            }).then(function (r) {
+                return r.json().catch(function () { return {}; }).then(function (d) {
+                    if (!r.ok || d.status !== 'success') {
+                        var msg = d.message || d.error || 'Нет связи с сервером';
+                        if (d.error === 'posts_disabled') msg = 'Посты временно недоступны';
+                        if (d.error === 'banned') msg = 'Аккаунт заблокирован — публиковать нельзя';
+                        var err = new Error(msg); err.status = r.status; err.data = d;
+                        throw err;
+                    }
+                    return d;
+                });
+            }, function () {
+                var err = new Error('Нет связи с сервером. Проверьте интернет.'); err.status = 0;
+                throw err;
+            });
+        }
+        // Пост с сервера -> формат карточки
+        function fromServer(p) {
+            return {
+                id: p.id,
+                author: p.author || {},
+                html: p.html || '',
+                photos: p.photos || [],
+                photoPos: p.photo_position === 'bottom' ? 'bottom' : 'top',
+                categories: p.categories || ['all'],
+                comments: p.comments_enabled !== false,
+                showLikes: p.likes_count !== null && p.likes_count !== undefined,
+                likes: p.likes_count || 0,
+                liked: !!p.liked,
+                mine: !!p.is_mine,
+                createdAt: p.created_at ? Date.parse(p.created_at) : Date.now()
+            };
+        }
+        // Первая страница каждого раздела хранится на устройстве — лента
+        // появляется сразу, а свежие посты подменяют её через мгновение
+        function cacheKey(cat) { return 'vg_posts_feed_' + String(me.platform_user_id || '') + '_' + cat; }
+        function readCache(cat) {
+            try { var d = JSON.parse(localStorage.getItem(cacheKey(cat)) || 'null'); return d && d.posts ? d : null; } catch (e) { return null; }
+        }
+        function writeCache(cat, list, hasMore, nextBefore) {
+            try { localStorage.setItem(cacheKey(cat), JSON.stringify({ posts: list.slice(0, 15), hasMore: hasMore, nextBefore: nextBefore })); } catch (e) {}
+        }
+
+        function loadFeed(reset) {
+            if (feed.loading && !reset) return;
+            if (!reset && (!feed.hasMore || feed.error)) return;
+            var seq = ++feed.seq;
+            var cat = current;
+            if (reset) {
+                var cached = readCache(cat);
+                posts = cached ? cached.posts.map(fromServer) : [];
+                feed.loaded = !!cached;
+                feed.hasMore = cached ? !!cached.hasMore : false;
+                feed.nextBefore = cached ? cached.nextBefore : null;
+                feed.error = '';
+                renderPosts();
+            }
+            feed.loading = true;
+            renderFeedState();
+            api('/get_posts', { category: cat, before_id: reset ? null : feed.nextBefore, limit: 15 })
+                .then(function (d) {
+                    if (seq !== feed.seq) return;               // уже выбран другой раздел
+                    var list = (d.posts || []).map(fromServer);
+                    posts = reset ? list : posts.concat(list);
+                    feed.hasMore = !!d.has_more;
+                    feed.nextBefore = d.next_before;
+                    feed.loaded = true;
+                    feed.error = '';
+                    if (reset) writeCache(cat, d.posts || [], feed.hasMore, feed.nextBefore);
+                    renderPosts();
+                })
+                .catch(function (err) {
+                    if (seq !== feed.seq) return;
+                    feed.error = err.message;
+                    feed.loaded = feed.loaded || posts.length > 0;
+                    renderPosts();
+                })
+                .then(function () {
+                    if (seq !== feed.seq) return;
+                    feed.loading = false;
+                    renderFeedState();
+                });
+        }
+
+        // Ник/аватар поменяли на другой странице или вкладке — подхватываем
+        window.addEventListener('storage', function (e) {
+            if (e.key === 'rememberedUser' && readStoredMe()) paintMe();
+        });
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible') { if (readStoredMe()) paintMe(); refreshMe(); }
+        });
+        window.addEventListener('pageshow', function (e) {
+            if (e.persisted) { if (readStoredMe()) paintMe(); refreshMe(); }
+        });
+
         var current = 'all';
         try {
             var saved = localStorage.getItem('vg_posts_category');
@@ -1528,7 +2142,7 @@
             var cat = CATEGORIES.filter(function (c) { return c.id === id; })[0];
             var t = document.getElementById('currentCategoryDesktop');
             if (t && cat) t.textContent = cat.title;
-            renderPosts();
+            loadFeed(true);
             if (!isDesktop.matches) setTimeout(closeDrawer, 160);
         }
 
@@ -1559,9 +2173,12 @@
             var top = p.photoPos !== 'bottom';
             var photosHtml = n ? '<div class="post-photos ' + (n === 1 ? 'n1' : n === 2 ? 'n2' : n === 3 ? 'n3' : 'nmany') + (top ? ' top' : '') + '">' +
                 p.photos.map(function () { return '<img alt="" loading="lazy">'; }).join('') + '</div>' : '';
+            el.dataset.id = p.id;
             el.innerHTML =
-                '<div class="post-head"><div class="post-avatar">Я</div><div>' +
-                    '<div class="post-author">Вы</div><div class="post-time"></div></div></div>' +
+                '<div class="post-head"><div class="post-avatar"></div><div class="post-head-text">' +
+                    '<div class="post-author"></div><div class="post-time"></div></div>' +
+                    (p.mine ? '<button type="button" class="post-delete" aria-label="Удалить публикацию"><i class="far fa-trash-can"></i><span>Удалить?</span></button>' : '') +
+                '</div>' +
                 (top ? photosHtml + '<div class="post-text"></div>' : '<div class="post-text"></div>' + photosHtml) +
                 '<div class="post-tags"></div>' +
                 '<div class="post-actions">' +
@@ -1570,6 +2187,9 @@
                         ? '<button type="button" class="post-action"><i class="far fa-comment"></i><span>Комментировать</span></button>'
                         : '<span class="post-action disabled"><i class="fas fa-comment-slash"></i><span>Комментарии отключены</span></span>') +
                 '</div>';
+            var author = authorOf(p);
+            paintAvatar(el.querySelector('.post-avatar'), author);
+            paintName(el.querySelector('.post-author'), author);
             el.querySelector('.post-time').textContent = timeAgo(p.createdAt);
             el.querySelector('.post-text').innerHTML = p.html;
             if (!p.html.replace(/<[^>]*>/g, '').trim()) el.querySelector('.post-text').remove();
@@ -1589,12 +2209,50 @@
                 like.querySelector('i').className = (p.liked ? 'fas' : 'far') + ' fa-heart';
                 like.querySelector('span').textContent = p.showLikes ? String(p.likes) : '';
             }
+            var likeBusy = false;
             like.addEventListener('click', function () {
-                p.liked = !p.liked;
-                p.likes += p.liked ? 1 : -1;
+                if (likeBusy) return;
+                likeBusy = true;
+                var prev = { liked: p.liked, likes: p.likes };
+                p.liked = !p.liked;                          // сразу на экране
+                p.likes = Math.max(0, p.likes + (p.liked ? 1 : -1));
                 paintLike();
+                api('/toggle_post_like', { post_id: p.id }).then(function (d) {
+                    p.liked = !!d.liked;
+                    if (d.likes_count !== null && d.likes_count !== undefined) p.likes = d.likes_count;
+                    paintLike();
+                }).catch(function () {
+                    p.liked = prev.liked; p.likes = prev.likes;  // не получилось — возвращаем
+                    paintLike();
+                }).then(function () { likeBusy = false; });
             });
             paintLike();
+
+            // Удаление своего поста: первое нажатие — «Удалить?», второе — удаляем
+            var del = el.querySelector('.post-delete');
+            if (del) {
+                var armTimer = null;
+                del.addEventListener('click', function () {
+                    if (!del.classList.contains('armed')) {
+                        del.classList.add('armed');
+                        clearTimeout(armTimer);
+                        armTimer = setTimeout(function () { del.classList.remove('armed'); }, 3000);
+                        return;
+                    }
+                    clearTimeout(armTimer);
+                    del.disabled = true;
+                    el.classList.add('removing');
+                    api('/delete_post', { post_id: p.id }).then(function () {
+                        posts = posts.filter(function (x) { return x.id !== p.id; });
+                        try { localStorage.removeItem(cacheKey(current)); } catch (e) {}
+                        setTimeout(renderPosts, 220);
+                    }).catch(function () {
+                        el.classList.remove('removing');
+                        del.disabled = false;
+                        del.classList.remove('armed');
+                    });
+                });
+            }
             return el;
         }
 
@@ -1604,11 +2262,57 @@
             });
             ['Mobile', 'Desktop'].forEach(function (suffix) {
                 var list  = document.getElementById('postsList' + suffix);
-                var empty = document.getElementById('postsEmpty' + suffix);
                 list.innerHTML = '';
                 visible.forEach(function (p) { list.appendChild(postCard(p)); });
-                empty.hidden = visible.length > 0;
             });
+            renderFeedState();
+        }
+        // «Пусто» — только когда лента загрузилась и в ней правда ничего нет
+        function renderFeedState() {
+            var count = posts.length;
+            ['Mobile', 'Desktop'].forEach(function (suffix) {
+                var empty = document.getElementById('postsEmpty' + suffix);
+                var foot  = document.getElementById('postsFooter' + suffix);
+                if (!empty || !foot) return;
+                if (count) {
+                    empty.hidden = true;
+                } else if (feed.error) {
+                    empty.hidden = false;
+                    empty.innerHTML = '<div class="posts-error"><div></div>' +
+                        '<button type="button" class="posts-retry">Повторить</button></div>';
+                    empty.querySelector('.posts-error div').textContent = feed.error;
+                } else {
+                    empty.hidden = !feed.loaded;
+                    empty.textContent = 'Пусто';
+                }
+                foot.innerHTML = '';
+                if (!count) return;
+                if (feed.loading) {
+                    foot.innerHTML = '<span class="posts-spinner" aria-label="Загрузка"></span>';
+                } else if (feed.error) {
+                    foot.innerHTML = '<button type="button" class="posts-retry">Не удалось загрузить — повторить</button>';
+                } else if (feed.hasMore) {
+                    foot.innerHTML = '<span class="posts-sentinel"></span>';
+                    observeSentinel(foot.firstChild);
+                }
+            });
+            var firstLoad = feed.loading && !count && !feed.loaded;
+            document.querySelectorAll('.posts-first-load').forEach(function (s) { s.hidden = !firstLoad; });
+        }
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.posts-retry')) return;
+            var reset = posts.length === 0;
+            feed.error = '';
+            loadFeed(reset);
+        });
+        // Подгрузка следующей страницы, когда долистали до конца
+        var sentinelObserver = window.IntersectionObserver ? new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) { if (en.isIntersecting) loadFeed(false); });
+        }, { rootMargin: '400px 0px' }) : null;
+        function observeSentinel(el) {
+            if (!el) return;
+            if (sentinelObserver) sentinelObserver.observe(el);
+            else setTimeout(function () { loadFeed(false); }, 300);
         }
 
         // ---------- Открытие / закрытие окна (мобильная версия) ----------
@@ -1658,7 +2362,7 @@
         // =====================================================================
         // ОКНО «НОВЫЙ ПОСТ» (пока без сервера — пост появляется только в ленте)
         // =====================================================================
-        var MAX_LEN = 2000, MAX_PHOTOS = 10, DRAFT_KEY = 'vg_post_draft';
+        var MAX_LEN = 2000, MAX_PHOTOS = 10, DRAFT_KEY = 'vg_post_draft_' + String(me.platform_user_id || 'guest');
         var composer   = document.getElementById('composer');
         var editor     = document.getElementById('composerEditor');
         var publishBtn = document.getElementById('composerPublish');
@@ -1936,39 +2640,67 @@
         });
 
         // ----- Публикация -----
+        var publishing = false;
+        function setPublishing(on) {
+            publishing = on;
+            publishBtn.classList.toggle('busy', on);
+            publishBtn.textContent = on ? 'Публикую…' : 'Опубликовать';
+            composer.classList.toggle('is-publishing', on);
+            if (!on) updateState(); else publishBtn.disabled = true;
+        }
+        function showComposerError(msg) {
+            draftNote.textContent = msg;
+            draftNote.classList.add('error');
+            draftNote.style.opacity = '1';
+            clearTimeout(noteTimer);
+            noteTimer = setTimeout(function () { draftNote.style.opacity = '0'; draftNote.classList.remove('error'); }, 6000);
+        }
         function publish() {
+            if (publishing) return;
             if (publishBtn.disabled) {
                 var box = document.getElementById('composerBox');
                 box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
                 return;
             }
-            posts.unshift({
-                id: Date.now(),
-                html: sanitize(editor.innerHTML),
-                photos: photos.map(function (p) { return p.url; }),
-                photoPos: photoPos,
-                categories: chosen.slice(),
-                comments: commentsCb.checked,
-                showLikes: likesCb.checked,
-                likes: 0,
-                liked: false,
-                createdAt: Date.now()
+            var fd = new FormData();
+            fd.append('platform_user_id', me.platform_user_id || '');
+            fd.append('content', sanitize(editor.innerHTML));
+            fd.append('categories', JSON.stringify(chosen));
+            fd.append('photo_position', photoPos);
+            fd.append('comments_enabled', commentsCb.checked ? '1' : '0');
+            fd.append('show_likes', likesCb.checked ? '1' : '0');
+            fd.append('client_id', String(Date.now()) + Math.random().toString(36).slice(2, 8));
+            photos.forEach(function (ph, i) { fd.append('photos', ph.file, ph.file.name || ('photo' + i + '.jpg')); });
+
+            setPublishing(true);
+            api('/create_post', fd).then(function (d) {
+                var post = d.post && d.post.html !== undefined ? fromServer(d.post) : null;
+                // сброс формы
+                photos.forEach(function (ph) { try { URL.revokeObjectURL(ph.url); } catch (e) {} });
+                editor.innerHTML = '';
+                photos = [];
+                photoPos = 'top';
+                paintPhotoPos();
+                chosen = ['all'];
+                commentsCb.checked = true;
+                likesCb.checked = true;
+                renderPhotos();
+                try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+                CATEGORIES.forEach(function (c) { try { localStorage.removeItem(cacheKey(c.id)); } catch (e) {} });
+                draftNote.textContent = '';
+                setPublishing(false);
+                closeComposer();
+                if (post && (current === 'all' || post.categories.indexOf(current) >= 0)) {
+                    posts.unshift(post);
+                    feed.loaded = true;
+                    renderPosts();
+                } else {
+                    selectCategory('all');
+                }
+            }).catch(function (err) {
+                setPublishing(false);
+                showComposerError(err.message || 'Не удалось опубликовать');
             });
-            // сброс формы
-            editor.innerHTML = '';
-            photos = [];
-            photoPos = 'top';
-            paintPhotoPos();
-            chosen = ['all'];
-            commentsCb.checked = true;
-            likesCb.checked = true;
-            renderPhotos();
-            try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
-            draftNote.textContent = '';
-            closeComposer();
-            // показать ленту, где пост точно виден
-            if (current !== 'all' && posts[0].categories.indexOf(current) < 0) selectCategory('all');
-            else renderPosts();
         }
         publishBtn.addEventListener('click', publish);
 
@@ -2008,6 +2740,12 @@
 
         buildLists();
         selectCategory(current);
+        paintMe();
+        refreshMe();
+        // свежая лента при возвращении на страницу
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible' && feed.loaded && !feed.loading) loadFeed(true);
+        });
     })();
     </script>
 
