@@ -1,8 +1,8 @@
 // service-worker.js
 // ВАЖНО: версию обязательно поднимать при каждом изменении статики —
 // иначе старые файлы продолжают отдаваться из кэша Cache First.
-const CACHE_NAME = 'vuntgram-v2.3.5';
-const API_CACHE_NAME = 'vuntgram-api-v2.2.4';
+const CACHE_NAME = 'vuntgram-v2.3.6';
+const API_CACHE_NAME = 'vuntgram-api-v2.2.5';
 
 // Только СТАТИЧЕСКИЕ ресурсы для предварительного кэширования.    
 // Это «оболочка» приложения: после первой успешной загрузки всё отсюда
