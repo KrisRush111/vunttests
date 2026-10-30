@@ -25821,7 +25821,7 @@ vgResolveBadgeSrc();
 .vg-act-preview {
     display: none;
     font-size: 14px; margin-bottom: 2px;
-    color: var(--telegram-blue, #0088cc);
+    color: var(--online-green, #00c73c);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .chat-item.vg-acting .last-message { display: none !important; }
@@ -25834,6 +25834,15 @@ vgResolveBadgeSrc();
      'typing' — набирает текст, 'voice' — пишет голосовое, 'video' — пишет кружок.
    Старые клиенты action не шлют — считаем это 'typing'. */
 (function () {
+    // Диагностика: в консоли браузера выполнить  localStorage.vgTypingDebug = '1'
+    // и обновить страницу — будут видны все отправленные/полученные статусы.
+    const VG_TYPING_VERSION = 'typing-v2';
+    window.VG_TYPING_VERSION = VG_TYPING_VERSION;
+    let DEBUG = false;
+    try { DEBUG = localStorage.getItem('vgTypingDebug') === '1'; } catch (e) {}
+    const dbg = (...a) => { if (DEBUG) console.log('[vg-typing]', ...a); };
+    dbg('загружен', VG_TYPING_VERSION);
+
     const SEND_EVERY = 3000;   // как часто повторять «я ещё ...», пока действие идёт
     const IDLE_STOP  = 4000;   // пауза в наборе -> шлём "перестал"
     const SHOW_TTL   = 5000;   // если "стоп" не пришёл — гасим сами
@@ -26022,12 +26031,13 @@ vgResolveBadgeSrc();
     }
 
     function onUserTyping(p) {
+        dbg('получено', p);
         if (!p || p.chat_id == null) return;
         if (String(p.user_id) === String(userData.platform_user_id)) return;  // своё же с другого устройства
         // Сервер не знает участников чата — сверяем сами: событие должно быть
         // от собеседника именно в этом личном чате. Иначе — игнор.
         const peer = peerOf(findChat(p.chat_id));
-        if (!peer || peer !== String(p.user_id)) return;
+        if (!peer || peer !== String(p.user_id)) { dbg('отброшено: не собеседник этого чата', { peer, from: p.user_id }); return; }
         if (p.is_typing === false) { clearAction(p.chat_id); return; }
         setAction(p.chat_id, normAction(p.action));
     }
@@ -26054,6 +26064,8 @@ vgResolveBadgeSrc();
     function emitTyping(chatId, peer, isOn, action) {
         const payload = { chat_id: chatId, is_typing: isOn, action };
         if (peer) payload.to_user_id = peer;
+        else dbg('ВНИМАНИЕ: не найден собеседник чата', chatId, '— статус увидят только при открытом чате');
+        dbg('отправлено', payload);
         appSocket.emit('typing', payload);
     }
 
@@ -26099,6 +26111,7 @@ vgResolveBadgeSrc();
 
     window.addEventListener('vg-rec-state', (e) => {
         const d = e.detail || {};
+        dbg('запись', d, 'сокет подключён:', !!(typeof appSocket !== 'undefined' && appSocket && appSocket.connected));
         if (d.active) {
             if (recState) { recEmit(false); clearInterval(recState.interval); recState = null; }
             if (d.chatId == null || window.VG_CURRENT_CHAT_IS_BOT || window.VG_CURRENT_CHAT_IS_GROUP) return;
