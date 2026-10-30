@@ -422,33 +422,103 @@
             to   { opacity: 1; transform: translateX(0); }
         }
 
-        /* ============ Футер (как на остальных страницах) ============ */
+        /* ============ Футер: «жидкое стекло» ============ */
         .bottom-nav {
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
-            margin: 0 auto calc(20px + env(safe-area-inset-bottom));
-            width: calc(100% - 84px);
-            max-width: 396px;
-            background: rgba(255, 255, 255, 0.92);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            backdrop-filter: blur(20px) saturate(180%);
-            justify-content: space-evenly;
+            /* Как в contacts.html: 20px от низа экрана, без добавки зоны «Домой» */
+            margin: 0 auto 20px;
+            width: calc(100% - 28px);
+            max-width: 460px;
+            background: rgba(255, 255, 255, 0.55);
+            -webkit-backdrop-filter: blur(22px) saturate(190%);
+            backdrop-filter: blur(22px) saturate(190%);
+            justify-content: space-between;
             align-items: center;
-            gap: 10px;
-            padding: 4px 14px;
+            gap: 14px;
+            padding: 5px 8px;
             border: none;
-            border-radius: 34px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+            border-radius: 36px;
+            box-shadow:
+                0 10px 30px rgba(0, 0, 0, 0.10),
+                0 2px 8px rgba(0, 0, 0, 0.05),
+                0 0 0 0.5px rgba(0, 0, 0, 0.06),
+                inset 0 1px 1px rgba(255, 255, 255, 0.9),
+                inset 0 -1px 2px rgba(255, 255, 255, 0.45),
+                inset 0 0 14px rgba(255, 255, 255, 0.25);
             z-index: 100;
             overflow: hidden;
+            isolation: isolate;
         }
+
+        /* Водный блик по контуру */
+        .bottom-nav::before,
+        .bottom-nav::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            pointer-events: none;
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            z-index: 2;
+        }
+        .bottom-nav::before {
+            padding: 1.2px;
+            background: linear-gradient(135deg,
+                rgba(255, 255, 255, 1) 0%,
+                rgba(255, 255, 255, 0.25) 22%,
+                rgba(170, 210, 255, 0.55) 45%,
+                rgba(255, 255, 255, 0.15) 65%,
+                rgba(200, 170, 255, 0.5) 85%,
+                rgba(255, 255, 255, 0.95) 100%);
+        }
+        /* Бегущая «волна» света вдоль края */
+        .bottom-nav::after {
+            padding: 1.6px;
+            background: linear-gradient(100deg,
+                transparent 35%,
+                rgba(255, 255, 255, 0.95) 48%,
+                rgba(190, 225, 255, 0.8) 52%,
+                transparent 65%);
+            background-size: 260% 100%;
+            animation: navWaterGlint 6s ease-in-out infinite;
+        }
+        @keyframes navWaterGlint {
+            0%   { background-position: 130% 0; opacity: 0; }
+            15%  { opacity: 1; }
+            55%  { background-position: -30% 0; opacity: 1; }
+            70%, 100% { background-position: -30% 0; opacity: 0; }
+        }
+
         @media (prefers-color-scheme: dark) {
             .bottom-nav {
-                background: rgba(33, 33, 33, 0.85);
-                box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.24);
+                background: rgba(33, 33, 33, 0.5);
+                box-shadow:
+                    0 10px 30px rgba(0, 0, 0, 0.4),
+                    0 2px 8px rgba(0, 0, 0, 0.24),
+                    inset 0 1px 1px rgba(255, 255, 255, 0.18),
+                    inset 0 0 14px rgba(255, 255, 255, 0.05);
             }
+            .bottom-nav::before {
+                background: linear-gradient(135deg,
+                    rgba(255, 255, 255, 0.45) 0%,
+                    rgba(255, 255, 255, 0.06) 25%,
+                    rgba(140, 190, 255, 0.3) 45%,
+                    rgba(255, 255, 255, 0.04) 65%,
+                    rgba(190, 150, 255, 0.3) 85%,
+                    rgba(255, 255, 255, 0.4) 100%);
+            }
+            .bottom-nav::after {
+                background: linear-gradient(100deg, transparent 35%, rgba(255,255,255,0.5) 48%, rgba(170,210,255,0.4) 52%, transparent 65%);
+                background-size: 260% 100%;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .bottom-nav::after { animation: none; opacity: 0; }
         }
 
         .nav-item {
@@ -512,9 +582,18 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .nav-item.active { color: #0a84ff; background-color: rgba(120, 120, 128, 0.16); }
+        /* Подсветка активного пункта — шире, во всю ширину своей ячейки */
+        .nav-item { position: relative; z-index: 3; padding: 6px 2px; border-radius: 28px; }
+        .nav-item.active {
+            color: #0a84ff;
+            background-color: rgba(120, 120, 128, 0.14);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
         @media (prefers-color-scheme: dark) {
-            .nav-item.active { background-color: rgba(120, 120, 128, 0.32); }
+            .nav-item.active {
+                background-color: rgba(120, 120, 128, 0.3);
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            }
         }
         .nav-item.active i,
         .nav-item.active .nav-svg { transform: scale(1.05); }
@@ -561,11 +640,12 @@
             .bottom-nav.desktop-only-nav {
                 position: fixed;
                 bottom: 0;
-                left: 28px;
+                left: 14px;
                 right: auto;
-                width: calc(var(--desktop-sidebar-width) - 56px);
+                width: calc(var(--desktop-sidebar-width) - 28px);
                 max-width: none;
-                margin: 0 0 calc(20px + env(safe-area-inset-bottom)) 0;
+                gap: 10px;
+                margin: 0 0 20px 0;
                 z-index: 20;
             }
 
