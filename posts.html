@@ -686,6 +686,522 @@
                 margin: 0 auto;
             }
         }
+
+        /* =====================================================================
+           ОКНО «НОВЫЙ ПОСТ»
+           ===================================================================== */
+        .composer {
+            position: fixed;
+            inset: 0;
+            z-index: 1100;                       /* выше футера и окна рекомендаций */
+            background: var(--telegram-bg);
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(28px);
+            transition:
+                opacity 0.28s ease,
+                transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+                visibility 0s linear 0.42s;
+        }
+        .composer.open {
+            opacity: 1;
+            visibility: visible;
+            transform: none;
+            transition:
+                opacity 0.28s ease,
+                transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+                visibility 0s;
+        }
+
+        .composer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: calc(14px + env(safe-area-inset-top)) 14px 12px;
+            border-bottom: 1px solid var(--telegram-divider);
+            flex-shrink: 0;
+        }
+        .composer-title {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            flex: 1;
+            text-align: center;
+        }
+        .composer-close {
+            width: 34px;
+            height: 34px;
+            border: none;
+            border-radius: 50%;
+            background: var(--telegram-secondary-bg);
+            color: var(--telegram-hint);
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.2s ease;
+        }
+        .composer-close:active { transform: scale(0.9); }
+
+        .composer-publish {
+            border: none;
+            border-radius: 999px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            background: var(--vg-purple-gradient);
+            box-shadow: 0 2px 8px rgba(149, 1, 255, 0.3);
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        }
+        .composer-publish:active { transform: scale(0.95); }
+        .composer-publish:disabled {
+            cursor: default;
+            box-shadow: none;
+            filter: grayscale(1);
+            opacity: 0.35;
+        }
+
+        .composer-body {
+            flex: 1;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            padding: 16px 14px calc(30px + env(safe-area-inset-bottom));
+        }
+        .composer-inner {
+            max-width: 640px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        /* Автор */
+        .composer-author {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .post-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--vg-purple-gradient);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .composer-author-name { font-weight: 600; font-size: 15px; line-height: 1.2; }
+        .composer-author-hint { font-size: 12.5px; color: var(--telegram-hint); line-height: 1.3; }
+
+        /* Рамка для текста — как поле комментария */
+        .composer-box {
+            background: var(--telegram-secondary-bg);
+            border-radius: 22px;
+            padding: 14px 14px 10px 16px;
+            border: 1.5px solid transparent;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+        }
+        .composer-box:focus-within {
+            background: var(--telegram-bg);
+            border-color: rgba(149, 1, 255, 0.35);
+            box-shadow: 0 0 0 4px rgba(149, 1, 255, 0.08);
+        }
+        .composer-editor {
+            min-height: 120px;
+            max-height: 46vh;
+            overflow-y: auto;
+            outline: none;
+            font-size: 16px;
+            line-height: 1.5;
+            color: var(--telegram-text);
+            word-break: break-word;
+            -webkit-user-select: text;
+            user-select: text;
+        }
+        .composer-editor:empty::before {
+            content: attr(data-placeholder);
+            color: var(--telegram-hint);
+            pointer-events: none;
+        }
+        .composer-editor blockquote,
+        .post-text blockquote {
+            border-left: 3px solid var(--vg-purple);
+            padding: 2px 0 2px 10px;
+            margin: 4px 0;
+            color: var(--telegram-hint);
+        }
+        .composer-editor ul, .composer-editor ol,
+        .post-text ul, .post-text ol { padding-left: 22px; margin: 4px 0; }
+        .composer-editor a, .post-text a { color: var(--vg-blue); text-decoration: underline; }
+
+        /* Миниатюры фото */
+        .composer-photos {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 10px 0 2px;
+            scrollbar-width: none;
+        }
+        .composer-photos::-webkit-scrollbar { display: none; }
+        .composer-photos:empty { display: none; }
+        .composer-photo {
+            position: relative;
+            width: 74px;
+            height: 74px;
+            border-radius: 14px;
+            overflow: hidden;
+            flex-shrink: 0;
+            background: var(--telegram-divider);
+            animation: composerPhotoIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .composer-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .composer-photo-remove {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        @keyframes composerPhotoIn {
+            from { opacity: 0; transform: scale(0.8); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+
+        /* Нижняя строка рамки: фото + счётчик */
+        .composer-box-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 8px;
+        }
+        .composer-photo-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            border: none;
+            background: transparent;
+            color: var(--telegram-hint);
+            font-size: 13.5px;
+            font-weight: 500;
+            padding: 6px 10px 6px 4px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: color 0.2s ease, transform 0.2s ease;
+        }
+        .composer-photo-btn i { font-size: 18px; }
+        .composer-photo-btn:hover { color: var(--vg-purple); }
+        .composer-photo-btn:active { transform: scale(0.94); }
+        .composer-counter {
+            font-size: 12px;
+            color: var(--telegram-hint);
+            font-variant-numeric: tabular-nums;
+            transition: color 0.2s ease;
+        }
+        .composer-counter.warn { color: #ff9500; }
+        .composer-counter.over { color: #ff3b30; font-weight: 600; }
+
+        /* Панель форматирования — серые иконки без рамок */
+        .composer-toolbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 2px;
+            margin-top: -8px;
+            padding: 0 2px;
+        }
+        .fmt-btn {
+            width: 38px;
+            height: 36px;
+            border: none;
+            background: transparent;
+            color: var(--telegram-hint);
+            border-radius: 10px;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+        }
+        .fmt-btn:hover { background: var(--rec-row-hover); }
+        .fmt-btn:active { transform: scale(0.9); }
+        .fmt-btn.on { color: var(--telegram-text); background: var(--rec-row-hover); }
+        .fmt-sep {
+            width: 1px;
+            height: 18px;
+            background: var(--telegram-divider);
+            margin: 0 4px;
+        }
+
+        /* Строка для ссылки */
+        .composer-link-row {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-top: -6px;
+        }
+        .composer-link-row.show { display: flex; animation: composerPhotoIn 0.25s ease; }
+        .composer-link-input {
+            flex: 1;
+            min-width: 0;
+            border: none;
+            outline: none;
+            background: var(--telegram-secondary-bg);
+            color: var(--telegram-text);
+            border-radius: 999px;
+            padding: 9px 14px;
+            font-size: 14px;
+        }
+        .composer-link-ok {
+            border: none;
+            background: var(--vg-blue);
+            color: #fff;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            font-size: 13px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        /* Секции настроек */
+        .composer-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--telegram-hint);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin: 0 4px 10px;
+        }
+        .composer-section-note {
+            font-size: 12.5px;
+            color: var(--telegram-hint);
+            margin: 8px 4px 0;
+        }
+
+        .cat-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .cat-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            border: 1.5px solid var(--telegram-divider);
+            background: transparent;
+            color: var(--telegram-text);
+            border-radius: 999px;
+            padding: 7px 13px 7px 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
+        }
+        .cat-chip:active { transform: scale(0.95); }
+        .cat-chip .cat-check {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 1.5px solid var(--telegram-divider);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: transparent;
+            transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .cat-chip.checked {
+            border-color: rgba(149, 1, 255, 0.45);
+            background: var(--rec-row-active);
+            color: var(--vg-purple);
+        }
+        @media (prefers-color-scheme: dark) {
+            .cat-chip.checked { color: #c78bff; }
+        }
+        .cat-chip.locked { cursor: default; }
+        .cat-chip.locked:active { transform: none; }
+        .cat-chip.checked .cat-check {
+            background: var(--vg-purple-gradient);
+            border-color: transparent;
+            color: #fff;
+            transform: scale(1.05);
+        }
+
+        .composer-card {
+            background: var(--telegram-secondary-bg);
+            border-radius: 18px;
+            overflow: hidden;
+        }
+        .composer-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 13px 14px 13px 16px;
+            cursor: pointer;
+        }
+        .composer-row + .composer-row { border-top: 1px solid var(--telegram-divider); }
+        .composer-row-text { min-width: 0; }
+        .composer-row-title { font-size: 15px; font-weight: 500; line-height: 1.3; }
+        .composer-row-sub { font-size: 12.5px; color: var(--telegram-hint); line-height: 1.35; }
+
+        /* Переключатель в стиле iOS */
+        .vg-switch {
+            position: relative;
+            width: 51px;
+            height: 31px;
+            flex-shrink: 0;
+        }
+        .vg-switch input {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            margin: 0;
+            cursor: pointer;
+        }
+        .vg-switch-track {
+            position: absolute;
+            inset: 0;
+            border-radius: 999px;
+            background: rgba(120, 120, 128, 0.32);
+            transition: background-color 0.25s ease;
+            pointer-events: none;
+        }
+        .vg-switch-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 27px;
+            height: 27px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .vg-switch input:checked + .vg-switch-track { background: var(--vg-purple-gradient); }
+        .vg-switch input:checked + .vg-switch-track::after { transform: translateX(20px); }
+
+        .composer-draft-note {
+            text-align: center;
+            font-size: 12px;
+            color: var(--telegram-hint);
+            min-height: 16px;
+            transition: opacity 0.3s ease;
+        }
+
+        /* Небольшая встряска, если не выбрана ни одна рекомендация / пустой пост */
+        .shake { animation: vgShake 0.4s ease; }
+        @keyframes vgShake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-6px); }
+            40% { transform: translateX(6px); }
+            60% { transform: translateX(-4px); }
+            80% { transform: translateX(3px); }
+        }
+
+        /* =====================================================================
+           КАРТОЧКА ПОСТА В ЛЕНТЕ
+           ===================================================================== */
+        .post-card {
+            background: var(--telegram-bg);
+            border-radius: 20px;
+            padding: 14px 14px 10px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            animation: postIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        @keyframes postIn {
+            from { opacity: 0; transform: translateY(14px) scale(0.98); }
+            to   { opacity: 1; transform: none; }
+        }
+        .post-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .post-author { font-weight: 600; font-size: 15px; line-height: 1.2; }
+        .post-time { font-size: 12.5px; color: var(--telegram-hint); }
+        .post-text { font-size: 15.5px; line-height: 1.5; word-break: break-word; }
+        .post-photos {
+            display: grid;
+            gap: 4px;
+            margin-top: 10px;
+            border-radius: 14px;
+            overflow: hidden;
+        }
+        .post-photos.n1 { grid-template-columns: 1fr; }
+        .post-photos.n2 { grid-template-columns: 1fr 1fr; }
+        .post-photos.n3, .post-photos.nmany { grid-template-columns: 1fr 1fr 1fr; }
+        .post-photos img { width: 100%; height: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+        .post-photos.n1 img { aspect-ratio: auto; max-height: 420px; }
+        .post-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .post-tag {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--vg-purple);
+            background: var(--rec-row-active);
+            border-radius: 999px;
+            padding: 3px 10px;
+        }
+        @media (prefers-color-scheme: dark) { .post-tag { color: #c78bff; } }
+        .post-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 8px;
+            border-top: 1px solid var(--telegram-divider);
+            padding-top: 6px;
+        }
+        .post-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: none;
+            background: transparent;
+            color: var(--telegram-hint);
+            font-size: 13.5px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+        }
+        .post-action.liked { color: #ff3b5c; }
+        .post-action.liked i { animation: vgLikePop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes vgLikePop { 0% { transform: scale(0.6); } 100% { transform: scale(1); } }
+        .post-action.disabled { cursor: default; opacity: 0.7; font-size: 12.5px; }
+
+        @media (min-width: 768px) {
+            /* Окно занимает второй плейсхолдер — правую часть рядом с рекомендациями */
+            .composer {
+                left: var(--desktop-sidebar-width);
+                transform: translateY(14px) scale(0.985);
+                z-index: 30;
+            }
+            .composer.open { transform: none; }
+            .composer-header { padding: 14px 20px; min-height: 62px; }
+            .composer-body { padding: 22px 20px 40px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .composer, .composer.open { transition: opacity 0.2s ease, visibility 0s; transform: none; }
+        }
     </style>
 <script id="vg-page-in-head">
 /* Ранний флаг для плавного появления страницы (футер при этом не трогаем) */
@@ -779,6 +1295,98 @@
         </div>
         <div class="posts-empty" id="postsEmptyMobile">Пусто</div>
     </div>
+
+    <!-- ===================== ОКНО «НОВЫЙ ПОСТ» ===================== -->
+    <section class="composer" id="composer" role="dialog" aria-modal="true" aria-labelledby="composerTitle" aria-hidden="true">
+        <div class="composer-header">
+            <button class="composer-close" id="composerClose" type="button" aria-label="Закрыть">
+                <i class="fas fa-xmark"></i>
+            </button>
+            <div class="composer-title" id="composerTitle">Новый пост</div>
+            <button class="composer-publish" id="composerPublish" type="button" disabled>Опубликовать</button>
+        </div>
+
+        <div class="composer-body">
+            <div class="composer-inner">
+                <div class="composer-author">
+                    <div class="post-avatar">Я</div>
+                    <div>
+                        <div class="composer-author-name">Вы</div>
+                        <div class="composer-author-hint">Публикация будет видна всем</div>
+                    </div>
+                </div>
+
+                <!-- Рамка ввода текста -->
+                <div class="composer-box" id="composerBox">
+                    <div class="composer-editor" id="composerEditor" contenteditable="true" role="textbox" aria-multiline="true"
+                         data-placeholder="О чём хотите рассказать?" spellcheck="true"></div>
+                    <div class="composer-photos" id="composerPhotos"></div>
+                    <div class="composer-box-footer">
+                        <button class="composer-photo-btn" id="composerPhotoBtn" type="button">
+                            <i class="far fa-image"></i><span id="composerPhotoLabel">Фото</span>
+                        </button>
+                        <span class="composer-counter" id="composerCounter">0 / 2000</span>
+                    </div>
+                    <input type="file" id="composerFile" accept="image/*" multiple hidden>
+                </div>
+
+                <!-- Форматирование: серые иконки без рамок -->
+                <div class="composer-toolbar" id="composerToolbar">
+                    <button class="fmt-btn" type="button" data-cmd="bold" title="Жирный"><i class="fas fa-bold"></i></button>
+                    <button class="fmt-btn" type="button" data-cmd="italic" title="Курсив"><i class="fas fa-italic"></i></button>
+                    <button class="fmt-btn" type="button" data-cmd="underline" title="Подчёркнутый"><i class="fas fa-underline"></i></button>
+                    <button class="fmt-btn" type="button" data-cmd="strikeThrough" title="Зачёркнутый"><i class="fas fa-strikethrough"></i></button>
+                    <span class="fmt-sep"></span>
+                    <button class="fmt-btn" type="button" data-cmd="insertUnorderedList" title="Список"><i class="fas fa-list-ul"></i></button>
+                    <button class="fmt-btn" type="button" data-cmd="insertOrderedList" title="Нумерованный список"><i class="fas fa-list-ol"></i></button>
+                    <button class="fmt-btn" type="button" data-cmd="quote" title="Цитата"><i class="fas fa-quote-right"></i></button>
+                    <button class="fmt-btn" type="button" data-cmd="link" title="Ссылка"><i class="fas fa-link"></i></button>
+                    <span class="fmt-sep"></span>
+                    <button class="fmt-btn" type="button" data-cmd="removeFormat" title="Очистить оформление"><i class="fas fa-text-slash"></i></button>
+                </div>
+                <div class="composer-link-row" id="composerLinkRow">
+                    <input class="composer-link-input" id="composerLinkInput" type="url" inputmode="url" placeholder="https://…">
+                    <button class="composer-link-ok" id="composerLinkOk" type="button" aria-label="Вставить ссылку"><i class="fas fa-check"></i></button>
+                </div>
+
+                <!-- Рекомендации (обязательно) -->
+                <div>
+                    <div class="composer-section-title">Рекомендации</div>
+                    <div class="cat-chips" id="composerCats"></div>
+                    <div class="composer-section-note">«Всё сразу» выбрано всегда. Добавьте разделы, где публикацию тоже стоит показывать</div>
+                </div>
+
+                <!-- Настройки -->
+                <div>
+                    <div class="composer-section-title">Настройки</div>
+                    <div class="composer-card">
+                        <label class="composer-row">
+                            <div class="composer-row-text">
+                                <div class="composer-row-title">Комментарии</div>
+                                <div class="composer-row-sub" id="commentsSub">Другие смогут комментировать</div>
+                            </div>
+                            <span class="vg-switch">
+                                <input type="checkbox" id="composerComments" checked>
+                                <span class="vg-switch-track"></span>
+                            </span>
+                        </label>
+                        <label class="composer-row">
+                            <div class="composer-row-text">
+                                <div class="composer-row-title">Показывать число лайков</div>
+                                <div class="composer-row-sub">Можно скрыть, чтобы не думать о цифрах</div>
+                            </div>
+                            <span class="vg-switch">
+                                <input type="checkbox" id="composerLikes" checked>
+                                <span class="vg-switch-track"></span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="composer-draft-note" id="composerDraftNote"></div>
+            </div>
+        </div>
+    </section>
 
     <!-- Затемнение поверх постов и само окно рекомендаций (мобильная версия) -->
     <div class="rec-backdrop" id="recBackdrop"></div>
@@ -882,15 +1490,73 @@
         });
 
         // ---------- Посты ----------
+        function timeAgo(ts) {
+            var s = Math.round((Date.now() - ts) / 1000);
+            if (s < 60) return 'только что';
+            var m = Math.round(s / 60);
+            if (m < 60) return m + ' мин назад';
+            var d = new Date(ts);
+            return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) + ' в ' +
+                   d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        }
+        function catTitle(id) {
+            var c = CATEGORIES.filter(function (x) { return x.id === id; })[0];
+            return c ? c.title : id;
+        }
+        function postCard(p) {
+            var el = document.createElement('article');
+            el.className = 'post-card';
+            var n = p.photos.length;
+            var photosHtml = n ? '<div class="post-photos ' + (n === 1 ? 'n1' : n === 2 ? 'n2' : n === 3 ? 'n3' : 'nmany') + '">' +
+                p.photos.map(function () { return '<img alt="" loading="lazy">'; }).join('') + '</div>' : '';
+            el.innerHTML =
+                '<div class="post-head"><div class="post-avatar">Я</div><div>' +
+                    '<div class="post-author">Вы</div><div class="post-time"></div></div></div>' +
+                '<div class="post-text"></div>' + photosHtml +
+                '<div class="post-tags"></div>' +
+                '<div class="post-actions">' +
+                    '<button type="button" class="post-action post-like"><i class="far fa-heart"></i><span></span></button>' +
+                    (p.comments
+                        ? '<button type="button" class="post-action"><i class="far fa-comment"></i><span>Комментировать</span></button>'
+                        : '<span class="post-action disabled"><i class="fas fa-comment-slash"></i><span>Комментарии отключены</span></span>') +
+                '</div>';
+            el.querySelector('.post-time').textContent = timeAgo(p.createdAt);
+            el.querySelector('.post-text').innerHTML = p.html;
+            if (!p.html.replace(/<[^>]*>/g, '').trim()) el.querySelector('.post-text').remove();
+            [].slice.call(el.querySelectorAll('.post-photos img')).forEach(function (img, i) { img.src = p.photos[i]; });
+            var tags = el.querySelector('.post-tags');
+            var shown = p.categories.filter(function (c) { return c !== 'all'; });
+            if (!shown.length) shown = ['all'];
+            shown.forEach(function (c) {
+                var t = document.createElement('span');
+                t.className = 'post-tag';
+                t.textContent = catTitle(c);
+                tags.appendChild(t);
+            });
+            var like = el.querySelector('.post-like');
+            function paintLike() {
+                like.classList.toggle('liked', p.liked);
+                like.querySelector('i').className = (p.liked ? 'fas' : 'far') + ' fa-heart';
+                like.querySelector('span').textContent = p.showLikes ? String(p.likes) : '';
+            }
+            like.addEventListener('click', function () {
+                p.liked = !p.liked;
+                p.likes += p.liked ? 1 : -1;
+                paintLike();
+            });
+            paintLike();
+            return el;
+        }
+
         function renderPosts() {
             var visible = posts.filter(function (p) {
-                return current === 'all' || p.category === current;
+                return current === 'all' || p.categories.indexOf(current) >= 0;
             });
             ['Mobile', 'Desktop'].forEach(function (suffix) {
                 var list  = document.getElementById('postsList' + suffix);
                 var empty = document.getElementById('postsEmpty' + suffix);
                 list.innerHTML = '';
-                // Здесь будет отрисовка карточек постов, когда появится сервер
+                visible.forEach(function (p) { list.appendChild(postCard(p)); });
                 empty.hidden = visible.length > 0;
             });
         }
@@ -939,11 +1605,329 @@
             startX = null;
         });
 
-        // ---------- Кнопка «+» (пока только визуально) ----------
+        // =====================================================================
+        // ОКНО «НОВЫЙ ПОСТ» (пока без сервера — пост появляется только в ленте)
+        // =====================================================================
+        var MAX_LEN = 2000, MAX_PHOTOS = 10, DRAFT_KEY = 'vg_post_draft';
+        var composer   = document.getElementById('composer');
+        var editor     = document.getElementById('composerEditor');
+        var publishBtn = document.getElementById('composerPublish');
+        var counter    = document.getElementById('composerCounter');
+        var photosBox  = document.getElementById('composerPhotos');
+        var fileInput  = document.getElementById('composerFile');
+        var photoLabel = document.getElementById('composerPhotoLabel');
+        var catsBox    = document.getElementById('composerCats');
+        var commentsCb = document.getElementById('composerComments');
+        var likesCb    = document.getElementById('composerLikes');
+        var draftNote  = document.getElementById('composerDraftNote');
+        var linkRow    = document.getElementById('composerLinkRow');
+        var linkInput  = document.getElementById('composerLinkInput');
+        var toolbar    = document.getElementById('composerToolbar');
+
+        var photos = [];                  // { url, file }
+        var chosen = ['all'];             // выбранные рекомендации
+        var savedRange = null;
+        var lastFocus = null;
+
+        function textLen() { return (editor.innerText || '').replace(/\n$/, '').trim().length; }
+
+        function updateState() {
+            var n = textLen();
+            counter.textContent = n + ' / ' + MAX_LEN;
+            counter.classList.toggle('warn', n > MAX_LEN * 0.9 && n <= MAX_LEN);
+            counter.classList.toggle('over', n > MAX_LEN);
+            publishBtn.disabled = (n === 0 && photos.length === 0) || n > MAX_LEN;
+            photoLabel.textContent = photos.length ? ('Фото · ' + photos.length + '/' + MAX_PHOTOS) : 'Фото';
+            // пустой редактор без мусорных <br>, чтобы показывалась подсказка
+            if (!n && !editor.querySelector('img,li,blockquote') && editor.innerHTML !== '') editor.innerHTML = '';
+        }
+
+        // ----- Рекомендации -----
+        function renderCats() {
+            catsBox.innerHTML = '';
+            CATEGORIES.forEach(function (cat) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'cat-chip' + (chosen.indexOf(cat.id) >= 0 ? ' checked' : '') + (cat.id === 'all' ? ' locked' : '');
+                b.dataset.id = cat.id;
+                b.setAttribute('aria-pressed', chosen.indexOf(cat.id) >= 0 ? 'true' : 'false');
+                b.innerHTML = '<span class="cat-check"><i class="fas fa-check"></i></span><span></span>';
+                b.lastChild.textContent = cat.title;
+                catsBox.appendChild(b);
+            });
+        }
+        catsBox.addEventListener('click', function (e) {
+            var chip = e.target.closest('.cat-chip');
+            if (!chip) return;
+            var id = chip.dataset.id;
+            if (id === 'all') {
+                // «Всё сразу» выбрано всегда и не снимается — лёгкая встряска как подсказка
+                chip.classList.remove('shake'); void chip.offsetWidth; chip.classList.add('shake');
+                return;
+            }
+            var i = chosen.indexOf(id);
+            if (i >= 0) chosen.splice(i, 1); else chosen.push(id);
+            if (chosen.indexOf('all') < 0) chosen.unshift('all');
+            renderCats();
+            saveDraft();
+        });
+
+        // ----- Фото -----
+        document.getElementById('composerPhotoBtn').addEventListener('click', function () {
+            if (photos.length >= MAX_PHOTOS) { flashNote('Можно добавить до ' + MAX_PHOTOS + ' фото'); return; }
+            fileInput.click();
+        });
+        fileInput.addEventListener('change', function () {
+            [].slice.call(fileInput.files || []).forEach(function (f) {
+                if (photos.length >= MAX_PHOTOS || !/^image\//.test(f.type)) return;
+                photos.push({ url: URL.createObjectURL(f), file: f });
+            });
+            fileInput.value = '';
+            renderPhotos();
+            updateState();
+        });
+        function renderPhotos() {
+            photosBox.innerHTML = '';
+            photos.forEach(function (p, i) {
+                var d = document.createElement('div');
+                d.className = 'composer-photo';
+                d.innerHTML = '<img alt=""><button type="button" class="composer-photo-remove" aria-label="Убрать фото"><i class="fas fa-xmark"></i></button>';
+                d.querySelector('img').src = p.url;
+                d.querySelector('button').addEventListener('click', function () {
+                    photos.splice(i, 1);
+                    renderPhotos();
+                    updateState();
+                });
+                photosBox.appendChild(d);
+            });
+        }
+
+        // ----- Форматирование -----
+        function keepSelection() {
+            var sel = window.getSelection();
+            if (sel.rangeCount && editor.contains(sel.anchorNode)) savedRange = sel.getRangeAt(0).cloneRange();
+        }
+        function restoreSelection() {
+            editor.focus();
+            if (!savedRange) return;
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(savedRange);
+        }
+        function refreshToolbar() {
+            toolbar.querySelectorAll('.fmt-btn').forEach(function (b) {
+                var cmd = b.dataset.cmd, on = false;
+                try {
+                    if (cmd === 'quote') on = document.queryCommandValue('formatBlock').toLowerCase() === 'blockquote';
+                    else if (cmd !== 'link' && cmd !== 'removeFormat') on = document.queryCommandState(cmd);
+                } catch (e) {}
+                b.classList.toggle('on', !!on && document.activeElement === editor);
+            });
+        }
+        document.addEventListener('selectionchange', function () {
+            if (!composer.classList.contains('open')) return;
+            keepSelection();
+            refreshToolbar();
+        });
+        // кнопки не забирают фокус у текста
+        toolbar.addEventListener('mousedown', function (e) { if (e.target.closest('.fmt-btn')) e.preventDefault(); });
+        toolbar.addEventListener('click', function (e) {
+            var b = e.target.closest('.fmt-btn');
+            if (!b) return;
+            var cmd = b.dataset.cmd;
+            restoreSelection();
+            if (cmd === 'link') {
+                keepSelection();
+                linkRow.classList.toggle('show');
+                if (linkRow.classList.contains('show')) { linkInput.value = ''; linkInput.focus(); }
+                return;
+            }
+            if (cmd === 'quote') {
+                var isQ = false;
+                try { isQ = document.queryCommandValue('formatBlock').toLowerCase() === 'blockquote'; } catch (err) {}
+                document.execCommand('formatBlock', false, isQ ? 'div' : 'blockquote');
+            } else if (cmd === 'removeFormat') {
+                document.execCommand('removeFormat');
+                document.execCommand('unlink');
+                try { document.execCommand('formatBlock', false, 'div'); } catch (err) {}
+            } else {
+                document.execCommand(cmd);
+            }
+            refreshToolbar();
+            updateState();
+            saveDraft();
+        });
+        function applyLink() {
+            var url = linkInput.value.trim();
+            linkRow.classList.remove('show');
+            if (!url) { restoreSelection(); return; }
+            if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+            restoreSelection();
+            var sel = window.getSelection();
+            if (sel.isCollapsed) {
+                document.execCommand('insertHTML', false, '<a href="' + url.replace(/"/g, '&quot;') + '">' + escapeHtml(url) + '</a>&nbsp;');
+            } else {
+                document.execCommand('createLink', false, url);
+            }
+            updateState();
+            saveDraft();
+        }
+        document.getElementById('composerLinkOk').addEventListener('click', applyLink);
+        linkInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
+            if (e.key === 'Escape') { e.stopPropagation(); linkRow.classList.remove('show'); restoreSelection(); }
+        });
+
+        // Горячие клавиши (десктоп): Ctrl/Cmd + B / I / U, Ctrl/Cmd + Enter — опубликовать
+        editor.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); publish(); }
+        });
+        // Вставка из буфера — только текст, без чужих стилей
+        editor.addEventListener('paste', function (e) {
+            var t = (e.clipboardData || window.clipboardData);
+            if (!t) return;
+            e.preventDefault();
+            document.execCommand('insertText', false, t.getData('text/plain'));
+        });
+        editor.addEventListener('input', function () { updateState(); saveDraft(); });
+
+        // ----- Черновик -----
+        var draftTimer = null;
+        function saveDraft() {
+            clearTimeout(draftTimer);
+            draftTimer = setTimeout(function () {
+                try {
+                    if (!textLen()) { localStorage.removeItem(DRAFT_KEY); draftNote.textContent = ''; return; }
+                    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+                        html: editor.innerHTML, cats: chosen,
+                        comments: commentsCb.checked, likes: likesCb.checked
+                    }));
+                    flashNote('Черновик сохранён');
+                } catch (e) {}
+            }, 600);
+        }
+        function loadDraft() {
+            try {
+                var d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+                if (!d) return;
+                editor.innerHTML = sanitize(d.html || '');
+                chosen = (d.cats && d.cats.length) ? d.cats : ['all'];
+                if (chosen.indexOf('all') < 0) chosen.unshift('all');
+                commentsCb.checked = d.comments !== false;
+                likesCb.checked = d.likes !== false;
+                if (textLen()) draftNote.textContent = 'Восстановлен черновик';
+            } catch (e) {}
+        }
+        var noteTimer = null;
+        function flashNote(t) {
+            draftNote.textContent = t;
+            draftNote.style.opacity = '1';
+            clearTimeout(noteTimer);
+            noteTimer = setTimeout(function () { draftNote.style.opacity = '0'; }, 1800);
+        }
+
+        commentsCb.addEventListener('change', function () {
+            document.getElementById('commentsSub').textContent = commentsCb.checked
+                ? 'Другие смогут комментировать' : 'Комментарии под публикацией отключены';
+            saveDraft();
+        });
+        likesCb.addEventListener('change', saveDraft);
+
+        // ----- Открыть / закрыть -----
+        function openComposer() {
+            lastFocus = document.activeElement;
+            closeDrawer();
+            if (!editor.innerHTML) loadDraft();
+            renderCats();
+            commentsCb.dispatchEvent(new Event('change'));
+            updateState();
+            composer.classList.add('open');
+            composer.setAttribute('aria-hidden', 'false');
+            setTimeout(function () { editor.focus(); }, isDesktop.matches ? 250 : 380);
+        }
+        function closeComposer() {
+            composer.classList.remove('open');
+            composer.setAttribute('aria-hidden', 'true');
+            linkRow.classList.remove('show');
+            editor.blur();
+            if (lastFocus && lastFocus.focus) try { lastFocus.focus({ preventScroll: true }); } catch (e) {}
+        }
         ['addPostButtonMobile', 'addPostButtonDesktop'].forEach(function (id) {
             var b = document.getElementById(id);
-            if (b) b.addEventListener('click', function () { /* создание поста — позже */ });
+            if (b) b.addEventListener('click', openComposer);
         });
+        document.getElementById('composerClose').addEventListener('click', closeComposer);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && composer.classList.contains('open')) closeComposer();
+        });
+
+        // ----- Публикация -----
+        function publish() {
+            if (publishBtn.disabled) {
+                var box = document.getElementById('composerBox');
+                box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+                return;
+            }
+            posts.unshift({
+                id: Date.now(),
+                html: sanitize(editor.innerHTML),
+                photos: photos.map(function (p) { return p.url; }),
+                categories: chosen.slice(),
+                comments: commentsCb.checked,
+                showLikes: likesCb.checked,
+                likes: 0,
+                liked: false,
+                createdAt: Date.now()
+            });
+            // сброс формы
+            editor.innerHTML = '';
+            photos = [];
+            chosen = ['all'];
+            commentsCb.checked = true;
+            likesCb.checked = true;
+            renderPhotos();
+            try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+            draftNote.textContent = '';
+            closeComposer();
+            // показать ленту, где пост точно виден
+            if (current !== 'all' && posts[0].categories.indexOf(current) < 0) selectCategory('all');
+            else renderPosts();
+        }
+        publishBtn.addEventListener('click', publish);
+
+        // ----- Безопасный HTML (разрешаем только оформление) -----
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function sanitize(html) {
+            var ALLOWED = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, STRIKE: 1, DEL: 1, UL: 1, OL: 1, LI: 1, BLOCKQUOTE: 1, A: 1, BR: 1, DIV: 1, P: 1 };
+            var tpl = document.createElement('template');
+            tpl.innerHTML = html;
+            (function walk(node) {
+                [].slice.call(node.childNodes).forEach(function (ch) {
+                    if (ch.nodeType === 3) return;
+                    if (ch.nodeType !== 1 || !ALLOWED[ch.tagName]) {
+                        if (ch.nodeType === 1 && !/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED)$/.test(ch.tagName)) {
+                            walk(ch);
+                            while (ch.firstChild) node.insertBefore(ch.firstChild, ch);
+                        }
+                        node.removeChild(ch);
+                        return;
+                    }
+                    var href = ch.tagName === 'A' ? ch.getAttribute('href') : null;
+                    [].slice.call(ch.attributes).forEach(function (a) { ch.removeAttribute(a.name); });
+                    if (href && /^https?:\/\//i.test(href)) {
+                        ch.setAttribute('href', href);
+                        ch.setAttribute('target', '_blank');
+                        ch.setAttribute('rel', 'noopener noreferrer nofollow');
+                    }
+                    walk(ch);
+                });
+            })(tpl.content);
+            return tpl.innerHTML;
+        }
 
         buildLists();
         selectCategory(current);
