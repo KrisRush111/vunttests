@@ -12301,7 +12301,17 @@ html[data-theme="dark"] .vg-verified-tooltip {
         transition: color 0.25s ease !important;
         -webkit-user-drag: none;
     }
-    body .bottom-nav .nav-icon-wrap { width: 46px; }
+    body .bottom-nav .nav-icon-wrap { width: 46px; height: 34px; flex: 0 0 34px; }
+    body .bottom-nav .nav-item {
+        height: 62px;
+        box-sizing: border-box;
+        justify-content: center;
+    }
+    body .bottom-nav .nav-item > span:not(.nav-icon-wrap) {
+        line-height: 14px;
+        height: 14px;
+    }
+    body .bottom-nav .nav-icon-wrap > i { line-height: 1; width: 1.25em; text-align: center; }
     body .bottom-nav .nav-item.vg-under-lens { color: #0a84ff; }
     body .bottom-nav .nav-item.vg-under-lens .nav-icon-wrap { transform: scale(1.16); }
     body .bottom-nav .nav-item .nav-svg { width: 23px; height: 23px; display: block; }
@@ -12362,9 +12372,8 @@ html[data-theme="dark"] .vg-verified-tooltip {
     .vg-ico-profile  { animation: vgIcoProfile 0.75s cubic-bezier(0.3, 1.3, 0.5, 1); }
     @keyframes vgIcoContacts {
         0%   { transform: scale(1); }
-        25%  { transform: translateY(-4px) scale(1.14, 0.9); }
-        45%  { transform: translateY(0) scale(0.9, 1.12); }
-        65%  { transform: scale(1.06, 0.96); }
+        40%  { transform: scale(1.16); }
+        70%  { transform: scale(0.98); }
         100% { transform: scale(1.05); }
     }
     @keyframes vgIcoPosts {
@@ -12738,6 +12747,88 @@ html[data-theme="dark"] .vg-verified-tooltip {
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
+})();
+</script>
+
+<!-- ==========================================================================
+     МГНОВЕННОЕ ОБНОВЛЕНИЕ СТРАНИЦ (vg-app-updater)
+     service-worker.js отдаёт страницу из кэша (быстро), но при КАЖДОМ открытии
+     сверяет её и её скрипты с сервером. Если что-то изменилось — присылает
+     VG_UPDATED, и страница перезагружается на свежую версию:
+       • сразу — если её открыли только что и пользователь ещё ничего не делает;
+       • иначе — при следующем возвращении в приложение / уходе с поля ввода,
+         чтобы не потерять набранный текст и открытый чат.
+     ========================================================================== -->
+<script id="vg-app-updater">
+(function () {
+    'use strict';
+    if (window.__vgAppUpdater || !('serviceWorker' in navigator)) return;
+    window.__vgAppUpdater = true;
+
+    var openedAt = Date.now();
+    var pending = false;
+    var KEY = 'vg_auto_reload_at';
+
+    // Пользователь чем-то занят — перезагрузка помешала бы
+    function busy() {
+        var a = document.activeElement;
+        if (a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+        return !!document.querySelector(
+            '.composer.open, .chat-modal.active, .report-sheet-overlay, .report-confirm-overlay, ' +
+            '.photo-viewer-modal.active, .user-profile.open');
+    }
+    // Не чаще раза в 20 секунд — защита от зацикливания
+    function allowed() {
+        try {
+            var last = parseInt(sessionStorage.getItem(KEY), 10) || 0;
+            if (Date.now() - last < 20000) return false;
+            sessionStorage.setItem(KEY, String(Date.now()));
+        } catch (e) {}
+        return true;
+    }
+    function reloadNow() {
+        pending = false;
+        if (allowed()) window.location.reload();
+    }
+    function onUpdate() {
+        // Только что открыли и ничего не трогали — обновляемся сразу
+        if (!busy() && (Date.now() - openedAt < 10000 || document.visibilityState === 'hidden')) {
+            reloadNow();
+        } else {
+            pending = true;
+        }
+    }
+
+    navigator.serviceWorker.addEventListener('message', function (e) {
+        if (e.data && e.data.type === 'VG_UPDATED') onUpdate();
+    });
+    // Вернулись в приложение — подходящий момент
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+            if (pending && !busy()) reloadNow();
+            checkForNewWorker();
+        }
+    });
+    // Закончили печатать / закрыли окно — тоже подходящий момент
+    document.addEventListener('focusout', function () {
+        setTimeout(function () { if (pending && !busy()) reloadNow(); }, 400);
+    });
+    document.addEventListener('click', function () {
+        setTimeout(function () { if (pending && !busy() && Date.now() - openedAt > 1000) reloadNow(); }, 600);
+    }, true);
+
+    // Новая версия самого service-worker.js — браузер проверяет её не всегда,
+    // поэтому спрашиваем явно при открытии и при возвращении в приложение
+    var lastCheck = 0;
+    function checkForNewWorker() {
+        if (Date.now() - lastCheck < 30000) return;
+        lastCheck = Date.now();
+        navigator.serviceWorker.getRegistration().then(function (reg) {
+            if (reg && reg.update) reg.update().catch(function () {});
+        }).catch(function () {});
+    }
+    if (document.readyState === 'complete') checkForNewWorker();
+    else window.addEventListener('load', checkForNewWorker);
 })();
 </script>
 </body>
