@@ -219,7 +219,7 @@
             overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior: contain;
-            padding: 12px 12px 110px;
+            padding: 12px 14px 110px;
             display: flex;
             flex-direction: column;
             scrollbar-width: thin;
@@ -228,7 +228,7 @@
         .posts-feed::-webkit-scrollbar { width: 4px; }
         .posts-feed::-webkit-scrollbar-thumb { background: var(--telegram-hint); border-radius: 2px; }
 
-        .posts-list { display: flex; flex-direction: column; gap: 12px; }
+        .posts-list { display: flex; flex-direction: column; gap: 24px; padding: 10px 8px; }
         .posts-list:empty { display: none; }
 
         /* «Пусто» строго по центру экрана */
@@ -780,8 +780,9 @@
             transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
         }
         .composer-publish:active { transform: scale(0.95); }
-        .composer-publish:disabled {
-            cursor: default;
+        .composer-publish:disabled,
+        .composer-publish.is-disabled {
+            cursor: pointer;
             box-shadow: none;
             filter: grayscale(1);
             opacity: 0.35;
@@ -1060,7 +1061,9 @@
             font-size: 12.5px;
             color: var(--telegram-hint);
             margin: 8px 4px 0;
+            transition: color 0.2s ease;
         }
+        .composer-section-note.need { color: #ff3b30; font-weight: 500; }
 
         .cat-chips {
             display: flex;
@@ -1188,11 +1191,48 @@
            КАРТОЧКА ПОСТА В ЛЕНТЕ
            ===================================================================== */
         .post-card {
-            background: var(--telegram-bg);
+            position: relative;
+            z-index: 0;                         /* своя «стопка» слоёв: свечение не уходит под соседей */
             border-radius: 20px;
             padding: 14px 14px 10px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             animation: postIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        /* Фон карточки — отдельным слоем поверх свечения (как у окна рекомендаций) */
+        .post-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            border-radius: inherit;
+            background: var(--telegram-bg);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            pointer-events: none;
+        }
+        /* Воздушная переливающаяся тень — свой цвет у каждой публикации */
+        .post-card::before {
+            content: '';
+            position: absolute;
+            inset: -9px;
+            z-index: -1;
+            border-radius: 28px;
+            background: conic-gradient(from 210deg,
+                var(--glow, #4fc3f7), var(--glow2, #9be3ff), var(--glow, #4fc3f7),
+                var(--glow2, #9be3ff), var(--glow, #4fc3f7));
+            filter: blur(12px);
+            opacity: 0.75;
+            pointer-events: none;
+        }
+        .post-card.glow-on::before { animation: postGlow 5.5s ease-in-out infinite; animation-delay: var(--glow-delay, 0s); }
+        @keyframes postGlow {
+            0%   { opacity: 0.6;  transform: scale(0.995); filter: blur(12px) hue-rotate(-10deg); }
+            50%  { opacity: 0.95; transform: scale(1.02);  filter: blur(16px) hue-rotate(12deg); }
+            100% { opacity: 0.6;  transform: scale(0.995); filter: blur(12px) hue-rotate(-10deg); }
+        }
+        @media (prefers-color-scheme: dark) {
+            .post-card::before { opacity: 0.6; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .post-card.glow-on::before { animation: none; }
         }
         @keyframes postIn {
             from { opacity: 0; transform: translateY(14px) scale(0.98); }
@@ -1202,19 +1242,111 @@
         .post-author { font-weight: 600; font-size: 15px; line-height: 1.2; }
         .post-time { font-size: 12.5px; color: var(--telegram-hint); }
         .post-text { font-size: 15.5px; line-height: 1.5; word-break: break-word; }
+        /* Фото поста — листаемая лента (свайп / колесо / стрелки), точки снизу */
         .post-photos {
-            display: grid;
-            gap: 4px;
+            position: relative;
             margin-top: 10px;
-            border-radius: 14px;
+            border-radius: 16px;
             overflow: hidden;
+            background: var(--telegram-secondary-bg);
         }
-        .post-photos.n1 { grid-template-columns: 1fr; }
-        .post-photos.n2 { grid-template-columns: 1fr 1fr; }
-        .post-photos.n3, .post-photos.nmany { grid-template-columns: 1fr 1fr 1fr; }
-        .post-photos img { width: 100%; height: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-        .post-photos.n1 img { aspect-ratio: auto; max-height: 420px; }
         .post-photos.top { margin: 0 0 10px; }
+        .post-slides {
+            display: flex;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-x: contain;
+            scrollbar-width: none;
+        }
+        .post-slides::-webkit-scrollbar { display: none; }
+        .post-slide {
+            flex: 0 0 100%;
+            scroll-snap-align: center;
+            scroll-snap-stop: always;
+            aspect-ratio: var(--ratio, 4 / 5);  /* по первому фото, от 4:5 до 1.91:1 */
+            max-height: 560px;
+            width: 100%;
+        }
+        .post-photos.single .post-slide { aspect-ratio: auto; max-height: 520px; }
+        .post-slide img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            -webkit-user-drag: none;
+            user-select: none;
+        }
+        .post-photos.single .post-slide img { height: auto; max-height: 520px; }
+
+        .post-dots {
+            position: absolute;
+            left: 50%;
+            bottom: 10px;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 6px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.18);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+            pointer-events: none;
+        }
+        .post-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.55);
+            transition: background-color 0.25s ease, transform 0.25s ease;
+        }
+        .post-dot.on { background: #fff; transform: scale(1.2); }
+        .post-counter {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.45);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            pointer-events: none;
+        }
+        .post-nav {
+            position: absolute;
+            top: 50%;
+            width: 34px;
+            height: 34px;
+            margin-top: -17px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.85);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+            color: #111;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            display: none;                      /* только на компьютере, при наведении */
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.15s ease;
+        }
+        .post-nav svg { width: 16px; height: 16px; display: block; }
+        .post-nav:active { transform: scale(0.9); }
+        .post-nav.prev { left: 10px; }
+        .post-nav.next { right: 10px; }
+        .post-nav[hidden] { display: none !important; }
+        @media (hover: hover) and (pointer: fine) {
+            .post-nav { display: flex; }
+            .post-photos:hover .post-nav { opacity: 1; }
+        }
         .post-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
         .post-tag {
             font-size: 12px;
@@ -1229,7 +1361,7 @@
             display: flex;
             align-items: center;
             gap: 4px;
-            margin-top: 8px;
+            margin-top: 10px;
             border-top: 1px solid var(--telegram-divider);
             padding-top: 6px;
         }
@@ -1245,12 +1377,42 @@
             border-radius: 999px;
             cursor: pointer;
         }
-        .post-action.liked { color: #ff3b5c; }
-        .post-action.liked i { animation: vgLikePop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
-        @keyframes vgLikePop { 0% { transform: scale(0.6); } 100% { transform: scale(1); } }
+        /* Лайк: контурное сердечко, при нажатии — светло-голубое 🩵 */
+        .post-like { gap: 6px; align-items: center; font-variant-numeric: tabular-nums; transition: color 0.2s ease; margin-left: auto; }
+        .like-heart {
+            width: 28px;
+            height: 28px;
+            translate: 0 -1px;          /* оптически по центру с числом */
+            display: block;
+            fill: transparent;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linejoin: round;
+            transition: fill 0.2s ease, stroke 0.2s ease, transform 0.2s ease;
+        }
+        .post-like:active .like-heart { transform: scale(0.88); }
+        .post-like.liked { color: #4fb3f6; }
+        .post-like.liked .like-heart { fill: #8fd3ff; stroke: #5ec0fa; }
+        .post-like.pop .like-heart { animation: vgLikePop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes vgLikePop {
+            0%   { transform: scale(0.6); }
+            45%  { transform: scale(1.25); }
+            100% { transform: scale(1); }
+        }
+        .like-count { font-weight: 600; min-width: 0; font-size: 15px; line-height: 1; }
+        @media (prefers-color-scheme: dark) {
+            .post-like.liked { color: #8fd3ff; }
+        }
         .post-action.disabled { cursor: default; opacity: 0.7; font-size: 12.5px; }
 
         .post-head-text { flex: 1; min-width: 0; }
+        .author-link { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        .post-author.author-link { display: inline-flex; border-radius: 6px; }
+        .post-author.author-link:hover .vg-nick-text,
+        .post-author.author-link:not(.vg-has-badge):hover { text-decoration: underline; text-underline-offset: 2px; }
+        .post-avatar.author-link { transition: transform 0.15s ease; }
+        .post-avatar.author-link:active, .post-author.author-link:active { transform: scale(0.96); }
+        .author-link:focus-visible { outline: 2px solid var(--vg-blue); outline-offset: 2px; }
         .post-delete {
             display: inline-flex;
             align-items: center;
@@ -1495,7 +1657,7 @@
                 <div>
                     <div class="composer-section-title">Рекомендации</div>
                     <div class="cat-chips" id="composerCats"></div>
-                    <div class="composer-section-note">«Всё сразу» выбрано всегда. Добавьте разделы, где публикацию тоже стоит показывать</div>
+                    <div class="composer-section-note" id="composerCatsNote">«Всё сразу» выбрано всегда. Выберите ещё хотя бы один раздел — без этого опубликовать нельзя</div>
                 </div>
 
                 <!-- Настройки -->
@@ -1918,17 +2080,45 @@ vgResolveBadgeSrc();
             var r = Math.min(255, (num >> 16) + amt), g = Math.min(255, ((num >> 8) & 255) + amt), b = Math.min(255, (num & 255) + amt);
             return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
         }
-        function paintAvatar(el, u) {
+        // Есть ли у пользователя фото. Как в chats.html: если явно не сказано
+        // «фото нет», считаем, что может быть — avatar-cache.js сам проверит
+        // на сервере (раньше фото не запрашивалось, если в данных входа не было
+        // поля has_avatar — из-за этого аватарка не показывалась).
+        function mayHavePhoto(u) {
+            if (!u || u.avatar_hidden) return false;
+            if (u.avatar_url) return true;
+            if (u.has_avatar === true || u.has_avatar_photo === true) return true;
+            if (u.has_avatar === false || u.has_avatar_photo === false) return false;
+            return true;
+        }
+        function paintAvatar(el, u, size) {
             if (!el || !u) return;
+            size = size || 40;
             var ini = initialOf(u);
-            var hasPhoto = !!(u.has_avatar_photo || u.has_avatar);
-            if (window.AvatarCache && typeof window.AvatarCache.render === 'function' && u.platform_user_id) {
-                try { window.AvatarCache.render(SERVER_URL, el, u.platform_user_id, ini, u.avatar_background, hasPhoto); return; } catch (e) {}
+            var uid = u.platform_user_id;
+            var hasPhoto = mayHavePhoto(u);
+            var AC = window.AvatarCache;
+            var color = u.avatar_background || '#9501ff';
+
+            // 1) сразу, без сети: сохранённое на устройстве фото или цветной круг
+            var cached = (hasPhoto && uid && AC && AC.getLocalSync) ? AC.getLocalSync(uid) : null;
+            if (cached && cached.dataUrl) {
+                el.style.backgroundImage = 'url(' + JSON.stringify(cached.dataUrl) + ')';
+                el.style.backgroundSize = 'cover';
+                el.style.backgroundPosition = 'center';
+                el.style.backgroundRepeat = 'no-repeat';
+                el.style.backgroundColor = '';
+                el.textContent = '';
+            } else {
+                var knows = hasPhoto && uid && AC && AC.knownHasPhoto && AC.knownHasPhoto(uid);
+                el.style.backgroundImage = 'none';
+                el.style.background = 'linear-gradient(135deg, ' + color + ', ' + lighten(color, 20) + ')';
+                el.textContent = knows ? '' : ini;
             }
-            el.textContent = ini;
-            el.style.background = u.avatar_background
-                ? 'linear-gradient(135deg, ' + u.avatar_background + ', ' + lighten(u.avatar_background, 20) + ')'
-                : '';
+            // 2) в фоне — свежая аватарка (тот же avatar-cache.js, что в чатах)
+            if (AC && typeof AC.render === 'function' && uid) {
+                try { AC.render(SERVER_URL, el, uid, ini, u.avatar_background, hasPhoto, size); } catch (e) {}
+            }
         }
         function paintName(el, u) {
             if (!el || !u) return;
@@ -1950,7 +2140,9 @@ vgResolveBadgeSrc();
         // Свои посты всегда показываем с актуальными ником и аватаром
         function authorOf(p) {
             var a = p.author || {};
-            return String(a.platform_user_id) === String(me.platform_user_id) ? me : a;
+            // свои — актуальный ник/аватар из профиля, а чего в нём нет (галочка,
+            // признак фото) — из ответа сервера
+            return String(a.platform_user_id) === String(me.platform_user_id) ? Object.assign({}, a, me) : a;
         }
         function paintMe() {
             paintAvatar(document.getElementById('composerAvatar'), me);
@@ -2162,6 +2354,105 @@ vgResolveBadgeSrc();
             return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) + ' в ' +
                    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         }
+        // 32, 474, 999 -> как есть; 1 000+ -> 1К … 999К; 1 000 000+ -> 1М
+        function formatCount(n) {
+            n = Math.max(0, Math.floor(Number(n) || 0));
+            if (n < 1000) return String(n);
+            if (n < 1000000) return Math.floor(n / 1000) + 'К';
+            return Math.floor(n / 1000000) + 'М';
+        }
+        // Листание фото: свайп/трекпад (scroll-snap), стрелки на компьютере, точки + счётчик
+        function setupCarousel(root, n) {
+            var track = root.querySelector('.post-slides');
+            var dots = [].slice.call(root.querySelectorAll('.post-dot'));
+            var counter = root.querySelector('.post-counter');
+            var prev = root.querySelector('.post-nav.prev');
+            var next = root.querySelector('.post-nav.next');
+            var idx = 0, raf = 0;
+            function paint(i) {
+                if (i === idx) return;
+                idx = i;
+                dots.forEach(function (d, k) { d.classList.toggle('on', k === i); });
+                counter.textContent = (i + 1) + '/' + n;
+                prev.hidden = i === 0;
+                next.hidden = i === n - 1;
+            }
+            track.addEventListener('scroll', function () {
+                cancelAnimationFrame(raf);
+                raf = requestAnimationFrame(function () {
+                    var w = track.clientWidth || 1;
+                    paint(Math.max(0, Math.min(n - 1, Math.round(track.scrollLeft / w))));
+                });
+            }, { passive: true });
+            function go(d) {
+                var i = Math.max(0, Math.min(n - 1, idx + d));
+                track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' });
+            }
+            prev.addEventListener('click', function () { go(-1); });
+            next.addEventListener('click', function () { go(1); });
+            // мышью можно и перетащить, как пальцем
+            var drag = null;
+            track.addEventListener('pointerdown', function (e) {
+                if (e.pointerType !== 'mouse' || e.button !== 0) return;
+                drag = { x: e.clientX, left: track.scrollLeft, moved: false };
+                track.style.scrollSnapType = 'none';
+                track.style.scrollBehavior = 'auto';
+            });
+            window.addEventListener('pointermove', function (e) {
+                if (!drag) return;
+                var dx = e.clientX - drag.x;
+                if (Math.abs(dx) > 3) drag.moved = true;
+                track.scrollLeft = drag.left - dx;
+            });
+            window.addEventListener('pointerup', function () {
+                if (!drag) return;
+                var w = track.clientWidth || 1;
+                var target = Math.round(track.scrollLeft / w);
+                var moved = track.scrollLeft - drag.left;
+                if (Math.abs(moved) > w * 0.15) target = Math.round(drag.left / w) + (moved > 0 ? 1 : -1);
+                target = Math.max(0, Math.min(n - 1, target));
+                drag = null;
+                track.style.scrollBehavior = '';
+                track.scrollTo({ left: target * w, behavior: 'smooth' });
+                setTimeout(function () { track.style.scrollSnapType = ''; }, 350);
+            });
+        }
+        // Цвета свечения публикаций (без розового, чёрного и фиолетового)
+        var GLOWS = [
+            ['#4fc3f7', '#9be3ff'],   // голубой
+            ['#9be15d', '#d4f7a1'],   // салатный
+            ['#ffd54f', '#ffe9a0'],   // жёлтый
+            ['#a1785c', '#d2b49c'],   // коричневый
+            ['#3d7bff', '#8fb2ff'],   // синий
+            ['#b9a5ff', '#ddd1ff'],   // сиреневый
+            ['#22d3c5', '#8ff0e6']    // бирюзовый
+        ];
+        // Цвет закреплён за постом (по id), соседние посты — разные цвета
+        function glowFor(id) {
+            var n = Math.abs(parseInt(id, 10) || 0);
+            return GLOWS[n % GLOWS.length];
+        }
+        // Переливаются только карточки на экране — меньше нагрузка на телефон
+        var glowObserver = window.IntersectionObserver ? new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) { en.target.classList.toggle('glow-on', en.isIntersecting); });
+        }, { rootMargin: '80px 0px' }) : null;
+        // Профиль автора открывается в contacts.html (там полный профиль: «О себе»,
+        // чат, медиа, жалоба). Данные автора кладём заранее — шапка профиля
+        // появится сразу, без «Загрузка…»
+        function openAuthorProfile(author) {
+            try {
+                sessionStorage.setItem('vg_profile_preview', JSON.stringify({
+                    platform_user_id: author.platform_user_id,
+                    nickname: author.nickname,
+                    avatar_background: author.avatar_background,
+                    has_avatar: author.has_avatar,
+                    has_avatar_photo: author.has_avatar_photo,
+                    is_verified: author.is_verified,
+                    is_bot: author.is_bot
+                }));
+            } catch (e) {}
+            window.location.href = 'contacts.html?profile=' + encodeURIComponent(author.platform_user_id) + '&from=posts';
+        }
         function catTitle(id) {
             var c = CATEGORIES.filter(function (x) { return x.id === id; })[0];
             return c ? c.title : id;
@@ -2171,43 +2462,83 @@ vgResolveBadgeSrc();
             el.className = 'post-card';
             var n = p.photos.length;
             var top = p.photoPos !== 'bottom';
-            var photosHtml = n ? '<div class="post-photos ' + (n === 1 ? 'n1' : n === 2 ? 'n2' : n === 3 ? 'n3' : 'nmany') + (top ? ' top' : '') + '">' +
-                p.photos.map(function () { return '<img alt="" loading="lazy">'; }).join('') + '</div>' : '';
+            var CHEV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
+            var photosHtml = n ? '<div class="post-photos' + (n === 1 ? ' single' : '') + (top ? ' top' : '') + '">' +
+                '<div class="post-slides">' +
+                    p.photos.map(function (_, i) {
+                        return '<div class="post-slide"><img alt="Фото ' + (i + 1) + ' из ' + n + '" loading="' + (i ? 'lazy' : 'eager') + '" draggable="false"></div>';
+                    }).join('') +
+                '</div>' +
+                (n > 1
+                    ? '<span class="post-counter">1/' + n + '</span>' +
+                      '<div class="post-dots">' + p.photos.map(function (_, i) { return '<span class="post-dot' + (i ? '' : ' on') + '"></span>'; }).join('') + '</div>' +
+                      '<button type="button" class="post-nav prev" aria-label="Предыдущее фото" hidden>' + CHEV + '</button>' +
+                      '<button type="button" class="post-nav next" aria-label="Следующее фото">' + CHEV.replace('M15 5l-7 7 7 7', 'M9 5l7 7-7 7') + '</button>'
+                    : '') +
+                '</div>' : '';
             el.dataset.id = p.id;
+            var glow = glowFor(p.id);
+            el.style.setProperty('--glow', glow[0]);
+            el.style.setProperty('--glow2', glow[1]);
+            el.style.setProperty('--glow-delay', (-(Math.abs(parseInt(p.id, 10) || 0) % 11) * 0.5) + 's');
+            if (glowObserver) glowObserver.observe(el); else el.classList.add('glow-on');
             el.innerHTML =
                 '<div class="post-head"><div class="post-avatar"></div><div class="post-head-text">' +
                     '<div class="post-author"></div><div class="post-time"></div></div>' +
                     (p.mine ? '<button type="button" class="post-delete" aria-label="Удалить публикацию"><i class="far fa-trash-can"></i><span>Удалить?</span></button>' : '') +
                 '</div>' +
                 (top ? photosHtml + '<div class="post-text"></div>' : '<div class="post-text"></div>' + photosHtml) +
-                '<div class="post-tags"></div>' +
                 '<div class="post-actions">' +
-                    '<button type="button" class="post-action post-like"><i class="far fa-heart"></i><span></span></button>' +
                     (p.comments
                         ? '<button type="button" class="post-action"><i class="far fa-comment"></i><span>Комментировать</span></button>'
                         : '<span class="post-action disabled"><i class="fas fa-comment-slash"></i><span>Комментарии отключены</span></span>') +
+                    '<button type="button" class="post-action post-like" aria-pressed="false" aria-label="Нравится"><svg class="like-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.6c-.3 0-.6-.1-.8-.3C6.4 16.2 3 13.2 3 9.3 3 6.6 5.1 4.5 7.7 4.5c1.6 0 3.2.8 4.3 2.1 1.1-1.3 2.7-2.1 4.3-2.1 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.4 6.9-8.2 11-.2.2-.5.3-.8.3z"/></svg><span class="like-count"></span></button>' +
                 '</div>';
             var author = authorOf(p);
             paintAvatar(el.querySelector('.post-avatar'), author);
             paintName(el.querySelector('.post-author'), author);
+            // Нажатие на автора (имя или аватар) — его профиль, если это не я
+            var authorId = author && author.platform_user_id;
+            if (authorId && String(authorId) !== String(me.platform_user_id)) {
+                [el.querySelector('.post-avatar'), el.querySelector('.post-author')].forEach(function (node) {
+                    node.classList.add('author-link');
+                    node.setAttribute('role', 'link');
+                    node.setAttribute('tabindex', '0');
+                    node.setAttribute('aria-label', 'Профиль: ' + (author.nickname || 'пользователь'));
+                    node.addEventListener('click', function () { openAuthorProfile(author); });
+                    node.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAuthorProfile(author); }
+                    });
+                });
+            }
             el.querySelector('.post-time').textContent = timeAgo(p.createdAt);
             el.querySelector('.post-text').innerHTML = p.html;
             if (!p.html.replace(/<[^>]*>/g, '').trim()) el.querySelector('.post-text').remove();
-            [].slice.call(el.querySelectorAll('.post-photos img')).forEach(function (img, i) { img.src = p.photos[i]; });
-            var tags = el.querySelector('.post-tags');
-            var shown = p.categories.filter(function (c) { return c !== 'all'; });
-            if (!shown.length) shown = ['all'];
-            shown.forEach(function (c) {
-                var t = document.createElement('span');
-                t.className = 'post-tag';
-                t.textContent = catTitle(c);
-                tags.appendChild(t);
-            });
+            [].slice.call(el.querySelectorAll('.post-slide img')).forEach(function (img, i) { img.src = p.photos[i]; });
+            if (n > 1) {
+                var box = el.querySelector('.post-photos');
+                // Высоту ленты задаёт первое фото (как в Instagram): 4:5 … 1.91:1
+                var first = box.querySelector('.post-slide img');
+                var setRatio = function () {
+                    if (!first.naturalWidth) return;
+                    var r = Math.max(0.8, Math.min(1.91, first.naturalWidth / first.naturalHeight));
+                    box.style.setProperty('--ratio', String(r));
+                };
+                if (first.complete) setRatio(); else first.addEventListener('load', setRatio, { once: true });
+                setupCarousel(box, n);
+            }
+            // Разделы поста на карточке не показываем: они нужны только для
+            // того, в каких рекомендациях пост виден (p.categories)
             var like = el.querySelector('.post-like');
-            function paintLike() {
+            function paintLike(pop) {
                 like.classList.toggle('liked', p.liked);
-                like.querySelector('i').className = (p.liked ? 'fas' : 'far') + ' fa-heart';
-                like.querySelector('span').textContent = p.showLikes ? String(p.likes) : '';
+                like.setAttribute('aria-pressed', p.liked ? 'true' : 'false');
+                var cnt = like.querySelector('.like-count');
+                cnt.textContent = p.showLikes && p.likes > 0 ? formatCount(p.likes) : '';
+                cnt.title = p.showLikes ? String(p.likes) : '';
+                if (pop) {
+                    like.classList.remove('pop'); void like.offsetWidth; like.classList.add('pop');
+                }
             }
             var likeBusy = false;
             like.addEventListener('click', function () {
@@ -2216,7 +2547,7 @@ vgResolveBadgeSrc();
                 var prev = { liked: p.liked, likes: p.likes };
                 p.liked = !p.liked;                          // сразу на экране
                 p.likes = Math.max(0, p.likes + (p.liked ? 1 : -1));
-                paintLike();
+                paintLike(p.liked);
                 api('/toggle_post_like', { post_id: p.id }).then(function (d) {
                     p.liked = !!d.liked;
                     if (d.likes_count !== null && d.likes_count !== undefined) p.likes = d.likes_count;
@@ -2362,7 +2693,7 @@ vgResolveBadgeSrc();
         // =====================================================================
         // ОКНО «НОВЫЙ ПОСТ» (пока без сервера — пост появляется только в ленте)
         // =====================================================================
-        var MAX_LEN = 2000, MAX_PHOTOS = 10, DRAFT_KEY = 'vg_post_draft_' + String(me.platform_user_id || 'guest');
+        var MAX_LEN = 2000, MAX_PHOTOS = 5, DRAFT_KEY = 'vg_post_draft_' + String(me.platform_user_id || 'guest');
         var composer   = document.getElementById('composer');
         var editor     = document.getElementById('composerEditor');
         var publishBtn = document.getElementById('composerPublish');
@@ -2408,13 +2739,23 @@ vgResolveBadgeSrc();
             counter.textContent = n + ' / ' + MAX_LEN;
             counter.classList.toggle('warn', n > MAX_LEN * 0.9 && n <= MAX_LEN);
             counter.classList.toggle('over', n > MAX_LEN);
-            publishBtn.disabled = (n === 0 && photos.length === 0) || n > MAX_LEN;
+            // Кнопка не disabled (иначе нажатие не дойдёт и не покажет подсказку) — только серая
+            var blocked = (n === 0 && photos.length === 0) || n > MAX_LEN || needsCategory();
+            if (!publishing) publishBtn.disabled = false;
+            publishBtn.classList.toggle('is-disabled', blocked);
+            publishBtn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+            var note = document.getElementById('composerCatsNote');
+            if (note && !needsCategory()) note.classList.remove('need');
             photoLabel.textContent = photos.length ? ('Фото · ' + photos.length + '/' + MAX_PHOTOS) : 'Фото';
             // пустой редактор без мусорных <br>, чтобы показывалась подсказка
             if (!n && !editor.querySelector('img,li,blockquote') && editor.innerHTML !== '') editor.innerHTML = '';
         }
 
         // ----- Рекомендации -----
+        // Кроме «Всё сразу» обязательно хотя бы один раздел
+        function needsCategory() {
+            return !chosen.some(function (c) { return c !== 'all'; });
+        }
         function renderCats() {
             catsBox.innerHTML = '';
             CATEGORIES.forEach(function (cat) {
@@ -2441,6 +2782,7 @@ vgResolveBadgeSrc();
             if (i >= 0) chosen.splice(i, 1); else chosen.push(id);
             if (chosen.indexOf('all') < 0) chosen.unshift('all');
             renderCats();
+            updateState();
             saveDraft();
         });
 
@@ -2450,10 +2792,13 @@ vgResolveBadgeSrc();
             fileInput.click();
         });
         fileInput.addEventListener('change', function () {
+            var skipped = 0;
             [].slice.call(fileInput.files || []).forEach(function (f) {
-                if (photos.length >= MAX_PHOTOS || !/^image\//.test(f.type)) return;
+                if (!/^image\//.test(f.type)) return;
+                if (photos.length >= MAX_PHOTOS) { skipped++; return; }
                 photos.push({ url: URL.createObjectURL(f), file: f });
             });
+            if (skipped) flashNote('Можно добавить до ' + MAX_PHOTOS + ' фото — лишние не добавлены');
             fileInput.value = '';
             renderPhotos();
             updateState();
@@ -2657,9 +3002,14 @@ vgResolveBadgeSrc();
         }
         function publish() {
             if (publishing) return;
-            if (publishBtn.disabled) {
-                var box = document.getElementById('composerBox');
-                box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+            if (publishBtn.classList.contains('is-disabled')) {
+                var hasContent = textLen() > 0 || photos.length > 0;
+                var target = document.getElementById(hasContent && needsCategory() ? 'composerCats' : 'composerBox');
+                if (hasContent && needsCategory()) {
+                    document.getElementById('composerCatsNote').classList.add('need');
+                    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                target.classList.remove('shake'); void target.offsetWidth; target.classList.add('shake');
                 return;
             }
             var fd = new FormData();
@@ -2703,6 +3053,7 @@ vgResolveBadgeSrc();
             });
         }
         publishBtn.addEventListener('click', publish);
+
 
         // ----- Безопасный HTML (разрешаем только оформление) -----
         function escapeHtml(s) {
