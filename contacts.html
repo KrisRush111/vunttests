@@ -11245,5 +11245,469 @@ html.vg-viewer-lock .message-box { z-index: 100020 !important; }
 .search-input:focus::placeholder { color: transparent !important; }
 </style>
 
+
+<!-- ==========================================================================
+     ЖИДКИЙ СТЕКЛЯННЫЙ ФУТЕР (одинаковый блок на contacts / posts / chats / profile)
+     • прозрачная капсула с водным бликом по контуру;
+     • активная «капсула-подсветка» — отдельный элемент .vg-nav-pill: при нажатии
+       превращается в стеклянную линзу, её можно вести пальцем по футеру;
+     • при переходе на другую страницу линза «доезжает» с места прошлой вкладки;
+     • иконки анимируются при выборе.
+     ========================================================================== -->
+<style id="vg-liquid-nav-style">
+    body .bottom-nav.bottom-nav {
+        width: calc(100% - 28px) !important;
+        max-width: 460px !important;
+        background: rgba(255, 255, 255, 0.55) !important;
+        background-color: rgba(255, 255, 255, 0.55) !important;
+        background-image: none !important;
+        -webkit-backdrop-filter: blur(22px) saturate(190%) !important;
+        backdrop-filter: blur(22px) saturate(190%) !important;
+        justify-content: space-between !important;
+        gap: 14px !important;
+        padding: 5px 8px !important;
+        border: none !important;
+        border-radius: 36px !important;
+        box-shadow:
+            0 10px 30px rgba(0, 0, 0, 0.10),
+            0 2px 8px rgba(0, 0, 0, 0.05),
+            0 0 0 0.5px rgba(0, 0, 0, 0.06),
+            inset 0 1px 1px rgba(255, 255, 255, 0.9),
+            inset 0 -1px 2px rgba(255, 255, 255, 0.45),
+            inset 0 0 14px rgba(255, 255, 255, 0.25) !important;
+        overflow: visible !important;
+        isolation: isolate;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+
+    /* Водный блик по контуру + бегущая волна света */
+    body .bottom-nav::before,
+    body .bottom-nav::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        z-index: 2;
+    }
+    body .bottom-nav::before {
+        padding: 1.2px;
+        background: linear-gradient(135deg,
+            rgba(255, 255, 255, 1) 0%,
+            rgba(255, 255, 255, 0.25) 22%,
+            rgba(170, 210, 255, 0.55) 45%,
+            rgba(255, 255, 255, 0.15) 65%,
+            rgba(200, 170, 255, 0.5) 85%,
+            rgba(255, 255, 255, 0.95) 100%);
+    }
+    body .bottom-nav::after {
+        padding: 1.6px;
+        background: linear-gradient(100deg,
+            transparent 35%,
+            rgba(255, 255, 255, 0.95) 48%,
+            rgba(190, 225, 255, 0.8) 52%,
+            transparent 65%);
+        background-size: 260% 100%;
+        animation: vgNavWaterGlint 6s ease-in-out infinite;
+    }
+    @keyframes vgNavWaterGlint {
+        0%   { background-position: 130% 0; opacity: 0; }
+        15%  { opacity: 1; }
+        55%  { background-position: -30% 0; opacity: 1; }
+        70%, 100% { background-position: -30% 0; opacity: 0; }
+    }
+
+    /* Пункты меню: сами без фона, подсветку рисует .vg-nav-pill */
+    body .bottom-nav .nav-item {
+        position: relative;
+        z-index: 3;
+        padding: 6px 2px !important;
+        border-radius: 28px !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        box-shadow: none !important;
+        transition: color 0.25s ease !important;
+        -webkit-user-drag: none;
+    }
+    body .bottom-nav .nav-icon-wrap { width: 46px; }
+    body .bottom-nav .nav-item.vg-under-lens { color: #0a84ff; }
+    body .bottom-nav .nav-item.vg-under-lens .nav-icon-wrap { transform: scale(1.16); }
+    body .bottom-nav .nav-item .nav-svg { width: 23px; height: 23px; display: block; }
+
+    /* Капсула-подсветка / стеклянная линза */
+    .vg-nav-pill {
+        position: absolute;
+        left: 0;
+        top: 5px;
+        height: calc(100% - 10px);
+        width: 0;
+        border-radius: 28px;
+        background-color: rgba(120, 120, 128, 0.14);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        z-index: 1;
+        pointer-events: none;
+        will-change: translate, scale;
+        transition:
+            translate 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+            width 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+            background-color 0.25s ease,
+            box-shadow 0.25s ease,
+            scale 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 0.2s ease;
+    }
+    .vg-nav-pill.no-anim { transition: none !important; }
+    .vg-nav-pill.lens {
+        background-color: rgba(255, 255, 255, 0.16);
+        box-shadow:
+            inset 0 0 0 1.2px rgba(255, 255, 255, 0.95),
+            inset 0 3px 8px rgba(255, 255, 255, 0.55),
+            inset 0 -3px 8px rgba(160, 200, 255, 0.25),
+            0 8px 22px rgba(0, 0, 0, 0.14),
+            0 1px 3px rgba(0, 0, 0, 0.08);
+        scale: 1.05 1.1;
+        -webkit-backdrop-filter: blur(1.5px) saturate(170%) brightness(1.06);
+        backdrop-filter: blur(1.5px) saturate(170%) brightness(1.06);
+    }
+    .vg-nav-pill.dragging {
+        transition:
+            width 0.25s ease,
+            background-color 0.25s ease,
+            box-shadow 0.25s ease,
+            scale 0.3s cubic-bezier(0.3, 1.55, 0.5, 1);
+    }
+    .vg-nav-pill.jelly { animation: vgPillJelly 0.5s ease-out; }
+    @keyframes vgPillJelly {
+        0%   { scale: 1.05 1.1; }
+        40%  { scale: 0.96 1.04; }
+        70%  { scale: 1.02 0.98; }
+        100% { scale: 1 1; }
+    }
+
+    /* Анимации иконок */
+    .vg-ico-contacts { animation: vgIcoContacts 0.62s cubic-bezier(0.3, 0.9, 0.4, 1); }
+    .vg-ico-posts    { animation: vgIcoPosts 0.7s cubic-bezier(0.3, 1.2, 0.5, 1); }
+    .vg-ico-chats    { animation: vgIcoChats 0.65s ease-in-out; }
+    .vg-ico-profile  { animation: vgIcoProfile 0.75s cubic-bezier(0.3, 1.3, 0.5, 1); }
+    @keyframes vgIcoContacts {
+        0%   { transform: scale(1); }
+        25%  { transform: translateY(-4px) scale(1.14, 0.9); }
+        45%  { transform: translateY(0) scale(0.9, 1.12); }
+        65%  { transform: scale(1.06, 0.96); }
+        100% { transform: scale(1.05); }
+    }
+    @keyframes vgIcoPosts {
+        0%   { transform: rotate(0deg) scale(1); }
+        45%  { transform: rotate(70deg) scale(1.22); }
+        100% { transform: rotate(90deg) scale(1.05); }
+    }
+    @keyframes vgIcoChats {
+        0%   { transform: rotate(0) translateY(0); }
+        20%  { transform: rotate(-13deg) translateY(-3px) scale(1.1); }
+        40%  { transform: rotate(10deg) translateY(-2px) scale(1.1); }
+        60%  { transform: rotate(-6deg) scale(1.06); }
+        80%  { transform: rotate(3deg); }
+        100% { transform: rotate(0) scale(1.05); }
+    }
+    @keyframes vgIcoProfile {
+        0%   { transform: rotate(0deg) scale(1); }
+        50%  { transform: rotate(150deg) scale(1.18); }
+        100% { transform: rotate(180deg) scale(1.05); }
+    }
+
+    @media (min-width: 768px) {
+        body .bottom-nav.desktop-only-nav.desktop-only-nav {
+            left: 14px !important;
+            right: auto !important;
+            width: calc(var(--desktop-sidebar-width, 340px) - 28px) !important;
+            max-width: none !important;
+            gap: 10px !important;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        body .bottom-nav.bottom-nav {
+            background: rgba(33, 33, 33, 0.5) !important;
+            background-color: rgba(33, 33, 33, 0.5) !important;
+            box-shadow:
+                0 10px 30px rgba(0, 0, 0, 0.4),
+                0 2px 8px rgba(0, 0, 0, 0.24),
+                inset 0 1px 1px rgba(255, 255, 255, 0.18),
+                inset 0 0 14px rgba(255, 255, 255, 0.05) !important;
+        }
+        body .bottom-nav::before {
+            background: linear-gradient(135deg,
+                rgba(255, 255, 255, 0.45) 0%,
+                rgba(255, 255, 255, 0.06) 25%,
+                rgba(140, 190, 255, 0.3) 45%,
+                rgba(255, 255, 255, 0.04) 65%,
+                rgba(190, 150, 255, 0.3) 85%,
+                rgba(255, 255, 255, 0.4) 100%);
+        }
+        body .bottom-nav::after {
+            background: linear-gradient(100deg, transparent 35%, rgba(255,255,255,0.5) 48%, rgba(170,210,255,0.4) 52%, transparent 65%);
+            background-size: 260% 100%;
+        }
+        .vg-nav-pill {
+            background-color: rgba(120, 120, 128, 0.3);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+        .vg-nav-pill.lens {
+            background-color: rgba(255, 255, 255, 0.07);
+            box-shadow:
+                inset 0 0 0 1.2px rgba(255, 255, 255, 0.4),
+                inset 0 3px 8px rgba(255, 255, 255, 0.14),
+                0 8px 22px rgba(0, 0, 0, 0.35);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        body .bottom-nav::after { animation: none; opacity: 0; }
+        .vg-nav-pill, .vg-nav-pill.dragging { transition: none !important; }
+        .vg-nav-pill.jelly,
+        .vg-ico-contacts, .vg-ico-posts, .vg-ico-chats, .vg-ico-profile { animation: none !important; }
+    }
+</style>
+<script id="vg-liquid-nav-script">
+(function () {
+    'use strict';
+    if (window.__vgLiquidNav) return;
+    window.__vgLiquidNav = true;
+
+    var KEY = 'vg_nav_from';
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var ICON_ANIM = {
+        'contacts.html': 'vg-ico-contacts',
+        'posts.html':    'vg-ico-posts',
+        'chats.html':    'vg-ico-chats',
+        'profile.html':  'vg-ico-profile'
+    };
+
+    // С какой вкладки пришли (записывается перед переходом, живёт 4 секунды)
+    var cameFrom = null, arrivedTo = null;
+    try {
+        var saved = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+        if (saved && Date.now() - saved.t < 4000) { cameFrom = saved.i; arrivedTo = saved.to; }
+        sessionStorage.removeItem(KEY);
+    } catch (e) {}
+
+    function pageOf(a) {
+        return (a.getAttribute('href') || '').split('?')[0].split('#')[0].split('/').pop();
+    }
+
+    function playIcon(item) {
+        if (!item || reduce) return;
+        var ic = item.querySelector('.nav-icon-wrap > i, .nav-icon-wrap > svg');
+        if (!ic) return;
+        var cls = ICON_ANIM[pageOf(item)] || 'vg-ico-contacts';
+        ic.classList.remove(cls);
+        void ic.getBoundingClientRect();
+        ic.classList.add(cls);
+        ic.addEventListener('animationend', function done() {
+            ic.classList.remove(cls);
+            ic.removeEventListener('animationend', done);
+        });
+    }
+
+    var prefetched = {};
+    function prefetch(href) {
+        if (!href || prefetched[href]) return;
+        prefetched[href] = true;
+        var l = document.createElement('link');
+        l.rel = 'prefetch';
+        l.href = href;
+        document.head.appendChild(l);
+    }
+
+    function setup(nav) {
+        var items = [].slice.call(nav.querySelectorAll('.nav-item'));
+        if (!items.length) return;
+        var startCur = items.findIndex(function (it) { return it.classList.contains('active'); });
+        var cur = startCur;
+
+        var pill = document.createElement('span');
+        pill.className = 'vg-nav-pill';
+        pill.setAttribute('aria-hidden', 'true');
+        nav.insertBefore(pill, nav.firstChild);
+
+        var busy = false;      // идёт анимация перехода — не дёргать капсулу по resize
+        var drag = null;
+        var suppressClick = false;
+
+        function geom(i) {
+            var it = items[i];
+            return { x: it.offsetLeft, w: it.offsetWidth, y: it.offsetTop, h: it.offsetHeight };
+        }
+        function place(x, w, instant) {
+            if (instant) pill.classList.add('no-anim');
+            pill.style.width = w + 'px';
+            pill.style.translate = x + 'px 0';
+            if (instant) { void pill.offsetWidth; pill.classList.remove('no-anim'); }
+        }
+        function placeAt(i, instant) {
+            if (i < 0 || !items[i]) { pill.style.opacity = '0'; return; }
+            var g = geom(i);
+            if (!g.w) return;                          // футер сейчас скрыт
+            pill.style.opacity = '1';
+            pill.style.top = g.y + 'px';
+            pill.style.height = g.h + 'px';
+            place(g.x, g.w, instant);
+        }
+        function indexAt(clientX) {
+            var best = 0, bestD = Infinity;
+            items.forEach(function (it, k) {
+                var r = it.getBoundingClientRect();
+                var d = Math.abs(clientX - (r.left + r.width / 2));
+                if (d < bestD) { bestD = d; best = k; }
+            });
+            return best;
+        }
+        function settle() {
+            busy = false;
+            pill.classList.remove('lens', 'dragging');
+            if (!reduce) {
+                pill.classList.remove('jelly');
+                void pill.offsetWidth;
+                pill.classList.add('jelly');
+                setTimeout(function () { pill.classList.remove('jelly'); }, 650);
+            }
+        }
+        function setActiveVisual(i) {
+            items.forEach(function (it, k) { it.classList.toggle('active', k === i); });
+        }
+
+        function go(i) {
+            if (i < 0) return;
+            if (i === cur) {
+                placeAt(cur);
+                settle();
+                playIcon(items[i]);
+                return;
+            }
+            try { sessionStorage.setItem(KEY, JSON.stringify({ i: cur, to: i, t: Date.now() })); } catch (e) {}
+            busy = true;
+            pill.classList.remove('dragging');
+            pill.classList.add('lens');
+            setActiveVisual(i);
+            placeAt(i);
+            var href = items[i].href;
+            setTimeout(function () { window.location.href = href; }, reduce ? 0 : 300);
+        }
+
+        // ----- Появление: линза едет с места прошлой вкладки -----
+        function init() {
+            if (cur < 0) { pill.style.opacity = '0'; return; }
+            if (arrivedTo === cur && !reduce && geom(cur).w) {
+                // путь уже проехали на прошлой странице — только мягко «сдуваем» линзу
+                busy = true;
+                pill.classList.add('lens');
+                placeAt(cur, true);
+                requestAnimationFrame(function () {
+                    setTimeout(function () { settle(); playIcon(items[cur]); }, 140);
+                });
+            } else if (cameFrom !== null && cameFrom !== cur && items[cameFrom] && !reduce && geom(cur).w) {
+                busy = true;
+                placeAt(cameFrom, true);
+                pill.classList.add('lens');
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () {
+                        placeAt(cur);
+                        setTimeout(function () { settle(); playIcon(items[cur]); }, 420);
+                    });
+                });
+            } else {
+                placeAt(cur, true);
+            }
+        }
+
+        // ----- Перетаскивание пальцем / мышью -----
+        nav.addEventListener('pointerdown', function (e) {
+            if (e.button > 0 || busy) return;
+            var hit = indexAt(e.clientX);
+            prefetch(items[hit] && items[hit].href);
+            drag = { id: e.pointerId, x0: e.clientX, moved: false, left: nav.getBoundingClientRect().left, startHit: hit };
+            if (hit === cur) pill.classList.add('lens');   // нажали на активный пункт — линза «надувается»
+        });
+
+        nav.addEventListener('pointermove', function (e) {
+            if (!drag || e.pointerId !== drag.id) return;
+            var dx = e.clientX - drag.x0;
+            if (!drag.moved) {
+                if (Math.abs(dx) < 6) return;
+                drag.moved = true;
+                try { nav.setPointerCapture(e.pointerId); } catch (err) {}
+                pill.classList.add('lens', 'dragging');
+            }
+            var w = geom(Math.max(cur, 0)).w || pill.offsetWidth;
+            var first = items[0], last = items[items.length - 1];
+            var minX = first.offsetLeft;
+            var maxX = last.offsetLeft + last.offsetWidth - w;
+            var x = Math.max(minX, Math.min(maxX, e.clientX - drag.left - w / 2));
+            place(x, w);
+            var h = indexAt(e.clientX);
+            prefetch(items[h].href);
+            items.forEach(function (it, k) { it.classList.toggle('vg-under-lens', k === h); });
+        });
+
+        function endDrag(e, cancelled) {
+            if (!drag || (e && e.pointerId !== drag.id)) return;
+            var d = drag;
+            drag = null;
+            items.forEach(function (it) { it.classList.remove('vg-under-lens'); });
+            if (d.moved) {
+                suppressClick = true;
+                setTimeout(function () { suppressClick = false; }, 400);
+                if (cancelled) { placeAt(cur); settle(); }
+                else go(indexAt(e.clientX));
+            } else if (cancelled) {
+                settle();
+            }
+            // простое нажатие обработает click
+        }
+        nav.addEventListener('pointerup', function (e) { endDrag(e, false); });
+        nav.addEventListener('pointercancel', function (e) { endDrag(e, true); });
+        nav.addEventListener('lostpointercapture', function (e) { if (drag && drag.moved) endDrag(e, false); });
+
+        nav.addEventListener('click', function (e) {
+            var a = e.target.closest('.nav-item');
+            if (!a || !nav.contains(a)) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;   // открыть в новой вкладке — как обычно
+            e.preventDefault();
+            if (suppressClick || busy) return;
+            go(items.indexOf(a));
+        });
+        nav.addEventListener('dragstart', function (e) { e.preventDefault(); });
+
+        // Пересчёт при изменении размеров / показе футера
+        if (window.ResizeObserver) {
+            new ResizeObserver(function () { if (!busy && !drag) placeAt(cur, true); }).observe(nav);
+        }
+        window.addEventListener('resize', function () { if (!busy && !drag) placeAt(cur, true); });
+
+        // Возврат кнопкой «Назад» из кэша браузера — вернуть исходное состояние
+        window.addEventListener('pageshow', function (e) {
+            if (!e.persisted) return;
+            busy = false;
+            cur = startCur;
+            setActiveVisual(cur);
+            pill.classList.remove('lens', 'dragging', 'jelly');
+            placeAt(cur, true);
+        });
+
+        init();
+    }
+
+    function start() {
+        document.querySelectorAll('.bottom-nav').forEach(setup);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+})();
+</script>
 </body>
 </html>
