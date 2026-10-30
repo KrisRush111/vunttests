@@ -228,7 +228,7 @@
         .posts-feed::-webkit-scrollbar { width: 4px; }
         .posts-feed::-webkit-scrollbar-thumb { background: var(--telegram-hint); border-radius: 2px; }
 
-        .posts-list { display: flex; flex-direction: column; gap: 24px; padding: 10px 8px; }
+        .posts-list { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px; }
         .posts-list:empty { display: none; }
 
         /* «Пусто» строго по центру экрана */
@@ -1208,31 +1208,55 @@
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             pointer-events: none;
         }
-        /* Воздушная переливающаяся тень — свой цвет у каждой публикации */
+        /* Тонкий «водный» контур своего цвета у каждой публикации (как блик у футера).
+           В покое неподвижен; перелив бежит по контуру, только пока на пост
+           навели мышку или держат на нём палец. */
         .post-card::before {
             content: '';
             position: absolute;
-            inset: -9px;
-            z-index: -1;
-            border-radius: 28px;
-            background: conic-gradient(from 210deg,
-                var(--glow, #4fc3f7), var(--glow2, #9be3ff), var(--glow, #4fc3f7),
-                var(--glow2, #9be3ff), var(--glow, #4fc3f7));
-            filter: blur(12px);
-            opacity: 0.75;
+            inset: 0;
+            z-index: 1;
+            border-radius: inherit;
+            padding: 1.6px;
+            background: linear-gradient(120deg,
+                var(--glow, #4fc3f7) 0%,
+                var(--glow2, #9be3ff) 18%,
+                rgba(255, 255, 255, 0.95) 30%,
+                var(--glow, #4fc3f7) 42%,
+                var(--glow2, #9be3ff) 58%,
+                rgba(255, 255, 255, 0.9) 70%,
+                var(--glow, #4fc3f7) 84%,
+                var(--glow2, #9be3ff) 100%);
+            background-size: 300% 300%;
+            background-position: 0% 50%;
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            opacity: 0.85;
             pointer-events: none;
+            transition: opacity 0.3s ease;
         }
-        .post-card.glow-on::before { animation: postGlow 5.5s ease-in-out infinite; animation-delay: var(--glow-delay, 0s); }
-        @keyframes postGlow {
-            0%   { opacity: 0.6;  transform: scale(0.995); filter: blur(12px) hue-rotate(-10deg); }
-            50%  { opacity: 0.95; transform: scale(1.02);  filter: blur(16px) hue-rotate(12deg); }
-            100% { opacity: 0.6;  transform: scale(0.995); filter: blur(12px) hue-rotate(-10deg); }
+        /* Мягкий внутренний блик «как вода» — на фоне карточки */
+        .post-card::after {
+            box-shadow:
+                0 1px 3px rgba(0, 0, 0, 0.05),
+                inset 0 1px 1px rgba(255, 255, 255, 0.9),
+                inset 0 0 10px color-mix(in srgb, var(--glow, #4fc3f7) 10%, transparent);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .post-card:hover::before { opacity: 1; animation: postWater 2.8s linear infinite; }
+        }
+        .post-card.touching::before { opacity: 1; animation: postWater 2.8s linear infinite; }
+        @keyframes postWater {
+            from { background-position: 0% 50%; }
+            to   { background-position: 300% 50%; }
         }
         @media (prefers-color-scheme: dark) {
-            .post-card::before { opacity: 0.6; }
+            .post-card::before { opacity: 0.7; }
+            .post-card::after { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.06); }
         }
         @media (prefers-reduced-motion: reduce) {
-            .post-card.glow-on::before { animation: none; }
+            .post-card:hover::before, .post-card.touching::before { animation: none; }
         }
         @keyframes postIn {
             from { opacity: 0; transform: translateY(14px) scale(0.98); }
@@ -3943,7 +3967,6 @@ vgResolveBadgeSrc();
             ['#4fc3f7', '#9be3ff'],   // голубой
             ['#9be15d', '#d4f7a1'],   // салатный
             ['#ffd54f', '#ffe9a0'],   // жёлтый
-            ['#a1785c', '#d2b49c'],   // коричневый
             ['#3d7bff', '#8fb2ff'],   // синий
             ['#b9a5ff', '#ddd1ff'],   // сиреневый
             ['#22d3c5', '#8ff0e6']    // бирюзовый
@@ -3953,10 +3976,23 @@ vgResolveBadgeSrc();
             var n = Math.abs(parseInt(id, 10) || 0);
             return GLOWS[n % GLOWS.length];
         }
-        // Переливаются только карточки на экране — меньше нагрузка на телефон
-        var glowObserver = window.IntersectionObserver ? new IntersectionObserver(function (entries) {
-            entries.forEach(function (en) { en.target.classList.toggle('glow-on', en.isIntersecting); });
-        }, { rootMargin: '80px 0px' }) : null;
+        // Перелив контура пальцем: пока палец на посте (и ещё секунду после)
+        function bindWaterTouch(el) {
+            var timer = null;
+            el.addEventListener('pointerdown', function (e) {
+                if (e.pointerType === 'mouse') return;      // мышью — через :hover
+                clearTimeout(timer);
+                el.classList.add('touching');
+            });
+            var off = function (e) {
+                if (e && e.pointerType === 'mouse') return;
+                clearTimeout(timer);
+                timer = setTimeout(function () { el.classList.remove('touching'); }, 1200);
+            };
+            el.addEventListener('pointerup', off);
+            el.addEventListener('pointercancel', off);
+            el.addEventListener('pointerleave', off);
+        }
         function catTitle(id) {
             var c = CATEGORIES.filter(function (x) { return x.id === id; })[0];
             return c ? c.title : id;
@@ -3984,8 +4020,7 @@ vgResolveBadgeSrc();
             var glow = glowFor(p.id);
             el.style.setProperty('--glow', glow[0]);
             el.style.setProperty('--glow2', glow[1]);
-            el.style.setProperty('--glow-delay', (-(Math.abs(parseInt(p.id, 10) || 0) % 11) * 0.5) + 's');
-            if (glowObserver) glowObserver.observe(el); else el.classList.add('glow-on');
+            bindWaterTouch(el);
             el.innerHTML =
                 '<div class="post-head"><div class="post-avatar"></div><div class="post-head-text">' +
                     '<div class="post-author"></div><div class="post-time"></div></div>' +
