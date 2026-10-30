@@ -847,47 +847,87 @@
         .post-text ul, .post-text ol { padding-left: 22px; margin: 4px 0; }
         .composer-editor a, .post-text a { color: var(--vg-blue); text-decoration: underline; }
 
-        /* Миниатюры фото */
+        /* Фото в рамке — во всю её ширину, над текстом или под ним */
+        .composer-box { display: flex; flex-direction: column; }
+        .composer-editor { order: 2; }
+        .composer-photos { order: 3; }
+        .composer-box.photos-top .composer-photos { order: 1; }
+        .composer-box-footer { order: 4; }
+        .composer-box.has-photos .composer-editor { min-height: 52px; }
+
         .composer-photos {
-            display: flex;
-            gap: 8px;
-            overflow-x: auto;
-            padding: 10px 0 2px;
-            scrollbar-width: none;
+            display: grid;
+            gap: 6px;
+            margin: 10px 0 2px;
+            border-radius: 16px;
+            overflow: hidden;
+            transition: opacity 0.18s ease, transform 0.18s ease;
         }
-        .composer-photos::-webkit-scrollbar { display: none; }
+        .composer-box.photos-top .composer-photos { margin: 0 0 12px; }
         .composer-photos:empty { display: none; }
+        .composer-photos.n1 { grid-template-columns: 1fr; }
+        .composer-photos.n2 { grid-template-columns: 1fr 1fr; }
+        .composer-photos.nmany { grid-template-columns: 1fr 1fr 1fr; }
+        .composer-photos.swapping { opacity: 0; transform: scale(0.98); }
+
         .composer-photo {
             position: relative;
-            width: 74px;
-            height: 74px;
-            border-radius: 14px;
+            aspect-ratio: 1;
+            border-radius: 10px;
             overflow: hidden;
-            flex-shrink: 0;
             background: var(--telegram-divider);
             animation: composerPhotoIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
         }
+        .composer-photos.n1 .composer-photo { aspect-ratio: auto; max-height: 300px; }
+        .composer-photos.n1 .composer-photo img { max-height: 300px; }
         .composer-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .composer-photo-remove {
             position: absolute;
-            top: 4px;
-            right: 4px;
-            width: 22px;
-            height: 22px;
+            top: 6px;
+            right: 6px;
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
             border: none;
             background: rgba(0, 0, 0, 0.55);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
             color: #fff;
-            font-size: 10px;
+            font-size: 11px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
         }
         @keyframes composerPhotoIn {
-            from { opacity: 0; transform: scale(0.8); }
+            from { opacity: 0; transform: scale(0.92); }
             to   { opacity: 1; transform: scale(1); }
         }
+
+        /* Кнопка «фото над / под текстом» */
+        .composer-box-tools { display: flex; align-items: center; gap: 2px; }
+        .photo-pos-btn {
+            width: 34px;
+            height: 34px;
+            border: none;
+            background: transparent;
+            color: var(--telegram-hint);
+            border-radius: 50%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: color 0.2s ease, background-color 0.2s ease;
+        }
+        .photo-pos-btn.show { display: flex; animation: composerPhotoIn 0.25s ease; }
+        .photo-pos-btn:hover { color: var(--vg-purple); background: var(--rec-row-hover); }
+        .photo-pos-btn svg {
+            width: 20px;
+            height: 20px;
+            display: block;
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .composer-box:not(.photos-top) .photo-pos-btn svg { transform: rotate(180deg); }
 
         /* Нижняя строка рамки: фото + счётчик */
         .composer-box-footer {
@@ -1153,6 +1193,7 @@
         .post-photos.n3, .post-photos.nmany { grid-template-columns: 1fr 1fr 1fr; }
         .post-photos img { width: 100%; height: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
         .post-photos.n1 img { aspect-ratio: auto; max-height: 420px; }
+        .post-photos.top { margin: 0 0 10px; }
         .post-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
         .post-tag {
             font-size: 12px;
@@ -1317,14 +1358,22 @@
                 </div>
 
                 <!-- Рамка ввода текста -->
-                <div class="composer-box" id="composerBox">
+                <div class="composer-box photos-top" id="composerBox">
                     <div class="composer-editor" id="composerEditor" contenteditable="true" role="textbox" aria-multiline="true"
                          data-placeholder="О чём хотите рассказать?" spellcheck="true"></div>
                     <div class="composer-photos" id="composerPhotos"></div>
                     <div class="composer-box-footer">
-                        <button class="composer-photo-btn" id="composerPhotoBtn" type="button">
-                            <i class="far fa-image"></i><span id="composerPhotoLabel">Фото</span>
-                        </button>
+                        <div class="composer-box-tools">
+                            <button class="composer-photo-btn" id="composerPhotoBtn" type="button">
+                                <i class="far fa-image"></i><span id="composerPhotoLabel">Фото</span>
+                            </button>
+                            <button class="photo-pos-btn" id="photoPosBtn" type="button" title="Фото под текстом" aria-label="Фото под текстом">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M8 20V5M4 9l4-4 4 4"/>
+                                    <path d="M16 4v15M12 15l4 4 4-4"/>
+                                </svg>
+                            </button>
+                        </div>
                         <span class="composer-counter" id="composerCounter">0 / 2000</span>
                     </div>
                     <input type="file" id="composerFile" accept="image/*" multiple hidden>
@@ -1507,12 +1556,13 @@
             var el = document.createElement('article');
             el.className = 'post-card';
             var n = p.photos.length;
-            var photosHtml = n ? '<div class="post-photos ' + (n === 1 ? 'n1' : n === 2 ? 'n2' : n === 3 ? 'n3' : 'nmany') + '">' +
+            var top = p.photoPos !== 'bottom';
+            var photosHtml = n ? '<div class="post-photos ' + (n === 1 ? 'n1' : n === 2 ? 'n2' : n === 3 ? 'n3' : 'nmany') + (top ? ' top' : '') + '">' +
                 p.photos.map(function () { return '<img alt="" loading="lazy">'; }).join('') + '</div>' : '';
             el.innerHTML =
                 '<div class="post-head"><div class="post-avatar">Я</div><div>' +
                     '<div class="post-author">Вы</div><div class="post-time"></div></div></div>' +
-                '<div class="post-text"></div>' + photosHtml +
+                (top ? photosHtml + '<div class="post-text"></div>' : '<div class="post-text"></div>' + photosHtml) +
                 '<div class="post-tags"></div>' +
                 '<div class="post-actions">' +
                     '<button type="button" class="post-action post-like"><i class="far fa-heart"></i><span></span></button>' +
@@ -1625,6 +1675,24 @@
         var toolbar    = document.getElementById('composerToolbar');
 
         var photos = [];                  // { url, file }
+        var photoPos = 'top';             // 'top' — над текстом, 'bottom' — под текстом
+        var box = document.getElementById('composerBox');
+        var posBtn = document.getElementById('photoPosBtn');
+        function paintPhotoPos() {
+            box.classList.toggle('photos-top', photoPos === 'top');
+            var label = photoPos === 'top' ? 'Фото под текстом' : 'Фото над текстом';
+            posBtn.title = label;
+            posBtn.setAttribute('aria-label', label);
+        }
+        posBtn.addEventListener('click', function () {
+            photosBox.classList.add('swapping');
+            setTimeout(function () {
+                photoPos = photoPos === 'top' ? 'bottom' : 'top';
+                paintPhotoPos();
+                requestAnimationFrame(function () { photosBox.classList.remove('swapping'); });
+                saveDraft();
+            }, 170);
+        });
         var chosen = ['all'];             // выбранные рекомендации
         var savedRange = null;
         var lastFocus = null;
@@ -1688,6 +1756,10 @@
         });
         function renderPhotos() {
             photosBox.innerHTML = '';
+            var n = photos.length;
+            photosBox.className = 'composer-photos' + (n === 1 ? ' n1' : n === 2 ? ' n2' : n > 2 ? ' nmany' : '');
+            posBtn.classList.toggle('show', n > 0);
+            box.classList.toggle('has-photos', n > 0);
             photos.forEach(function (p, i) {
                 var d = document.createElement('div');
                 d.className = 'composer-photo';
@@ -1799,7 +1871,7 @@
                 try {
                     if (!textLen()) { localStorage.removeItem(DRAFT_KEY); draftNote.textContent = ''; return; }
                     localStorage.setItem(DRAFT_KEY, JSON.stringify({
-                        html: editor.innerHTML, cats: chosen,
+                        html: editor.innerHTML, cats: chosen, photoPos: photoPos,
                         comments: commentsCb.checked, likes: likesCb.checked
                     }));
                     flashNote('Черновик сохранён');
@@ -1814,6 +1886,8 @@
                 chosen = (d.cats && d.cats.length) ? d.cats : ['all'];
                 if (chosen.indexOf('all') < 0) chosen.unshift('all');
                 commentsCb.checked = d.comments !== false;
+                photoPos = d.photoPos === 'bottom' ? 'bottom' : 'top';
+                paintPhotoPos();
                 likesCb.checked = d.likes !== false;
                 if (textLen()) draftNote.textContent = 'Восстановлен черновик';
             } catch (e) {}
@@ -1872,6 +1946,7 @@
                 id: Date.now(),
                 html: sanitize(editor.innerHTML),
                 photos: photos.map(function (p) { return p.url; }),
+                photoPos: photoPos,
                 categories: chosen.slice(),
                 comments: commentsCb.checked,
                 showLikes: likesCb.checked,
@@ -1882,6 +1957,8 @@
             // сброс формы
             editor.innerHTML = '';
             photos = [];
+            photoPos = 'top';
+            paintPhotoPos();
             chosen = ['all'];
             commentsCb.checked = true;
             likesCb.checked = true;
