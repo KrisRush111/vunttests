@@ -1290,11 +1290,11 @@
             flex: 0 0 100%;
             scroll-snap-align: center;
             scroll-snap-stop: always;
-            aspect-ratio: var(--ratio, 4 / 5);  /* по первому фото, от 4:5 до 1.91:1 */
+            aspect-ratio: var(--ratio, 1);  /* по первому фото, в пределах RATIO_MIN … RATIO_MAX */
             max-height: 560px;
             width: 100%;
         }
-        .post-photos.single .post-slide { aspect-ratio: auto; max-height: 520px; }
+
         .post-slide img {
             width: 100%;
             height: 100%;
@@ -1305,7 +1305,7 @@
             /* в ленте фото чуть ярче и сочнее; в полноэкранном просмотре — оригинал */
             filter: brightness(1.06) saturate(1.18) contrast(1.03);
         }
-        .post-photos.single .post-slide img { height: auto; max-height: 520px; }
+
 
         .post-dots {
             position: absolute;
@@ -4307,6 +4307,23 @@ vgResolveBadgeSrc();
                 else { zoom.x -= e.deltaX; zoom.y -= e.deltaY; clampPan(img); applyZoom(img, false); }
             }, { passive: false });
         })();
+        // Пропорции рамки фото: от 4:5 (вертикальное) до 3:2 (горизонтальное)
+        var RATIO_MIN = 0.8, RATIO_MAX = 1.5;
+        function clampRatio(r) { return Math.round(Math.max(RATIO_MIN, Math.min(RATIO_MAX, r)) * 1000) / 1000; }
+        var RATIO_KEY = 'vg_photo_ratio_v1', ratioMap = null;
+        function ratioStore() {
+            if (!ratioMap) { try { ratioMap = JSON.parse(localStorage.getItem(RATIO_KEY) || '{}') || {}; } catch (e) { ratioMap = {}; } }
+            return ratioMap;
+        }
+        function photoRatio(url) { var r = ratioStore()[url]; return r ? clampRatio(r) : 0; }
+        function rememberRatio(url, r) {
+            var m = ratioStore();
+            if (m[url] === r || !url || url.indexOf('data:') === 0) return;
+            m[url] = r;
+            var keys = Object.keys(m);
+            if (keys.length > 400) keys.slice(0, keys.length - 400).forEach(function (k) { delete m[k]; });
+            try { localStorage.setItem(RATIO_KEY, JSON.stringify(m)); } catch (e) {}
+        }
         // Листание фото: свайп/трекпад (scroll-snap), стрелки на компьютере, точки + счётчик
         function setupCarousel(root, n) {
             var track = root.querySelector('.post-slides');
@@ -4463,17 +4480,20 @@ vgResolveBadgeSrc();
                     openPhotoViewer(p, i, box && box.querySelector('.post-slides'));
                 });
             });
-            if (n > 1) {
+            if (n) {
                 var box = el.querySelector('.post-photos');
-                // Высоту ленты задаёт первое фото (как в Instagram): 4:5 … 1.91:1
+                // Рамку задаёт ПЕРВОЕ фото, но в разумных пределах (остальные подстраиваются под неё)
                 var first = box.querySelector('.post-slide img');
+                var known = photoRatio(p.photos[0]);
+                if (known) box.style.setProperty('--ratio', String(known));   // из кэша — без прыжка ленты
                 var setRatio = function () {
                     if (!first.naturalWidth) return;
-                    var r = Math.max(0.8, Math.min(1.91, first.naturalWidth / first.naturalHeight));
+                    var r = clampRatio(first.naturalWidth / first.naturalHeight);
                     box.style.setProperty('--ratio', String(r));
+                    rememberRatio(p.photos[0], r);
                 };
                 if (first.complete) setRatio(); else first.addEventListener('load', setRatio, { once: true });
-                setupCarousel(box, n);
+                if (n > 1) setupCarousel(box, n);
             }
             // Разделы поста на карточке не показываем: они нужны только для
             // того, в каких рекомендациях пост виден (p.categories)
