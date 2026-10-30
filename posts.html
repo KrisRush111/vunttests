@@ -3545,14 +3545,35 @@ vgResolveBadgeSrc();
             if (u.has_avatar === false || u.has_avatar_photo === false) return false;
             return true;
         }
+        // avatar-cache.js объявляет `const AvatarCache` — это глобальное имя, но НЕ
+        // window.AvatarCache. Раньше страница искала window.AvatarCache, не находила
+        // его и каждый раз качала фото заново, ничего не сохраняя на устройстве.
+        function getAvatarCache() {
+            try {
+                return (typeof AvatarCache !== 'undefined' && AvatarCache && typeof AvatarCache.render === 'function')
+                    ? AvatarCache : null;
+            } catch (e) { return null; }
+        }
+        // avatar-cache.js берёт цвет фона через window.adjustColor (как на других страницах)
+        if (typeof window.adjustColor !== 'function') {
+            window.adjustColor = function (hex, percent) { return lighten(hex, Math.round(2.55 * percent)); };
+        }
         function paintAvatar(el, u, size) {
             if (!el || !u) return;
             size = size || 40;
             var ini = initialOf(u);
             var uid = u.platform_user_id;
             var hasPhoto = mayHavePhoto(u);
-            var AC = window.AvatarCache;
+            var AC = getAvatarCache();
             var color = u.avatar_background || '#9501ff';
+
+            // Основной путь — тот же AvatarCache, что в чатах и контактах:
+            //  • фото, уже сохранённое на устройстве, рисуется СРАЗУ, без сети;
+            //  • в фоне — лёгкая проверка /avatar_version; картинка качается заново
+            //    только если автор сменил аватарку, и снова сохраняется до следующей смены.
+            if (AC && uid) {
+                try { AC.render(SERVER_URL, el, uid, ini, color, hasPhoto, size); return; } catch (e) {}
+            }
 
             // 1) сразу, без сети: сохранённое на устройстве фото или цветной круг
             var cached = (hasPhoto && uid && AC && AC.getLocalSync) ? AC.getLocalSync(uid) : null;
@@ -3569,7 +3590,8 @@ vgResolveBadgeSrc();
                 el.style.background = 'linear-gradient(135deg, ' + color + ', ' + lighten(color, 20) + ')';
                 el.textContent = knows ? '' : ini;
             }
-            // 2) фото с нашего сервера: /avatar_version (есть ли фото и какая версия)
+            // Запасной путь, если avatar-cache.js не загрузился:
+        // 2) фото с нашего сервера: /avatar_version (есть ли фото и какая версия)
             //    + /avatar/<id>?size=… — картинка нужного размера
             if (hasPhoto && uid) {
                 avatarPhoto(uid, size).then(function (url) {
@@ -3677,7 +3699,7 @@ vgResolveBadgeSrc();
                 if (!data || data.status !== 'success' || !data.user) return;
                 me = Object.assign({}, me, data.user, { has_avatar: data.user.has_avatar });
                 saveMe();
-                try { if (window.AvatarCache && window.AvatarCache.setSelf) window.AvatarCache.setSelf(me.platform_user_id, me.avatar_url); } catch (e) {}
+                try { var AC = getAvatarCache(); if (AC && AC.setSelf) AC.setSelf(me.platform_user_id, me.avatar_url); } catch (e) {}
                 paintMe();
             }).catch(function () {}).then(function () { refreshing = false; });
         }
@@ -5443,6 +5465,88 @@ vgResolveBadgeSrc();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
+})();
+</script>
+
+<!-- ==========================================================================
+     МГНОВЕННОЕ ОБНОВЛЕНИЕ СТРАНИЦ (vg-app-updater)
+     service-worker.js отдаёт страницу из кэша (быстро), но при КАЖДОМ открытии
+     сверяет её и её скрипты с сервером. Если что-то изменилось — присылает
+     VG_UPDATED, и страница перезагружается на свежую версию:
+       • сразу — если её открыли только что и пользователь ещё ничего не делает;
+       • иначе — при следующем возвращении в приложение / уходе с поля ввода,
+         чтобы не потерять набранный текст и открытый чат.
+     ========================================================================== -->
+<script id="vg-app-updater">
+(function () {
+    'use strict';
+    if (window.__vgAppUpdater || !('serviceWorker' in navigator)) return;
+    window.__vgAppUpdater = true;
+
+    var openedAt = Date.now();
+    var pending = false;
+    var KEY = 'vg_auto_reload_at';
+
+    // Пользователь чем-то занят — перезагрузка помешала бы
+    function busy() {
+        var a = document.activeElement;
+        if (a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+        return !!document.querySelector(
+            '.composer.open, .chat-modal.active, .report-sheet-overlay, .report-confirm-overlay, ' +
+            '.photo-viewer-modal.active, .user-profile.open');
+    }
+    // Не чаще раза в 20 секунд — защита от зацикливания
+    function allowed() {
+        try {
+            var last = parseInt(sessionStorage.getItem(KEY), 10) || 0;
+            if (Date.now() - last < 20000) return false;
+            sessionStorage.setItem(KEY, String(Date.now()));
+        } catch (e) {}
+        return true;
+    }
+    function reloadNow() {
+        pending = false;
+        if (allowed()) window.location.reload();
+    }
+    function onUpdate() {
+        // Только что открыли и ничего не трогали — обновляемся сразу
+        if (!busy() && (Date.now() - openedAt < 10000 || document.visibilityState === 'hidden')) {
+            reloadNow();
+        } else {
+            pending = true;
+        }
+    }
+
+    navigator.serviceWorker.addEventListener('message', function (e) {
+        if (e.data && e.data.type === 'VG_UPDATED') onUpdate();
+    });
+    // Вернулись в приложение — подходящий момент
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+            if (pending && !busy()) reloadNow();
+            checkForNewWorker();
+        }
+    });
+    // Закончили печатать / закрыли окно — тоже подходящий момент
+    document.addEventListener('focusout', function () {
+        setTimeout(function () { if (pending && !busy()) reloadNow(); }, 400);
+    });
+    document.addEventListener('click', function () {
+        setTimeout(function () { if (pending && !busy() && Date.now() - openedAt > 1000) reloadNow(); }, 600);
+    }, true);
+
+    // Новая версия самого service-worker.js — браузер проверяет её не всегда,
+    // поэтому спрашиваем явно при открытии и при возвращении в приложение
+    var lastCheck = 0;
+    function checkForNewWorker() {
+        if (Date.now() - lastCheck < 30000) return;
+        lastCheck = Date.now();
+        navigator.serviceWorker.getRegistration().then(function (reg) {
+            if (reg && reg.update) reg.update().catch(function () {});
+        }).catch(function () {});
+    }
+    if (document.readyState === 'complete') checkForNewWorker();
+    else window.addEventListener('load', checkForNewWorker);
 })();
 </script>
 </body>
