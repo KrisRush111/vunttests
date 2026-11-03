@@ -4214,8 +4214,63 @@ vgResolveBadgeSrc();
             });
         }
         // Пост с сервера -> формат карточки
+        // ===== Лайки: одно состояние на все виды и списки =====
+        // Свежие нажатия хранятся здесь, пока сервер их точно не «увидел»,
+        // чтобы кэш или ответ, отправленный до нажатия, не откатывал сердечко.
+        var likeLocal = {};             // id -> { liked, likes, at }
+        var LIKE_HOLD_MS = 20000;
+        function applyLocalLike(x) {
+            var l = likeLocal[x.id];
+            if (!l) return x;
+            if (Date.now() - l.at > LIKE_HOLD_MS && !l.pending) { delete likeLocal[x.id]; return x; }
+            x.liked = l.liked; x.likes = l.likes;
+            return x;
+        }
+        // Поменять лайк везде: в ленте, в профиле, в листе поста и в кэше ленты на устройстве
+        function setLikeEverywhere(id, liked, likes) {
+            posts.forEach(function (x) { if (x.id === id) { x.liked = liked; x.likes = likes; } });
+            [].slice.call(document.querySelectorAll('[data-id="' + id + '"]')).forEach(function (el) {
+                if (el._post) { el._post.liked = liked; el._post.likes = likes; }
+                if (el._paintLike) el._paintLike();
+            });
+            try {
+                var prefix = 'vg_posts_feed_' + String(me.platform_user_id || '') + '_';
+                for (var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    if (!k || k.indexOf(prefix) !== 0) continue;
+                    var d = JSON.parse(localStorage.getItem(k) || 'null');
+                    var hit = false;
+                    (d && d.posts || []).forEach(function (r) {
+                        if (r.id === id) { r.liked = liked; if (r.likes_count !== null && r.likes_count !== undefined) r.likes_count = likes; hit = true; }
+                    });
+                    if (hit) localStorage.setItem(k, JSON.stringify(d));
+                }
+            } catch (e) {}
+        }
+        // Нажатие на сердечко (карточка или плитка)
+        var likeBusyIds = {};
+        function toggleLike(p) {
+            if (likeBusyIds[p.id]) return;
+            likeBusyIds[p.id] = true;
+            var prev = { liked: p.liked, likes: p.likes };
+            var liked = !p.liked;
+            var likes = Math.max(0, (p.likes || 0) + (liked ? 1 : -1));
+            likeLocal[p.id] = { liked: liked, likes: likes, at: Date.now(), pending: true };
+            p.liked = liked; p.likes = likes;
+            setLikeEverywhere(p.id, liked, likes);
+            api('/toggle_post_like', { post_id: p.id }).then(function (d) {
+                var srvLiked = typeof d.liked === 'boolean' ? d.liked : liked;
+                var srvLikes = d.likes_count !== null && d.likes_count !== undefined ? d.likes_count : likes;
+                likeLocal[p.id] = { liked: srvLiked, likes: srvLikes, at: Date.now(), pending: false };
+                setLikeEverywhere(p.id, srvLiked, srvLikes);
+            }).catch(function () {
+                delete likeLocal[p.id];
+                setLikeEverywhere(p.id, prev.liked, prev.likes);     // не получилось — возвращаем
+            }).then(function () { delete likeBusyIds[p.id]; });
+        }
+
         function fromServer(p) {
-            return {
+            return applyLocalLike({
                 id: p.id,
                 author: p.author || {},
                 html: p.html || '',
@@ -4228,7 +4283,14 @@ vgResolveBadgeSrc();
                 liked: !!p.liked,
                 mine: !!p.is_mine,
                 createdAt: p.created_at ? Date.parse(p.created_at) : Date.now()
-            };
+            });
+        }
+        // «Отпечаток» поста: если с сервера пришло то же самое — ленту не перерисовываем
+        function postSig(x, withLikes) {
+            var a = x.author || {};
+            return JSON.stringify([x.id, x.html, x.photos, x.photoPos, x.comments, x.showLikes, x.mine,
+                a.nickname, a.avatar_version, a.has_avatar, a.avatar_background, a.is_verified,
+                withLikes ? [x.liked, x.likes] : 0]);
         }
         // Первая страница каждого раздела хранится на устройстве — лента
         // появляется сразу, а свежие посты подменяют её через мгновение
@@ -4237,7 +4299,15 @@ vgResolveBadgeSrc();
             try { var d = JSON.parse(localStorage.getItem(cacheKey(cat)) || 'null'); return d && d.posts ? d : null; } catch (e) { return null; }
         }
         function writeCache(cat, list, hasMore, nextBefore) {
-            try { localStorage.setItem(cacheKey(cat), JSON.stringify({ posts: list.slice(0, 15), hasMore: hasMore, nextBefore: nextBefore })); } catch (e) {}
+            // свежие нажатия на сердечко важнее ответа, который мог уйти до нажатия
+            list = list.slice(0, 15).map(function (r) {
+                var l = likeLocal[r.id];
+                if (!l) return r;
+                r = Object.assign({}, r, { liked: l.liked });
+                if (r.likes_count !== null && r.likes_count !== undefined) r.likes_count = l.likes;
+                return r;
+            });
+            try { localStorage.setItem(cacheKey(cat), JSON.stringify({ posts: list, hasMore: hasMore, nextBefore: nextBefore })); } catch (e) {}
         }
 
         function loadFeed(reset) {
@@ -4260,12 +4330,24 @@ vgResolveBadgeSrc();
                 .then(function (d) {
                     if (seq !== feed.seq) return;               // уже выбран другой раздел
                     var list = (d.posts || []).map(fromServer);
-                    posts = reset ? list : posts.concat(list);
                     feed.hasMore = !!d.has_more;
                     feed.nextBefore = d.next_before;
                     feed.loaded = true;
                     feed.error = '';
                     if (reset) writeCache(cat, d.posts || [], feed.hasMore, feed.nextBefore);
+                    var sameShape = reset && list.length === posts.length && list.every(function (x, i) {
+                        return postSig(x, false) === postSig(posts[i], false);
+                    });
+                    if (sameShape) {
+                        // те же посты — только обновляем лайки на месте, без мигания
+                        list.forEach(function (x, i) {
+                            var old = posts[i];
+                            if (old.liked !== x.liked || old.likes !== x.likes) setLikeEverywhere(x.id, x.liked, x.likes);
+                        });
+                        renderFeedState();
+                        return;
+                    }
+                    posts = reset ? list : posts.concat(list);
                     renderPosts();
                 })
                 .catch(function (err) {
@@ -4958,23 +5040,10 @@ vgResolveBadgeSrc();
                     like.classList.remove('pop'); void like.offsetWidth; like.classList.add('pop');
                 }
             }
-            var likeBusy = false;
-            like.addEventListener('click', function () {
-                if (likeBusy) return;
-                likeBusy = true;
-                var prev = { liked: p.liked, likes: p.likes };
-                p.liked = !p.liked;                          // сразу на экране
-                p.likes = Math.max(0, p.likes + (p.liked ? 1 : -1));
-                paintLike(p.liked);
-                api('/toggle_post_like', { post_id: p.id }).then(function (d) {
-                    p.liked = !!d.liked;
-                    if (d.likes_count !== null && d.likes_count !== undefined) p.likes = d.likes_count;
-                    paintLike();
-                }).catch(function () {
-                    p.liked = prev.liked; p.likes = prev.likes;  // не получилось — возвращаем
-                    paintLike();
-                }).then(function () { likeBusy = false; });
-            });
+            var wasLiked = !!p.liked;
+            el._post = p;
+            el._paintLike = function () { paintLike(p.liked && !wasLiked); wasLiked = !!p.liked; };
+            like.addEventListener('click', function () { toggleLike(p); });
             paintLike();
 
             // Три точки: «Переслать», «Пожаловаться» (чужой пост) / «Удалить» (свой)
@@ -5065,20 +5134,11 @@ vgResolveBadgeSrc();
                 btn.querySelector('span').textContent = p.showLikes && p.likes > 0 ? formatCount(p.likes) : '';
             }
             paint();
-            var busy = false;
+            var tile = btn.closest('[data-id]');
+            if (tile) { tile._post = p; tile._paintLike = paint; }
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                if (busy) return;
-                busy = true;
-                var prev = { liked: p.liked, likes: p.likes };
-                p.liked = !p.liked; p.likes = Math.max(0, (p.likes || 0) + (p.liked ? 1 : -1));
-                paint();
-                api('/toggle_post_like', { post_id: p.id }).then(function (d) {
-                    if (d && typeof d.liked === 'boolean') p.liked = d.liked;
-                    if (d && d.likes_count != null) p.likes = d.likes_count;
-                    paint();
-                }).catch(function () { p.liked = prev.liked; p.likes = prev.likes; paint(); })
-                  .then(function () { busy = false; });
+                toggleLike(p);
             });
         }
         // Плитка «как в Pinterest»
