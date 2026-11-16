@@ -5291,24 +5291,37 @@ vgResolveBadgeSrc();
             });
             var now = Date.now();
             var fresh = 0;
+            var firstPaint = Object.keys(enterAt).length === 0;   // первая отрисовка страницы: без анимации карточек
             ['Mobile', 'Desktop'].forEach(function (suffix) {
-                var list  = document.getElementById('postsList' + suffix);
-                list.innerHTML = '';
+                var list = document.getElementById('postsList' + suffix);
+                var old = {};
+                [].forEach.call(list.children, function (c) { if (c.dataset && c.dataset.id) old[c.dataset.id] = c; });
                 list.className = 'posts-list layout-' + layout;
+                var frag = document.createDocumentFragment();
                 visible.forEach(function (p) {
-                    var el = buildPostEl(p);
-                    if (enterAt[p.id] === undefined) {
-                        // новый пост: вход со стаггером, не больше 6 шагов
-                        enterAt[p.id] = now + Math.min(fresh, 6) * 50;
-                        fresh++;
+                    var sig = postSig(p, true);
+                    var el = old[p.id];
+                    // карточку не пересоздаём, если она не изменилась: картинки не перезагружаются, сетка не прыгает
+                    if (!el || swap === true || el._sig !== sig) {
+                        el = buildPostEl(p);
+                        el._sig = sig;
+                        if (enterAt[p.id] === undefined) {
+                            if (firstPaint) {
+                                enterAt[p.id] = now - 1000;
+                            } else {
+                                enterAt[p.id] = now + Math.min(fresh, 6) * 50;   // новый пост: вход со стаггером
+                                fresh++;
+                            }
+                        }
+                        var left = enterAt[p.id] + 450 - now;
+                        if (left > 0) {
+                            el.classList.add('enter');
+                            el.style.animationDelay = Math.round(enterAt[p.id] - now) + 'ms';
+                        }
                     }
-                    var left = enterAt[p.id] + 450 - now;    // сколько ещё идёт вход
-                    if (left > 0) {
-                        el.classList.add('enter');
-                        el.style.animationDelay = Math.round(enterAt[p.id] - now) + 'ms';   // отрицательная задержка — продолжаем с середины
-                    }
-                    list.appendChild(el);
+                    frag.appendChild(el);
                 });
+                list.replaceChildren(frag);
                 if (swap === true) { void list.offsetWidth; list.classList.add('layout-swap'); }
             });
             renderFeedState();
