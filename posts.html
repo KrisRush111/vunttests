@@ -2105,10 +2105,11 @@ window.addEventListener('pagereveal', function (e) {
             border-radius: var(--tile-radius);
             cursor: pointer;
         }
-        .post-tile::before { padding: 1.3px; }
-        .tile-photo { position: relative; border-radius: var(--tile-radius) var(--tile-radius) 0 0; overflow: hidden; background: var(--telegram-secondary-bg); cursor: zoom-in; }
+        /* Без подсветки и контура: плитка — просто фото и подпись, как в Pinterest */
+        .posts-list .post-tile::before, .posts-list .post-tile::after { display: none !important; }
+        .tile-photo { position: relative; border-radius: var(--tile-radius) var(--tile-radius) 0 0; overflow: hidden; background: var(--telegram-secondary-bg); cursor: pointer; }
         .tile-photo .post-slide { aspect-ratio: var(--r, 0.8); max-height: none; }
-        .tile-photo .post-slide img { cursor: zoom-in; }
+        .tile-photo .post-slide img { cursor: pointer; }
         .tile-photo .post-nav { width: 28px; height: 28px; margin-top: -14px; }
         .tile-photo .post-nav.prev { left: 6px; }
         .tile-photo .post-nav.next { right: 6px; }
@@ -2147,14 +2148,14 @@ window.addEventListener('pagereveal', function (e) {
             font-size: 15px; font-weight: 600; line-height: 1.35; -webkit-line-clamp: 7;
             letter-spacing: -0.01em;
         }
-        .post-tile.text-only::after { background: linear-gradient(160deg, color-mix(in srgb, var(--glow) 22%, var(--telegram-bg)), var(--telegram-bg) 70%); }
+        .post-tile.text-only { background: var(--telegram-secondary-bg); border-radius: var(--tile-radius); }
 
         @media (min-width: 768px) {
             .posts-feed-desktop .posts-list.layout-tiles { max-width: 900px; column-count: 3; column-gap: 14px; }
             .posts-feed-desktop .post-tile { margin-bottom: 14px; }
         }
 
-        /* ---------- Пост целиком (из плитки) — лист снизу ---------- */
+        /* ---------- Пост целиком (открывается по нажатию на плитку) ---------- */
         .post-sheet {
             position: fixed; inset: 0; z-index: 1080;
             display: flex; align-items: flex-end; justify-content: center;
@@ -2163,19 +2164,62 @@ window.addEventListener('pagereveal', function (e) {
         }
         .post-sheet.open { background: rgba(0, 0, 0, 0.45); visibility: visible; transition: background-color 0.25s ease, visibility 0s; }
         .post-sheet-inner {
-            width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
-            background: var(--feed-bg); border-radius: 28px 28px 0 0;
-            padding: 8px 12px calc(18px + env(safe-area-inset-bottom));
+            width: 100%; max-width: 560px; height: 100%; overflow-y: auto;
+            background: var(--feed-bg);
+            padding: env(safe-area-inset-top, 0px) 0 calc(24px + env(safe-area-inset-bottom));
             transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
             scrollbar-width: none;
         }
         .post-sheet.open .post-sheet-inner { transform: none; }
-        .post-sheet-grip { width: 38px; height: 5px; border-radius: 3px; background: var(--telegram-divider); margin: 2px auto 10px; }
-        .post-sheet .post-card { animation: none; }
+        .post-sheet-grip { display: none; }
+        .post-detail { padding: 10px 14px 0; }
+        .post-detail .detail-photos { margin: 0; border-radius: 22px; }
+        .detail-over {
+            position: absolute; top: 12px; left: 12px; right: 12px; z-index: 4;
+            display: flex; justify-content: space-between; pointer-events: none;
+        }
+        .detail-top { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .detail-btn {
+            pointer-events: auto;
+            width: 40px; height: 40px; border: none; border-radius: 14px;
+            background: rgba(255, 255, 255, 0.92); color: #111;
+            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+        .detail-btn svg { width: 20px; height: 20px; display: block; }
+        .detail-btn:active { transform: scale(0.94); }
+        .detail-actions { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
+        .detail-like {
+            display: inline-flex; align-items: center; gap: 6px;
+            border: none; background: none; padding: 4px 0; cursor: pointer;
+            color: var(--telegram-text); font-size: 15px; font-weight: 600;
+        }
+        .detail-like .like-heart { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; display: block; }
+        .detail-like.liked { color: #5ec0fa; }
+        .detail-like.liked .like-heart { fill: #8fd3ff; stroke: #5ec0fa; }
+        .detail-icon { border: none; background: none; padding: 4px; cursor: pointer; color: var(--telegram-text); display: flex; }
+        .detail-icon svg { width: 24px; height: 24px; display: block; }
+        .detail-profile {
+            margin-left: auto; border: none; border-radius: 999px; padding: 11px 18px; cursor: pointer;
+            background: var(--vg-purple-gradient); color: #fff;
+            font: inherit; font-size: 15px; font-weight: 700;
+        }
+        .detail-meta { display: flex; align-items: center; gap: 10px; margin-top: 14px; min-width: 0; }
+        .detail-meta .post-avatar { width: 32px; height: 32px; font-size: 14px; flex: 0 0 auto; }
+        .detail-meta .post-head-text { display: flex; flex-direction: column; min-width: 0; }
+        .detail-text { margin-top: 10px; font-size: 15.5px; }
+        .detail-text:empty { display: none; }
+        .detail-recs-title { font-size: 17px; font-weight: 800; margin: 24px 0 10px; }
+        .detail-recs { padding: 0; }
         @media (min-width: 768px) {
             .post-sheet { align-items: center; }
-            .post-sheet-inner { border-radius: 28px; transform: translateY(20px) scale(0.98); opacity: 0; transition: transform 0.3s ease, opacity 0.25s ease; }
-            .post-sheet.open .post-sheet-inner { opacity: 1; }
+            .post-sheet-inner {
+                height: auto; max-height: 88vh; border-radius: 28px;
+                transform: translateY(20px) scale(0.98); opacity: 0;
+                transition: transform 0.3s ease, opacity 0.25s ease;
+            }
+            .post-sheet.open .post-sheet-inner { transform: none; opacity: 1; }
         }
     </style>
 <script id="vg-page-in-head">
@@ -5179,8 +5223,6 @@ vgResolveBadgeSrc();
             var n = p.photos.length;
             el.className = 'post-card post-tile' + (n ? '' : ' text-only');
             el.dataset.id = p.id;
-            setGlow(el, p);
-            bindWaterTouch(el);
             var author = authorOf(p);
             el.innerHTML =
                 (n ? '<div class="tile-media">' +
@@ -5224,18 +5266,15 @@ vgResolveBadgeSrc();
                     }, { once: true });
                 });
                 if (n > 1) setupCarousel(media, n);
-                // Нажатие на фото — на весь экран, с того фото, которое сейчас видно
-                frame.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    if (e.target.closest('.post-nav')) return;
-                    if (media._draggedAt && Date.now() - media._draggedAt < 400) return;   // это было перетаскивание
-                    var i = Math.round(track.scrollLeft / (track.clientWidth || 1));
-                    openPhotoViewer(p, Math.max(0, Math.min(n - 1, i)), track);
-                });
                 media.querySelector('.tile-dots') && media.querySelector('.tile-dots').addEventListener('click', function (e) { e.stopPropagation(); });
             }
             bindTileLike(el.querySelector('.tile-like'), p);
-            el.addEventListener('click', function () { openPostSheet(p); });
+            // Нажатие где угодно (текст, фото, подпись) — пост целиком
+            el.addEventListener('click', function () {
+                var mediaEl = el.querySelector('.tile-media');
+                if (mediaEl && mediaEl._draggedAt && Date.now() - mediaEl._draggedAt < 400) return;   // это было перетаскивание
+                openPostSheet(p);
+            });
             return el;
         }
         // Миниатюра справа для «Компактно»
@@ -5256,16 +5295,129 @@ vgResolveBadgeSrc();
             return el;
         }
 
+        // Открытый пост: фото на всю ширину, действия, текст, а ниже — рекомендации из того же раздела
+        function postDetail(p) {
+            var CHEV_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
+            var CHEV_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
+            var DOTS = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+            var SHARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8L12 3.5 16.5 8"/><path d="M8 12.5H6.5A2.5 2.5 0 0 0 4 15v4.5A2.5 2.5 0 0 0 6.5 22h11a2.5 2.5 0 0 0 2.5-2.5V15a2.5 2.5 0 0 0-2.5-2.5H16"/></svg>';
+            var el = document.createElement('article');
+            el.className = 'post-detail';
+            el.dataset.id = p.id;
+            el._post = p;
+            var n = p.photos.length;
+            var author = authorOf(p);
+            var authorId = author && author.platform_user_id;
+            var isMine = !authorId || String(authorId) === String(me.platform_user_id);
+            var topBtns =
+                '<button type="button" class="detail-btn detail-back" aria-label="Назад">' + CHEV_L + '</button>' +
+                '<button type="button" class="detail-btn detail-more" aria-label="Действия с публикацией" aria-haspopup="menu">' + DOTS + '</button>';
+            var media = n
+                ? '<div class="post-photos detail-photos' + (n === 1 ? ' single' : '') + '">' +
+                    '<div class="post-slides">' +
+                        p.photos.map(function (_, i) {
+                            return '<div class="post-slide"><img alt="Фото ' + (i + 1) + ' из ' + n + '" loading="' + (i ? 'lazy' : 'eager') + '" draggable="false"></div>';
+                        }).join('') +
+                    '</div>' +
+                    (n > 1
+                        ? '<span class="post-counter">1/' + n + '</span>' +
+                          '<div class="post-dots">' + p.photos.map(function (_, i) { return '<span class="post-dot' + (i ? '' : ' on') + '"></span>'; }).join('') + '</div>' +
+                          '<button type="button" class="post-nav prev" aria-label="Предыдущее фото" hidden>' + CHEV_L + '</button>' +
+                          '<button type="button" class="post-nav next" aria-label="Следующее фото">' + CHEV_R + '</button>'
+                        : '') +
+                    '<div class="detail-over">' + topBtns + '</div>' +
+                  '</div>'
+                : '<div class="detail-top">' + topBtns + '</div>';
+            var recs = posts.filter(function (x) { return x.id !== p.id; });
+            var recTitle = current === 'all' ? 'Ещё публикации' : 'Ещё в разделе «' + catTitle(current) + '»';
+            el.innerHTML = media +
+                '<div class="detail-actions">' +
+                    '<button type="button" class="detail-like" aria-pressed="false" aria-label="Нравится">' +
+                        '<svg class="like-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="' + HEART_PATH + '"/></svg><span class="like-count"></span></button>' +
+                    '<button type="button" class="detail-icon detail-share" aria-label="Поделиться">' + SHARE + '</button>' +
+                    (isMine ? '' : '<button type="button" class="detail-profile">Открыть профиль</button>') +
+                '</div>' +
+                '<div class="detail-meta"><div class="post-avatar"></div><div class="post-head-text">' +
+                    '<div class="post-author"></div><div class="post-time"></div></div></div>' +
+                '<div class="post-text detail-text"></div>' +
+                (recs.length ? '<div class="detail-recs-title"></div><div class="posts-list layout-tiles detail-recs"></div>' : '');
+
+            paintAvatar(el.querySelector('.post-avatar'), author);
+            paintName(el.querySelector('.post-author'), author);
+            el.querySelector('.post-time').textContent = timeAgo(p.createdAt);
+            var txt = el.querySelector('.detail-text');
+            txt.innerHTML = p.html;
+            if (!p.html.replace(/<[^>]*>/g, '').trim()) txt.remove();
+            if (!isMine) {
+                [el.querySelector('.post-avatar'), el.querySelector('.post-author')].forEach(function (node) {
+                    node.classList.add('author-link');
+                    node.addEventListener('click', function () { openUserProfile(author); });
+                });
+                var prof = el.querySelector('.detail-profile');
+                if (prof) prof.addEventListener('click', function () { openUserProfile(author); });
+            }
+
+            // Фото: та же лента, что и в карточке (свайп, точки, счётчик)
+            if (n) {
+                var box = el.querySelector('.detail-photos');
+                var first = box.querySelector('.post-slide img');
+                var known = photoRatio(p.photos[0]);
+                if (known) box.style.setProperty('--ratio', String(clampRatio(known)));
+                var setRatio = function () {
+                    if (!first.naturalWidth) return;
+                    var raw = first.naturalWidth / first.naturalHeight;
+                    box.style.setProperty('--ratio', String(clampRatio(raw)));
+                    rememberRatio(p.photos[0], Math.round(raw * 1000) / 1000);
+                };
+                [].slice.call(box.querySelectorAll('.post-slide img')).forEach(function (img, i) { img.src = p.photos[i]; });
+                if (first.complete) setRatio(); else first.addEventListener('load', setRatio, { once: true });
+                if (n > 1) setupCarousel(box, n);
+            }
+
+            // Действия: лайк, поделиться
+            var likeBtn = el.querySelector('.detail-like');
+            function paintLike() {
+                likeBtn.classList.toggle('liked', !!p.liked);
+                likeBtn.setAttribute('aria-pressed', p.liked ? 'true' : 'false');
+                likeBtn.querySelector('.like-count').textContent = p.showLikes && p.likes > 0 ? formatCount(p.likes) : '';
+            }
+            el._paintLike = paintLike;
+            paintLike();
+            likeBtn.addEventListener('click', function () { toggleLike(p); });
+            el.querySelector('.detail-share').addEventListener('click', function () {
+                var text = plainText(p.html) || 'Публикация';
+                if (navigator.share) { navigator.share({ text: text }).catch(function () {}); return; }
+                if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { upToast('Текст скопирован'); }).catch(function () {});
+            });
+
+            // Назад и три точки (как в карточке)
+            el.querySelector('.detail-back').addEventListener('click', function () { closePostSheet(false); });
+            var more = el.querySelector('.detail-more');
+            more.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (postMenu && postMenu.anchor === more) { closePostMenu(); return; }
+                openPostMenu(more, p, el);
+            });
+
+            // Рекомендации: посты того же раздела, что открыт сейчас
+            var recWrap = el.querySelector('.detail-recs');
+            if (recWrap) {
+                el.querySelector('.detail-recs-title').textContent = recTitle;
+                recs.slice(0, 30).forEach(function (x) { recWrap.appendChild(postTile(x)); });
+            }
+            return el;
+        }
+
         // Пост целиком (из плитки) — лист снизу
         var sheet = document.createElement('div');
         sheet.className = 'post-sheet';
-        sheet.innerHTML = '<div class="post-sheet-inner" role="dialog" aria-modal="true" aria-label="Публикация"><div class="post-sheet-grip"></div><div class="post-sheet-body"></div></div>';
+        sheet.innerHTML = '<div class="post-sheet-inner" role="dialog" aria-modal="true" aria-label="Публикация"><div class="post-sheet-body"></div></div>';
         document.body.appendChild(sheet);
         var sheetPushed = false;
         function openPostSheet(p) {
             var body = sheet.querySelector('.post-sheet-body');
             body.innerHTML = '';
-            body.appendChild(postCard(p));
+            body.appendChild(postDetail(p));
             sheet.querySelector('.post-sheet-inner').scrollTop = 0;
             sheet.classList.add('open');
             if (!sheetPushed) { try { history.pushState({ vgPostSheet: 1 }, ''); sheetPushed = true; } catch (e) {} }
