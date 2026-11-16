@@ -100,6 +100,8 @@
             line-height: 1.5;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            opacity: 0;
+            animation: pageLoadIn 0.5s ease-out forwards;
         }
 
         button { font: inherit; }
@@ -1195,7 +1197,10 @@
             z-index: 0;                         /* своя «стопка» слоёв: свечение не уходит под соседей */
             border-radius: 20px;
             padding: 14px 14px 10px;
-            animation: postIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        /* Вход только у карточек, которых раньше не было в ленте (см. renderPosts) */
+        .post-card.enter {
+            animation: postIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
         }
         /* Фон карточки — отдельным слоем поверх свечения (как у окна рекомендаций) */
         .post-card::after {
@@ -1258,6 +1263,12 @@
         @media (prefers-reduced-motion: reduce) {
             .post-card:hover::before, .post-card.touching::before { animation: none; }
         }
+        @keyframes pageLoadIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: none; }
+        }
+        .posts-header-sticky, .posts-topbar { animation: fadeInUp .35s ease-out backwards; }
         @keyframes postIn {
             from { opacity: 0; transform: translateY(14px) scale(0.98); }
             to   { opacity: 1; transform: none; }
@@ -3993,6 +4004,8 @@ vgResolveBadgeSrc();
 
         // Лента текущего раздела (данные приходят с сервера, база posts_db)
         var posts = [];
+        // когда у поста стартовал вход-анимация (мс); повторные перерисовки не запускают её заново
+        var enterAt = {};
         var feed = { loading: false, loaded: false, hasMore: false, nextBefore: null, error: '', seq: 0 };
 
         // =====================================================================
@@ -5276,11 +5289,26 @@ vgResolveBadgeSrc();
             var visible = posts.filter(function (p) {
                 return current === 'all' || p.categories.indexOf(current) >= 0;
             });
+            var now = Date.now();
+            var fresh = 0;
             ['Mobile', 'Desktop'].forEach(function (suffix) {
                 var list  = document.getElementById('postsList' + suffix);
                 list.innerHTML = '';
                 list.className = 'posts-list layout-' + layout;
-                visible.forEach(function (p) { list.appendChild(buildPostEl(p)); });
+                visible.forEach(function (p) {
+                    var el = buildPostEl(p);
+                    if (enterAt[p.id] === undefined) {
+                        // новый пост: вход со стаггером, не больше 6 шагов
+                        enterAt[p.id] = now + Math.min(fresh, 6) * 50;
+                        fresh++;
+                    }
+                    var left = enterAt[p.id] + 450 - now;    // сколько ещё идёт вход
+                    if (left > 0) {
+                        el.classList.add('enter');
+                        el.style.animationDelay = Math.round(enterAt[p.id] - now) + 'ms';   // отрицательная задержка — продолжаем с середины
+                    }
+                    list.appendChild(el);
+                });
                 if (swap === true) { void list.offsetWidth; list.classList.add('layout-swap'); }
             });
             renderFeedState();
