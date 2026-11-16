@@ -1929,8 +1929,8 @@ window.addEventListener('pagereveal', function (e) {
         /* =====================================================================
            НОВЫЙ ДИЗАЙН: минимализм + виды ленты («Оформление»)
            ===================================================================== */
-        :root { --feed-bg: #f3f3f6; --tile-radius: 18px; }
-        @media (prefers-color-scheme: dark) { :root { --feed-bg: #0b0b0c; } }
+        :root { --feed-bg: #ffffff; --tile-radius: 18px; --tile-border: #e3e3e8; }
+        @media (prefers-color-scheme: dark) { :root { --feed-bg: #000000; --tile-border: #2a2a2d; } }
         body, .desktop-content { background-color: var(--feed-bg); }
 
         /* Шапка: без линии и тени, полупрозрачная с размытием; под заголовком — текущий раздел */
@@ -2148,7 +2148,7 @@ window.addEventListener('pagereveal', function (e) {
             font-size: 15px; font-weight: 600; line-height: 1.35; -webkit-line-clamp: 7;
             letter-spacing: -0.01em;
         }
-        .post-tile.text-only { background: var(--telegram-secondary-bg); border-radius: var(--tile-radius); }
+        .post-tile.text-only { background: var(--telegram-secondary-bg); border: 1px solid var(--tile-border); border-radius: var(--tile-radius); }
 
         @media (min-width: 768px) {
             .posts-feed-desktop .posts-list.layout-tiles { max-width: 900px; column-count: 3; column-gap: 14px; }
@@ -5223,7 +5223,6 @@ vgResolveBadgeSrc();
             var n = p.photos.length;
             el.className = 'post-card post-tile' + (n ? '' : ' text-only');
             el.dataset.id = p.id;
-            var author = authorOf(p);
             el.innerHTML =
                 (n ? '<div class="tile-media">' +
                         '<div class="tile-photo"><div class="post-slides">' +
@@ -5238,13 +5237,9 @@ vgResolveBadgeSrc();
                         '</div>' +
                         (n > 1 ? '<div class="tile-dots">' + p.photos.map(function (_, i) { return '<span class="post-dot' + (i ? '' : ' on') + '"></span>'; }).join('') + '</div>' : '') +
                     '</div>' : '') +
-                '<div class="tile-body"><div class="tile-text"></div>' +
-                    '<div class="tile-foot"><div class="post-avatar"></div><span class="tile-name"></span>' +
-                    '<button type="button" class="tile-like" aria-label="Нравится"><svg class="like-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="' + HEART_PATH + '"/></svg><span></span></button>' +
-                '</div></div>';
-            el.querySelector('.tile-text').textContent = plainText(p.html);
-            el.querySelector('.tile-name').textContent = (author && author.nickname) || '';
-            paintAvatar(el.querySelector('.tile-foot .post-avatar'), author, 20);
+                // Фото есть — в плитке только фото. Без фото — плитка-цитата с текстом.
+                (n ? '' : '<div class="tile-body"><div class="tile-text"></div></div>');
+            if (!n) el.querySelector('.tile-text').textContent = plainText(p.html);
             if (n) {
                 var media = el.querySelector('.tile-media');
                 var frame = el.querySelector('.tile-photo');
@@ -5268,7 +5263,6 @@ vgResolveBadgeSrc();
                 if (n > 1) setupCarousel(media, n);
                 media.querySelector('.tile-dots') && media.querySelector('.tile-dots').addEventListener('click', function (e) { e.stopPropagation(); });
             }
-            bindTileLike(el.querySelector('.tile-like'), p);
             // Нажатие где угодно (текст, фото, подпись) — пост целиком
             el.addEventListener('click', function () {
                 var mediaEl = el.querySelector('.tile-media');
