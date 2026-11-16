@@ -100,6 +100,8 @@
             line-height: 1.5;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            opacity: 0;
+            animation: pageLoadIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
         }
 
         button { font: inherit; }
@@ -1261,11 +1263,11 @@
         @media (prefers-reduced-motion: reduce) {
             .post-card:hover::before, .post-card.touching::before { animation: none; }
         }
+        @keyframes pageLoadIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(8px); }
             to   { opacity: 1; transform: none; }
         }
-        .posts-header-sticky, .posts-topbar { animation: fadeInUp .35s ease-out backwards; }
         @keyframes postIn {
             from { opacity: 0; transform: translateY(14px) scale(0.98); }
             to   { opacity: 1; transform: none; }
@@ -4003,7 +4005,7 @@ vgResolveBadgeSrc();
         var posts = [];
         // когда у поста стартовал вход-анимация (мс); повторные перерисовки не запускают её заново
         var enterAt = {};
-        var feed = { loading: false, loaded: false, hasMore: false, nextBefore: null, error: '', seq: 0 };
+        var feed = { silent: false, loading: false, loaded: false, hasMore: false, nextBefore: null, error: '', seq: 0 };
 
         // =====================================================================
         // АККАУНТ: ник, аватар и галочка — те же данные, что в profile.html / chats.html
@@ -4334,6 +4336,7 @@ vgResolveBadgeSrc();
                 feed.error = '';
                 renderPosts();
             }
+            feed.silent = !!reset && posts.length > 0;   // фоновое обновление поверх кеша — без спиннера
             feed.loading = true;
             renderFeedState();
             api('/get_posts', { category: cat, before_id: reset ? null : feed.nextBefore, limit: 15 })
@@ -5344,7 +5347,7 @@ vgResolveBadgeSrc();
                 foot.innerHTML = '';
                 if (!count) return;
                 if (feed.loading) {
-                    foot.innerHTML = '<span class="posts-spinner" aria-label="Загрузка"></span>';
+                    if (!feed.silent) foot.innerHTML = '<span class="posts-spinner" aria-label="Загрузка"></span>';
                 } else if (feed.error) {
                     foot.innerHTML = '<button type="button" class="posts-retry">Не удалось загрузить — повторить</button>';
                 } else if (feed.hasMore) {
