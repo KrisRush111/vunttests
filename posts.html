@@ -2079,15 +2079,15 @@ window.addEventListener('pagereveal', function (e) {
             display: none;
             grid-column: 2;
             grid-row: 2 / span 1;
-            width: 76px;
-            height: 76px;
-            border-radius: 14px;
+            width: 96px;
+            height: 96px;
+            border-radius: 18px;
             overflow: hidden;
             position: relative;
             background: var(--telegram-secondary-bg);
             cursor: zoom-in;
         }
-        .post-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; filter: brightness(1.06) saturate(1.18) contrast(1.03); }
+        .post-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; filter: brightness(1.06) saturate(1.18) contrast(1.03); }
         .post-thumb .thumb-count {
             position: absolute; right: 5px; bottom: 5px;
             font-size: 11px; font-weight: 700; color: #fff;
@@ -5270,7 +5270,7 @@ vgResolveBadgeSrc();
             el.addEventListener('click', function () {
                 var mediaEl = el.querySelector('.tile-media');
                 if (mediaEl && mediaEl._draggedAt && Date.now() - mediaEl._draggedAt < 400) return;   // это было перетаскивание
-                openPostSheet(p);
+                openPostSheet(p, el.querySelector('.tile-photo') || el);
             });
             return el;
         }
@@ -5415,12 +5415,60 @@ vgResolveBadgeSrc();
         sheet.innerHTML = '<div class="post-sheet-inner" role="dialog" aria-modal="true" aria-label="Публикация"><div class="post-sheet-body"></div></div>';
         document.body.appendChild(sheet);
         var sheetPushed = false;
-        function openPostSheet(p) {
+        // Пост «вырастает» из плитки: клон источника летит в своё место в открытом листе
+        function zoomOpen(src) {
+            if (!src || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+            var inner = sheet.querySelector('.post-sheet-inner');
+            var body = sheet.querySelector('.post-sheet-body');
+            var target = body.querySelector('.detail-photos') || body.querySelector('.detail-hero-text');
+            if (!target) return;
+            var isPhoto = target.classList.contains('detail-photos');
+            var r0 = src.getBoundingClientRect();
+            if (!r0.width || !r0.height) return;
+            // Положение цели внутри листа не зависит от его текущего translate
+            var rel = target.getBoundingClientRect().top - inner.getBoundingClientRect().top;
+            var ty = 0;
+            try { ty = new DOMMatrix(getComputedStyle(inner).transform).m42 || 0; } catch (e) {}
+            var finalTop = inner.getBoundingClientRect().top - ty;
+            var t1 = target.getBoundingClientRect();
+            var r1 = { left: t1.left, top: finalTop + rel, width: t1.width, height: t1.height };
+            if (!r1.width || !r1.height) return;
+
+            var clone = document.createElement('div');
+            clone.setAttribute('aria-hidden', 'true');
+            clone.style.cssText = 'position:fixed;z-index:1090;pointer-events:none;overflow:hidden;' +
+                'left:' + r0.left + 'px;top:' + r0.top + 'px;width:' + r0.width + 'px;height:' + r0.height + 'px;' +
+                'border-radius:' + (isPhoto ? getComputedStyle(src).borderTopLeftRadius : '18px') + ';' +
+                'background:var(--telegram-secondary-bg);';
+            var imgs = [].slice.call(src.querySelectorAll ? src.querySelectorAll('img') : []);
+            var pick = null, best = 1e9;
+            imgs.forEach(function (im) {
+                var d = Math.abs(im.getBoundingClientRect().left - r0.left);
+                if (d < best && im.src) { best = d; pick = im; }
+            });
+            if (pick) {
+                var im = document.createElement('img');
+                im.src = pick.src; im.alt = '';
+                im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+                clone.appendChild(im);
+            }
+            document.body.appendChild(clone);
+            target.style.visibility = 'hidden';
+            var anim = clone.animate([
+                { left: r0.left + 'px', top: r0.top + 'px', width: r0.width + 'px', height: r0.height + 'px', borderRadius: clone.style.borderRadius },
+                { left: r1.left + 'px', top: r1.top + 'px', width: r1.width + 'px', height: r1.height + 'px', borderRadius: '22px' }
+            ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' });
+            var done = function () { target.style.visibility = ''; clone.remove(); };
+            anim.onfinish = done;
+            anim.oncancel = done;
+        }
+        function openPostSheet(p, src) {
             var body = sheet.querySelector('.post-sheet-body');
             body.innerHTML = '';
             body.appendChild(postDetail(p));
             sheet.querySelector('.post-sheet-inner').scrollTop = 0;
             sheet.classList.add('open');
+            zoomOpen(src);
             if (!sheetPushed) { try { history.pushState({ vgPostSheet: 1 }, ''); sheetPushed = true; } catch (e) {} }
         }
         function closePostSheet(fromHistory) {
