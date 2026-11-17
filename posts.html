@@ -2079,15 +2079,15 @@ window.addEventListener('pagereveal', function (e) {
             display: none;
             grid-column: 2;
             grid-row: 2 / span 1;
-            width: 96px;
-            height: 96px;
-            border-radius: 18px;
+            width: 76px;
+            height: 76px;
+            border-radius: 14px;
             overflow: hidden;
             position: relative;
             background: var(--telegram-secondary-bg);
             cursor: zoom-in;
         }
-        .post-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; filter: brightness(1.06) saturate(1.18) contrast(1.03); }
+        .post-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; filter: brightness(1.06) saturate(1.18) contrast(1.03); }
         .post-thumb .thumb-count {
             position: absolute; right: 5px; bottom: 5px;
             font-size: 11px; font-weight: 700; color: #fff;
@@ -2095,7 +2095,7 @@ window.addEventListener('pagereveal', function (e) {
         }
 
         /* ---------- 4. ПЛИТКА (как Pinterest): 2 колонки, высота — по фото ---------- */
-        .posts-list.layout-tiles { display: block; column-count: 2; column-gap: 10px; padding: 2px 0; }
+        .posts-list.layout-tiles { display: block; column-count: 2; column-gap: 6px; padding: 0; }
         .posts-list.layout-tiles:empty { display: none; }
         .post-tile {
             break-inside: avoid;
@@ -2107,7 +2107,7 @@ window.addEventListener('pagereveal', function (e) {
         }
         /* Без подсветки и контура: плитка — просто фото и подпись, как в Pinterest */
         .posts-list .post-tile::before, .posts-list .post-tile::after { display: none !important; }
-        .tile-photo { position: relative; border-radius: var(--tile-radius) var(--tile-radius) 0 0; overflow: hidden; background: var(--telegram-secondary-bg); cursor: pointer; }
+        .tile-photo { position: relative; border-radius: var(--tile-radius); overflow: hidden; isolation: isolate; background: var(--telegram-secondary-bg); cursor: pointer; }
         .tile-photo .post-slide { aspect-ratio: var(--r, 0.8); max-height: none; }
         .tile-photo .post-slide img { cursor: pointer; }
         .tile-photo .post-nav { width: 28px; height: 28px; margin-top: -14px; }
@@ -2151,7 +2151,7 @@ window.addEventListener('pagereveal', function (e) {
         .post-tile.text-only { background: var(--telegram-secondary-bg); border: 1px solid var(--tile-border); border-radius: var(--tile-radius); }
 
         @media (min-width: 768px) {
-            .posts-feed-desktop .posts-list.layout-tiles { max-width: 900px; column-count: 3; column-gap: 14px; }
+            .posts-feed-desktop .posts-list.layout-tiles { max-width: 960px; column-count: 3; column-gap: 10px; }
             .posts-feed-desktop .post-tile { margin-bottom: 14px; }
         }
 
@@ -2167,7 +2167,7 @@ window.addEventListener('pagereveal', function (e) {
             width: 100%; max-width: 560px; height: 100%; overflow-y: auto;
             background: var(--feed-bg);
             padding: env(safe-area-inset-top, 0px) 0 calc(24px + env(safe-area-inset-bottom));
-            transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+            transform: none; transform-origin: 0 0; transition: none;
             scrollbar-width: none;
         }
         .post-sheet.open .post-sheet-inner { transform: none; }
@@ -2219,8 +2219,8 @@ window.addEventListener('pagereveal', function (e) {
             .post-sheet { align-items: center; }
             .post-sheet-inner {
                 height: auto; max-height: 88vh; border-radius: 28px;
-                transform: translateY(20px) scale(0.98); opacity: 0;
-                transition: transform 0.3s ease, opacity 0.25s ease;
+                transform: none; opacity: 1;
+                transition: none;
             }
             .post-sheet.open .post-sheet-inner { transform: none; opacity: 1; }
         }
@@ -5270,7 +5270,7 @@ vgResolveBadgeSrc();
             el.addEventListener('click', function () {
                 var mediaEl = el.querySelector('.tile-media');
                 if (mediaEl && mediaEl._draggedAt && Date.now() - mediaEl._draggedAt < 400) return;   // это было перетаскивание
-                openPostSheet(p, el.querySelector('.tile-photo') || el);
+                openPostSheet(p, el);
             });
             return el;
         }
@@ -5409,74 +5409,65 @@ vgResolveBadgeSrc();
             return el;
         }
 
-        // Пост целиком (из плитки) — лист снизу
+        // Раскрытие из геометрии нажатой плитки, а не выезд снизу.
         var sheet = document.createElement('div');
         sheet.className = 'post-sheet';
         sheet.innerHTML = '<div class="post-sheet-inner" role="dialog" aria-modal="true" aria-label="Публикация"><div class="post-sheet-body"></div></div>';
         document.body.appendChild(sheet);
         var sheetPushed = false;
-        // Пост «вырастает» из плитки: клон источника летит в своё место в открытом листе
-        function zoomOpen(src) {
-            if (!src || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
-            var inner = sheet.querySelector('.post-sheet-inner');
-            var body = sheet.querySelector('.post-sheet-body');
-            var target = body.querySelector('.detail-photos') || body.querySelector('.detail-hero-text');
-            if (!target) return;
-            var isPhoto = target.classList.contains('detail-photos');
-            var r0 = src.getBoundingClientRect();
-            if (!r0.width || !r0.height) return;
-            // Положение цели внутри листа не зависит от его текущего translate
-            var rel = target.getBoundingClientRect().top - inner.getBoundingClientRect().top;
-            var ty = 0;
-            try { ty = new DOMMatrix(getComputedStyle(inner).transform).m42 || 0; } catch (e) {}
-            var finalTop = inner.getBoundingClientRect().top - ty;
-            var t1 = target.getBoundingClientRect();
-            var r1 = { left: t1.left, top: finalTop + rel, width: t1.width, height: t1.height };
-            if (!r1.width || !r1.height) return;
-
-            var clone = document.createElement('div');
-            clone.setAttribute('aria-hidden', 'true');
-            clone.style.cssText = 'position:fixed;z-index:1090;pointer-events:none;overflow:hidden;' +
-                'left:' + r0.left + 'px;top:' + r0.top + 'px;width:' + r0.width + 'px;height:' + r0.height + 'px;' +
-                'border-radius:' + (isPhoto ? getComputedStyle(src).borderTopLeftRadius : '18px') + ';' +
-                'background:var(--telegram-secondary-bg);';
-            var imgs = [].slice.call(src.querySelectorAll ? src.querySelectorAll('img') : []);
-            var pick = null, best = 1e9;
-            imgs.forEach(function (im) {
-                var d = Math.abs(im.getBoundingClientRect().left - r0.left);
-                if (d < best && im.src) { best = d; pick = im; }
-            });
-            if (pick) {
-                var im = document.createElement('img');
-                im.src = pick.src; im.alt = '';
-                im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
-                clone.appendChild(im);
-            }
-            document.body.appendChild(clone);
-            target.style.visibility = 'hidden';
-            var anim = clone.animate([
-                { left: r0.left + 'px', top: r0.top + 'px', width: r0.width + 'px', height: r0.height + 'px', borderRadius: clone.style.borderRadius },
-                { left: r1.left + 'px', top: r1.top + 'px', width: r1.width + 'px', height: r1.height + 'px', borderRadius: '22px' }
-            ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' });
-            var done = function () { target.style.visibility = ''; clone.remove(); };
-            anim.onfinish = done;
-            anim.oncancel = done;
+        var sheetSource = null, sheetAnimation = null, sheetEpoch = 0, sheetClosing = false;
+        var reducedSheetMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        function sheetOriginTransform(inner) {
+            if (!sheetSource || !sheetSource.isConnected) return null;
+            var a = sheetSource.getBoundingClientRect(), b = inner.getBoundingClientRect();
+            if (!a.width || !a.height || !b.width || !b.height) return null;
+            return 'translate(' + (a.left - b.left) + 'px,' + (a.top - b.top) + 'px) scale(' + (a.width / b.width) + ',' + (a.height / b.height) + ')';
         }
-        function openPostSheet(p, src) {
+        function openPostSheet(p, source) {
+            sheetClosing = false;
+            ++sheetEpoch;
+            if (sheetAnimation) { sheetAnimation.cancel(); sheetAnimation = null; }
+            sheetSource = source || null;
             var body = sheet.querySelector('.post-sheet-body');
             body.innerHTML = '';
             body.appendChild(postDetail(p));
-            sheet.querySelector('.post-sheet-inner').scrollTop = 0;
+            var inner = sheet.querySelector('.post-sheet-inner');
+            inner.scrollTop = 0;
+            inner.style.transform = '';
             sheet.classList.add('open');
-            zoomOpen(src);
+            var origin = sheetOriginTransform(inner);
+            if (origin && !reducedSheetMotion.matches) {
+                sheetAnimation = inner.animate([
+                    { transform: origin, borderRadius: '22px', opacity: 0.65 },
+                    { transform: 'none', borderRadius: getComputedStyle(inner).borderRadius, opacity: 1 }
+                ], { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+            }
             if (!sheetPushed) { try { history.pushState({ vgPostSheet: 1 }, ''); sheetPushed = true; } catch (e) {} }
         }
         function closePostSheet(fromHistory) {
-            if (!sheet.classList.contains('open')) return;
-            sheet.classList.remove('open');
+            if (!sheet.classList.contains('open') || sheetClosing) return;
+            sheetClosing = true;
+            var epoch = ++sheetEpoch;
+            if (sheetAnimation) { sheetAnimation.cancel(); sheetAnimation = null; }
+            var inner = sheet.querySelector('.post-sheet-inner');
+            var origin = sheetOriginTransform(inner);
+            function finish() {
+                if (epoch !== sheetEpoch) return;
+                sheet.classList.remove('open');
+                sheetClosing = false;
+                sheet.querySelector('.post-sheet-body').innerHTML = '';
+                sheetAnimation = null;
+                if (sheetSource && sheetSource.isConnected) sheetSource.focus({ preventScroll: true });
+            }
+            if (origin && !reducedSheetMotion.matches) {
+                sheetAnimation = inner.animate([
+                    { transform: 'none', opacity: 1 },
+                    { transform: origin, borderRadius: '22px', opacity: 0 }
+                ], { duration: 320, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+                sheetAnimation.onfinish = finish;
+            } else finish();
             if (sheetPushed && !fromHistory) { sheetPushed = false; try { history.back(); } catch (e) {} }
             sheetPushed = false;
-            setTimeout(function () { if (!sheet.classList.contains('open')) sheet.querySelector('.post-sheet-body').innerHTML = ''; }, 350);
         }
         sheet.addEventListener('click', function (e) { if (e.target === sheet) closePostSheet(false); });
         window.addEventListener('popstate', function () {
