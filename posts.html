@@ -2215,15 +2215,254 @@ window.addEventListener('pagereveal', function (e) {
         .detail-text:empty { display: none; }
         .detail-recs-title { font-size: 17px; font-weight: 800; margin: 24px 0 10px; }
         .detail-recs { padding: 0; }
-        @media (min-width: 768px) {
-            .post-sheet { align-items: center; }
-            .post-sheet-inner {
-                height: auto; max-height: 88vh; border-radius: 28px;
-                transform: translateY(20px) scale(0.98); opacity: 0;
-                transition: transform 0.3s ease, opacity 0.25s ease;
-            }
-            .post-sheet.open .post-sheet-inner { transform: none; opacity: 1; }
+
+        /* ---------- Комментарии в открытом посте ---------- */
+        .detail-comments-box {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid var(--telegram-divider);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
+        .detail-comments-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--telegram-text);
+        }
+        .detail-comments-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .detail-comments-empty {
+            font-size: 13.5px;
+            color: var(--telegram-hint);
+            padding: 4px 0 8px;
+        }
+        .detail-comment-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 9px;
+            font-size: 14px;
+            line-height: 1.38;
+            animation: fadeInUp 0.25s ease both;
+        }
+        .detail-comment-item .post-avatar {
+            width: 28px;
+            height: 28px;
+            font-size: 12px;
+            flex: 0 0 auto;
+            margin-top: 1px;
+        }
+        .detail-comment-body {
+            flex: 1;
+            min-width: 0;
+            background: var(--telegram-secondary-bg);
+            padding: 8px 12px;
+            border-radius: 16px;
+        }
+        .detail-comment-author {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .detail-comment-time {
+            font-weight: 400;
+            font-size: 11.5px;
+            color: var(--telegram-hint);
+        }
+        .detail-comment-text {
+            word-break: break-word;
+            color: var(--telegram-text);
+        }
+        .detail-comment-form {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .detail-comment-input {
+            flex: 1;
+            min-width: 0;
+            border: 1.5px solid transparent;
+            outline: none;
+            background: var(--telegram-secondary-bg);
+            color: var(--telegram-text);
+            border-radius: 999px;
+            padding: 9px 14px;
+            font-size: 14px;
+            transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .detail-comment-input:focus {
+            background: var(--telegram-bg);
+            border-color: rgba(149, 1, 255, 0.35);
+            box-shadow: 0 0 0 3px rgba(149, 1, 255, 0.08);
+        }
+        .detail-comment-send {
+            width: 34px;
+            height: 34px;
+            border: none;
+            border-radius: 50%;
+            background: var(--vg-purple-gradient);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.2s var(--jelly-timing), opacity 0.2s ease;
+        }
+        .detail-comment-send:active { transform: scale(0.9); }
+        .detail-comment-send:disabled { opacity: 0.4; cursor: default; }
+        .detail-comments-disabled {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--telegram-divider);
+            font-size: 13px;
+            color: var(--telegram-hint);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        @media (min-width: 768px) {
+            /* Правый плейсхолдер на десктопе: открытый пост поверх правой области */
+            .post-sheet {
+                left: var(--desktop-sidebar-width);
+                align-items: stretch;
+                justify-content: stretch;
+                background: transparent !important;
+                z-index: 28;
+            }
+            .post-sheet-inner {
+                width: 100%;
+                max-width: none;
+                height: 100%;
+                max-height: none;
+                border-radius: 0;
+                background: var(--feed-bg);
+                padding: 0;
+                overflow-y: auto;
+                transform: translateY(16px) scale(0.988);
+                opacity: 0;
+                transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.26s ease;
+            }
+            .post-sheet.open .post-sheet-inner {
+                transform: none;
+                opacity: 1;
+            }
+            .post-sheet-body {
+                min-height: 100%;
+                padding: 20px 24px 40px;
+                max-width: 1320px;
+                margin: 0 auto;
+            }
+
+            /* Двухколоночный макет в стиле Pinterest: слева фото+описание+комментарии, справа лента плиток */
+            .post-detail.desktop-split {
+                display: grid;
+                grid-template-columns: minmax(340px, 460px) minmax(0, 1fr);
+                gap: 24px;
+                align-items: start;
+                padding: 0;
+            }
+            .detail-left-col {
+                position: sticky;
+                top: 20px;
+                max-height: calc(100vh - 40px);
+                overflow-y: auto;
+                scrollbar-width: none;
+                background: var(--telegram-bg);
+                border-radius: 28px;
+                padding: 16px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--telegram-divider);
+                animation: pinCardIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+            }
+            .detail-left-col::-webkit-scrollbar { display: none; }
+            @media (prefers-color-scheme: dark) {
+                .detail-left-col {
+                    background: #121214;
+                    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+                }
+            }
+
+            .detail-left-col .detail-photos {
+                border-radius: 20px;
+            }
+            .detail-left-col .post-slide {
+                max-height: 52vh;
+            }
+            .detail-left-col .detail-hero-text {
+                min-height: 160px;
+                border-radius: 20px;
+                font-size: 18px;
+            }
+            .detail-left-col .detail-btn {
+                transition: transform 0.22s var(--jelly-timing), background-color 0.2s ease, box-shadow 0.2s ease;
+            }
+            .detail-left-col .detail-btn:hover {
+                transform: scale(1.08);
+                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+            }
+            .detail-left-col .detail-btn:active {
+                transform: scale(0.92);
+            }
+
+            /* Правая колонка с остальными плитками (без заголовка «Рекомендации») */
+            .detail-right-col {
+                min-width: 0;
+            }
+            .detail-right-col .detail-recs-title {
+                display: none !important;
+            }
+            .detail-right-col .detail-recs.layout-tiles {
+                column-count: 2;
+                column-gap: 14px;
+                max-width: none;
+                margin: 0;
+            }
+            @media (min-width: 1180px) {
+                .detail-right-col .detail-recs.layout-tiles {
+                    column-count: 3;
+                }
+            }
+            .detail-right-col .post-tile {
+                margin-bottom: 14px;
+                transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), filter 0.25s ease;
+                animation: pinTileStagger 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+                animation-delay: calc(min(var(--stagger, 0), 12) * 28ms);
+            }
+            .detail-right-col .post-tile:hover {
+                transform: translateY(-2px) scale(1.012);
+            }
+            .detail-right-col .post-tile:active {
+                transform: scale(0.98);
+            }
+            .detail-right-col .tile-photo {
+                border-radius: 20px;
+                transition: box-shadow 0.28s ease;
+            }
+            .detail-right-col .post-tile:hover .tile-photo {
+                box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+            }
+
+            @keyframes pinCardIn {
+                from { opacity: 0; transform: translateY(14px) scale(0.975); }
+                to   { opacity: 1; transform: none; }
+            }
+            @keyframes pinTileStagger {
+                from { opacity: 0; transform: translateY(16px) scale(0.97); }
+                to   { opacity: 1; transform: none; }
+            }
+        }
+
     </style>
 <script id="vg-page-in-head">
 /* Ранний флаг для плавного появления страницы (футер при этом не трогаем) */
@@ -4490,6 +4729,7 @@ vgResolveBadgeSrc();
                 var t = document.getElementById(tid);
                 if (t && cat) t.textContent = cat.title;
             });
+            if (sheet.classList.contains('open')) closePostSheet(false);
             loadFeed(true);
             if (!isDesktop.matches) setTimeout(closeDrawer, 160);
         }
@@ -5292,15 +5532,17 @@ vgResolveBadgeSrc();
             return el;
         }
 
-        // Открытый пост: фото на всю ширину, действия, текст, а ниже — рекомендации из того же раздела
+        // Открытый пост: на десктопе — слева фото + описание + комментарии, справа — плитки постов (как в Pinterest)
+        var commentsStore = {}; // post_id -> [{ author, text, createdAt }]
         function postDetail(p) {
             var CHEV_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
             var CHEV_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
             var DOTS = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
             var COMMENT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M20.5 11.5c0 4.1-3.8 7.5-8.5 7.5-1.2 0-2.3-.2-3.3-.5L4 20.5l1.4-3.9C4.5 15.3 3.5 13.5 3.5 11.5 3.5 7.4 7.3 4 12 4s8.5 3.4 8.5 7.5z"/></svg>';
             var SHARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8L12 3.5 16.5 8"/><path d="M8 12.5H6.5A2.5 2.5 0 0 0 4 15v4.5A2.5 2.5 0 0 0 6.5 22h11a2.5 2.5 0 0 0 2.5-2.5V15a2.5 2.5 0 0 0-2.5-2.5H16"/></svg>';
+            var SEND_ICO = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
             var el = document.createElement('article');
-            el.className = 'post-detail';
+            el.className = 'post-detail desktop-split';
             el.dataset.id = p.id;
             el._post = p;
             var n = p.photos.length;
@@ -5327,25 +5569,43 @@ vgResolveBadgeSrc();
                   '</div>'
                 : '<div class="detail-hero"><div class="detail-top">' + topBtns + '</div>' +
                     '<div class="detail-hero-text"></div></div>';
-            var recs = posts.filter(function (x) { return x.id !== p.id; });
+            var recs = posts.filter(function (x) {
+                return x.id !== p.id && (current === 'all' || x.categories.indexOf(current) >= 0);
+            });
             var recTitle = current === 'all' ? 'Ещё публикации' : 'Ещё в разделе «' + catTitle(current) + '»';
-            el.innerHTML = media +
-                '<div class="detail-actions">' +
-                    '<button type="button" class="detail-like" aria-pressed="false" aria-label="Нравится">' +
-                        '<svg class="like-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="' + HEART_PATH + '"/></svg><span class="like-count"></span></button>' +
-                    (p.comments !== false ? '<button type="button" class="detail-icon detail-comment" aria-label="Комментарии">' + COMMENT + '</button>' : '') +
-                    '<button type="button" class="detail-icon detail-share" aria-label="Поделиться">' + SHARE + '</button>' +
+
+            var commentsHtml = p.comments !== false
+                ? '<div class="detail-comments-box">' +
+                    '<div class="detail-comments-head"><span>Комментарии</span><span class="detail-comments-cnt"></span></div>' +
+                    '<div class="detail-comments-list"></div>' +
+                    '<form class="detail-comment-form">' +
+                        '<input type="text" class="detail-comment-input" placeholder="Добавить комментарий…" maxlength="500">' +
+                        '<button type="submit" class="detail-comment-send" aria-label="Отправить" disabled>' + SEND_ICO + '</button>' +
+                    '</form>' +
+                  '</div>'
+                : '<div class="detail-comments-disabled"><i class="fas fa-comment-slash"></i><span>Комментарии отключены</span></div>';
+
+            el.innerHTML =
+                '<div class="detail-left-col">' +
+                    media +
+                    '<div class="detail-actions">' +
+                        '<button type="button" class="detail-like" aria-pressed="false" aria-label="Нравится">' +
+                            '<svg class="like-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="' + HEART_PATH + '"/></svg><span class="like-count"></span></button>' +
+                        (p.comments !== false ? '<button type="button" class="detail-icon detail-comment" aria-label="Комментарии">' + COMMENT + '</button>' : '') +
+                        '<button type="button" class="detail-icon detail-share" aria-label="Поделиться">' + SHARE + '</button>' +
+                    '</div>' +
+                    '<div class="detail-meta"><div class="post-avatar"></div><div class="post-head-text">' +
+                        '<div class="post-author"></div><div class="post-time"></div></div></div>' +
+                    (n ? '<div class="post-text detail-text"></div>' : '') +
+                    commentsHtml +
                 '</div>' +
-                '<div class="detail-meta"><div class="post-avatar"></div><div class="post-head-text">' +
-                    '<div class="post-author"></div><div class="post-time"></div></div></div>' +
-                (n ? '<div class="post-text detail-text"></div>' : '') +
-                (recs.length ? '<div class="detail-recs-title"></div><div class="posts-list layout-tiles detail-recs"></div>' : '');
+                '<div class="detail-right-col">' +
+                    (recs.length ? '<div class="detail-recs-title"></div><div class="posts-list layout-tiles detail-recs"></div>' : '') +
+                '</div>';
 
             paintAvatar(el.querySelector('.post-avatar'), author);
             paintName(el.querySelector('.post-author'), author);
             el.querySelector('.post-time').textContent = timeAgo(p.createdAt);
-            var cBtn = el.querySelector('.detail-comment');
-            if (cBtn) cBtn.addEventListener('click', function () { upToast('Комментарии пока недоступны'); });
             var hasText = !!p.html.replace(/<[^>]*>/g, '').trim();
             var txt = el.querySelector('.detail-text');
             if (txt) { txt.innerHTML = p.html; if (!hasText) txt.remove(); }
@@ -5355,6 +5615,55 @@ vgResolveBadgeSrc();
                 [el.querySelector('.post-avatar'), el.querySelector('.post-author')].forEach(function (node) {
                     node.classList.add('author-link');
                     node.addEventListener('click', function () { openUserProfile(author); });
+                });
+            }
+
+            // Комментарии (под фото и описанием)
+            if (p.comments !== false) {
+                var cListEl = el.querySelector('.detail-comments-list');
+                var cCntEl = el.querySelector('.detail-comments-cnt');
+                var cForm = el.querySelector('.detail-comment-form');
+                var cInput = el.querySelector('.detail-comment-input');
+                var cSend = el.querySelector('.detail-comment-send');
+                var items = commentsStore[p.id] || [];
+
+                function renderDetailComments() {
+                    cListEl.innerHTML = '';
+                    cCntEl.textContent = items.length ? String(items.length) : '';
+                    if (!items.length) {
+                        cListEl.innerHTML = '<div class="detail-comments-empty">Пока нет комментариев — будьте первым</div>';
+                        return;
+                    }
+                    items.forEach(function (c) {
+                        var row = document.createElement('div');
+                        row.className = 'detail-comment-item';
+                        row.innerHTML =
+                            '<div class="post-avatar"></div>' +
+                            '<div class="detail-comment-body">' +
+                                '<div class="detail-comment-author"><span class="c-name"></span><span class="detail-comment-time"></span></div>' +
+                                '<div class="detail-comment-text"></div>' +
+                            '</div>';
+                        paintAvatar(row.querySelector('.post-avatar'), c.author, 28);
+                        paintName(row.querySelector('.c-name'), c.author);
+                        row.querySelector('.detail-comment-time').textContent = timeAgo(c.createdAt);
+                        row.querySelector('.detail-comment-text').textContent = c.text;
+                        cListEl.appendChild(row);
+                    });
+                }
+                renderDetailComments();
+
+                var cBtn = el.querySelector('.detail-comment');
+                if (cBtn) cBtn.addEventListener('click', function () { cInput.focus(); });
+                cInput.addEventListener('input', function () { cSend.disabled = !cInput.value.trim(); });
+                cForm.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var val = cInput.value.trim();
+                    if (!val) return;
+                    items = items.concat([{ author: authorSnapshot(), text: val, createdAt: Date.now() }]);
+                    commentsStore[p.id] = items;
+                    cInput.value = '';
+                    cSend.disabled = true;
+                    renderDetailComments();
                 });
             }
 
@@ -5370,7 +5679,13 @@ vgResolveBadgeSrc();
                     box.style.setProperty('--ratio', String(clampRatio(raw)));
                     rememberRatio(p.photos[0], Math.round(raw * 1000) / 1000);
                 };
-                [].slice.call(box.querySelectorAll('.post-slide img')).forEach(function (img, i) { img.src = p.photos[i]; });
+                [].slice.call(box.querySelectorAll('.post-slide img')).forEach(function (img, i) {
+                    img.src = p.photos[i];
+                    img.addEventListener('click', function () {
+                        if (box._draggedAt && Date.now() - box._draggedAt < 400) return;
+                        openPhotoViewer(p, i, box.querySelector('.post-slides'));
+                    });
+                });
                 if (first.complete) setRatio(); else first.addEventListener('load', setRatio, { once: true });
                 if (n > 1) setupCarousel(box, n);
             }
@@ -5386,9 +5701,7 @@ vgResolveBadgeSrc();
             paintLike();
             likeBtn.addEventListener('click', function () { toggleLike(p); });
             el.querySelector('.detail-share').addEventListener('click', function () {
-                var text = plainText(p.html) || 'Публикация';
-                if (navigator.share) { navigator.share({ text: text }).catch(function () {}); return; }
-                if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { upToast('Текст скопирован'); }).catch(function () {});
+                sharePost(p);
             });
 
             // Назад и три точки (как в карточке)
@@ -5400,11 +5713,16 @@ vgResolveBadgeSrc();
                 openPostMenu(more, p, el);
             });
 
-            // Рекомендации: посты того же раздела, что открыт сейчас
+            // Остальные посты справа (на мобильном — под постом с заголовком, на десктопе — справа без заголовка «Рекомендации»)
             var recWrap = el.querySelector('.detail-recs');
             if (recWrap) {
-                el.querySelector('.detail-recs-title').textContent = recTitle;
-                recs.slice(0, 30).forEach(function (x) { recWrap.appendChild(postTile(x)); });
+                var titleEl = el.querySelector('.detail-recs-title');
+                if (titleEl) titleEl.textContent = recTitle;
+                recs.slice(0, 30).forEach(function (x, idx) {
+                    var tile = postTile(x);
+                    tile.style.setProperty('--stagger', idx);
+                    recWrap.appendChild(tile);
+                });
             }
             return el;
         }
@@ -5906,6 +6224,7 @@ vgResolveBadgeSrc();
 
         // ----- Открыть / закрыть -----
         function openComposer() {
+            if (sheet.classList.contains('open')) closePostSheet(false);
             if (upEl.classList.contains('open')) closeUserProfile(false);
             lastFocus = document.activeElement;
             closeDrawer();
